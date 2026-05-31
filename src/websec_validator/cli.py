@@ -137,55 +137,60 @@ def cmd_run(args) -> int:
 
 
 def cmd_dynamic(args) -> int:
-    out = Path(args.out).expanduser().resolve() if args.out else Path.cwd() / "websec-out"
-    out.mkdir(parents=True, exist_ok=True)
-    facts = Path(args.facts).expanduser().resolve() if args.facts else out / "FACTS.json"
-    if not facts.is_file():
-        sys.exit(f"error: FACTS.json not found at {facts} — run `websec run <repo>` first (or pass --facts)")
+    base = Path(args.out).expanduser().resolve() if args.out else Path.cwd() / "websec-out"
+    # resolve BEFORE _new_run_dir repoints `latest` (else the symlink moves under us)
+    facts_path = (Path(args.facts).expanduser() if args.facts else base / "latest" / "FACTS.json").resolve()
+    if not facts_path.is_file():
+        sys.exit(f"error: FACTS.json not found at {facts_path} — run `websec run <repo>` first (or pass --facts)")
+    out, ts = _new_run_dir(args.out)
+    dyn: dict = {}
 
     if args.unauth:
         if not args.target:
             sys.exit("error: --unauth requires --target")
         if args.probe_writes and not dynamic.is_localhost(args.target):
             sys.exit("error: --probe-writes is localhost-only (it sends write verbs) — point --target at your sandbox")
-        print("websec dynamic — STRICT read-only · UNAUTHENTICATED · GET-only (side-effecting paths skipped)\n")
-        full = dynamic.run_unauth(args.target, facts, out, probe_writes=args.probe_writes)
-        u = full["unauth_reachability"]
-        print(f"  target: {u['target']}")
-        print(f"  skipped {len(u['skipped_side_effecting'])} side-effecting GET(s) (cron/generate/etc.)")
-        print(f"  → {u['summary']}\n")
+        print(f"websec dynamic — STRICT read-only · UNAUTHENTICATED · GET-only  ·  run {ts}\n")
+        dyn = dynamic.run_unauth(args.target, facts_path, out, probe_writes=args.probe_writes)
+        u = dyn["unauth_reachability"]
+        print(f"  target: {u['target']}  ·  → {u['summary']}")
         for r in u["results"]:
             mark = "🔓" if r["verdict"] == "OPEN-no-auth" else (" ·" if r["verdict"] == "protected" else "  ")
-            print(f"    {mark} {str(r['status']):>4}  {r['verdict']:26} {r['path']}  ({r['bytes']}b)")
+            print(f"    {mark} {str(r['status']):>4}  {r['verdict']:26} {r['path']}")
         if args.probe_writes:
-            w = full["write_auth_enforcement"]
-            print(f"\n  --- write-verb auth enforcement (localhost, non-destructive) ---")
-            print(f"  → {w['summary']}\n")
+            w = dyn["write_auth_enforcement"]
+            print(f"\n  write-verb auth enforcement → {w['summary']}")
             for r in w["results"]:
                 mark = "🔓" if r["verdict"] != "auth-enforced" and not r["verdict"].startswith("http-") else " ·"
                 print(f"    {mark} {str(r['status']):>4}  {r['verdict']:42} {r['method']} {r['path']}")
-        print(f"\n  details: {out / 'dynamic-unauth-findings.json'}")
-        return 0
-
-    if not args.config:
+    elif args.config:
+        cfg = Path(args.config).expanduser().resolve()
+        if not cfg.is_file():
+            sys.exit(f"error: config not found: {cfg}")
+        print(f"websec dynamic — authenticated cross-tenant BOLA (read-only)  ·  run {ts}\n")
+        dyn = dynamic.run_dynamic(cfg, facts_path, out)
+        ct = dyn.get("cross_tenant_bola", {})
+        if ct.get("error"):
+            print("  ERROR:", ct["error"])
+            return 1
+        print(f"  agentA {ct['agentA']['email']} (tenant {ct['agentA']['tenant']}) · "
+              f"agentB {ct['agentB']['email']} (tenant {ct['agentB']['tenant']})")
+        print(f"  → {ct['summary']}")
+        for lk in ct.get("leaks", []):
+            print(f"     🚨 LEAK {lk['direction']} {lk['path']} → HTTP {lk['status']}")
+    else:
         sys.exit("error: provide --config (authenticated cross-tenant) OR --unauth --target (read-only)")
-    cfg = Path(args.config).expanduser().resolve()
-    if not cfg.is_file():
-        sys.exit(f"error: config not found: {cfg}")
-    print("websec dynamic — authenticated, READ-ONLY v1 (cross-tenant BOLA on GET endpoints)\n")
-    res = dynamic.run_dynamic(cfg, facts, out)
-    ct = res.get("cross_tenant_bola", {})
-    if ct.get("error"):
-        print("  ERROR:", ct["error"])
-        return 1
-    print(f"  agentA: {ct['agentA']['email']}  (tenant {ct['agentA']['tenant']})")
-    print(f"  agentB: {ct['agentB']['email']}  (tenant {ct['agentB']['tenant']})")
-    print(f"  tested {ct['endpoints_tested']} tenant-scoped GET endpoint(s) · {ct['checks']} cross-tenant checks")
-    print(f"  → {ct['summary']}")
-    for lk in ct.get("leaks", []):
-        print(f"     🚨 LEAK {lk['direction']} {lk['path']} → HTTP {lk['status']}")
-    print(f"\n  details: {out / 'dynamic-findings.json'}")
-    return 1 if ct.get("leaks") else 0
+
+    # merge dynamic evidence into the traceable ledger + write the immutable run report
+    facts_dict = json.loads(facts_path.read_text())
+    ledger = findings.build_ledger(facts_dict, None, dyn,
+                                   findings.load_suppressions(Path(facts_dict.get("target", "."))))
+    (out / "findings-ledger.json").write_text(json.dumps(ledger, indent=2))
+    (out / "REPORT.md").write_text(
+        report.render(facts_dict, {"available": [], "missing": []}, [], None, [], ts, ledger))
+    print(f"\n  ledger: {ledger['total']} finding(s) · {ledger['by_severity']} · confidence {ledger['by_confidence']}")
+    print(f"  ✓ run {ts} saved (immutable): {out}")
+    return 1 if ledger["by_severity"].get("CRITICAL") else 0
 
 
 def cmd_proof(args) -> int:

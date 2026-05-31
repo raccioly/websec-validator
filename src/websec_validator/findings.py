@@ -130,6 +130,13 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         out.append(_f(f"Missing authorization: {m} {p}", "access-control", "missing-auth",
                       sev, conf, p, ev))
 
+    # ---- 1b. Cross-tenant BOLA leaks (dynamically confirmed) ----
+    for lk in ((dynamic or {}).get("cross_tenant_bola", {}) or {}).get("leaks", []):
+        out.append(_f(f"Cross-tenant read: {lk.get('direction')} {lk.get('path')}", "access-control", "bola",
+                      "CRITICAL", "HIGH", lk.get("path", ""),
+                      [{"layer": "dynamic", "detail": f"cross-tenant GET returned another tenant's data "
+                        f"(HTTP {lk.get('status')}, {lk.get('direction')})"}]))
+
     # ---- 2. Static scanner findings (de-duplicated `unified`) ----
     cat_to_class = {"sca": "cve", "secret": "secret", "iac": "iac", "sast": "sast"}
     for t in (unified or {}).get("top", []):
