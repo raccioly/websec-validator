@@ -1,5 +1,6 @@
 # websec-validator outputs — hold findings + tokens once probes run; never commit
 websec-out/
+websec-corpus/
 security/
 
 # private reference material (prior WU pentest — large + contains real secrets/findings)

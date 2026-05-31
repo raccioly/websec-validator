@@ -25,4 +25,4 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-websec_validator = ["templates/probes/*", "templates/reports/*"]
+websec_validator = ["templates/probes/*", "templates/reports/*", "corpus.json"]

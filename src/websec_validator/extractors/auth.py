@@ -11,7 +11,8 @@ import re
 
 from .base import Extractor, RepoContext
 
-JWT_LIBS = re.compile(r"jsonwebtoken|\bjose\b|\bPyJWT\b|get_jwt_identity|jwt\.sign|jwt\.verify|jwtVerify|flask_jwt", re.I)
+JWT_LIBS = re.compile(r"jsonwebtoken|\bjose\b|\bPyJWT\b|import\s+jwt\b|get_jwt_identity|"
+                      r"jwt\.(?:sign|verify|encode|decode)|jwtVerify|flask_jwt|@?jwt_required|token_required", re.I)
 PASSPORT = re.compile(r"\bpassport\b|passport-jwt|passport-local")
 SESSION = re.compile(r"express-session|cookie-session|iron-session|flask\.session|request\.session|getServerSession|getToken", re.I)
 APIKEY = re.compile(r"x-api-key|api[_-]?key|apikey", re.I)

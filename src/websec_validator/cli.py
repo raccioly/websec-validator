@@ -16,7 +16,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import __version__, briefing, probes, recon, scanners
+from . import __version__, briefing, probes, proof, recon, scanners
 
 
 def _resolve_target(raw: str) -> Path:
@@ -107,6 +107,29 @@ def cmd_run(args) -> int:
     return 0
 
 
+def cmd_proof(args) -> int:
+    from importlib import resources
+    corpus_path = (Path(args.corpus).expanduser().resolve() if args.corpus
+                   else Path(str(resources.files("websec_validator").joinpath("corpus.json"))))
+    workdir = (Path(args.workdir).expanduser().resolve() if args.workdir
+               else Path.home() / ".cache" / "websec-corpus")
+    print(f"websec proof — recon coverage vs vuln-app corpus\n  corpus:  {corpus_path}\n  workdir: {workdir}\n")
+    res = proof.run_proof(corpus_path, workdir)
+    for r in res["results"]:
+        if r.get("score") is None:
+            print(f"  {r['name']:12} — {r.get('status', 'no checks')}")
+            continue
+        print(f"  {r['name']:12} {r['passed']}/{r['total']} checks · {r.get('endpoints', '?')} endpoints · {r.get('vulns', '')[:55]}")
+        for c in r.get("checks", []):
+            print(f"       {'✓' if c['pass'] else '✗'} {c['check']:22} got={c['got']}")
+    agg = res["aggregate"]
+    print(f"\n  OVERALL recon coverage: {agg.get('overall_coverage')} "
+          f"({agg['checks_passed']}/{agg['checks_total']} checks, {agg['apps']} apps)")
+    print("  NOTE: PROXY metric (does recon surface the known-vuln surface?). The full agent-lift")
+    print("  kill-criterion is the manual A/B in corpus/PROOF-PROTOCOL.md.")
+    return 0
+
+
 def _which(b):
     import shutil
     return shutil.which(b)
@@ -150,6 +173,11 @@ def build_parser() -> argparse.ArgumentParser:
     d = sub.add_parser("doctor", help="show which scanners are installed")
     d.add_argument("target", nargs="?", help="optional repo to scope scanner relevance")
     d.set_defaults(func=cmd_doctor)
+
+    pf = sub.add_parser("proof", help="score recon coverage against a known-vuln-app corpus")
+    pf.add_argument("--corpus", help="corpus JSON (default: bundled)")
+    pf.add_argument("--workdir", help="where to clone corpus apps (default: ~/.cache/websec-corpus)")
+    pf.set_defaults(func=cmd_proof)
     return p
 
 

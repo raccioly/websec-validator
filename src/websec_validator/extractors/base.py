@@ -39,7 +39,10 @@ class RepoContext:
         for p in self.root.rglob("*"):
             if n >= MAX_FILES:
                 break
-            if p.is_dir() or any(part in SKIP_DIRS for part in p.parts):
+            # match SKIP_DIRS against parts RELATIVE to the scan root — otherwise a
+            # repo located under e.g. ~/.cache or any dir named like a skip-dir would
+            # have its whole tree skipped.
+            if p.is_dir() or any(part in SKIP_DIRS for part in p.relative_to(self.root).parts):
                 continue
             if p.suffix.lower() in CODE_EXT:
                 self.code_files.append(p)
@@ -75,7 +78,7 @@ class RepoContext:
         """rglob filtered against SKIP_DIRS (for file-based framework detection)."""
         out = []
         for p in self.root.rglob(pattern):
-            if any(part in SKIP_DIRS for part in p.parts):
+            if any(part in SKIP_DIRS for part in p.relative_to(self.root).parts):
                 continue
             out.append(p)
             if len(out) >= limit:

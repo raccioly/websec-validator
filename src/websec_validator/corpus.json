@@ -1,0 +1,36 @@
+[
+  {
+    "name": "VAmPI",
+    "repo": "https://github.com/erev0s/VAmPI",
+    "language": "python",
+    "vulns": "OWASP API Top 10 — BOLA, mass-assignment, JWT weaknesses, excessive data exposure",
+    "expect": {
+      "frameworks": ["flask"],
+      "min_endpoints": 10,
+      "auth_scheme_contains": "jwt",
+      "idor_present": true
+    }
+  },
+  {
+    "name": "NodeGoat",
+    "repo": "https://github.com/OWASP/NodeGoat",
+    "language": "node",
+    "vulns": "OWASP Top 10 — injection, broken auth, IDOR (allocations), access control",
+    "expect": {
+      "frameworks": ["express"],
+      "min_endpoints": 8,
+      "auth_scheme_contains": "session",
+      "idor_present": true
+    }
+  },
+  {
+    "name": "DVGA",
+    "repo": "https://github.com/dolevf/Damn-Vulnerable-GraphQL-Application",
+    "language": "python",
+    "vulns": "GraphQL — introspection, injection, DoS (batching/aliasing), info disclosure",
+    "expect": {
+      "frameworks": ["flask"],
+      "graphql_present": true
+    }
+  }
+]
