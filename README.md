@@ -25,7 +25,7 @@ local. The four ways to get there, all ending in the same `AGENT-BRIEFING.md` yo
 | **Tell your agent** (simplest) | — | say the line above |
 | **CLI** (a terminal) | `pipx install websec-validator` | `websec run /path/to/your/app` |
 | **Claude Code plugin** (slash) | `/plugin marketplace add raccioly/websec-validator`  →  `/plugin install websec-validator@websec-plugins` | invoke the **security-pass** skill, or just ask |
-| **Docker** (no install) | `docker build -t websec-validator .` | `docker run --rm -v "$PWD:/scan" websec-validator run /scan --out /scan/websec-out` |
+| **Docker** (no install) | `docker build -t websec-validator .` | `docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/scan" websec-validator run /scan --out /scan/websec-out` |
 
 ➡️ **Want the reasoning behind every check?** Read **[docs/METHODOLOGY.md](docs/METHODOLOGY.md)** — what each test does and why.
 
@@ -51,7 +51,7 @@ No need to install Noir or any scanner — the image bundles them all (arch-awar
 
 ```bash
 docker build -t websec-validator .
-docker run --rm -v "$PWD:/scan" websec-validator run /scan --out /scan/websec-out
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/scan" websec-validator run /scan --out /scan/websec-out
 ```
 
 The image carries Noir + Trivy + Gitleaks + Semgrep + Checkov; mount your repo at `/scan` and the

@@ -42,6 +42,11 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 RUN pip install --no-cache-dir .
 
+# Run as a non-root user (hardening — the tool only needs to read code + write its
+# report). Pass `--user "$(id -u):$(id -g)"` at runtime so output written to a
+# mounted volume matches your host user.
+RUN useradd --create-home --uid 1001 websec
 WORKDIR /scan
+USER websec
 ENTRYPOINT ["websec"]
 CMD ["--help"]
