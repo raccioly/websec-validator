@@ -215,6 +215,26 @@ lets you just ask, in plain English, for a security pass: it runs `websec`, read
 works the findings with you. For other agents the universal interface is unchanged: run the CLI, read
 `AGENT-BRIEFING.md`.
 
+**Install gotchas (field-tested):**
+
+- The install id is `plugin@marketplace` — `websec-validator@websec-plugins` (the marketplace name
+  from `.claude-plugin/marketplace.json`), **not** `@websec-validator` (the repo).
+- The plugin only delivers the *instructions*; the actual scanning is a **separate Python CLI**
+  (`websec`). The skill's Step 0 installs it (`pipx install websec-validator`) if it's missing.
+- **`/plugin …` only works in the terminal CLI.** In the Claude **app / Agent SDK** (no `/plugin`),
+  configure it in `.claude/settings.json` instead:
+  ```json
+  {
+    "extraKnownMarketplaces": {
+      "websec-plugins": { "source": { "source": "github", "repo": "raccioly/websec-validator" } }
+    },
+    "enabledPlugins": { "websec-validator@websec-plugins": true }
+  }
+  ```
+  This **registers + enables** the plugin but does **not** auto-fetch it — the first download still
+  needs the CLI (`/plugin install websec-validator@websec-plugins`) once. (Project `.claude/settings.json`
+  for a team; `~/.claude/settings.json` for just you.)
+
 ## Credits
 
 Methodology + probe library come from a real authenticated pentest pass

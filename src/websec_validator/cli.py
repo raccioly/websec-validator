@@ -156,12 +156,16 @@ def cmd_dynamic(args) -> int:
         dyn = dynamic.run_unauth(args.target, facts_path, out, probe_writes=args.probe_writes)
         u = dyn["unauth_reachability"]
         print(f"  target: {u['target']}  ·  → {u['summary']}")
+        if u.get("warning"):
+            print(f"\n  {u['warning']}\n")
         for r in u["results"]:
             mark = "🔓" if r["verdict"] == "OPEN-no-auth" else (" ·" if r["verdict"] == "protected" else "  ")
             print(f"    {mark} {str(r['status']):>4}  {r['verdict']:26} {r['path']}")
         if args.probe_writes:
             w = dyn["write_auth_enforcement"]
             print(f"\n  write-verb auth enforcement → {w['summary']}")
+            if w.get("warning"):
+                print(f"\n  {w['warning']}\n")
             for r in w["results"]:
                 mark = "🔓" if r["verdict"] != "auth-enforced" and not r["verdict"].startswith("http-") else " ·"
                 print(f"    {mark} {str(r['status']):>4}  {r['verdict']:42} {r['method']} {r['path']}")

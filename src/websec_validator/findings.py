@@ -111,6 +111,11 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                  ((dynamic or {}).get("write_auth_enforcement", {}) or {}).get("results", [])}
     dyn_get = {r["path"]: r for r in
                ((dynamic or {}).get("unauth_reachability", {}) or {}).get("results", [])}
+    # If the dynamic run suspects a fail-OPEN test env, its unauth "successes" are untrustworthy —
+    # do NOT escalate them to CRITICAL (the catastrophic-false-positive trap). Fall back to the
+    # recon-level hypothesis with a caveat until the operator re-runs with auth resolving.
+    dyn_fail_open = bool(((dynamic or {}).get("write_auth_enforcement", {}) or {}).get("fail_open_suspected")
+                         or ((dynamic or {}).get("unauth_reachability", {}) or {}).get("fail_open_suspected"))
     for eg in authz.get("endpoint_guards", []):
         if eg.get("guarded") or eg.get("public_hint") or not eg.get("analyzed"):
             continue
@@ -121,7 +126,12 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         dv = dyn_write.get((m, p)) or dyn_get.get(p)
         if dv:
             verdict = dv.get("verdict", "")
-            if "EXECUTED-UNAUTH" in verdict:
+            if dyn_fail_open and verdict not in ("auth-enforced", "protected"):
+                ev.append({"layer": "dynamic", "detail": f"reached unauthenticated (HTTP {dv.get('status')}) — "
+                           "BUT fail-open suspected (auth not resolving in the test env); UNTRUSTWORTHY, "
+                           "re-run with a working auth provider before trusting this"})
+                # keep recon-level conf/sev; do not escalate
+            elif "EXECUTED-UNAUTH" in verdict:
                 ev.append({"layer": "dynamic", "detail": f"{m} executed UNAUTHENTICATED (HTTP {dv.get('status')})"})
                 conf, sev = "HIGH", "CRITICAL"
             elif "no-auth-gate" in verdict or verdict == "OPEN-no-auth":

@@ -210,6 +210,25 @@ class FieldFeedbackBatch1Tests(unittest.TestCase):
         self.assertEqual(scanners._norm_gitleaks(rows)[0]["severity"], "LOW")  # presigned ASIA ≠ HIGH
 
 
+class FailOpenGuardTests(unittest.TestCase):
+    """P0-4: a fail-open test env must NOT escalate untrustworthy unauth 'successes' to CRITICAL."""
+
+    def _ledger(self, fail_open):
+        authz = {"endpoint_guards": [{"method": "POST", "path": "/api/x", "code_path": "r.ts",
+                                      "guarded": False, "analyzed": True, "public_hint": False}]}
+        ex = {"method": "POST", "path": "/api/x", "status": 201, "verdict": "EXECUTED-UNAUTH"}
+        dyn = {"write_auth_enforcement": {"results": [ex], "fail_open_suspected": fail_open}}
+        return findings.build_ledger({"authz": authz}, None, dyn, [])["findings"][0]
+
+    def test_fail_open_not_escalated(self):
+        f = self._ledger(True)
+        self.assertNotEqual(f["severity"], "CRITICAL")                       # not escalated
+        self.assertTrue(any("UNTRUSTWORTHY" in e["detail"] for e in f["evidence"]))
+
+    def test_healthy_env_still_escalates(self):
+        self.assertEqual(self._ledger(False)["severity"], "CRITICAL")        # regression guard
+
+
 class ProbeStagingTests(unittest.TestCase):
     """P0-3 / P1-2: probes ship with the target's real surface + an always-on unauth baseline."""
 

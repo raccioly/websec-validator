@@ -138,6 +138,19 @@ SIDE_EFFECTING = re.compile(
     r"sponsor-post|upload|/refresh|/rebuild|/process|/dispatch|/import|/export|/scrape(?![\w-])", re.I)
 
 
+# When NOTHING enforces auth, the likeliest cause in a test env is a fail-OPEN auth
+# provider (unconfigured/erroring), not "the app has no auth". Say so loudly — a naive
+# read of all-200s as "wide open" is a catastrophic false positive.
+FAIL_OPEN_WARNING = (
+    "⚠ NO endpoint enforced auth (none returned 401/403). Before concluding authentication is missing, "
+    "RULE OUT a fail-OPEN test environment: an unconfigured or erroring auth provider "
+    "(Cognito/Auth0/NextAuth/…) can let every request through. Configure a valid (even dummy) provider, or "
+    "mock a session, and RE-RUN — if these flip to 401, the app is fine and the env was the bug. Until an "
+    "auth-enforced response is observed, treat ALL authN/authZ results here as UNTRUSTWORTHY. (If it stays "
+    "open WITH a working provider, that's a real finding: the middleware should fail CLOSED — deny on auth error.)"
+)
+
+
 def unauth_reachability(target: str, facts: dict, max_endpoints: int = 50) -> dict:
     """STRICT read-only: GET each genuine data-read endpoint with NO auth, to see
     which are reachable unauthenticated. Skips side-effecting GETs and any path
@@ -170,6 +183,8 @@ def unauth_reachability(target: str, facts: dict, max_endpoints: int = 50) -> di
         results.append({"path": path, "status": code, "bytes": n, "verdict": verdict})
 
     openish = [r for r in results if r["verdict"] == "OPEN-no-auth"]
+    protected = [r for r in results if r["verdict"] in ("protected", "redirect (likely to login)")]
+    fail_open = len(results) >= 3 and not protected and bool(openish)
     return {
         "target": target,
         "mode": "STRICT read-only · unauthenticated · GET-only · side-effecting paths skipped",
@@ -177,8 +192,12 @@ def unauth_reachability(target: str, facts: dict, max_endpoints: int = 50) -> di
         "skipped_side_effecting": sorted(set(skipped)),
         "open_no_auth": openish,
         "results": results,
+        "fail_open_suspected": fail_open,
+        "authn_trustworthy": not fail_open,
+        "warning": FAIL_OPEN_WARNING if fail_open else "",
         "summary": f"{len(openish)}/{len(results)} data-read GET endpoints reachable WITHOUT auth"
-                   + (" — review whether these should be public" if openish else " — all gated"),
+                   + (" — review whether these should be public" if openish else " — all gated")
+                   + ("  ·  ⚠ FAIL-OPEN SUSPECTED (nothing enforced auth — results untrustworthy)" if fail_open else ""),
     }
 
 
@@ -216,6 +235,7 @@ def write_auth_enforcement(target: str, facts: dict, max_endpoints: int = 80) ->
     missing = [r for r in results if r["verdict"] != "auth-enforced" and not r["verdict"].startswith("http-")]
     executed = [r for r in results if r["verdict"] == "EXECUTED-UNAUTH"]
     enforced = sum(1 for r in results if r["verdict"] == "auth-enforced")
+    fail_open = len(results) >= 3 and enforced == 0
     return {
         "note": "Heuristic: a protected route returns 401/403 BEFORE validation; a 400/404 unauth means "
                 "the request reached the handler with no auth gate. VERIFY each — but inconsistency vs "
@@ -225,8 +245,12 @@ def write_auth_enforcement(target: str, facts: dict, max_endpoints: int = 80) ->
         "no_auth_gate": missing,
         "executed_unauth": executed,
         "results": results,
+        "fail_open_suspected": fail_open,
+        "authn_trustworthy": not fail_open,
+        "warning": FAIL_OPEN_WARNING if fail_open else "",
         "summary": f"{enforced}/{len(results)} write endpoints enforce auth · "
-                   f"{len(missing)} reached with no auth gate · {len(executed)} executed unauthenticated",
+                   f"{len(missing)} reached with no auth gate · {len(executed)} executed unauthenticated"
+                   + ("  ·  ⚠ FAIL-OPEN SUSPECTED — results untrustworthy" if fail_open else ""),
     }
 
 
