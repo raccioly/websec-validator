@@ -117,14 +117,24 @@ def cmd_dynamic(args) -> int:
     if args.unauth:
         if not args.target:
             sys.exit("error: --unauth requires --target")
+        if args.probe_writes and not dynamic.is_localhost(args.target):
+            sys.exit("error: --probe-writes is localhost-only (it sends write verbs) — point --target at your sandbox")
         print("websec dynamic — STRICT read-only · UNAUTHENTICATED · GET-only (side-effecting paths skipped)\n")
-        u = dynamic.run_unauth(args.target, facts, out)["unauth_reachability"]
+        full = dynamic.run_unauth(args.target, facts, out, probe_writes=args.probe_writes)
+        u = full["unauth_reachability"]
         print(f"  target: {u['target']}")
         print(f"  skipped {len(u['skipped_side_effecting'])} side-effecting GET(s) (cron/generate/etc.)")
         print(f"  → {u['summary']}\n")
         for r in u["results"]:
             mark = "🔓" if r["verdict"] == "OPEN-no-auth" else (" ·" if r["verdict"] == "protected" else "  ")
             print(f"    {mark} {str(r['status']):>4}  {r['verdict']:26} {r['path']}  ({r['bytes']}b)")
+        if args.probe_writes:
+            w = full["write_auth_enforcement"]
+            print(f"\n  --- write-verb auth enforcement (localhost, non-destructive) ---")
+            print(f"  → {w['summary']}\n")
+            for r in w["results"]:
+                mark = "🔓" if r["verdict"] != "auth-enforced" and not r["verdict"].startswith("http-") else " ·"
+                print(f"    {mark} {str(r['status']):>4}  {r['verdict']:42} {r['method']} {r['path']}")
         print(f"\n  details: {out / 'dynamic-unauth-findings.json'}")
         return 0
 
@@ -224,6 +234,7 @@ def build_parser() -> argparse.ArgumentParser:
     dyn = sub.add_parser("dynamic", help="dynamic probes vs a LIVE target (read-only): cross-tenant BOLA (--config) or unauth reachability (--unauth)")
     dyn.add_argument("--config", help="dynamic config JSON (target + role creds) for authenticated cross-tenant BOLA")
     dyn.add_argument("--unauth", action="store_true", help="STRICT read-only: GET each data-read endpoint with NO auth (needs --target)")
+    dyn.add_argument("--probe-writes", action="store_true", help="also test write-verb auth enforcement (LOCALHOST-only, non-destructive)")
     dyn.add_argument("--target", help="target base URL (for --unauth)")
     dyn.add_argument("--facts", help="FACTS.json from a prior run (default: ./websec-out/FACTS.json)")
     dyn.add_argument("--out", help="output dir (default: ./websec-out)")

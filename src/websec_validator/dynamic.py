@@ -37,11 +37,13 @@ def _dig(d: dict, dotted: str):
     return cur
 
 
-def _request(method: str, url: str, token: str | None, timeout: int = 20):
+def _request(method: str, url: str, token: str | None, timeout: int = 20, data: bytes | None = None):
     headers = {"Accept": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    req = urllib.request.Request(url, method=method, headers=headers)
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, method=method, headers=headers, data=data)
     try:
         r = urllib.request.urlopen(req, timeout=timeout)
         return r.status, r.read(4000).decode(errors="replace")
@@ -49,6 +51,11 @@ def _request(method: str, url: str, token: str | None, timeout: int = 20):
         return e.code, e.read(1000).decode(errors="replace")
     except Exception as e:
         return None, f"{type(e).__name__}: {e}"
+
+
+def is_localhost(target: str) -> bool:
+    import urllib.parse
+    return (urllib.parse.urlparse(target).hostname or "") in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
 
 
 def mint(cfg: dict, role: str) -> dict:
@@ -175,9 +182,59 @@ def unauth_reachability(target: str, facts: dict, max_endpoints: int = 50) -> di
     }
 
 
-def run_unauth(target: str, facts_path: Path, outdir: Path) -> dict:
+WRITE_VERBS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def write_auth_enforcement(target: str, facts: dict, max_endpoints: int = 80) -> dict:
+    """LOCALHOST-ONLY. Does each write endpoint ENFORCE auth? Sends the write verb
+    UNAUTHENTICATED with an empty `{}` body and dummy IDs in path params, then reads
+    the status: 401/403 = auth enforced (good); 400/422/404/405 = reached the
+    handler/validation with no auth gate (auth likely MISSING — verify); 2xx =
+    executed unauthenticated (critical). Empty body + dummy id keep it
+    non-destructive (validation rejects before any real mutation)."""
+    eps = []
+    for e in (facts.get("routes") or {}).get("endpoints", []):
+        p = e.get("path", "")
+        if e.get("method") in WRITE_VERBS and not SIDE_EFFECTING.search(p):
+            eps.append((e["method"], p))
+    eps = sorted(set(eps))[:max_endpoints]
+
+    results = []
+    for method, path in eps:
+        url = target + re.sub(r"\{[^}]+\}", "websec-nonexistent-id", path)
+        code, _ = _request(method, url, token=None, data=b"{}")
+        if code in (401, 403):
+            verdict = "auth-enforced"
+        elif code in (200, 201, 204):
+            verdict = "EXECUTED-UNAUTH"
+        elif code in (400, 422, 404, 405, 409, 415, 500):
+            verdict = "no-auth-gate (reached handler/validation)"
+        else:
+            verdict = f"http-{code}"
+        results.append({"method": method, "path": path, "status": code, "verdict": verdict})
+
+    missing = [r for r in results if r["verdict"] != "auth-enforced" and not r["verdict"].startswith("http-")]
+    executed = [r for r in results if r["verdict"] == "EXECUTED-UNAUTH"]
+    enforced = sum(1 for r in results if r["verdict"] == "auth-enforced")
+    return {
+        "note": "Heuristic: a protected route returns 401/403 BEFORE validation; a 400/404 unauth means "
+                "the request reached the handler with no auth gate. VERIFY each — but inconsistency vs "
+                "sibling routes is high-signal. Empty body + dummy ids keep this non-destructive.",
+        "tested": len(results),
+        "auth_enforced": enforced,
+        "no_auth_gate": missing,
+        "executed_unauth": executed,
+        "results": results,
+        "summary": f"{enforced}/{len(results)} write endpoints enforce auth · "
+                   f"{len(missing)} reached with no auth gate · {len(executed)} executed unauthenticated",
+    }
+
+
+def run_unauth(target: str, facts_path: Path, outdir: Path, probe_writes: bool = False) -> dict:
     facts = json.loads(Path(facts_path).read_text())
     res = {"unauth_reachability": unauth_reachability(target, facts)}
+    if probe_writes:
+        res["write_auth_enforcement"] = write_auth_enforcement(target, facts)
     outdir.mkdir(parents=True, exist_ok=True)
     (outdir / "dynamic-unauth-findings.json").write_text(json.dumps(res, indent=2))
     return res
