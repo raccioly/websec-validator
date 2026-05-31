@@ -13,7 +13,9 @@ from .auth import AuthExtractor
 from .authz import AuthzExtractor
 from .base import Extractor, RepoContext
 from .client_exposure import ClientExposureExtractor
+from .graphql import GraphQLExtractor
 from .iac_ci import IacCiExtractor
+from .integrations import IntegrationsExtractor
 from .routes import RoutesExtractor
 from .stack import StackExtractor
 from .surface import SurfaceExtractor
@@ -30,6 +32,8 @@ REGISTRY: list[Extractor] = [
     SurfaceExtractor(),
     IacCiExtractor(),
     ClientExposureExtractor(),
+    GraphQLExtractor(),
+    IntegrationsExtractor(),
 ]
 
 

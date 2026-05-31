@@ -52,6 +52,18 @@ def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list
     client_leaks = client.get("public_secret_leaks", []) + client.get("server_secret_in_client_component", [])
     client_section = _bullets(client_leaks) if client_leaks else "_none detected_"
 
+    gql = facts.get("graphql", {})
+    if gql.get("present"):
+        gfind = "; ".join(f"{x['severity']} {x['issue']}" for x in gql.get("findings", [])) or "no obvious issues"
+        gql_line = f"{', '.join(gql.get('endpoints', []))} · introspection={gql.get('introspection')} · {gfind}"
+    else:
+        gql_line = "_no GraphQL detected_"
+    integ = facts.get("integrations", {})
+    integ_line = ", ".join(integ.get("third_party_integrations", [])) or "none detected"
+    wh_unverified = integ.get("webhooks_without_sig_verification", [])
+    wh_line = (_section("⚠ Webhooks with NO signature-verification in their handler (verify)", wh_unverified)
+               if wh_unverified else f"_{len(integ.get('webhook_endpoints', []))} webhook endpoint(s); signature code present or none found_")
+
     avail = ", ".join(s["name"] for s in scanners.get("available", [])) or "none on PATH"
     missing = "\n".join(f"- **{s['name']}** ({s['category']}) — `{s.get('install','')}`"
                         for s in scanners.get("missing", [])) or "_all relevant scanners present_"
@@ -140,6 +152,11 @@ Guard coverage (file-level heuristic): {gs.get("with_visible_guard",0)} with vis
 
 **Client-side secret exposure** (ships to the browser if real): {client_section}
 Production source maps exposed: {client.get("production_source_maps", False)}
+
+**GraphQL surface:** {gql_line}
+
+**Third-party integrations:** {integ_line}
+{wh_line}
 
 ## 4. Static findings (no running app needed)
 
