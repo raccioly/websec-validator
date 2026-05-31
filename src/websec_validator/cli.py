@@ -111,7 +111,7 @@ def cmd_run(args) -> int:
 
     # 3. probes: choose + stage
     chosen = probes.applicable(facts)
-    manifest = probes.stage(chosen, out)
+    manifest = probes.stage(chosen, out, facts)
     print(f"\n  staged {len([m for m in manifest if 'attack_class' in m])} tailored probe template(s) → {out / 'probes'}")
 
     # 4. traceable findings ledger (recon + static; dynamic merges in via `websec dynamic`)

@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from websec_validator import calibration, findings, scanners           # noqa: E402
+from websec_validator import calibration, findings, probes, scanners   # noqa: E402
 from websec_validator.extractors import routes                         # noqa: E402
 from websec_validator.extractors.auth import AuthExtractor             # noqa: E402
 from websec_validator.extractors.authz import AuthzExtractor           # noqa: E402
@@ -208,6 +208,30 @@ class FieldFeedbackBatch1Tests(unittest.TestCase):
         rows = [{"File": "j.json", "RuleID": "aws", "Description": "AWS key",
                  "Secret": "ASIAEXAMPLE000000000", "Match": "X-Amz-Signature=zzz"}]
         self.assertEqual(scanners._norm_gitleaks(rows)[0]["severity"], "LOW")  # presigned ASIA ≠ HIGH
+
+
+class ProbeStagingTests(unittest.TestCase):
+    """P0-3 / P1-2: probes ship with the target's real surface + an always-on unauth baseline."""
+
+    def test_context_unauth_baseline_and_banner(self):
+        d = Path(tempfile.mkdtemp())
+        facts = {"routes": {"endpoints": [{"method": "POST", "path": "/api/sponsors"},
+                                          {"method": "GET", "path": "/api/health"}],
+                            "targeting": {"write_endpoints": ["POST /api/sponsors"]}},
+                 "auth": {"scheme": "jwt", "token_location": "bearer"},
+                 "tenant": {"candidates": [{"key": "tenantId"}]}}
+        chosen = probes.applicable(facts)
+        self.assertIn("unauth-baseline", chosen)              # always staged (P1-2)
+        man = probes.stage(chosen, d, facts)
+        ctx = json.loads((d / "probes" / "probe-context.json").read_text())
+        self.assertIn("POST /api/sponsors", ctx["endpoints"]["writes"])   # real route, not template's
+        self.assertEqual(ctx["auth"]["scheme"], "jwt")
+        body = (d / "probes" / "unauth-baseline.sh").read_text()
+        self.assertTrue(body.startswith("#!"))                # shebang preserved
+        self.assertIn("DRAFT probe", body)                    # banner prepended
+        self.assertIn("probe-context.json", body)
+        ub = [m for m in man if m.get("key") == "unauth-baseline"][0]
+        self.assertEqual(ub["targets"], ["POST /api/sponsors"])           # real per-probe targets
 
 
 class RouteUnitTests(unittest.TestCase):
