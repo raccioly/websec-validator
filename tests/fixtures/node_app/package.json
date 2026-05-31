@@ -1,0 +1,9 @@
+{
+  "name": "node-fixture",
+  "version": "1.0.0",
+  "dependencies": {
+    "express": "^4.19.0",
+    "jsonwebtoken": "^9.0.0",
+    "@aws-sdk/client-dynamodb": "^3.0.0"
+  }
+}
