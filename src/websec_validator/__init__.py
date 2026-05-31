@@ -11,4 +11,11 @@ It never calls an LLM, never runs a server, and never needs a running instance o
 the target app. Running the probes and applying fixes is the agent + human's job.
 """
 
-__version__ = "0.1.0"
+# Single source of truth is pyproject.toml — derive __version__ from the installed
+# package metadata so the two can never drift (the bug where `--version` lagged the release).
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+try:
+    __version__ = _pkg_version("websec-validator")
+except PackageNotFoundError:  # running straight from source, not installed
+    __version__ = "0.0.0+source"
