@@ -43,8 +43,12 @@ def render(facts: dict, scanners: dict, scan_results: list, unified: dict | None
             chain = " → ".join(e["layer"] for e in f["evidence"])
             api = (" · " + ", ".join(f["standards"]["owasp_api"])) if f["standards"]["owasp_api"] else ""
             cal = f.get("calibrated") or {}
-            calstr = (f" · P(real)≈**{cal.get('p')}** CI {cal.get('ci')} (n={cal.get('n')}, {cal.get('basis')})"
-                      if cal else "")
+            if not cal:
+                calstr = ""
+            elif cal.get("n", 0) == 0 or str(cal.get("basis", "")).startswith("prior"):
+                calstr = " · P(real): _uncalibrated — verify manually_"   # don't dress n=0 as a measurement (B4)
+            else:
+                calstr = f" · P(real)≈**{cal.get('p')}** CI {cal.get('ci')} (n={cal.get('n')}, {cal.get('basis')})"
             _ll.append(f"- **[{f['severity']}/{f['confidence']}]** {f['title']}  \n"
                        f"  `{f['location']}` · evidence: {chain} · {cwe}{api}{calstr}  \n"
                        f"  _fix:_ {f['remediation']}")

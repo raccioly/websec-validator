@@ -64,6 +64,12 @@ The staged probes in `websec-out/probes/` are **drafts**. For each relevant one:
   never run destructive probes against production,
 - run it, record the result (PASS counts like "14/14 blocked" are the evidence that it held).
 
+**Shortcut — `websec dynamic` automates the access-control half** against a running TEST target:
+`websec dynamic --unauth --target <url>` (which mutating routes respond with NO auth) and
+`websec dynamic --config <file>` (authenticated cross-tenant BOLA). Run it to confirm the auth/BOLA
+leads fast, then hand-run the more bespoke probes. It's read-only by default; `--probe-writes` is
+localhost-only. (See `dynamic-config.example.json` for the `--config` shape.)
+
 Verify each finding with a 4-role debate before reporting it (Advocate → Challenger → Mediator →
 Explainer); the Challenger trying to *refute* it is the false-positive killer.
 
