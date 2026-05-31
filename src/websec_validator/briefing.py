@@ -173,12 +173,29 @@ Install for fuller coverage:
 
 Keep these in the repo after you run them — re-running after a fix proves "still blocked, now safer."
 
-## 6. Method
+## 6. How to work this — verify with a debate, then fix
 
-1. **Static first** (§4) — triage real-vs-noise; on a {surface.get("datastore_class","?")} datastore most injection alerts are false positives.
-2. **Confirm the auth + tenant model** (§1–§2).
-3. **Run the probes at the §3 targets** as low-priv, then cross-tenant. Record PASS counts ("14/14 blocked").
-4. **Fix** what isn't blocked; re-run to confirm; human reviews the diff.
+The findings ledger (`findings-ledger.json` / REPORT.md) comes pre-ranked with a **confidence**
+(HIGH = dynamically confirmed; MEDIUM/LOW = hypothesis). **Verify before you report** — especially
+MEDIUM/LOW — by running a 4-role debate per finding (this is the FP killer):
+
+- **Advocate** — argue it's real; cite the evidence chain + the CWE / OWASP-API.
+- **Challenger** — try hard to *refute* it: false positive? intended-public? unreachable? guarded by a
+  pattern the static scan missed? (default to skepticism)
+- **Mediator** — decide: confirmed / false-positive / needs-data. You may override the tool.
+- **Explainer** — write the survivor up: exact `curl` repro, real impact, and the fix.
+
+**Generate probes the same way** — a Positive perspective (intended behavior holds) + Negative
+(bypass / injection / error) + Edge (boundary / concurrency / unusual input), then a Critic dedupes
+them into one runnable suite. More perspectives = broader coverage.
+
+**Verify the constitution** (`CONSTITUTION.md`): every ⬜ line is a Given/When/Then to confirm with a
+probe — flip it to ✅ holds or 🔴 VIOLATED.
+
+Order: static triage (on a {surface.get("datastore_class","?")} datastore, injection alerts are usually FPs) →
+confirm the auth/tenant model → run §3-targeted probes (low-priv, then cross-tenant; record PASS counts
+like "14/14 blocked") → fix what fails → re-run to confirm. **Human reviews every diff; never run
+destructive or production probes without explicit authorization.**
 
 ## 7. Hand back
 

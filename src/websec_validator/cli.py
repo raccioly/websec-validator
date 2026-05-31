@@ -16,7 +16,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import __version__, briefing, dynamic, findings, probes, proof, recon, report, scanners
+from . import __version__, briefing, constitution, dynamic, findings, probes, proof, recon, report, scanners
 
 
 def _resolve_target(raw: str) -> Path:
@@ -117,6 +117,7 @@ def cmd_run(args) -> int:
     suppressions = findings.load_suppressions(target)
     ledger = findings.build_ledger(facts, unified, None, suppressions)
     (out / "findings-ledger.json").write_text(json.dumps(ledger, indent=2))
+    (out / "CONSTITUTION.md").write_text(constitution.render(constitution.build(facts, ledger)))
     if ledger["total"]:
         print(f"\n  ledger: {ledger['total']} finding(s) · {ledger['by_severity']} · confidence {ledger['by_confidence']}"
               + (f" · {ledger['suppressed']} suppressed" if ledger["suppressed"] else ""))
@@ -186,6 +187,7 @@ def cmd_dynamic(args) -> int:
     ledger = findings.build_ledger(facts_dict, None, dyn,
                                    findings.load_suppressions(Path(facts_dict.get("target", "."))))
     (out / "findings-ledger.json").write_text(json.dumps(ledger, indent=2))
+    (out / "CONSTITUTION.md").write_text(constitution.render(constitution.build(facts_dict, ledger)))
     (out / "REPORT.md").write_text(
         report.render(facts_dict, {"available": [], "missing": []}, [], None, [], ts, ledger))
     print(f"\n  ledger: {ledger['total']} finding(s) · {ledger['by_severity']} · confidence {ledger['by_confidence']}")
