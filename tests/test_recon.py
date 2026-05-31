@@ -284,11 +284,23 @@ class RouteUnitTests(unittest.TestCase):
             {"method": "GET", "url": "/items/<int:pk>", "params": [], "details": {"technology": "django", "code_paths": [{"path": "b"}]}},
             {"method": "GET", "url": "/assets/*.png", "params": [], "details": {}},
         ]
-        paths = {(r["method"], r["path"]) for r in routes._normalize_noir(eps)}
+        app, _spec = routes._normalize_noir(eps)
+        paths = {(r["method"], r["path"]) for r in app}
         self.assertIn(("GET", "/api/x/{id}"), paths)        # :id and {id} collapsed
         self.assertIn(("GET", "/items/{pk}"), paths)        # django <int:pk> normalized
         self.assertNotIn(("GET", "/assets/*.png"), paths)   # static-asset glob filtered
         self.assertEqual(sum(1 for _m, p in paths if p == "/api/x/{id}"), 1)
+
+    def test_vendored_spec_routes_split_out(self):  # B1
+        eps = [
+            {"method": "GET", "url": "/api/sponsors", "details": {"code_paths": [{"path": "src/app/api/sponsors/route.ts"}]}},
+            {"method": "POST", "url": "/vault/accounts", "details": {"code_paths": [{"path": "docs-implementation/fireblocks-swagger.yaml"}]}},
+            {"method": "POST", "url": "/graphql", "details": {"code_paths": [{"path": "packages/cdk/schemas/appsync.graphql"}]}},
+            {"method": "GET", "url": "/users", "details": {"code_paths": [{"path": "node_modules/some-lib/openapi.json"}]}},
+        ]
+        app, spec = routes._normalize_noir(eps)
+        self.assertEqual([(r["method"], r["path"]) for r in app], [("GET", "/api/sponsors")])  # only the real handler
+        self.assertEqual(len(spec), 3)                       # swagger + graphql + node_modules openapi excluded
 
     def test_derive_targeting(self):
         d = routes._derive([

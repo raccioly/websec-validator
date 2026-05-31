@@ -38,6 +38,20 @@ TRAVERSAL_NAMES = re.compile(r"^(file|filename|filepath|path|dir|folder|template
 TEMPLATED = ("BASE_URL", "localhost", "127.0.0.1", "${", "{{")
 ASSET_GLOB = re.compile(r"\*\.\w+")
 
+# A route whose source file is a vendored/third-party API SPEC (OpenAPI/Swagger/GraphQL
+# schema), not an app handler. Noir parses these and emits their paths as if the app
+# served them — which on a repo that vendors e.g. a 16k-line swagger turns ~15 real
+# findings into hundreds of phantom ones. We split these out as informational.
+SPEC_PATH = re.compile(
+    r"\.(?:ya?ml|graphql|gql|raml)$"                                  # spec file formats
+    r"|(?:^|/)(?:node_modules|vendor|vendored|third[_-]?party|examples?|schemas?"
+    r"|(?:docs?|documentation)[\w-]*)/"                               # vendor/docs/schema dirs
+    r"|swagger|openapi", re.I)
+
+
+def _is_spec_derived(code_path: str) -> bool:
+    return bool(code_path) and bool(SPEC_PATH.search(code_path))
+
 
 def _clean_path(p: str) -> str:
     p = re.sub(r":(\w+)", r"{\1}", p)    # Express :id  -> {id}
@@ -77,8 +91,10 @@ def _noir_scan(root: Path) -> list | None:
             pass
 
 
-def _normalize_noir(eps: list) -> list:
-    rows, seen = [], set()
+def _normalize_noir(eps: list) -> tuple:
+    """→ (app_routes, spec_derived_routes). Routes whose source file is a vendored API
+    spec are split out so they don't generate phantom findings (B1)."""
+    rows, spec, seen = [], [], set()
     for e in eps:
         if e.get("internal"):
             continue
@@ -89,21 +105,22 @@ def _normalize_noir(eps: list) -> list:
         if _is_noise(path):
             continue
         method = (e.get("method") or "GET").upper()
-        if (method, path) in seen:
-            continue
-        seen.add((method, path))
-        params = [{"name": p.get("name", ""), "where": p.get("param_type", "")}
-                  for p in (e.get("params") or [])]
         cp = (e.get("details", {}) or {}).get("code_paths") or [{}]
-        rows.append({
+        code_path = cp[0].get("path", "")
+        if (method, path, code_path) in seen:
+            continue
+        seen.add((method, path, code_path))
+        row = {
             "method": method,
             "path": path,
-            "params": params,
+            "params": [{"name": p.get("name", ""), "where": p.get("param_type", "")}
+                       for p in (e.get("params") or [])],
             "technology": (e.get("details", {}) or {}).get("technology", ""),
-            "code_path": cp[0].get("path", ""),
+            "code_path": code_path,
             "source": "noir",
-        })
-    return rows
+        }
+        (spec if _is_spec_derived(code_path) else rows).append(row)
+    return rows, spec
 
 
 # ---- regex fallback (only when Noir is absent) ---------------------------------------------
@@ -195,17 +212,17 @@ class RoutesExtractor(Extractor):
     def extract(self, ctx: RepoContext, facts: dict) -> dict:
         eps = _noir_scan(ctx.root)
         if eps is not None:
-            routes = _normalize_noir(eps)
+            routes, spec_derived = _normalize_noir(eps)
             engine = "noir"
         else:
-            routes = _fallback(ctx)
+            routes, spec_derived = _fallback(ctx), []
             engine = "regex-fallback (install OWASP Noir for full coverage: brew install noir)"
         by_method: dict = {}
         by_tech: dict = {}
         for r in routes:
             by_method[r["method"]] = by_method.get(r["method"], 0) + 1
             by_tech[r["technology"]] = by_tech.get(r["technology"], 0) + 1
-        return {
+        out = {
             "engine": engine,
             "count": len(routes),
             "by_method": by_method,
@@ -213,3 +230,12 @@ class RoutesExtractor(Extractor):
             "endpoints": routes,
             "targeting": _derive(routes),
         }
+        if spec_derived:
+            from collections import Counter
+            srcs = Counter(r["code_path"] for r in spec_derived)
+            out["spec_derived_excluded"] = len(spec_derived)
+            out["spec_derived_sources"] = [f"{n}× {f}" for f, n in srcs.most_common(8)]
+            out["note"] = (f"⚠ {len(spec_derived)} routes came from vendored API SPEC files "
+                           f"(OpenAPI/Swagger/GraphQL), not app handlers — EXCLUDED from the {len(routes)} "
+                           f"app routes + all findings. Sources: {', '.join(f for f, _ in srcs.most_common(5))}.")
+        return out

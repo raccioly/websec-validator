@@ -118,6 +118,7 @@ credentials** — ask the human, never fabricate, never hit production.
 - **Datastores:** {", ".join(stack.get("datastores", [])) or "?"}  ·  **Monorepo:** {stack.get("monorepo", False)}
 - **Auth scheme:** `{auth.get("scheme","?")}` (token in {auth.get("token_location","?")})  ·  guard files: {len(auth.get("guard_files", []))}
 - **Route engine:** {routes.get("engine","?")}  ·  **{routes.get('count',0)} endpoints**  ·  by method: {routes.get("by_method", {})}
+{("> " + routes["note"]) if routes.get("note") else ""}
 
 ## 2. ★ Tenant boundary (confirm first — highest value, easiest to get wrong)
 

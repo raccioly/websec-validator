@@ -68,7 +68,7 @@ def render(facts: dict, scanners: dict, scan_results: list, unified: dict | None
 | | |
 |---|---|
 | Stack | {", ".join(stack.get("languages", [])) or "?"} · {", ".join(stack.get("frameworks", [])) or "?"} · {", ".join(stack.get("datastores", [])) or "?"} |
-| Endpoints | **{routes.get('count', 0)}** (via {routes.get('engine','?').split(' ')[0]}) |
+| Endpoints | **{routes.get('count', 0)}** app routes (via {routes.get('engine','?').split(' ')[0]}){(" · " + str(routes.get('spec_derived_excluded')) + " spec-derived excluded") if routes.get('spec_derived_excluded') else ""} |
 | Auth | {facts.get('auth', {}).get('scheme','?')} · roles: {', '.join(authz.get('roles_detected', [])) or 'none'} |
 | Access control | {gs.get('with_visible_guard', 0)} guarded · **{gs.get('no_visible_guard', 0)} no visible guard** · global-middleware: {authz.get('global_auth_middleware', False)} |
 | Static scanner (raw, pre-triage) | {sev_line} |
