@@ -172,6 +172,14 @@ class CalibrationTests(unittest.TestCase):
 class FieldFeedbackBatch1Tests(unittest.TestCase):
     """Regressions for the field-test false positives (proxy.ts, self-scan, ASIA)."""
 
+    def test_unsafe_decoder_feeding_auth_flagged(self):  # F5
+        d = Path(tempfile.mkdtemp())
+        (d / "requireAdmin.ts").write_text(
+            "export function requireAdmin(req){ const p = decodeJwtPayloadUnsafe(req.cookies.t); if(!p.isAdmin) throw 0; }")
+        (d / "util.ts").write_text("export const add = (a,b) => a+b")   # no auth + no unsafe → not flagged
+        out = AuthzExtractor().extract(RepoContext(d), {"routes": {"endpoints": []}})
+        self.assertIn("decodeJwtPayloadUnsafe", [u["decoder"] for u in out["unsafe_auth_decoders"]])
+
     def _next_app(self, proxy_body):
         d = Path(tempfile.mkdtemp())
         (d / "src").mkdir()

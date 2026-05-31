@@ -26,6 +26,9 @@ from . import calibration
 STANDARDS = {
     "missing-auth": (["CWE-862 Missing Authorization", "CWE-306 Missing Authentication"],
                      "ASVS V4.1.1", ["API1:2023 BOLA", "API5:2023 BFLA"]),
+    "unsafe-auth-decoder": (["CWE-347 Improper Verification of Cryptographic Signature",
+                             "CWE-345 Insufficient Verification of Data Authenticity"],
+                            "ASVS V3.5.2", ["API2:2023 Broken Authentication"]),
     "bola": (["CWE-639 Authorization Bypass (IDOR)"], "ASVS V4.2.1", ["API1:2023 BOLA"]),
     "ssrf": (["CWE-918 SSRF"], "ASVS V12.6", ["API7:2023 SSRF"]),
     "secret": (["CWE-798 Hard-coded Credentials"], "ASVS V2.10", ["API8:2023 Misconfiguration"]),
@@ -48,6 +51,9 @@ REMEDIATION = {
     "missing-auth": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a "
                     "middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.",
     "bola": "Enforce object ownership: verify the authenticated principal owns/can access the resource id (tenant scope).",
+    "unsafe-auth-decoder": "Verify the token/signature before trusting it for an auth/identity decision — use a "
+                           "verifying decode (e.g. jwt.verify with the key / a checked session), never an *Unsafe* "
+                           "or decode-only path whose output then feeds requireAuth/requireAdmin.",
     "ssrf": "Validate + allowlist outbound URLs; block RFC1918/IMDS/file://; never fetch a raw user-supplied URL.",
     "secret": "Rotate the credential, remove from code/history, load from a secrets manager.",
     "cve": "Upgrade the dependency to the fixed version.",
@@ -149,6 +155,14 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                       "CRITICAL", "HIGH", lk.get("path", ""),
                       [{"layer": "dynamic", "detail": f"cross-tenant GET returned another tenant's data "
                         f"(HTTP {lk.get('status')}, {lk.get('direction')})"}]))
+
+    # ---- 1c. Unsafe/unverified decoder feeding an auth decision (F5) ----
+    for ud in ((facts.get("authz", {}) or {}).get("unsafe_auth_decoders", []) or []):
+        out.append(_f(f"Auth decision uses an unverified decoder: {ud.get('decoder')}", "access-control",
+                      "unsafe-auth-decoder", "HIGH", "MEDIUM", ud.get("file", ""),
+                      [{"layer": "recon", "detail": f"{ud.get('file')} makes an auth/identity decision AND calls "
+                        f"{ud.get('decoder')}() — if that decodes a token/signature WITHOUT verifying it, a forged "
+                        "value is trusted (the decodeJwtPayloadUnsafe → requireAdmin class of bug). Trace the call path."}]))
 
     # ---- 2. Static scanner findings (de-duplicated `unified`) ----
     cat_to_class = {"sca": "cve", "secret": "secret", "iac": "iac", "sast": "sast"}

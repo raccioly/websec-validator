@@ -52,6 +52,14 @@ ROLE = re.compile(
     r"has_?[Rr]ole\s*\(\s*['\"]([\w:.-]+)['\"]|"
     r"authorizeRoles\s*\(([^)]*)\)|permission_required\s*\(\s*['\"]([\w:.-]+)['\"]")
 
+# F5: a call to a decoder/parser named "unsafe"/"unverified"/"noVerify"/"skipVerify"
+# (e.g. decodeJwtPayloadUnsafe) — dangerous when its result feeds an auth decision.
+UNSAFE_DECODER = re.compile(r"\b([A-Za-z_]\w*(?:[Uu]nsafe|[Uu]nverified|[Nn]o[Vv]erif\w*|[Ss]kip[Vv]erif\w*)\w*)\s*\(")
+# does this file actually make an auth/identity decision? (so the unsafe decode matters)
+AUTH_CONTEXT = re.compile(
+    r"require(?:Auth|Admin|Role|Permission)|isAdmin|authoriz|getToken\s*\(|getServerSession|"
+    r"req\.auth\b|currentUser|jwt\.(?:decode|verify)|decodeJwt", re.I)
+
 
 def _parse_next_middleware(ctx: RepoContext) -> dict:
     # Next 15.5+/16 renamed `middleware.ts` → `proxy.ts` (both filenames are valid; the
@@ -127,6 +135,13 @@ class AuthzExtractor(Extractor):
                 if e.get("method") in WRITE_VERBS and not PUBLIC_HINT.search(e.get("path", "")):
                     no_guard_writes.append(f"{e['method']} {e['path']}  ({relcp or '?'})")
 
+        # F5: files that make an auth decision AND call an unsafe/unverified decoder
+        unsafe_decoders = []
+        for _p, rel, text in ctx.iter_code():
+            if AUTH_CONTEXT.search(text):
+                for dec in sorted(set(UNSAFE_DECODER.findall(text))):
+                    unsafe_decoders.append({"file": rel, "decoder": dec})
+
         if global_auth:
             where = f"`{mw['file']}` (matcher {mw.get('matchers') or '—'})" if mw_auth else "`app.use(<auth>)`"
             note = (f"A GLOBAL auth middleware ({where}) was detected — most routes are protected by default. "
@@ -146,5 +161,6 @@ class AuthzExtractor(Extractor):
                               "no_visible_guard": no_guard, "unknown": unknown},
             "endpoint_guards": egs[:400],
             "write_endpoints_without_visible_guard": sorted(set(no_guard_writes))[:60],
+            "unsafe_auth_decoders": unsafe_decoders[:30],
             "note": note,
         }
