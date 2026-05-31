@@ -13,7 +13,7 @@ from .briefing import _bullets, _section
 
 
 def render(facts: dict, scanners: dict, scan_results: list, unified: dict | None,
-           probe_manifest: list, timestamp: str) -> str:
+           probe_manifest: list, timestamp: str, ledger: dict | None = None) -> str:
     stack = facts.get("stack", {})
     routes = facts.get("routes", {})
     tgt = routes.get("targeting", {})
@@ -36,6 +36,22 @@ def render(facts: dict, scanners: dict, scan_results: list, unified: dict | None
 
     sinks = ", ".join(f"{k} ({n})" for k, n in surface.get("sink_counts", {}).items()) or "none"
 
+    if ledger and ledger.get("findings"):
+        _ll = []
+        for f in ledger["findings"][:60]:
+            cwe = (f["standards"]["cwe"][:1] or [""])[0]
+            chain = " → ".join(e["layer"] for e in f["evidence"])
+            api = (" · " + ", ".join(f["standards"]["owasp_api"])) if f["standards"]["owasp_api"] else ""
+            _ll.append(f"- **[{f['severity']}/{f['confidence']}]** {f['title']}  \n"
+                       f"  `{f['location']}` · evidence: {chain} · {cwe}{api}  \n"
+                       f"  _fix:_ {f['remediation']}")
+        ledger_block = "\n".join(_ll)
+        ledger_hdr = (f"**{ledger['total']} findings** · {ledger['by_severity']} · "
+                      f"confidence {ledger['by_confidence']}"
+                      + (f" · {ledger['suppressed']} suppressed" if ledger.get('suppressed') else ""))
+    else:
+        ledger_block, ledger_hdr = top_findings, sev_line
+
     return f"""# websec-validator report — {facts.get('target','')}
 
 > Generated {timestamp} · websec-validator v{facts.get('version','')} · **immutable run record** (never overwritten).
@@ -49,13 +65,14 @@ def render(facts: dict, scanners: dict, scan_results: list, unified: dict | None
 | Endpoints | **{routes.get('count', 0)}** (via {routes.get('engine','?').split(' ')[0]}) |
 | Auth | {facts.get('auth', {}).get('scheme','?')} · roles: {', '.join(authz.get('roles_detected', [])) or 'none'} |
 | Access control | {gs.get('with_visible_guard', 0)} guarded · **{gs.get('no_visible_guard', 0)} no visible guard** · global-middleware: {authz.get('global_auth_middleware', False)} |
-| Static findings | {sev_line} |
+| Findings (ledger) | {ledger_hdr} |
 | Attack surface | IDOR: {len(tgt.get('idor_candidates', []))} · SSRF: {len(tgt.get('ssrf_candidates', []))} · upload: {len(tgt.get('upload_candidates', []))} · writes: {len(tgt.get('write_endpoints', []))} |
 
-## 1. Static findings (de-duplicated, severity-ranked)
+## 1. Findings ledger (ranked · evidence chain · standards · confidence)
 
-{top_findings}
-{('' if not unified else f"_…{unified['total']} total, {unified['cross_tool_or_dup_merged']} merged. Full list in findings.json._")}
+{ledger_block}
+
+_Full ledger with complete evidence chains + remediation in `findings-ledger.json`. Confidence: HIGH = dynamically confirmed or verified; MEDIUM = concrete static evidence; LOW = single-source hypothesis to verify._
 
 ## 2. Access control
 

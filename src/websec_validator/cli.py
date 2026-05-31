@@ -16,7 +16,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import __version__, briefing, dynamic, probes, proof, recon, report, scanners
+from . import __version__, briefing, dynamic, findings, probes, proof, recon, report, scanners
 
 
 def _resolve_target(raw: str) -> Path:
@@ -113,12 +113,21 @@ def cmd_run(args) -> int:
     manifest = probes.stage(chosen, out)
     print(f"\n  staged {len([m for m in manifest if 'attack_class' in m])} tailored probe template(s) → {out / 'probes'}")
 
-    # 4. briefing + comprehensive REPORT.md (immutable run record)
+    # 4. traceable findings ledger (recon + static; dynamic merges in via `websec dynamic`)
+    suppressions = findings.load_suppressions(target)
+    ledger = findings.build_ledger(facts, unified, None, suppressions)
+    (out / "findings-ledger.json").write_text(json.dumps(ledger, indent=2))
+    if ledger["total"]:
+        print(f"\n  ledger: {ledger['total']} finding(s) · {ledger['by_severity']} · confidence {ledger['by_confidence']}"
+              + (f" · {ledger['suppressed']} suppressed" if ledger["suppressed"] else ""))
+
+    # 5. briefing + comprehensive REPORT.md (immutable run record)
     (out / "AGENT-BRIEFING.md").write_text(briefing.render(facts, det, scan_results, manifest, unified))
-    (out / "REPORT.md").write_text(report.render(facts, det, scan_results, unified, manifest, ts))
+    (out / "REPORT.md").write_text(report.render(facts, det, scan_results, unified, manifest, ts, ledger))
     (out / "manifest.json").write_text(json.dumps(
         {"facts": "FACTS.json", "scanners": det, "scan_results": scan_results,
-         "findings_summary": unified, "probes": manifest, "timestamp": ts}, indent=2))
+         "findings_summary": unified, "ledger": {"total": ledger["total"], "by_severity": ledger["by_severity"]},
+         "probes": manifest, "timestamp": ts}, indent=2))
 
     print(f"\n✓ run {ts} saved (immutable — nothing overwritten):\n    {out}")
     print("    REPORT.md          — full historical record")

@@ -89,13 +89,17 @@ class AuthzExtractor(Extractor):
         global_auth = any(GLOBAL_AUTH.search(t) for _p, _r, t in ctx.iter_code())
         roles: set = set(mw.get("role_checks", []))
         protected = no_guard = unknown = 0
-        no_guard_writes = []
+        no_guard_writes, egs = [], []
 
         for e in endpoints:
             cp = e.get("code_path", "")
             text = ctx.text(Path(cp)) if cp else ""
             _collect_roles(text, roles)
             guarded = bool(text and GUARD.search(text)) or _matcher_covers(e.get("path", ""), mw.get("matchers", []))
+            relcp = ctx.rel(Path(cp)) if cp else ""
+            egs.append({"method": e.get("method"), "path": e.get("path"), "code_path": relcp,
+                        "guarded": bool(guarded), "analyzed": bool(text),
+                        "public_hint": bool(PUBLIC_HINT.search(e.get("path", "")))})
             if guarded:
                 protected += 1
             elif not text:
@@ -103,7 +107,7 @@ class AuthzExtractor(Extractor):
             else:
                 no_guard += 1
                 if e.get("method") in WRITE_VERBS and not PUBLIC_HINT.search(e.get("path", "")):
-                    no_guard_writes.append(f"{e['method']} {e['path']}  ({ctx.rel(Path(cp)) if cp else '?'})")
+                    no_guard_writes.append(f"{e['method']} {e['path']}  ({relcp or '?'})")
 
         if global_auth:
             note = ("A GLOBAL auth middleware (`app.use(<auth>)`) was detected — most routes are likely "
@@ -120,6 +124,7 @@ class AuthzExtractor(Extractor):
             "roles_detected": sorted(r for r in roles if r),
             "guard_summary": {"with_visible_guard": protected,
                               "no_visible_guard": no_guard, "unknown": unknown},
+            "endpoint_guards": egs[:400],
             "write_endpoints_without_visible_guard": sorted(set(no_guard_writes))[:60],
             "note": note,
         }

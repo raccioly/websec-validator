@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from websec_validator import scanners                                  # noqa: E402
+from websec_validator import findings, scanners                        # noqa: E402
 from websec_validator.extractors import routes                         # noqa: E402
 from websec_validator.extractors.auth import AuthExtractor             # noqa: E402
 from websec_validator.extractors.base import RepoContext               # noqa: E402
@@ -123,6 +123,38 @@ class DedupTests(unittest.TestCase):
             self.assertEqual(res["total"], 2)        # 2 gitleaks dups → 1, plus 1 CVE
             self.assertEqual(res["by_severity"].get("HIGH"), 2)
             self.assertTrue((d / "findings.json").exists())
+
+
+class LedgerTests(unittest.TestCase):
+    def _facts(self, guards):
+        return {"authz": {"endpoint_guards": guards}, "surface": {"sinks": {}},
+                "client_exposure": {}, "iac_ci": {}, "graphql": {}}
+
+    def test_correlation_confidence_and_standards(self):
+        facts = self._facts([
+            {"method": "PUT", "path": "/api/settings/config", "code_path": "config.ts", "guarded": False, "analyzed": True, "public_hint": False},
+            {"method": "POST", "path": "/api/settings/topics", "code_path": "topics.ts", "guarded": True, "analyzed": True, "public_hint": False},
+        ])
+        led = findings.build_ledger(facts, None, None, [])
+        titles = [f["title"] for f in led["findings"]]
+        self.assertTrue(any("config" in t for t in titles))     # no-guard write surfaced
+        self.assertFalse(any("topics" in t for t in titles))    # guarded → excluded
+
+        dyn = {"write_auth_enforcement": {"results": [
+            {"method": "PUT", "path": "/api/settings/config", "status": 200, "verdict": "EXECUTED-UNAUTH"}]}}
+        led2 = findings.build_ledger(facts, None, dyn, [])
+        cfg = next(f for f in led2["findings"] if "config" in f["title"])
+        self.assertEqual(cfg["confidence"], "HIGH")             # dynamic confirmation escalates
+        self.assertEqual(cfg["severity"], "CRITICAL")
+        self.assertEqual(len(cfg["evidence"]), 2)               # recon + dynamic evidence chain
+        self.assertIn("CWE-862 Missing Authorization", cfg["standards"]["cwe"])
+        self.assertTrue(cfg["remediation"])
+
+    def test_suppression(self):
+        facts = self._facts([{"method": "PUT", "path": "/api/x", "code_path": "x.ts", "guarded": False, "analyzed": True, "public_hint": False}])
+        led = findings.build_ledger(facts, None, None, ["category:access-control"])
+        self.assertEqual(led["total"], 0)
+        self.assertEqual(led["suppressed"], 1)
 
 
 if __name__ == "__main__":
