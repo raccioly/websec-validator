@@ -1,0 +1,14 @@
+# keep the build context small + private
+base-research/
+.git/
+websec-out/
+websec-corpus/
+.wolf/
+.claude/
+tests/
+MARKET-ANALYSIS-AND-VERDICT.md
+**/__pycache__/
+*.egg-info/
+.venv/
+venv/
+.DS_Store

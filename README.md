@@ -23,6 +23,18 @@ Zero Python runtime dependencies. It shells out to scanners (Trivy, Gitleaks, Se
 Checkov, Prowler) and Noir **when present**, reports what's missing, and never hard-fails if a tool
 is absent.
 
+### Or run via Docker (everything bundled, zero install)
+
+No need to install Noir or any scanner — the image bundles them all (arch-aware, amd64 + arm64):
+
+```bash
+docker build -t websec-validator .
+docker run --rm -v "$PWD:/scan" websec-validator run /scan --out /scan/websec-out
+```
+
+The image carries Noir + Trivy + Gitleaks + Semgrep + Checkov; mount your repo at `/scan` and the
+artifacts land in `/scan/websec-out`.
+
 ## Use
 
 ```bash
@@ -97,9 +109,9 @@ python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 12 t
 ## Status / roadmap
 
 **Done:** 10-extractor recon, cross-tool de-dup, tailored probe staging, agent briefing, proof
-harness, test suite. **Next:** Docker-bundled scanners (reproducibility), v2 dynamic-running phase
-(ZAP/Nuclei engines + the two-role access-control diff), optional model-SDK adapters for
-no-agent fallback.
+harness, test suite, **Docker bundle** (all scanners + Noir, arch-aware). **Next:** v2
+dynamic-running phase (ZAP/Nuclei engines + the two-role access-control diff), optional model-SDK
+adapters for no-agent fallback.
 
 ## Using it as a skill
 
