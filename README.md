@@ -159,9 +159,9 @@ the next dynamic probes (explicitly gated — they mutate).
 
 ## Validated on
 
-HugoCross (Next.js), `wu-whatsappinbox` (106-service Express/AWS monorepo), VAmPI, NodeGoat, DVGA —
-independently reproducing a hand-done pentest's findings (tenant boundary, SSO-endpoint SSRF, media
-upload, conversation-BOLA routes, roles).
+A production Next.js app, a large Express/AWS monorepo, and the VAmPI / NodeGoat / DVGA vuln-app
+corpus — independently reproducing a hand-done pentest's findings (tenant boundary, SSRF, file
+upload, cross-tenant BOLA, role/authz gaps).
 
 ## Tests
 

@@ -47,7 +47,7 @@ class AuthExtractor(Extractor):
 
         # Detect ALL schemes present, then pick a primary by priority. A JWT app
         # that also wires Passport for SSO must read as primary=jwt, not passport
-        # (the bug the WhatsApp app exposed). Priority: nextauth > jwt > session > passport > api-key.
+        # (Passport is often SSO-only). Priority: nextauth > jwt > session > passport > api-key.
         detected = []
         if nextauth:
             detected.append("nextauth (session JWT in cookie)")
