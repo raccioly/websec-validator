@@ -76,12 +76,16 @@ def cmd_run(args) -> int:
     # 2. scanners: detect, optionally run
     det = scanners.detect(langs)
     scan_results = []
+    unified = None
     if args.scan:
         print("\n  running available static scanners (read-only)…")
         scan_results = scanners.run_available(target, out, langs)
         for r in scan_results:
             tag = r.get("findings", r.get("status", "?"))
             print(f"    {r['name']}: {tag}")
+        unified = scanners.normalize_findings(scan_results, out)
+        print(f"  → {unified['total']} de-duplicated findings "
+              f"({unified['cross_tool_or_dup_merged']} merged) · {unified['by_severity']}")
     else:
         print(f"\n  scanners available: {', '.join(s['name'] for s in det['available']) or 'none'}"
               "  (add --scan to execute them)")
@@ -92,11 +96,11 @@ def cmd_run(args) -> int:
     print(f"\n  staged {len([m for m in manifest if 'attack_class' in m])} tailored probe template(s) → {out / 'probes'}")
 
     # 4. briefing
-    brief = briefing.render(facts, det, scan_results, manifest)
+    brief = briefing.render(facts, det, scan_results, manifest, unified)
     (out / "AGENT-BRIEFING.md").write_text(brief)
     (out / "manifest.json").write_text(json.dumps(
         {"facts": "FACTS.json", "scanners": det, "scan_results": scan_results,
-         "probes": manifest}, indent=2))
+         "findings_summary": unified, "probes": manifest}, indent=2))
 
     print(f"\n✓ done. Hand this to your AI coding agent:\n    {out / 'AGENT-BRIEFING.md'}")
     print(f"  (add `{out.name}/` to .gitignore — it holds findings + tokens once you run the probes)")

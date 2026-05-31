@@ -23,7 +23,8 @@ def _section(title, items):
     return f"**{title}** ({len(items or [])}):\n{_bullets(items)}\n"
 
 
-def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list) -> str:
+def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list,
+           unified: dict | None = None) -> str:
     stack = facts.get("stack", {})
     auth = facts.get("auth", {})
     routes = facts.get("routes", {})
@@ -61,6 +62,18 @@ def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list
             for r in scan_results)
     else:
         scan_lines = "_Detected but not executed — run `websec run <repo> --scan`._"
+
+    if unified:
+        top_lines = "\n".join(
+            f"- **{t['severity']}** [{t['category']}] {t['title']} — `{t['file']}` ({'+'.join(t['tools'])})"
+            for t in unified.get("top", [])) or "_no findings_"
+        findings_block = (
+            f"**{unified['total']} de-duplicated findings** "
+            f"({unified['cross_tool_or_dup_merged']} cross-tool/duplicate merged) · "
+            f"by severity {unified['by_severity']} · by category {unified['by_category']}\n\n"
+            f"Top findings (full list in `findings.json`):\n{top_lines}")
+    else:
+        findings_block = scan_lines
 
     probe_lines = "\n".join(
         f"- **{p['key']}** — {p.get('attack_class','')}  \n"
@@ -132,7 +145,7 @@ Production source maps exposed: {client.get("production_source_maps", False)}
 
 Scanners available: {avail}
 
-{scan_lines}
+{findings_block}
 
 Install for fuller coverage:
 {missing}

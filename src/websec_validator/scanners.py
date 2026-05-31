@@ -141,3 +141,108 @@ def _count_findings(key: str, out_file: Path) -> int:
     if key == "semgrep":
         return len(data.get("results", []) or [])
     return 0
+
+
+# ---- cross-tool normalization + de-duplication -------------------------------------------
+# The thing no OSS orchestrator does: one ranked finding even when two scanners
+# report the same CVE / secret / misconfig. Fingerprints are scheme-shared across
+# tools so e.g. a secret found by both Gitleaks and Trivy collapses to one row.
+
+SEV_ORDER = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "INFO": 0, "UNKNOWN": 1}
+
+
+def _sev(s: str) -> str:
+    s = (s or "").upper()
+    return s if s in SEV_ORDER else "MEDIUM"
+
+
+def _norm_trivy(data: dict) -> list:
+    out = []
+    for res in (data.get("Results") or []):
+        tgt = res.get("Target", "")
+        for v in (res.get("Vulnerabilities") or []):
+            out.append({"tool": "trivy", "category": "sca", "severity": _sev(v.get("Severity")),
+                        "key": v.get("VulnerabilityID", ""), "file": tgt, "line": 0,
+                        "title": f"{v.get('PkgName')} {v.get('InstalledVersion')} → {v.get('FixedVersion', '(no fix)')}",
+                        "fingerprint": f"cve|{v.get('PkgName')}|{v.get('VulnerabilityID')}"})
+        for s in (res.get("Secrets") or []):
+            out.append({"tool": "trivy", "category": "secret", "severity": _sev(s.get("Severity") or "HIGH"),
+                        "key": s.get("RuleID", ""), "file": tgt, "line": s.get("StartLine", 0),
+                        "title": f"secret: {s.get('Title') or s.get('RuleID')}",
+                        "fingerprint": f"secret|{tgt}|{s.get('RuleID')}"})
+        for m in (res.get("Misconfigurations") or []):
+            out.append({"tool": "trivy", "category": "iac", "severity": _sev(m.get("Severity")),
+                        "key": m.get("ID", ""), "file": tgt, "line": 0, "title": (m.get("Title") or "")[:90],
+                        "fingerprint": f"iac|{tgt}|{m.get('ID')}"})
+    return out
+
+
+def _norm_gitleaks(data) -> list:
+    rows = data if isinstance(data, list) else (data.get("findings") or [])
+    out = []
+    for x in rows:
+        f, rule = x.get("File", ""), x.get("RuleID", "")
+        out.append({"tool": "gitleaks", "category": "secret", "severity": "HIGH",
+                    "key": rule, "file": f, "line": x.get("StartLine", 0),
+                    "title": f"secret: {(x.get('Description') or rule)[:80]}",
+                    "fingerprint": f"secret|{f}|{rule}"})
+    return out
+
+
+def _norm_semgrep(data: dict) -> list:
+    sevmap = {"ERROR": "HIGH", "WARNING": "MEDIUM", "INFO": "INFO"}
+    out = []
+    for r in (data.get("results") or []):
+        rule = (r.get("check_id", "")).split(".")[-1]
+        path = r.get("path", "")
+        line = (r.get("start") or {}).get("line", 0)
+        sev = sevmap.get((r.get("extra") or {}).get("severity", "INFO"), "MEDIUM")
+        out.append({"tool": "semgrep", "category": "sast", "severity": sev,
+                    "key": rule, "file": path, "line": line,
+                    "title": ((r.get("extra") or {}).get("message") or rule)[:90],
+                    "fingerprint": f"sast|{path}|{line}|{rule}"})
+    return out
+
+
+_PARSERS = {"trivy": _norm_trivy, "gitleaks": _norm_gitleaks, "semgrep": _norm_semgrep}
+
+
+def normalize_findings(scan_results: list, outdir: Path) -> dict:
+    """Merge every scanner's native JSON into one de-duplicated, severity-ranked
+    findings.json. Returns a summary (raw vs deduped, by severity/category)."""
+    raw = []
+    for r in scan_results:
+        out, key = r.get("output"), r.get("key")
+        parser = _PARSERS.get(key)
+        if not (out and parser and Path(out).exists()):
+            continue
+        try:
+            raw += parser(json.loads(Path(out).read_text() or "{}"))
+        except Exception:
+            continue
+
+    by_fp: dict = {}
+    for f in raw:
+        fp = f["fingerprint"]
+        if fp in by_fp:
+            if f["tool"] not in by_fp[fp]["tools"]:
+                by_fp[fp]["tools"].append(f["tool"])
+            if SEV_ORDER[f["severity"]] > SEV_ORDER[by_fp[fp]["severity"]]:
+                by_fp[fp]["severity"] = f["severity"]
+        else:
+            f = dict(f)
+            f["tools"] = [f.pop("tool")]
+            by_fp[fp] = f
+    deduped = sorted(by_fp.values(), key=lambda f: -SEV_ORDER[f["severity"]])
+    (outdir / "findings.json").write_text(json.dumps(deduped, indent=2))
+
+    by_sev, by_cat = {}, {}
+    for f in deduped:
+        by_sev[f["severity"]] = by_sev.get(f["severity"], 0) + 1
+        by_cat[f["category"]] = by_cat.get(f["category"], 0) + 1
+    return {"total_raw": len(raw), "total": len(deduped),
+            "cross_tool_or_dup_merged": len(raw) - len(deduped),
+            "by_severity": by_sev, "by_category": by_cat,
+            "top": [{"severity": f["severity"], "category": f["category"], "title": f["title"],
+                     "file": f["file"], "tools": f["tools"]} for f in deduped[:15]]}
+
