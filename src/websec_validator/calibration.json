@@ -1,0 +1,75 @@
+{
+  "meta": {
+    "corpus": [
+      "VAmPI",
+      "NodeGoat",
+      "DVGA"
+    ],
+    "n_total": 59,
+    "method": "binomial proportion + Wilson 95% CI",
+    "min_n": 5,
+    "unmatched_rule": "unmatched finding = false positive",
+    "researched_classes": [
+      "command-injection",
+      "graphql",
+      "missing-auth",
+      "sqli",
+      "ssti"
+    ],
+    "caveat": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+  },
+  "by_class_label": {
+    "command-injection|LOW": {
+      "n": 1,
+      "k": 1,
+      "p": 1.0,
+      "ci": [
+        0.207,
+        1.0
+      ]
+    },
+    "graphql|MEDIUM": {
+      "n": 2,
+      "k": 2,
+      "p": 1.0,
+      "ci": [
+        0.342,
+        1.0
+      ]
+    },
+    "missing-auth|MEDIUM": {
+      "n": 41,
+      "k": 27,
+      "p": 0.659,
+      "ci": [
+        0.505,
+        0.784
+      ]
+    }
+  },
+  "by_label": {
+    "LOW": {
+      "n": 8,
+      "k": 1,
+      "p": 0.125,
+      "ci": [
+        0.022,
+        0.471
+      ]
+    },
+    "MEDIUM": {
+      "n": 51,
+      "k": 29,
+      "p": 0.569,
+      "ci": [
+        0.433,
+        0.695
+      ]
+    }
+  },
+  "prior": {
+    "HIGH": 0.85,
+    "MEDIUM": 0.5,
+    "LOW": 0.25
+  }
+}

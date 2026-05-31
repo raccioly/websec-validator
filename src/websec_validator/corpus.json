@@ -9,7 +9,11 @@
       "min_endpoints": 10,
       "auth_scheme_contains": "jwt",
       "idor_present": true
-    }
+    },
+    "truth": [
+      {"class": "missing-auth", "location_contains": "*", "note": "VAmPI is a broken-object/function-level-authorization demo: its API endpoints are intentionally missing or mis-applying auth"},
+      {"class": "sqli", "location_contains": "*", "note": "raw SQL string interpolation in the vulnerable code path"}
+    ]
   },
   {
     "name": "NodeGoat",
@@ -21,7 +25,12 @@
       "min_endpoints": 8,
       "auth_scheme_contains": "session",
       "idor_present": true
-    }
+    },
+    "truth": [
+      {"class": "missing-auth", "location_contains": "*", "note": "broken access control across allocation/admin routes"},
+      {"class": "command-injection", "location_contains": "*", "note": "SSJS injection via eval in the contributions handler"},
+      {"class": "ssti", "location_contains": "*", "note": "server-side template injection demo"}
+    ]
   },
   {
     "name": "DVGA",
@@ -31,6 +40,10 @@
     "expect": {
       "frameworks": ["flask"],
       "graphql_present": true
-    }
+    },
+    "truth": [
+      {"class": "graphql", "location_contains": "*", "note": "introspection + playground enabled, no depth/complexity limits"},
+      {"class": "command-injection", "location_contains": "*", "note": "OS command injection via the system-diagnostics resolver"}
+    ]
   }
 ]

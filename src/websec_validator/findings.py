@@ -20,6 +20,8 @@ from __future__ import annotations
 import fnmatch
 from pathlib import Path
 
+from . import calibration
+
 # attack class → authoritative citations + a remediation pattern
 STANDARDS = {
     "missing-auth": (["CWE-862 Missing Authorization", "CWE-306 Missing Authentication"],
@@ -92,7 +94,8 @@ def _suppressed(f, pats):
 
 
 def _f(title, category, attack_class, severity, confidence, location, evidence):
-    return {"title": title, "category": category, "severity": severity, "confidence": confidence,
+    return {"title": title, "category": category, "attack_class": attack_class,
+            "severity": severity, "confidence": confidence,
             "location": location, "evidence": evidence, "standards": _cite(attack_class),
             "remediation": REMEDIATION.get(attack_class, _DEFAULT_REM), "status": "open"}
 
@@ -179,10 +182,16 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
     suppressed_n = len(out) - len(kept)
     kept.sort(key=lambda f: (-SEV_RANK.get(f["severity"], 0), -CONF_RANK.get(f["confidence"], 0)))
 
-    by_sev, by_conf = {}, {}
+    # ---- calibrate: attach a measured real-rate + CI to each finding (best-effort) ----
+    cal_table = calibration.load()
+    by_sev, by_conf, by_basis = {}, {}, {}
     for f in kept:
+        f["calibrated"] = calibration.apply(f.get("attack_class", ""), f["confidence"], cal_table)
         by_sev[f["severity"]] = by_sev.get(f["severity"], 0) + 1
         by_conf[f["confidence"]] = by_conf.get(f["confidence"], 0) + 1
+        by_basis[f["calibrated"]["basis"]] = by_basis.get(f["calibrated"]["basis"], 0) + 1
     return {"findings": kept, "total": len(kept), "suppressed": suppressed_n,
             "by_severity": by_sev, "by_confidence": by_conf,
+            "calibration": {"loaded": bool(cal_table), "by_basis": by_basis,
+                            "caveat": (cal_table or {}).get("meta", {}).get("caveat")},
             "dynamic_included": bool(dynamic)}

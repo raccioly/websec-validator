@@ -42,8 +42,11 @@ def render(facts: dict, scanners: dict, scan_results: list, unified: dict | None
             cwe = (f["standards"]["cwe"][:1] or [""])[0]
             chain = " → ".join(e["layer"] for e in f["evidence"])
             api = (" · " + ", ".join(f["standards"]["owasp_api"])) if f["standards"]["owasp_api"] else ""
+            cal = f.get("calibrated") or {}
+            calstr = (f" · P(real)≈**{cal.get('p')}** CI {cal.get('ci')} (n={cal.get('n')}, {cal.get('basis')})"
+                      if cal else "")
             _ll.append(f"- **[{f['severity']}/{f['confidence']}]** {f['title']}  \n"
-                       f"  `{f['location']}` · evidence: {chain} · {cwe}{api}  \n"
+                       f"  `{f['location']}` · evidence: {chain} · {cwe}{api}{calstr}  \n"
                        f"  _fix:_ {f['remediation']}")
         ledger_block = "\n".join(_ll)
         ledger_hdr = (f"**{ledger['total']} findings** · {ledger['by_severity']} · "
@@ -51,6 +54,9 @@ def render(facts: dict, scanners: dict, scan_results: list, unified: dict | None
                       + (f" · {ledger['suppressed']} suppressed" if ledger.get('suppressed') else ""))
     else:
         ledger_block, ledger_hdr = top_findings, sev_line
+
+    cal_caveat = ((ledger or {}).get("calibration", {}).get("caveat")
+                  or "calibrated on a vuln-app corpus — indicative only, skews optimistic on clean code")
 
     return f"""# websec-validator report — {facts.get('target','')}
 
@@ -73,6 +79,8 @@ def render(facts: dict, scanners: dict, scan_results: list, unified: dict | None
 {ledger_block}
 
 _Full ledger with complete evidence chains + remediation in `findings-ledger.json`. Confidence: HIGH = dynamically confirmed or verified; MEDIUM = concrete static evidence; LOW = single-source hypothesis to verify._
+
+_**P(real)** = measured real-vuln rate for that attack-class/confidence bucket, with a 95% confidence interval and sample size `n` ({cal_caveat}). A wide CI or `basis: prior (uncalibrated)` means thin data — lean on the verification debate, not the number; to be conservative, threshold on the CI lower bound._
 
 ## 2. Access control
 

@@ -178,8 +178,13 @@ Keep these in the repo after you run them — re-running after a fix proves "sti
 ## 6. How to work this — verify with a debate, then fix
 
 The findings ledger (`findings-ledger.json` / REPORT.md) comes pre-ranked with a **confidence**
-(HIGH = dynamically confirmed; MEDIUM/LOW = hypothesis). **Verify before you report** — especially
-MEDIUM/LOW — by running a 4-role debate per finding (this is the FP killer):
+(HIGH = dynamically confirmed; MEDIUM/LOW = hypothesis). Each finding also carries a **calibrated**
+estimate — `calibrated.p` (measured real-vuln rate for that attack-class/confidence bucket on a
+labeled vuln corpus), `calibrated.ci` (95% interval), `calibrated.n` (sample size), `calibrated.basis`.
+**A wide CI or `basis: prior (uncalibrated)` means thin data — lean on the debate, not the number.**
+The rates skew optimistic (the corpus is deliberately vulnerable); to be conservative, threshold on the
+CI lower bound. **Verify before you report** — especially MEDIUM/LOW — by running a 4-role debate per
+finding (this is the FP killer):
 
 - **Advocate** — argue it's real; cite the evidence chain + the CWE / OWASP-API.
 - **Challenger** — try hard to *refute* it: false positive? intended-public? unreachable? guarded by a

@@ -42,6 +42,7 @@ websec doctor ./my-app        # which scanners are installed?
 websec run ./my-app           # recon + de-dup scanners + stage tailored probes + emit the briefing
 websec run ./my-app --scan    # …and actually execute the available static scanners
 websec proof                  # score recon coverage against a known-vuln-app corpus (CI gate)
+websec calibrate              # fit confidence calibration vs the labeled corpus → calibration.json
 ```
 
 Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and follow it."**
@@ -71,6 +72,7 @@ candidates — so probes get pointed at the *exact* endpoints, not fired blindly
 | `AGENT-BRIEFING.md` | **The product.** Marching orders: detected surface, the access-control map, targeting, findings, the method, and the staged probe list. |
 | `FACTS.json` | The full structured recon. |
 | `findings.json` | Static scanner results, **de-duplicated across tools** and severity-ranked (with `--scan`). |
+| `findings-ledger.json` / `REPORT.md` | The traceable ledger: each finding with an evidence chain, CWE/ASVS/OWASP-API citation, remediation, and a **calibrated `P(real)`** (measured real-vuln rate + 95% CI + sample size). |
 | `probes/` | The probe scripts selected + staged for *this* app (BOLA, JWT, SSRF, mass-assignment…). |
 
 ## The flow
@@ -93,6 +95,20 @@ test credentials (the human supplies them) — the tool itself never touches a r
 each app's documented attack surface — a deterministic, CI-trackable proxy (currently **10/10**).
 The real kill-criterion (does the briefing lift an agent's bug-finding vs a generic prompt?) is the
 manual A/B in [`corpus/PROOF-PROTOCOL.md`](corpus/PROOF-PROTOCOL.md).
+
+## Calibrated confidence
+
+`websec calibrate` runs the ledger against the labeled corpus, measures how often each
+*(attack-class, confidence)* bucket is a **real** documented vuln, and writes `calibration.json`
+(shipped + applied at runtime). Each finding then carries `P(real)` with a **95% Wilson confidence
+interval** and the sample size `n` — so "MEDIUM" stops being a vibe and becomes "real ~57% of the
+time on the corpus (CI 43–70%, n=51)". A finding that matches no documented vuln counts as a false
+positive (the corpus is well-documented). **Honest caveats:** the corpus is *deliberately
+vulnerable*, so the rates skew **optimistic** for clean production code, and small samples mean
+**wide intervals** — the CI is the headline, not the point estimate, and both tighten as the corpus
+grows. With thin data a bucket falls back to the per-label aggregate, then to a clearly-flagged
+uncalibrated prior. No ML, no deps — binomial proportion + Wilson interval; the structure upgrades to
+isotonic regression if a large labeled set ever exists.
 
 ## Dynamic phase (v2 — read-only so far)
 
@@ -119,16 +135,19 @@ upload, conversation-BOLA routes, roles).
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 12 tests
+python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 20 tests
 ```
 
 ## Status / roadmap
 
-**Done:** 10-extractor recon, cross-tool de-dup, tailored probe staging, agent briefing, proof
-harness, test suite, **Docker bundle** (all scanners + Noir, arch-aware), **dynamic phase v1**
-(authenticated read-only cross-tenant BOLA — validated live, reproduced a hand-pentest's 14/14).
+**Done:** 11-extractor recon (incl. schema/entity → mass-assignment targeting), cross-tool de-dup,
+tailored probe staging, agent briefing, traceable findings ledger with **calibrated confidence
+(CJE — Wilson CIs)**, proof harness, test suite, **Docker bundle** (all scanners + Noir, arch-aware),
+**dynamic phase v1** (authenticated read-only cross-tenant BOLA — validated live, reproduced a
+hand-pentest's 14/14).
 **Next:** dynamic write-verb BOLA + JWT/auth probes + ZAP/Nuclei two-role diff (gated, they mutate),
-optional model-SDK adapters for no-agent fallback.
+calibration on hand-labeled real repos (more representative base rate), ASVS index lookup, optional
+model-SDK adapters for no-agent fallback.
 
 ## Using it as a skill
 

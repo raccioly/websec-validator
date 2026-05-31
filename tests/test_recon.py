@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from websec_validator import findings, scanners                        # noqa: E402
+from websec_validator import calibration, findings, scanners           # noqa: E402
 from websec_validator.extractors import routes                         # noqa: E402
 from websec_validator.extractors.auth import AuthExtractor             # noqa: E402
 from websec_validator.extractors.base import RepoContext               # noqa: E402
@@ -92,6 +92,45 @@ class SchemasTests(unittest.TestCase):
         out = SchemasExtractor().extract(ctx("node_app"), {})
         self.assertEqual(out["sensitive_fields"], [])
         self.assertEqual(out["orms"], [])
+
+
+class CalibrationTests(unittest.TestCase):
+    def test_wilson_interval(self):
+        self.assertEqual(calibration.wilson(0, 0), (0.0, 1.0))      # no data → full ignorance
+        lo, hi = calibration.wilson(1, 1)
+        self.assertAlmostEqual(hi, 1.0, places=6)
+        self.assertTrue(0.15 < lo < 0.25)                          # n=1 is NOT falsely certain (~0.21)
+        lo5, hi5 = calibration.wilson(5, 10)
+        self.assertTrue(lo5 < 0.5 < hi5)                           # centered on 0.5
+        self.assertGreater(calibration.wilson(9, 10)[0], lo5)      # more hits ⇒ higher lower bound
+
+    def test_is_real_matching(self):
+        truth = [{"class": "missing-auth", "location_contains": "*"},
+                 {"class": "mass-assignment", "location_contains": "register"}]
+        self.assertTrue(calibration.is_real("missing-auth", "/anything", truth))   # wildcard
+        self.assertTrue(calibration.is_real("mass-assignment", "/users/v1/register", truth))
+        self.assertFalse(calibration.is_real("mass-assignment", "/login", truth))  # location mismatch
+        self.assertFalse(calibration.is_real("ssrf", "/x", truth))                 # class mismatch ⇒ FP
+
+    def _table(self):
+        labeled = ([{"attack_class": "missing-auth", "confidence": "MEDIUM", "is_real": True}] * 6 +
+                   [{"attack_class": "missing-auth", "confidence": "MEDIUM", "is_real": False}] * 4 +
+                   [{"attack_class": "iac", "confidence": "MEDIUM", "is_real": False}] * 8)
+        return calibration.fit(labeled, ["X"], researched_classes={"missing-auth"})
+
+    def test_fit_aggregate_and_researched_filter(self):
+        t = self._table()
+        self.assertEqual(t["by_label"]["MEDIUM"]["n"], 18)         # iac findings still in the aggregate (FP)
+        self.assertEqual(t["by_label"]["MEDIUM"]["k"], 6)
+        self.assertIn("missing-auth|MEDIUM", t["by_class_label"])
+        self.assertNotIn("iac|MEDIUM", t["by_class_label"])        # unresearched ⇒ no misleading p=0 cell
+
+    def test_apply_fallback_tiers(self):
+        t = self._table()
+        self.assertEqual(calibration.apply("missing-auth", "MEDIUM", t)["basis"], "class+label")
+        self.assertEqual(calibration.apply("iac", "MEDIUM", t)["basis"], "label")   # no class cell → aggregate
+        self.assertEqual(calibration.apply("x", "HIGH", t)["basis"], "prior (uncalibrated)")  # no HIGH data
+        self.assertEqual(calibration.apply("x", "MEDIUM", None)["basis"], "prior (uncalibrated)")  # no table
 
 
 class RouteUnitTests(unittest.TestCase):

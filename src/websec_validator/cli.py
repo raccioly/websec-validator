@@ -16,7 +16,8 @@ import json
 import sys
 from pathlib import Path
 
-from . import __version__, briefing, constitution, dynamic, findings, probes, proof, recon, report, scanners
+from . import (__version__, briefing, calibration, constitution, dynamic, findings, probes, proof,
+               recon, report, scanners)
 
 
 def _resolve_target(raw: str) -> Path:
@@ -218,6 +219,62 @@ def cmd_proof(args) -> int:
     return 0
 
 
+def cmd_calibrate(args) -> int:
+    """Fit confidence calibration: run the recon ledger against the labeled vuln corpus,
+    measure how often each (attack_class, label) bucket is a real documented vuln, and
+    write calibration.json (shipped + applied at runtime by findings.build_ledger)."""
+    from importlib import resources
+    corpus_path = (Path(args.corpus).expanduser().resolve() if args.corpus
+                   else Path(str(resources.files("websec_validator").joinpath("corpus.json"))))
+    workdir = (Path(args.workdir).expanduser().resolve() if args.workdir
+               else Path.home() / ".cache" / "websec-corpus")
+    out_path = (Path(args.out).expanduser().resolve() if args.out
+                else Path(calibration.__file__).resolve().parent / "calibration.json")
+    corpus = json.loads(corpus_path.read_text())
+    workdir.mkdir(parents=True, exist_ok=True)
+    print("websec calibrate — fitting confidence against the labeled vuln corpus")
+    print(f"  corpus:  {corpus_path}\n  workdir: {workdir}\n  out:     {out_path}\n")
+
+    labeled, used = [], []
+    for entry in corpus:
+        truth = entry.get("truth")
+        if not truth:
+            print(f"  {entry['name']:12} — no truth block, skipped")
+            continue
+        repo = proof._ensure_repo(entry, workdir)
+        if not repo:
+            print(f"  {entry['name']:12} — unavailable (clone failed / no local_path)")
+            continue
+        try:
+            facts = recon.build_facts(repo, __version__)
+            ledger = findings.build_ledger(facts, None, None, [])
+        except Exception as e:
+            print(f"  {entry['name']:12} — recon/ledger error: {e}")
+            continue
+        n_real = 0
+        for f in ledger["findings"]:
+            real = calibration.is_real(f.get("attack_class", ""), f.get("location", ""), truth)
+            labeled.append({"attack_class": f.get("attack_class", ""),
+                            "confidence": f["confidence"], "is_real": real})
+            n_real += int(real)
+        used.append(entry["name"])
+        print(f"  {entry['name']:12} {len(ledger['findings'])} findings · {n_real} matched a documented vuln")
+
+    if not labeled:
+        print("\n  no labeled findings produced — is the corpus cloned? (needs network on first run)")
+        return 1
+
+    researched = {t.get("class") for entry in corpus for t in (entry.get("truth") or [])}
+    table = calibration.fit(labeled, used, researched)
+    out_path.write_text(json.dumps(table, indent=2) + "\n")
+    print(f"\n  fitted {table['meta']['n_total']} findings across {len(used)} app(s) → {out_path}")
+    for k, v in table["by_label"].items():
+        print(f"    {k:7} {v['k']}/{v['n']} real · p={v['p']} · 95% CI {v['ci']}")
+    print(f"\n  NOTE: {table['meta']['caveat']}.")
+    print("  Per-finding estimates carry n + basis; wide CI / basis=prior ⇒ trust the debate, not the number.")
+    return 0
+
+
 def _which(b):
     import shutil
     return shutil.which(b)
@@ -266,6 +323,12 @@ def build_parser() -> argparse.ArgumentParser:
     pf.add_argument("--corpus", help="corpus JSON (default: bundled)")
     pf.add_argument("--workdir", help="where to clone corpus apps (default: ~/.cache/websec-corpus)")
     pf.set_defaults(func=cmd_proof)
+
+    cal = sub.add_parser("calibrate", help="fit confidence calibration against the labeled vuln corpus → calibration.json")
+    cal.add_argument("--corpus", help="corpus JSON with `truth` blocks (default: bundled)")
+    cal.add_argument("--workdir", help="where corpus apps are cloned (default: ~/.cache/websec-corpus)")
+    cal.add_argument("--out", help="where to write calibration.json (default: bundled, next to the package)")
+    cal.set_defaults(func=cmd_calibrate)
 
     dyn = sub.add_parser("dynamic", help="dynamic probes vs a LIVE target (read-only): cross-tenant BOLA (--config) or unauth reachability (--unauth)")
     dyn.add_argument("--config", help="dynamic config JSON (target + role creds) for authenticated cross-tenant BOLA")
