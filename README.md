@@ -9,7 +9,7 @@
 It is *not* an autonomous scanner and *not* a SaaS. It's the missing front-half: the thing that
 turns a repo into a precise, fact-grounded security brief an AI agent (with a human in the loop)
 can act on — an auto-filled, repo-aware version of a senior pentester's "here's what to test and
-how" handoff. Full landscape + why this niche is real: [`MARKET-ANALYSIS-AND-VERDICT.md`](MARKET-ANALYSIS-AND-VERDICT.md).
+how" handoff. How it works + the reasoning behind every check: [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md).
 
 ## Quickstart — just point it at your repo
 
@@ -237,6 +237,5 @@ works the findings with you. For other agents the universal interface is unchang
 
 ## Credits
 
-Methodology + probe library come from a real authenticated pentest pass
-([`base-research/REPLICATION-PLAYBOOK.md`](base-research/REPLICATION-PLAYBOOK.md), not committed).
-This tool productizes that hand-written pass into something an AI agent can run on any repo.
+Methodology + probe library are distilled from a real authenticated penetration-testing pass.
+This tool productizes that hand-written methodology into something an AI agent can run on any repo.

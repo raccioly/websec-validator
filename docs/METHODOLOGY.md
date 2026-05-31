@@ -243,6 +243,3 @@ map into a full ASVS index lookup.)
 - **What this tool is not:** an autonomous scanner, a SaaS, or a replacement for a human reviewer.
   It is the precise front-half that makes the agent + human dramatically more effective — and it
   tells you, with a calibrated and clearly-caveated number, how much to trust each lead.
-
-For the market reasoning behind this design, see
-[`MARKET-ANALYSIS-AND-VERDICT.md`](../MARKET-ANALYSIS-AND-VERDICT.md).
