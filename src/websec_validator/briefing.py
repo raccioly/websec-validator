@@ -164,6 +164,11 @@ Production source maps exposed: {client.get("production_source_maps", False)}
 
 Scanners available: {avail}
 
+> ⚠️ The count below is **raw scanner output (pre-triage)** — expect mostly noise (vulnerable-looking
+> patterns that are guarded, intended-public, or not exploitable). The **triaged, calibrated view** is the
+> findings ledger in `REPORT.md` / `findings-ledger.json` — each finding there carries a `P(real)`. Start
+> from the ledger and debate-verify; don't report these raw counts as vulnerabilities.
+
 {findings_block}
 
 Install for fuller coverage:

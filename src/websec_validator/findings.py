@@ -151,11 +151,22 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                       [{"layer": "static", "detail": f"{'+'.join(t.get('tools', []))}: {t.get('title','')}"}]))
 
     # ---- 3. Attack-surface sinks (recon hypotheses) ----
+    # On a purely-NoSQL datastore, classic SQL-injection alerts are almost always FPs —
+    # down-rank them (the inflation the field test flagged) rather than ranking them MEDIUM.
+    _ds = {d.lower() for d in (facts.get("stack", {}).get("datastores") or [])}
+    _nosql = {"dynamodb", "dynamo", "mongodb", "mongo", "firestore", "cosmos", "cosmosdb", "couchdb", "cassandra"}
+    _sql = {"postgres", "postgresql", "mysql", "mariadb", "sqlite", "mssql", "sqlserver", "aurora", "oracle", "cockroach"}
+    is_nosql_only = bool(_ds & _nosql) and not (_ds & _sql)
     for cls, info in (facts.get("surface", {}).get("sinks", {}) or {}).items():
+        sev = "MEDIUM"
+        ev = [{"layer": "recon", "detail": f"user-input-gated {cls} in {info.get('count')} file(s)"}]
+        if cls in ("sqli", "sql-injection") and is_nosql_only:
+            sev = "LOW"
+            ev.append({"layer": "recon", "detail": f"datastore is {', '.join(sorted(_ds)) or 'NoSQL'} — "
+                       "classic SQLi is unlikely here; check for NoSQL injection instead (usually a false positive)"})
         out.append(_f(f"{cls} sink ({info.get('count')} site(s))", "attack-surface",
-                      cls if cls in STANDARDS else "sast", "MEDIUM", "LOW",
-                      (info.get("files") or ["?"])[0],
-                      [{"layer": "recon", "detail": f"user-input-gated {cls} in {info.get('count')} file(s)"}]))
+                      cls if cls in STANDARDS else "sast", sev, "LOW",
+                      (info.get("files") or ["?"])[0], ev))
 
     # ---- 4. Client-side secret exposure (HIGH — ships to browser) ----
     for leak in (facts.get("client_exposure", {}).get("public_secret_leaks", []) +

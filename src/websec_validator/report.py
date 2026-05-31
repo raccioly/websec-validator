@@ -71,7 +71,8 @@ def render(facts: dict, scanners: dict, scan_results: list, unified: dict | None
 | Endpoints | **{routes.get('count', 0)}** (via {routes.get('engine','?').split(' ')[0]}) |
 | Auth | {facts.get('auth', {}).get('scheme','?')} · roles: {', '.join(authz.get('roles_detected', [])) or 'none'} |
 | Access control | {gs.get('with_visible_guard', 0)} guarded · **{gs.get('no_visible_guard', 0)} no visible guard** · global-middleware: {authz.get('global_auth_middleware', False)} |
-| Findings (ledger) | {ledger_hdr} |
+| Static scanner (raw, pre-triage) | {sev_line} |
+| **Findings ledger** (triaged + calibrated) | {ledger_hdr} |
 | Attack surface | IDOR: {len(tgt.get('idor_candidates', []))} · SSRF: {len(tgt.get('ssrf_candidates', []))} · upload: {len(tgt.get('upload_candidates', []))} · writes: {len(tgt.get('write_endpoints', []))} |
 
 ## 1. Findings ledger (ranked · evidence chain · standards · confidence)
