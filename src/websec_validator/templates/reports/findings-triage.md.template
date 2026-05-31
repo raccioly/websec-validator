@@ -1,0 +1,28 @@
+# ZAP findings triage — API scan
+
+> Triaged against the actual codebase. Document every false positive with
+> evidence so future-you (and the pentest team) doesn't re-investigate them.
+
+| Alert | Count | Risk | Verdict | Why |
+|---|---|---|---|---|
+| <e.g. SQL Injection> | <N> | High | **False positive** | <Reason — link to file:line proof> |
+| <e.g. NoSQL Injection> | <N> | High | **False positive** | <Stack uses parameterized expressions, not strings> |
+| <e.g. PII Disclosure> | <N> | High | <Real / FP> | <Evidence trail> |
+| <e.g. Path Traversal> | <N> | High | **False positive** | <IDs are DB keys, no filesystem reads> |
+| <e.g. Application Error Disclosure> | <N> | Low | Minor | <Confirm error responses are generic> |
+
+## So what's actually worth doing?
+
+> List the real, actionable items that came from elsewhere in the engagement
+> (infra checks, source review, role-comparison diff).
+
+1. <Real item 1>
+2. <Real item 2>
+3. <Real item 3>
+
+## Lesson for next runs
+
+> A 2-3 sentence note about which ZAP rules systematically misfire on this stack
+> and what the real signal source was. Examples:
+>  - DynamoDB JSON API -> SQLi/NoSQLi alerts are noise; signal is in two-role diff.
+>  - GraphQL endpoint -> rule 10202 misfires on every alias; signal is in graphql-cop.

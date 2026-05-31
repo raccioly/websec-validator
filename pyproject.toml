@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "websec-validator"
+version = "0.1.0"
+description = "Local-first security recon that briefs your AI coding agent: facts + tailored probe scripts, code-in / artifacts-out. No LLM, no server, no running app."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Ricardo Accioly" }]
+keywords = ["security", "pentest", "sast", "dast", "bola", "ai-agent", "appsec"]
+# v1 deliberately has ZERO runtime dependencies — stdlib only.
+# It SHELLS OUT to scanners (trivy/gitleaks/semgrep/...) when present; it does not import them.
+dependencies = []
+
+[project.scripts]
+websec = "websec_validator.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+websec_validator = ["templates/probes/*", "templates/reports/*"]

@@ -1,0 +1,26 @@
+# websec-validator outputs — hold findings + tokens once probes run; never commit
+websec-out/
+security/
+
+# private reference material (prior WU pentest — large + contains real secrets/findings)
+base-research/
+
+# local agent tooling (OpenWolf brain + Claude config + daemon state) — machine-local, not the product
+.wolf/
+.claude/
+CLAUDE.md
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# secrets / env
+.env
+*.env
+
+.DS_Store

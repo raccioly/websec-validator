@@ -1,0 +1,37 @@
+# <Tool> findings — <YYYY-MM-DD>
+
+> Hand-written triage of `<tool>` output. Raw evidence in this folder
+> (e.g. `<tool>-baseline.json`, `<tool>-current.json`).
+
+## Run command
+
+```bash
+<the exact command, so anyone can re-run it>
+```
+
+## Summary
+
+- Raw alerts: <N>
+- Real findings: <N>
+- False positives triaged: <N>
+
+## Real findings
+
+### 1. <Title> — <severity>
+
+- **What:** <1-2 sentences>
+- **Where:** `<file:line>` or `<endpoint>`
+- **Evidence:** <log excerpt / response body / commit hash>
+- **Action:** <what to do, who owns it>
+
+### 2. ...
+
+## False positives (do not "fix")
+
+| Alert | Cause | Why FP |
+|---|---|---|
+| <alert name> | <what the tool detected> | <why it's a FP — link to file:line or test that proves it> |
+
+## Notes for next run
+
+- <Anything that surprised you, anything to investigate further next time>

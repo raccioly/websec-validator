@@ -1,0 +1,75 @@
+# Security tooling pass — findings summary
+
+> Date: <YYYY-MM-DD>. Tools run locally; **zero repo footprint added**.
+> All outputs in `security/<tool>/` (gitignored).
+
+## Tools run
+
+| Tool | Status | Outputs |
+|---|---|---|
+| **Prowler** <ver> | ☐ | `security/prowler/` |
+| **Nuclei** <ver> | ☐ | `security/nuclei/` |
+| **Semgrep** <ver> | ☐ | `security/semgrep/` |
+| **Gitleaks** <ver> | ☐ | `security/gitleaks/` |
+| **Trivy** <ver> | ☐ | `security/trivy/` |
+| **ZAP** <ver> + manual probes | ☐ | `security/zap/`, `security/pentest-prep/` |
+
+## Most important finding
+
+> The single highest-priority item, with action and owner.
+
+## Real findings
+
+| Tool | Finding | Severity | Action |
+|---|---|---|---|
+| <tool> | <finding> | <CRIT/HIGH/MED/LOW> | <action + file:line> |
+
+## What's clean
+
+| Surface | Tool | Result |
+|---|---|---|
+| <Surface 1> | <Tool> | <e.g. 0 CRITICAL + 0 HIGH> |
+| <Surface 2> | <Tool> | <Result> |
+
+## Recommended order of fixes
+
+1. <P0 item>
+2. <P1 item>
+3. <P2 item>
+
+## What's NOT in this report
+
+- <Surfaces not covered + why>
+- <Tools skipped + why>
+
+## Reproducing this scan pass
+
+```bash
+# Prowler
+prowler aws --region us-east-1 \
+  --compliance cis_2.0_aws aws_foundational_security_best_practices_aws \
+  --output-formats html json-asff csv \
+  --output-directory security/prowler/
+
+# Nuclei
+TOKEN=$(./security/zap/run.sh --print-token)
+nuclei -target "$ZAP_TARGET" -H "Authorization: Bearer $TOKEN" \
+  -tags "jwt,ssrf,sqli,lfi,redirect,rce,exposure,misconfig,cve" \
+  -severity medium,high,critical -rate-limit 30 -concurrency 5 \
+  -json-export security/nuclei/nuclei-baseline.json \
+  -output security/nuclei/nuclei-baseline.txt
+
+# Semgrep
+semgrep --config auto --config p/typescript --config p/javascript \
+  --config p/security-audit --severity WARNING --severity ERROR \
+  --json -o security/semgrep/semgrep-backend.json backend/src
+
+# Gitleaks
+gitleaks detect --source . --report-format json --report-path security/gitleaks/current.json
+gitleaks git --report-format json --report-path security/gitleaks/history.json
+
+# Trivy
+trivy fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL \
+  --skip-dirs node_modules --skip-dirs security \
+  --format json --output security/trivy/trivy-fs.json .
+```

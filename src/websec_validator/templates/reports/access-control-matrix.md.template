@@ -1,0 +1,65 @@
+# Access-Control Matrix — <PROJECT_NAME> API
+
+> Source of truth: `backend/src/routes/*`, `backend/src/server.ts`,
+> the auth/permission middleware files, and the role seed.
+>
+> This is the map of *what each role SHOULD be able to reach*. The ZAP
+> Access Control test compares it against what each role *actually* can reach.
+>
+> **Last refreshed:** <YYYY-MM-DD>
+
+## How auth is enforced
+
+- `<requireAuth middleware mount line>` applies to every `/api/*` route mounted *after* it.
+- A handful of `/api/*` routes are registered **before** that line and are therefore **public**:
+  list them here (e.g. `/api/auth/*`, `/api/health`, `/api/settings` if public).
+- Routes outside `/api/*` bypass `requireAuth` entirely: webhooks (HMAC-verified),
+  SCIM endpoints (own bearer), `/docs`, etc.
+- **Token mechanism:** describe how tokens are minted, sent, and refreshed.
+- **Authorization styles seen on routes:**
+  - Permission strings (CASL / cancan / custom) — describe.
+  - Tenant-scoped middleware (`requireGroupAccess` / `requireOrgAccess`) — describe.
+  - Manual in-handler checks — list which routes still rely on these.
+
+## Roles
+
+| Role label | roleId | Key permissions |
+|---|---|---|
+| <Highest privilege> | `role-...` | `*` (all) |
+| <Mid privilege> | `role-...` | ... |
+| <Low privilege> | `role-...` | ... |
+
+## Legend
+
+- ✅ allowed · ❌ denied (403) · 🔒 = denied unless caller is in the target tenant · 🟡 = self-only (IDOR-guarded)
+- "Auth" column = `requireAuth` enforced (any authenticated user reaches the guard).
+
+## Matrix (representative endpoints, grouped)
+
+| Method + Path | Guard | admin | low-privilege role |
+|---|---|---|---|
+| **Auth / public** | | | |
+| POST /api/auth/login | public | ✅ | ✅ |
+| POST /api/auth/refresh | public | ✅ | ✅ |
+| GET /api/auth/me | requireAuth | ✅ | ✅ |
+| POST /api/auth/logout | requireAuth | ✅ | ✅ |
+| **Admin: users** | | | |
+| GET /api/admin/users | requirePermission('users:view') | ✅ | ❌ |
+| POST /api/admin/users | requirePermission('users:manage') | ✅ | ❌ |
+| ... | ... | ... | ... |
+
+> Continue this table for every route. Group by `**Section**` rows.
+> The completeness of this matrix is the single highest-value deliverable —
+> the pentest team loads it into ZAP's Access Control tab and uses it as the
+> map for role-vs-role testing.
+
+## Known gaps / TODOs
+
+- List any routes you know don't yet conform (e.g. still use legacy `requireRole('admin')`).
+- List any routes whose authz lives in-handler instead of in middleware — these are
+  the easiest to forget when adding a new role.
+
+## Audit history
+
+- YYYY-MM-DD — initial matrix
+- YYYY-MM-DD — added `*` after PR #N
