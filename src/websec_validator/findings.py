@@ -193,5 +193,7 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
     return {"findings": kept, "total": len(kept), "suppressed": suppressed_n,
             "by_severity": by_sev, "by_confidence": by_conf,
             "calibration": {"loaded": bool(cal_table), "by_basis": by_basis,
+                            "personalized": bool((cal_table or {}).get("meta", {}).get("personalized")),
+                            "local_samples": (cal_table or {}).get("meta", {}).get("local_samples", 0),
                             "caveat": (cal_table or {}).get("meta", {}).get("caveat")},
             "dynamic_included": bool(dynamic)}

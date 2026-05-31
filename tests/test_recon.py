@@ -132,6 +132,41 @@ class CalibrationTests(unittest.TestCase):
         self.assertEqual(calibration.apply("x", "HIGH", t)["basis"], "prior (uncalibrated)")  # no HIGH data
         self.assertEqual(calibration.apply("x", "MEDIUM", None)["basis"], "prior (uncalibrated)")  # no table
 
+    def test_samples_from_dynamic_oracle(self):
+        dyn = {"write_auth_enforcement": {"results": [
+                  {"verdict": "EXECUTED-UNAUTH"}, {"verdict": "auth-enforced"},
+                  {"verdict": "no-auth-gate (reached handler/validation)"}, {"verdict": "http-500"}]},
+               "cross_tenant_bola": {"leaks": [{"path": "/x"}]}}
+        s = calibration.samples_from_dynamic(dyn)
+        ma = [x for x in s if x["attack_class"] == "missing-auth"]
+        self.assertEqual(len(ma), 3)                       # executed + no-auth-gate + auth-enforced; http-* skipped
+        self.assertEqual(sum(x["is_real"] for x in ma), 2)  # auth-enforced is a confirmed FALSE positive
+        self.assertTrue(any(x["attack_class"] == "bola" and x["is_real"] for x in s))
+
+    def test_merge_sums_counts_and_personalizes(self):
+        shipped = {"meta": {"caveat": "base"},
+                   "by_class_label": {"missing-auth|MEDIUM": {"n": 41, "k": 27, "p": 0.659, "ci": [0.5, 0.78]}},
+                   "by_label": {"MEDIUM": {"n": 41, "k": 27}}, "prior": calibration.PRIOR}
+        local = {"meta": {"samples": 3}, "by_class_label": {"missing-auth|MEDIUM": {"n": 3, "k": 2}},
+                 "by_label": {"MEDIUM": {"n": 3, "k": 2}}}
+        m = calibration._merge(shipped, local)
+        self.assertEqual(m["by_class_label"]["missing-auth|MEDIUM"]["n"], 44)   # counts summed
+        self.assertEqual(m["by_class_label"]["missing-auth|MEDIUM"]["k"], 29)
+        self.assertTrue(m["meta"]["personalized"])
+        self.assertEqual(m["meta"]["local_samples"], 3)
+
+    def test_record_samples_roundtrip(self):
+        saved = calibration.LOCAL_PATH
+        try:
+            calibration.LOCAL_PATH = Path(tempfile.mkdtemp()) / "local.json"
+            calibration.record_samples([{"attack_class": "missing-auth", "confidence": "MEDIUM", "is_real": True},
+                                        {"attack_class": "missing-auth", "confidence": "MEDIUM", "is_real": False}])
+            loc = calibration.load_local()
+            self.assertEqual(loc["by_label"]["MEDIUM"], {"n": 2, "k": 1})
+            self.assertEqual(loc["meta"]["samples"], 2)
+        finally:
+            calibration.LOCAL_PATH = saved
+
 
 class RouteUnitTests(unittest.TestCase):
     def test_clean_path(self):

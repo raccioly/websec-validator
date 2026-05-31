@@ -192,6 +192,16 @@ def cmd_dynamic(args) -> int:
     (out / "REPORT.md").write_text(
         report.render(facts_dict, {"available": [], "missing": []}, [], None, [], ts, ledger))
     print(f"\n  ledger: {ledger['total']} finding(s) · {ledger['by_severity']} · confidence {ledger['by_confidence']}")
+
+    # self-improving calibration: dynamic is an oracle — fold this run's CONFIRMED results
+    # (executed-unauth / auth-enforced / cross-tenant leak) into the user-global local overlay
+    samples = calibration.samples_from_dynamic(dyn)
+    rec = calibration.record_samples(samples) if samples else None
+    if rec:
+        nr = sum(1 for s in samples if s["is_real"])
+        print(f"  calibration: folded {len(samples)} confirmed sample(s) ({nr} real / {len(samples) - nr} FP) "
+              f"into your local overlay → {rec['meta']['samples']} total; confidence now personalizes to your apps")
+
     print(f"  ✓ run {ts} saved (immutable): {out}")
     return 1 if ledger["by_severity"].get("CRITICAL") else 0
 
@@ -224,6 +234,24 @@ def cmd_calibrate(args) -> int:
     measure how often each (attack_class, label) bucket is a real documented vuln, and
     write calibration.json (shipped + applied at runtime by findings.build_ledger)."""
     from importlib import resources
+
+    # --ingest: fold a hand-labeled findings file into your LOCAL overlay (the manual real-repo path)
+    if getattr(args, "ingest", None):
+        src = Path(args.ingest).expanduser().resolve()
+        if not src.is_file():
+            sys.exit(f"error: --ingest file not found: {src}")
+        data = json.loads(src.read_text())
+        rows = data.get("findings", data) if isinstance(data, dict) else data
+        labeled = [{"attack_class": r.get("attack_class", ""), "confidence": r.get("confidence", "MEDIUM"),
+                    "is_real": bool(r.get("is_real"))} for r in rows]
+        rec = calibration.record_samples(labeled)
+        if not rec:
+            sys.exit("error: nothing ingested (empty file, or local overlay not writable)")
+        nr = sum(1 for s in labeled if s["is_real"])
+        print(f"websec calibrate --ingest: folded {len(labeled)} hand-labeled sample(s) "
+              f"({nr} real / {len(labeled) - nr} FP) into {calibration.LOCAL_PATH} → {rec['meta']['samples']} total.")
+        return 0
+
     corpus_path = (Path(args.corpus).expanduser().resolve() if args.corpus
                    else Path(str(resources.files("websec_validator").joinpath("corpus.json"))))
     workdir = (Path(args.workdir).expanduser().resolve() if args.workdir
@@ -328,6 +356,7 @@ def build_parser() -> argparse.ArgumentParser:
     cal.add_argument("--corpus", help="corpus JSON with `truth` blocks (default: bundled)")
     cal.add_argument("--workdir", help="where corpus apps are cloned (default: ~/.cache/websec-corpus)")
     cal.add_argument("--out", help="where to write calibration.json (default: bundled, next to the package)")
+    cal.add_argument("--ingest", help="fold a hand-labeled findings JSON ({attack_class,confidence,is_real}) into your LOCAL overlay")
     cal.set_defaults(func=cmd_calibrate)
 
     dyn = sub.add_parser("dynamic", help="dynamic probes vs a LIVE target (read-only): cross-tenant BOLA (--config) or unauth reachability (--unauth)")

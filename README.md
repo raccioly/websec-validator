@@ -110,6 +110,13 @@ grows. With thin data a bucket falls back to the per-label aggregate, then to a 
 uncalibrated prior. No ML, no deps — binomial proportion + Wilson interval; the structure upgrades to
 isotonic regression if a large labeled set ever exists.
 
+**It self-improves.** `websec dynamic` is an *oracle*: a write that executes unauthenticated is a
+confirmed real vuln, and a recon-flagged endpoint that turns out auth-enforced is a confirmed false
+positive. Every dynamic run folds those confirmed labels into a **local overlay** (`~/.cache/websec-validator/`,
+gitignored, never shipped) that's merged on top of the public table — so the numbers **personalize to
+your apps** the more you run it, with no extra step and nothing leaving your machine. To label by hand
+instead, feed a `{attack_class, confidence, is_real}` file to `websec calibrate --ingest`.
+
 ## Dynamic phase (v2 — read-only so far)
 
 When you have a *running TEST instance*, `websec dynamic` mints role tokens and runs the probes the

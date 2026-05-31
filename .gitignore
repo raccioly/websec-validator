@@ -3,6 +3,8 @@ websec-out/
 websec-corpus/
 security/
 dynamic-config.json
+# self-improving calibration overlay — your private confirmed labels (normally lives in ~/.cache; never commit)
+calibration-local.json
 
 # private reference material (prior WU pentest — large + contains real secrets/findings)
 base-research/

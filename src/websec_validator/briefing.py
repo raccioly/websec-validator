@@ -183,8 +183,10 @@ estimate — `calibrated.p` (measured real-vuln rate for that attack-class/confi
 labeled vuln corpus), `calibrated.ci` (95% interval), `calibrated.n` (sample size), `calibrated.basis`.
 **A wide CI or `basis: prior (uncalibrated)` means thin data — lean on the debate, not the number.**
 The rates skew optimistic (the corpus is deliberately vulnerable); to be conservative, threshold on the
-CI lower bound. **Verify before you report** — especially MEDIUM/LOW — by running a 4-role debate per
-finding (this is the FP killer):
+CI lower bound. **The calibration self-improves:** every `websec dynamic` run folds its *confirmed*
+results (a write that executed unauthenticated = real; one that's auth-enforced = a recon false positive)
+into a local overlay, so these numbers personalize to your apps the more you run it. **Verify before you
+report** — especially MEDIUM/LOW — by running a 4-role debate per finding (this is the FP killer):
 
 - **Advocate** — argue it's real; cite the evidence chain + the CWE / OWASP-API.
 - **Challenger** — try hard to *refute* it: false positive? intended-public? unreachable? guarded by a

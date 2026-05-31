@@ -21,7 +21,9 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from importlib import resources
+from pathlib import Path
 
 Z95 = 1.959963984540054   # z for a 95% two-sided interval
 MIN_N = 5                 # a cell needs ≥ this many samples to be used (else fall back a tier)
@@ -29,6 +31,12 @@ MIN_N = 5                 # a cell needs ≥ this many samples to be used (else 
 PRIOR = {"HIGH": 0.85, "MEDIUM": 0.5, "LOW": 0.25}
 CAVEAT = ("indicative — calibrated on a deliberately-vulnerable app corpus; "
           "skews optimistic on clean production code")
+
+# Self-improving LOCAL overlay: user-global, gitignored (lives outside any repo), never
+# shipped. It accrues *confirmed* labels from your own dynamic runs (and optional hand-labels)
+# and is merged on top of the shipped public table so the numbers personalize to YOUR apps.
+LOCAL_PATH = Path(os.environ.get("WEBSEC_CALIBRATION_HOME",
+                                 str(Path.home() / ".cache" / "websec-validator"))) / "calibration-local.json"
 
 
 def wilson(k: int, n: int, z: float = Z95) -> tuple:
@@ -103,13 +111,99 @@ def fit(labeled: list, corpus_names: list, researched_classes: set | None = None
     }
 
 
-def load() -> dict | None:
-    """Load the shipped calibration.json (best-effort; absent/unreadable → None)."""
+def load_shipped() -> dict | None:
+    """Load the shipped, public, corpus-based calibration.json (best-effort)."""
     try:
         p = resources.files("websec_validator").joinpath("calibration.json")
         return json.loads(p.read_text())
     except Exception:
         return None
+
+
+def load_local() -> dict | None:
+    """Load the user-global self-improving overlay (raw cell counts; best-effort)."""
+    try:
+        if LOCAL_PATH.is_file():
+            return json.loads(LOCAL_PATH.read_text())
+    except Exception:
+        pass
+    return None
+
+
+def _merge(shipped: dict | None, local: dict | None) -> dict | None:
+    """Combine the shipped table with the local overlay by SUMMING cell counts, then
+    recomputing Wilson. Local samples are confirmed (oracle), so they're not filtered."""
+    if not shipped and not local:
+        return None
+    base = json.loads(json.dumps(shipped)) if shipped else {"meta": {"caveat": CAVEAT},
+                                                            "by_class_label": {}, "by_label": {}}
+    base.setdefault("prior", PRIOR)
+    base.setdefault("meta", {})
+    if local:
+        for grp in ("by_class_label", "by_label"):
+            merged = dict(base.get(grp, {}))
+            for key, lc in (local.get(grp, {}) or {}).items():
+                sc = merged.get(key, {})
+                merged[key] = _cell(sc.get("k", 0) + lc.get("k", 0), sc.get("n", 0) + lc.get("n", 0))
+            base[grp] = merged
+        ls = (local.get("meta", {}) or {}).get("samples", 0)
+        base["meta"]["personalized"] = True
+        base["meta"]["local_samples"] = ls
+        base["meta"]["caveat"] = (base["meta"].get("caveat", CAVEAT)
+                                  + f" · +{ls} confirmed local sample(s) folded in (personalized to your apps)")
+    return base
+
+
+def load() -> dict | None:
+    """Merged calibration the runtime uses: shipped public table + your LOCAL self-improving overlay."""
+    return _merge(load_shipped(), load_local())
+
+
+def record_samples(labeled: list, runs: int = 1) -> dict | None:
+    """Fold confirmed labeled samples into the LOCAL overlay (best-effort; user-global, gitignored).
+
+    `labeled`: list of {attack_class, confidence, is_real}. Returns the updated overlay, or None
+    if there was nothing to record / the write failed (never raises — calibration is non-critical).
+    """
+    if not labeled:
+        return None
+    try:
+        local = load_local() or {"meta": {"source": "local self-improving overlay", "samples": 0, "runs": 0},
+                                 "by_class_label": {}, "by_label": {}}
+        for r in labeled:
+            for grp, key in (("by_class_label", f"{r['attack_class']}|{r['confidence']}"),
+                             ("by_label", r["confidence"])):
+                cell = local.setdefault(grp, {}).setdefault(key, {"n": 0, "k": 0})
+                cell["n"] += 1
+                cell["k"] += 1 if r.get("is_real") else 0
+        local["meta"]["samples"] = local["meta"].get("samples", 0) + len(labeled)
+        local["meta"]["runs"] = local["meta"].get("runs", 0) + runs
+        LOCAL_PATH.parent.mkdir(parents=True, exist_ok=True)
+        LOCAL_PATH.write_text(json.dumps(local, indent=2) + "\n")
+        return local
+    except Exception:
+        return None
+
+
+def samples_from_dynamic(dynamic: dict) -> list:
+    """Turn a dynamic run into confirmed calibration samples — dynamic is an ORACLE.
+
+    Write-verb auth enforcement is unambiguous: a write that EXECUTED unauthenticated (or reached
+    the handler past the auth gate) is a real missing-auth; one that's auth-enforced is a recon
+    FALSE POSITIVE (recon flagged it, the live app actually blocks it). Cross-tenant LEAKs are
+    confirmed BOLA. (Unauth GET reachability is excluded — a public endpoint reached without auth
+    may be intended, so it's not a clean label.)
+    """
+    out = []
+    for r in (((dynamic or {}).get("write_auth_enforcement", {}) or {}).get("results", []) or []):
+        v = r.get("verdict", "")
+        if v == "auth-enforced":
+            out.append({"attack_class": "missing-auth", "confidence": "MEDIUM", "is_real": False})
+        elif v == "EXECUTED-UNAUTH" or v.startswith("no-auth-gate"):
+            out.append({"attack_class": "missing-auth", "confidence": "MEDIUM", "is_real": True})
+    for _lk in (((dynamic or {}).get("cross_tenant_bola", {}) or {}).get("leaks", []) or []):
+        out.append({"attack_class": "bola", "confidence": "MEDIUM", "is_real": True})
+    return out
 
 
 def apply(attack_class: str, confidence: str, table: dict | None) -> dict:
