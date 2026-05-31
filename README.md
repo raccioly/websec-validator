@@ -174,10 +174,12 @@ python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 23 t
 Published to PyPI via **Trusted Publishing** (OIDC — no API token in the repo). To cut a release:
 
 ```bash
-# 1. bump the version in pyproject.toml (e.g. 0.2.0 → 0.2.1)
+# 1. bump the version in pyproject.toml (e.g. 0.2.1 → 0.2.2)
 # 2. tag it and push — the tag must match pyproject's version (CI verifies):
-git tag v0.2.1 && git push origin v0.2.1
-# → .github/workflows/publish.yml builds + publishes to PyPI
+git tag v0.2.2 && git push origin v0.2.2
+# → publish.yml builds, INSTALLS + smoke-tests the wheel (version match,
+#   calibration ships, a real `websec run`), then publishes. A bad build fails
+#   CI instead of reaching PyPI — so you never have to yank after the fact.
 ```
 
 One-time PyPI setup (before the first release): on pypi.org → **Account → Publishing → Add a pending

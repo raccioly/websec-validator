@@ -40,6 +40,21 @@ jobs:
           python -m pip install --upgrade twine
           python -m twine check dist/*
 
+      - name: Smoke-test the built wheel before publishing
+        # Install the actual wheel and prove it works — catches a version that doesn't
+        # match pyproject (the 0.2.0→reported-0.1.0 bug), a missing data file, or a broken
+        # run, so a bad build fails CI instead of reaching PyPI (no yank needed afterward).
+        run: |
+          python -m pip install dist/*.whl
+          VER="$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+          GOT="$(websec --version | awk '{print $NF}')"
+          echo "pyproject=$VER  installed reports=$GOT"
+          [ "$VER" = "$GOT" ] || { echo "::error::built wheel reports $GOT but pyproject is $VER"; exit 1; }
+          python -c "from importlib import resources; assert resources.files('websec_validator').joinpath('calibration.json').is_file(), 'calibration.json missing from wheel'"
+          websec run tests/fixtures/py_app --out "$RUNNER_TEMP/smoke"
+          test -f "$RUNNER_TEMP/smoke/latest/AGENT-BRIEFING.md" || { echo "::error::websec run produced no AGENT-BRIEFING.md"; exit 1; }
+          echo "wheel installs, reports $GOT, ships calibration, and runs ✓"
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist
