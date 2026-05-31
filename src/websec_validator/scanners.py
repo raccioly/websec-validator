@@ -14,6 +14,7 @@ here — that is the dynamic phase, which v1 leaves to the agent + human.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -32,11 +33,19 @@ class Scanner:
     argv: object = None
 
 
+# Never scan the tool's own output, deps, or build artifacts. Scanning `websec-out/`
+# made Semgrep re-flag the AWS keys Gitleaks had just written into the report (and the
+# count compounded across runs). Filesystem scanners get these excluded explicitly.
+EXCLUDE_DIRS = ("websec-out", "node_modules", ".next", "dist", "build", ".git",
+                "security", ".venv", "venv", "__pycache__", ".mypy_cache", "coverage")
+
+
 def _trivy(target: Path, out: Path) -> list:
     # SCA + secrets + IaC misconfig in one pass; pinned by the user's install.
-    return ["trivy", "fs", "--scanners", "vuln,secret,misconfig",
-            "--skip-dirs", "node_modules", "--skip-dirs", "security",
-            "--format", "json", "--output", str(out), str(target)]
+    cmd = ["trivy", "fs", "--scanners", "vuln,secret,misconfig", "--format", "json", "--output", str(out)]
+    for d in EXCLUDE_DIRS:
+        cmd += ["--skip-dirs", d]
+    return cmd + [str(target)]
 
 
 def _gitleaks(target: Path, out: Path) -> list:
@@ -45,8 +54,10 @@ def _gitleaks(target: Path, out: Path) -> list:
 
 
 def _semgrep(target: Path, out: Path) -> list:
-    return ["semgrep", "scan", "--config", "auto", "--json",
-            "--output", str(out), str(target)]
+    cmd = ["semgrep", "scan", "--config", "auto", "--json", "--output", str(out)]
+    for d in EXCLUDE_DIRS:
+        cmd += ["--exclude", d]
+    return cmd + [str(target)]
 
 
 def _checkov(target: Path, out: Path) -> list:
@@ -156,6 +167,24 @@ def _sev(s: str) -> str:
     return s if s in SEV_ORDER else "MEDIUM"
 
 
+def _aws_secret_tier(secret: str, match: str):
+    """Tier an AWS-credential hit by key type / context → (severity, note) or (None, None).
+
+    Not every 'AWS key' is a live, long-lived breach risk: presigned-URL creds and ASIA
+    short-lived STS tokens are usually scoped + expired. Only AKIA long-lived keys are HIGH.
+    """
+    blob = f"{secret or ''} {match or ''}"
+    if re.search(r"X-Amz-(Signature|Credential|Expires|Security-Token)=", blob, re.I):
+        return "LOW", "presigned-URL credential (temporary + scoped, usually already expired)"
+    if re.search(r"\bASIA[0-9A-Z]{16}\b", blob):
+        return "MEDIUM", "temporary STS token (ASIA — short-lived, likely expired)"
+    if re.search(r"\b(?:AROA|AIDA|AGPA|AIPA|ANPA|ANVA)[0-9A-Z]{16}\b", blob):
+        return "LOW", "AWS resource/role identifier (not a usable secret)"
+    if re.search(r"\bAKIA[0-9A-Z]{16}\b", blob):
+        return "HIGH", "long-lived access key (AKIA)"
+    return None, None
+
+
 def _norm_trivy(data: dict) -> list:
     out = []
     for res in (data.get("Results") or []):
@@ -166,10 +195,11 @@ def _norm_trivy(data: dict) -> list:
                         "title": f"{v.get('PkgName')} {v.get('InstalledVersion')} → {v.get('FixedVersion', '(no fix)')}",
                         "fingerprint": f"cve|{v.get('PkgName')}|{v.get('VulnerabilityID')}"})
         for s in (res.get("Secrets") or []):
-            out.append({"tool": "trivy", "category": "secret", "severity": _sev(s.get("Severity") or "HIGH"),
+            sev, note = _aws_secret_tier(s.get("Match", ""), s.get("Code", "") or "")
+            title = f"secret: {s.get('Title') or s.get('RuleID')}" + (f" — {note}" if note else "")
+            out.append({"tool": "trivy", "category": "secret", "severity": sev or _sev(s.get("Severity") or "HIGH"),
                         "key": s.get("RuleID", ""), "file": tgt, "line": s.get("StartLine", 0),
-                        "title": f"secret: {s.get('Title') or s.get('RuleID')}",
-                        "fingerprint": f"secret|{tgt}|{s.get('RuleID')}"})
+                        "title": title, "fingerprint": f"secret|{tgt}|{s.get('RuleID')}"})
         for m in (res.get("Misconfigurations") or []):
             out.append({"tool": "trivy", "category": "iac", "severity": _sev(m.get("Severity")),
                         "key": m.get("ID", ""), "file": tgt, "line": 0, "title": (m.get("Title") or "")[:90],
@@ -182,10 +212,11 @@ def _norm_gitleaks(data) -> list:
     out = []
     for x in rows:
         f, rule = x.get("File", ""), x.get("RuleID", "")
-        out.append({"tool": "gitleaks", "category": "secret", "severity": "HIGH",
+        sev, note = _aws_secret_tier(x.get("Secret", ""), x.get("Match", ""))
+        title = f"secret: {(x.get('Description') or rule)[:80]}" + (f" — {note}" if note else "")
+        out.append({"tool": "gitleaks", "category": "secret", "severity": sev or "HIGH",
                     "key": rule, "file": f, "line": x.get("StartLine", 0),
-                    "title": f"secret: {(x.get('Description') or rule)[:80]}",
-                    "fingerprint": f"secret|{f}|{rule}"})
+                    "title": title, "fingerprint": f"secret|{f}|{rule}"})
     return out
 
 

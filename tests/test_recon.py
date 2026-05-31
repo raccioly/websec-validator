@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from websec_validator import calibration, findings, scanners           # noqa: E402
 from websec_validator.extractors import routes                         # noqa: E402
 from websec_validator.extractors.auth import AuthExtractor             # noqa: E402
+from websec_validator.extractors.authz import AuthzExtractor           # noqa: E402
 from websec_validator.extractors.base import RepoContext               # noqa: E402
 from websec_validator.extractors.stack import StackExtractor           # noqa: E402
 from websec_validator.extractors.schemas import SchemasExtractor       # noqa: E402
@@ -166,6 +167,47 @@ class CalibrationTests(unittest.TestCase):
             self.assertEqual(loc["meta"]["samples"], 2)
         finally:
             calibration.LOCAL_PATH = saved
+
+
+class FieldFeedbackBatch1Tests(unittest.TestCase):
+    """Regressions for the HugoCross live-run false positives (proxy.ts, self-scan, ASIA)."""
+
+    def _next_app(self, proxy_body):
+        d = Path(tempfile.mkdtemp())
+        (d / "src").mkdir()
+        (d / "src" / "proxy.ts").write_text(proxy_body)
+        (d / "src" / "r.ts").write_text("export async function POST(req){ return Response.json({}) }")
+        ctx = RepoContext(d)
+        facts = {"routes": {"endpoints": [
+            {"method": "POST", "path": "/api/x", "code_path": str(d / "src" / "r.ts")}]}}
+        return AuthzExtractor().extract(ctx, facts)
+
+    def test_nextjs_proxy_ts_detected_as_global_auth(self):
+        out = self._next_app(
+            'export default auth((req) => { if (!req.auth) return NextResponse.json({}, {status: 401}); });\n'
+            'export const config = { matcher: ["/((?!_next/static|favicon.ico).*)"] };')
+        self.assertTrue(out["global_auth_middleware"])
+        self.assertEqual(out["next_middleware"]["file"], "src/proxy.ts")
+        self.assertTrue(out["next_middleware"]["is_auth"])
+        self.assertEqual(out["write_endpoints_without_visible_guard"], [])  # the 42-HIGH FP cluster, gone
+
+    def test_non_auth_middleware_does_not_falsely_guard(self):
+        out = self._next_app('export function proxy(req){ return NextResponse.next(); }\n'
+                             'export const config = { matcher: ["/((?!_next).*)"] };')
+        self.assertFalse(out["global_auth_middleware"])             # not auth → not a guard
+        self.assertEqual(out["guard_summary"]["no_visible_guard"], 1)  # so the route IS still flagged
+
+    def test_scanner_argv_excludes_self_output(self):
+        self.assertIn("websec-out", scanners._trivy(Path("/repo"), Path("/o")))
+        self.assertIn("websec-out", scanners._semgrep(Path("/repo"), Path("/o")))
+
+    def test_aws_credential_tiering(self):
+        self.assertEqual(scanners._aws_secret_tier("AKIAIOSFODNN7EXAMPLE", "")[0], "HIGH")
+        self.assertEqual(scanners._aws_secret_tier("ASIAIOSFODNN7EXAMPLE", "")[0], "MEDIUM")
+        self.assertEqual(scanners._aws_secret_tier("", "X-Amz-Signature=z&X-Amz-Credential=ASIA")[0], "LOW")
+        rows = [{"File": "j.json", "RuleID": "aws", "Description": "AWS key",
+                 "Secret": "ASIAEXAMPLE000000000", "Match": "X-Amz-Signature=zzz"}]
+        self.assertEqual(scanners._norm_gitleaks(rows)[0]["severity"], "LOW")  # presigned ASIA ≠ HIGH
 
 
 class RouteUnitTests(unittest.TestCase):

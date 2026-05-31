@@ -34,6 +34,14 @@ GLOBAL_AUTH = re.compile(
     r"app\.use\s*\(\s*[\w.]*(?:authenticate|requireAuth|authMiddleware|verifyToken|"
     r"isAuthenticated|jwtMiddleware|ensureAuth)\w*\s*\)", re.I)
 
+# Does a Next.js middleware/proxy file actually enforce AUTH (vs. i18n/headers only)?
+# `auth((req)=>…)` / `withAuth` / `req.auth` / getToken / getServerSession / redirect-to-login /
+# a 401 / Clerk / Supabase updateSession all signal a global auth gate.
+MW_AUTH = re.compile(
+    r"\bauth\s*\(|withAuth\b|req\.auth\b|getToken\s*\(|getServerSession\s*\(|clerkMiddleware|"
+    r"updateSession\s*\(|NextResponse\.redirect\([^)]*(?:login|signin)|status:\s*401|"
+    r"['\"]Authentication required['\"]", re.I)
+
 PUBLIC_HINT = re.compile(
     r"/(login|logout|register|signup|signin|health|healthz|ping|status|webhooks?|"
     r"public|\.well-known|robots|favicon|sitemap|callback|refresh|csrf|metrics)\b", re.I)
@@ -46,15 +54,20 @@ ROLE = re.compile(
 
 
 def _parse_next_middleware(ctx: RepoContext) -> dict:
-    for cand in ("middleware.ts", "middleware.js", "src/middleware.ts", "src/middleware.js"):
+    # Next 15.5+/16 renamed `middleware.ts` → `proxy.ts` (both filenames are valid; the
+    # framework recognizes either). Missing this made the tool report "no global auth" on
+    # Next 16 apps and flag every handler — the single biggest false-positive cluster.
+    for cand in ("middleware.ts", "middleware.js", "src/middleware.ts", "src/middleware.js",
+                 "proxy.ts", "proxy.js", "src/proxy.ts", "src/proxy.js"):
         txt = ctx.manifest(cand)
         if not txt:
             continue
         matchers = re.findall(r"matcher\s*:\s*\[([^\]]*)\]", txt)
         patterns = re.findall(r"['\"]([^'\"]+)['\"]", matchers[0]) if matchers else []
         roles = [m for grp in ROLE.findall(txt) for m in grp if m]
-        return {"present": True, "file": cand, "matchers": patterns, "role_checks": roles}
-    return {"present": False, "matchers": []}
+        return {"present": True, "file": cand, "matchers": patterns,
+                "is_auth": bool(MW_AUTH.search(txt)), "role_checks": roles}
+    return {"present": False, "matchers": [], "is_auth": False}
 
 
 def _matcher_covers(path: str, matchers: list) -> bool:
@@ -85,8 +98,10 @@ class AuthzExtractor(Extractor):
     def extract(self, ctx: RepoContext, facts: dict) -> dict:
         endpoints = (facts.get("routes") or {}).get("endpoints", [])
         mw = _parse_next_middleware(ctx)
+        mw_auth = mw.get("is_auth", False)
 
-        global_auth = any(GLOBAL_AUTH.search(t) for _p, _r, t in ctx.iter_code())
+        # global auth = an Express path-less auth middleware OR a Next auth middleware/proxy
+        global_auth = mw_auth or any(GLOBAL_AUTH.search(t) for _p, _r, t in ctx.iter_code())
         roles: set = set(mw.get("role_checks", []))
         protected = no_guard = unknown = 0
         no_guard_writes, egs = [], []
@@ -95,7 +110,10 @@ class AuthzExtractor(Extractor):
             cp = e.get("code_path", "")
             text = ctx.text(Path(cp)) if cp else ""
             _collect_roles(text, roles)
-            guarded = bool(text and GUARD.search(text)) or _matcher_covers(e.get("path", ""), mw.get("matchers", []))
+            # a matcher only counts as a guard when the middleware actually does auth — a
+            # non-auth middleware.ts (i18n/headers) must NOT mark routes protected.
+            guarded = bool(text and GUARD.search(text)) or \
+                (mw_auth and _matcher_covers(e.get("path", ""), mw.get("matchers", [])))
             relcp = ctx.rel(Path(cp)) if cp else ""
             egs.append({"method": e.get("method"), "path": e.get("path"), "code_path": relcp,
                         "guarded": bool(guarded), "analyzed": bool(text),
@@ -110,10 +128,12 @@ class AuthzExtractor(Extractor):
                     no_guard_writes.append(f"{e['method']} {e['path']}  ({relcp or '?'})")
 
         if global_auth:
-            note = ("A GLOBAL auth middleware (`app.use(<auth>)`) was detected — most routes are likely "
-                    "protected by default. The list below is write endpoints with NO guard visible in their "
-                    "own handler file; they MAY be covered globally. Verify each is either covered or an "
-                    "intentional public exemption — don't assume they're vulnerable.")
+            where = f"`{mw['file']}` (matcher {mw.get('matchers') or '—'})" if mw_auth else "`app.use(<auth>)`"
+            note = (f"A GLOBAL auth middleware ({where}) was detected — most routes are protected by default. "
+                    "Endpoints its matcher covers are reported as guarded (defense-in-depth handled centrally). "
+                    "Any list below is write endpoints with NO guard visible in their own handler file AND not "
+                    "covered by the matcher; verify each is either covered or an intentional public exemption — "
+                    "don't assume they're vulnerable.")
         else:
             note = ("No global auth middleware detected. Write endpoints with no visible guard are "
                     "high-signal missing-authz leads — verify each.")
