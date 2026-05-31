@@ -37,9 +37,10 @@ brew install noir         # OWASP Noir — the route engine (50+ frameworks); re
 websec --version
 ```
 
-Zero Python runtime dependencies. It shells out to scanners (Trivy, Gitleaks, Semgrep/OpenGrep,
-Checkov, Prowler) and Noir **when present**, reports what's missing, and never hard-fails if a tool
-is absent.
+Requires **Python 3.11+** (on stock macOS, `python3` is often 3.9 — use `pipx`, which picks a newer
+interpreter, or install via Homebrew/pyenv). Zero Python runtime dependencies: it shells out to
+scanners (Trivy, Gitleaks, Semgrep/OpenGrep, Checkov, Prowler) and Noir **when present**, reports
+what's missing, and never hard-fails if a tool is absent.
 
 ### Or run via Docker (everything bundled, zero install)
 
