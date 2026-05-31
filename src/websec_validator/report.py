@@ -86,6 +86,8 @@ _Full ledger with complete evidence chains + remediation in `findings-ledger.jso
 {_section("File-upload candidates", tgt.get("upload_candidates"))}
 **Code-level sinks (user-input-gated):** {sinks}
 
+**Mass-assignment targets (privileged model fields):** {", ".join(facts.get("schemas", {}).get("sensitive_fields", [])) or "none detected"}  ·  ORMs: {", ".join(facts.get("schemas", {}).get("orms", [])) or "?"}
+
 ## 4. Config / CI-CD / client-side
 
 **IaC/CI:** {len((facts.get("iac_ci") or {}).get("findings", []))} finding(s) · **GraphQL:** {(facts.get("graphql") or {}).get("present", False)} · **client-side secret exposure:** {len((facts.get("client_exposure") or {}).get("public_secret_leaks", []) + (facts.get("client_exposure") or {}).get("server_secret_in_client_component", []))}

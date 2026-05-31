@@ -20,6 +20,7 @@ from websec_validator.extractors import routes                         # noqa: E
 from websec_validator.extractors.auth import AuthExtractor             # noqa: E402
 from websec_validator.extractors.base import RepoContext               # noqa: E402
 from websec_validator.extractors.stack import StackExtractor           # noqa: E402
+from websec_validator.extractors.schemas import SchemasExtractor       # noqa: E402
 from websec_validator.extractors.surface import SINKS, SurfaceExtractor  # noqa: E402
 from websec_validator.extractors.tenant import TenantExtractor         # noqa: E402
 
@@ -65,6 +66,32 @@ class SurfaceTests(unittest.TestCase):
         rx = SINKS["command-injection"][2]
         self.assertTrue(rx.search("child_process.exec(req.body.cmd)"))
         self.assertFalse(rx.search("child_process.exec('ls -la')"))
+
+
+class SchemasTests(unittest.TestCase):
+    def _build(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "prisma").mkdir()
+        (d / "prisma" / "schema.prisma").write_text(
+            "model User {\n  id String @id\n  email String\n  role String\n  isAdmin Boolean\n  tenantId String\n}\n")
+        (d / "models").mkdir()
+        (d / "models" / "account.py").write_text(
+            "from pydantic import BaseModel\nclass AccountUpdate(BaseModel):\n    name: str\n    balance: float\n")
+        return d
+
+    def test_detects_orms_entities_and_sensitive_fields(self):
+        out = SchemasExtractor().extract(RepoContext(self._build()), {})
+        self.assertIn("prisma", out["orms"])
+        self.assertIn("pydantic", out["orms"])
+        self.assertIn("User", [e["name"] for e in out["entities"]])
+        # privileged fields a mass-assignment probe should target
+        for f in ("role", "isAdmin", "tenantId", "balance"):
+            self.assertIn(f, out["sensitive_fields"])
+
+    def test_no_false_positives_on_modelless_fixture(self):
+        out = SchemasExtractor().extract(ctx("node_app"), {})
+        self.assertEqual(out["sensitive_fields"], [])
+        self.assertEqual(out["orms"], [])
 
 
 class RouteUnitTests(unittest.TestCase):

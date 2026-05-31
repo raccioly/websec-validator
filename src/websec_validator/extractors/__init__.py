@@ -17,6 +17,7 @@ from .graphql import GraphQLExtractor
 from .iac_ci import IacCiExtractor
 from .integrations import IntegrationsExtractor
 from .routes import RoutesExtractor
+from .schemas import SchemasExtractor
 from .stack import StackExtractor
 from .surface import SurfaceExtractor
 from .tenant import TenantExtractor
@@ -30,6 +31,7 @@ REGISTRY: list[Extractor] = [
     AuthzExtractor(),
     TenantExtractor(),
     SurfaceExtractor(),
+    SchemasExtractor(),
     IacCiExtractor(),
     ClientExposureExtractor(),
     GraphQLExtractor(),

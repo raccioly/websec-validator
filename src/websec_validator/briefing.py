@@ -136,6 +136,8 @@ credentials** — ask the human, never fabricate, never hit production.
 {_section("Auth endpoints", tgt.get("auth_endpoints"))}
 **Code-level sinks** (cross-reference with the above): {sink_summary}
 
+**Mass-assignment targets** — this app's privileged model fields (try injecting these into create/update payloads): {", ".join(facts.get("schemas", {}).get("sensitive_fields", [])) or "_none detected_"}  ·  ORMs: {", ".join(facts.get("schemas", {}).get("orms", [])) or "?"}
+
 ## 3b. ★ Access control (who can reach what — your #1 test)
 
 Guard coverage (file-level heuristic): {gs.get("with_visible_guard",0)} with visible guard · {gs.get("no_visible_guard",0)} none visible · {gs.get("unknown",0)} unknown.  Global auth middleware: **{global_auth}**.  Roles in code: {roles_str}

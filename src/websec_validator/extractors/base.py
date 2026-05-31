@@ -19,7 +19,7 @@ SKIP_DIRS = {".git", "node_modules", "dist", "build", ".next", ".nuxt", "venv",
              # agent tooling + editor dirs + worktree copies — not the target app
              ".wolf", ".claude", ".worktrees", ".idea", ".vscode", ".agent", ".agents"}
 CODE_EXT = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".py", ".go", ".rb",
-            ".java", ".php"}
+            ".java", ".php", ".prisma"}
 MAX_FILES = 12000
 MAX_BYTES = 2_000_000
 
