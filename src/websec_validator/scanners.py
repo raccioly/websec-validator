@@ -40,27 +40,27 @@ EXCLUDE_DIRS = ("websec-out", "node_modules", ".next", "dist", "build", ".git",
                 "security", ".venv", "venv", "__pycache__", ".mypy_cache", "coverage")
 
 
-def _trivy(target: Path, out: Path) -> list:
+def _trivy(target: Path, out: Path, excludes=()) -> list:
     # SCA + secrets + IaC misconfig in one pass; pinned by the user's install.
     cmd = ["trivy", "fs", "--scanners", "vuln,secret,misconfig", "--format", "json", "--output", str(out)]
-    for d in EXCLUDE_DIRS:
+    for d in list(EXCLUDE_DIRS) + list(excludes):
         cmd += ["--skip-dirs", d]
     return cmd + [str(target)]
 
 
-def _gitleaks(target: Path, out: Path) -> list:
+def _gitleaks(target: Path, out: Path, excludes=()) -> list:
     return ["gitleaks", "detect", "--source", str(target), "--no-banner",
             "--report-format", "json", "--report-path", str(out)]
 
 
-def _semgrep(target: Path, out: Path) -> list:
+def _semgrep(target: Path, out: Path, excludes=()) -> list:
     cmd = ["semgrep", "scan", "--config", "auto", "--json", "--output", str(out)]
-    for d in EXCLUDE_DIRS:
+    for d in list(EXCLUDE_DIRS) + list(excludes):
         cmd += ["--exclude", d]
     return cmd + [str(target)]
 
 
-def _checkov(target: Path, out: Path) -> list:
+def _checkov(target: Path, out: Path, excludes=()) -> list:
     return ["checkov", "-d", str(target), "--compact", "-o", "json",
             "--output-file-path", str(out.parent)]
 
@@ -103,26 +103,31 @@ def detect(stack_languages: list | None = None) -> dict:
 
 
 def run_available(target: Path, outdir: Path, stack_languages: list | None = None,
-                  timeout: int = 600) -> list:
+                  timeout: int = 600, excludes: list | None = None, only: list | None = None) -> list:
     """Execute every available, runnable static scanner. Returns per-scanner status.
 
+    `excludes`: extra paths/dirs to skip (--exclude). `only`: run just these scanner keys.
     Raw JSON lands in outdir/scanners/<key>.json. We capture status only here;
     cross-tool normalization + de-duplication is a separate (next) step.
     """
     langs = set(stack_languages or [])
+    excludes = excludes or []
+    only = set(only) if only else None
     scan_dir = outdir / "scanners"
     scan_dir.mkdir(parents=True, exist_ok=True)
     results = []
     for s in REGISTRY:
         if s.argv is None:
             continue  # detect-only for now
+        if only is not None and s.key not in only:
+            continue
         if s.languages and not (set(s.languages) & langs):
             continue
         if not shutil.which(s.binary):
             continue
         out_file = scan_dir / f"{s.key}.json"
         try:
-            proc = subprocess.run(s.argv(target, out_file), capture_output=True,
+            proc = subprocess.run(s.argv(target, out_file, excludes), capture_output=True,
                                   text=True, timeout=timeout)
             results.append({"key": s.key, "name": s.name, "category": s.category,
                             "exit_code": proc.returncode, "output": str(out_file),

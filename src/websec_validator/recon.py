@@ -14,8 +14,8 @@ from .extractors.base import RepoContext
 from .extractors.stack import StackExtractor
 
 
-def build_facts(root: Path, version: str) -> dict:
-    return extractors.run_all(root, version)
+def build_facts(root: Path, version: str, excludes: list | None = None) -> dict:
+    return extractors.run_all(root, version, excludes)
 
 
 def write_facts(facts: dict, out: Path) -> Path:

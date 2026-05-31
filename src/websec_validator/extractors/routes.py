@@ -67,16 +67,17 @@ def _is_noise(path: str) -> bool:
     return bool(ASSET_GLOB.search(path))   # static-asset glob route (/*.png)
 
 
-def _noir_scan(root: Path) -> list | None:
+def _noir_scan(root: Path, extra_excludes: list | None = None) -> list | None:
     """Run Noir → list of endpoint dicts, or None if Noir unavailable/failed."""
     if not shutil.which("noir"):
         return None
+    excl = EXCLUDE_GLOBS + ("," + ",".join(extra_excludes) if extra_excludes else "")
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
         out = Path(tf.name)
     try:
         proc = subprocess.run(
             ["noir", "scan", str(root), "-f", "json", "-o", str(out),
-             "--exclude-path", EXCLUDE_GLOBS, "--no-log", "--no-color"],
+             "--exclude-path", excl, "--no-log", "--no-color"],
             capture_output=True, text=True, timeout=300)
         if not out.exists():
             return None
@@ -210,13 +211,17 @@ class RoutesExtractor(Extractor):
     category = "surface"
 
     def extract(self, ctx: RepoContext, facts: dict) -> dict:
-        eps = _noir_scan(ctx.root)
+        eps = _noir_scan(ctx.root, getattr(ctx, "excludes", None))
         if eps is not None:
             routes, spec_derived = _normalize_noir(eps)
             engine = "noir"
         else:
             routes, spec_derived = _fallback(ctx), []
             engine = "regex-fallback (install OWASP Noir for full coverage: brew install noir)"
+        # honor user --exclude against route code_paths too (Noir's own --exclude-path glob is
+        # unreliable for bare dir names; this guarantees `--exclude <path>` drops those routes).
+        if getattr(ctx, "excludes", None):
+            routes = [r for r in routes if not ctx._excluded(r.get("code_path", ""))]
         by_method: dict = {}
         by_tech: dict = {}
         for r in routes:

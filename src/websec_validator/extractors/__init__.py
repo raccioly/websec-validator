@@ -39,9 +39,9 @@ REGISTRY: list[Extractor] = [
 ]
 
 
-def run_all(root: Path, version: str) -> dict:
+def run_all(root: Path, version: str, excludes: list | None = None) -> dict:
     """Walk the repo once, run every extractor, return the merged FACTS dict."""
-    ctx = RepoContext(root)
+    ctx = RepoContext(root, excludes)
     facts: dict = {
         "tool": "websec-validator",
         "version": version,

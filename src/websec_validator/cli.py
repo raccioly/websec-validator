@@ -87,7 +87,7 @@ def cmd_run(args) -> int:
     print(f"websec-validator v{__version__}  ·  target: {target}  ·  run {ts}\n")
 
     # 1. recon
-    facts = recon.build_facts(target, __version__)
+    facts = recon.build_facts(target, __version__, args.exclude)
     recon.write_facts(facts, out / "FACTS.json")
     langs = facts["stack"]["languages"]
     _print_facts_summary(facts)
@@ -98,7 +98,8 @@ def cmd_run(args) -> int:
     unified = None
     if args.scan:
         print("\n  running available static scanners (read-only)…")
-        scan_results = scanners.run_available(target, out, langs)
+        only = args.scanners.split(",") if args.scanners else None
+        scan_results = scanners.run_available(target, out, langs, excludes=args.exclude, only=only)
         for r in scan_results:
             tag = r.get("findings", r.get("status", "?"))
             print(f"    {r['name']}: {tag}")
@@ -342,6 +343,10 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("target")
     r.add_argument("--scan", action="store_true", help="also execute available static scanners")
     r.add_argument("--out", help="output dir (default: ./websec-out)")
+    r.add_argument("--exclude", action="append", metavar="PATH",
+                   help="exclude a path/glob from recon + scanners (repeatable; e.g. --exclude 'docs/**')")
+    r.add_argument("--scanners", metavar="A,B",
+                   help="comma-separated subset of scanners to run with --scan (e.g. gitleaks,semgrep)")
     r.set_defaults(func=cmd_run)
 
     # recon/proof/calibrate are hidden from the main --help (argparse.SUPPRESS): recon is a

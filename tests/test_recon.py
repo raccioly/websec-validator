@@ -267,6 +267,22 @@ class ProbeStagingTests(unittest.TestCase):
         self.assertNotIn("security/pentest", blob)
 
 
+class ExcludeAndScannerSelectTests(unittest.TestCase):  # F4
+    def test_repocontext_honors_excludes(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "src").mkdir(); (d / "keep").mkdir()
+        (d / "src" / "a.py").write_text("x=1")
+        (d / "keep" / "b.py").write_text("y=1")
+        ctx = RepoContext(d, excludes=["src"])
+        rels = {ctx.rel(p) for p in ctx.code_files}
+        self.assertIn("keep/b.py", rels)
+        self.assertNotIn("src/a.py", rels)        # --exclude src dropped it
+
+    def test_scanner_argv_includes_user_excludes(self):
+        self.assertIn("docs", scanners._trivy(Path("/r"), Path("/o"), excludes=["docs"]))
+        self.assertIn("docs", scanners._semgrep(Path("/r"), Path("/o"), excludes=["docs"]))
+
+
 class RouteUnitTests(unittest.TestCase):
     def test_clean_path(self):
         self.assertEqual(routes._clean_path("/api/users/:id"), "/api/users/{id}")

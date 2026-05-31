@@ -9,6 +9,7 @@ still say something useful.
 
 from __future__ import annotations
 
+import fnmatch
 from pathlib import Path
 
 SKIP_DIRS = {".git", "node_modules", "dist", "build", ".next", ".nuxt", "venv",
@@ -27,12 +28,16 @@ MAX_BYTES = 2_000_000
 class RepoContext:
     """Walk the tree once; cache file text; serve cheap queries to every extractor."""
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, excludes: list | None = None):
         self.root = root
+        self.excludes = [e for e in (excludes or []) if e]   # user --exclude paths/globs
         self._text: dict[Path, str] = {}
         self.code_files: list[Path] = []
         self.stack: dict = {}          # filled by StackExtractor, read by the rest
         self._walk()
+
+    def _excluded(self, rel: str) -> bool:
+        return any(ex in rel or fnmatch.fnmatch(rel, ex) for ex in self.excludes)
 
     def _walk(self) -> None:
         n = 0
@@ -43,6 +48,8 @@ class RepoContext:
             # repo located under e.g. ~/.cache or any dir named like a skip-dir would
             # have its whole tree skipped.
             if p.is_dir() or any(part in SKIP_DIRS for part in p.relative_to(self.root).parts):
+                continue
+            if self.excludes and self._excluded(str(p.relative_to(self.root))):
                 continue
             if p.suffix.lower() in CODE_EXT:
                 self.code_files.append(p)
