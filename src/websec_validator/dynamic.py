@@ -124,6 +124,65 @@ def cross_tenant_bola(cfg: dict, facts: dict) -> dict:
     }
 
 
+# GET endpoints that are NOT safe to hit even read-only — they trigger real work
+# (cron ticks, scraping, content generation, seeding, sending, uploads).
+SIDE_EFFECTING = re.compile(
+    r"/cron|/seed|generate|regenerate|/trigger|/sync|/send|/run\b|social-image|"
+    r"sponsor-post|upload|/refresh|/rebuild|/process|/dispatch|/import|/export|/scrape(?![\w-])", re.I)
+
+
+def unauth_reachability(target: str, facts: dict, max_endpoints: int = 50) -> dict:
+    """STRICT read-only: GET each genuine data-read endpoint with NO auth, to see
+    which are reachable unauthenticated. Skips side-effecting GETs and any path
+    with an unfilled {param}. Records status + byte size only (never the body)."""
+    eps = []
+    for e in (facts.get("routes") or {}).get("endpoints", []):
+        p = e.get("path", "")
+        if e.get("method") != "GET" or "{" in p or SIDE_EFFECTING.search(p):
+            continue
+        eps.append(p)
+    eps = sorted(set(eps))[:max_endpoints]
+
+    results, skipped = [], [e.get("path") for e in (facts.get("routes") or {}).get("endpoints", [])
+                            if e.get("method") == "GET" and SIDE_EFFECTING.search(e.get("path", ""))]
+    for path in eps:
+        code, body = _request("GET", target + path, token=None, timeout=15)
+        n = len(body) if isinstance(body, str) else 0
+        if code in (401, 403):
+            verdict = "protected"
+        elif code in (301, 302, 307, 308):
+            verdict = "redirect (likely to login)"
+        elif code in (200, 206) and n > 2:
+            verdict = "OPEN-no-auth"
+        elif code in (200, 206):
+            verdict = "open-empty"
+        elif code == 404:
+            verdict = "404"
+        else:
+            verdict = f"http-{code}"
+        results.append({"path": path, "status": code, "bytes": n, "verdict": verdict})
+
+    openish = [r for r in results if r["verdict"] == "OPEN-no-auth"]
+    return {
+        "target": target,
+        "mode": "STRICT read-only · unauthenticated · GET-only · side-effecting paths skipped",
+        "tested": len(results),
+        "skipped_side_effecting": sorted(set(skipped)),
+        "open_no_auth": openish,
+        "results": results,
+        "summary": f"{len(openish)}/{len(results)} data-read GET endpoints reachable WITHOUT auth"
+                   + (" — review whether these should be public" if openish else " — all gated"),
+    }
+
+
+def run_unauth(target: str, facts_path: Path, outdir: Path) -> dict:
+    facts = json.loads(Path(facts_path).read_text())
+    res = {"unauth_reachability": unauth_reachability(target, facts)}
+    outdir.mkdir(parents=True, exist_ok=True)
+    (outdir / "dynamic-unauth-findings.json").write_text(json.dumps(res, indent=2))
+    return res
+
+
 def run_dynamic(config_path: Path, facts_path: Path, outdir: Path) -> dict:
     cfg = json.loads(Path(config_path).read_text())
     facts = json.loads(Path(facts_path).read_text())

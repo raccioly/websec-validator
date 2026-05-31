@@ -108,14 +108,31 @@ def cmd_run(args) -> int:
 
 
 def cmd_dynamic(args) -> int:
-    cfg = Path(args.config).expanduser().resolve()
-    if not cfg.is_file():
-        sys.exit(f"error: config not found: {cfg}")
     out = Path(args.out).expanduser().resolve() if args.out else Path.cwd() / "websec-out"
     out.mkdir(parents=True, exist_ok=True)
     facts = Path(args.facts).expanduser().resolve() if args.facts else out / "FACTS.json"
     if not facts.is_file():
         sys.exit(f"error: FACTS.json not found at {facts} — run `websec run <repo>` first (or pass --facts)")
+
+    if args.unauth:
+        if not args.target:
+            sys.exit("error: --unauth requires --target")
+        print("websec dynamic — STRICT read-only · UNAUTHENTICATED · GET-only (side-effecting paths skipped)\n")
+        u = dynamic.run_unauth(args.target, facts, out)["unauth_reachability"]
+        print(f"  target: {u['target']}")
+        print(f"  skipped {len(u['skipped_side_effecting'])} side-effecting GET(s) (cron/generate/etc.)")
+        print(f"  → {u['summary']}\n")
+        for r in u["results"]:
+            mark = "🔓" if r["verdict"] == "OPEN-no-auth" else (" ·" if r["verdict"] == "protected" else "  ")
+            print(f"    {mark} {str(r['status']):>4}  {r['verdict']:26} {r['path']}  ({r['bytes']}b)")
+        print(f"\n  details: {out / 'dynamic-unauth-findings.json'}")
+        return 0
+
+    if not args.config:
+        sys.exit("error: provide --config (authenticated cross-tenant) OR --unauth --target (read-only)")
+    cfg = Path(args.config).expanduser().resolve()
+    if not cfg.is_file():
+        sys.exit(f"error: config not found: {cfg}")
     print("websec dynamic — authenticated, READ-ONLY v1 (cross-tenant BOLA on GET endpoints)\n")
     res = dynamic.run_dynamic(cfg, facts, out)
     ct = res.get("cross_tenant_bola", {})
@@ -204,8 +221,10 @@ def build_parser() -> argparse.ArgumentParser:
     pf.add_argument("--workdir", help="where to clone corpus apps (default: ~/.cache/websec-corpus)")
     pf.set_defaults(func=cmd_proof)
 
-    dyn = sub.add_parser("dynamic", help="authenticated dynamic probes vs a LIVE target (read-only v1: cross-tenant BOLA)")
-    dyn.add_argument("--config", required=True, help="dynamic config JSON (target + role creds)")
+    dyn = sub.add_parser("dynamic", help="dynamic probes vs a LIVE target (read-only): cross-tenant BOLA (--config) or unauth reachability (--unauth)")
+    dyn.add_argument("--config", help="dynamic config JSON (target + role creds) for authenticated cross-tenant BOLA")
+    dyn.add_argument("--unauth", action="store_true", help="STRICT read-only: GET each data-read endpoint with NO auth (needs --target)")
+    dyn.add_argument("--target", help="target base URL (for --unauth)")
     dyn.add_argument("--facts", help="FACTS.json from a prior run (default: ./websec-out/FACTS.json)")
     dyn.add_argument("--out", help="output dir (default: ./websec-out)")
     dyn.set_defaults(func=cmd_dynamic)
