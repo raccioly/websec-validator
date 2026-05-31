@@ -15,7 +15,8 @@ if [ -z "${BASE:-}" ] || [ "${BASE#FILL}" != "$BASE" ]; then
   echo "Set TARGET=http://host:port (or fill target_base_url in probe-context.json)"; exit 2
 fi
 
-mapfile -t EPS < <(python3 -c "import json;[print(e) for e in json.load(open('$ctx'))['endpoints']['writes']]" 2>/dev/null)
+EPS=()   # (portable; macOS bash 3.2 lacks `mapfile`)
+while IFS= read -r line; do [ -n "$line" ] && EPS+=("$line"); done < <(python3 -c "import json;[print(e) for e in json.load(open('$ctx'))['endpoints']['writes']]" 2>/dev/null)
 if [ "${#EPS[@]}" -eq 0 ]; then
   echo "No write endpoints in probe-context.json — add 'METHOD /path' lines under endpoints.writes."; exit 2
 fi

@@ -18,7 +18,8 @@ if [ -z "${BASE:-}" ] || [ "${BASE#FILL}" != "$BASE" ]; then echo "Set TARGET=ht
 : "${GROUP_A:?set GROUP_A=<tenant/group id of account A>}"
 : "${GROUP_B:?set GROUP_B=<tenant/group id of account B>}"
 
-mapfile -t PATHS < <(python3 -c "
+PATHS=()   # (portable; macOS bash 3.2 lacks `mapfile`)
+while IFS= read -r line; do [ -n "$line" ] && PATHS+=("$line"); done < <(python3 -c "
 import json
 c = json.load(open('$ctx'))['endpoints']
 cand = c.get('idor_candidates') or [w.split(' ',1)[1] for w in c.get('writes',[]) if ' ' in w]
