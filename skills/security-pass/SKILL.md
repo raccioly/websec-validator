@@ -9,14 +9,31 @@ You are running a security pass on a codebase. A CLI does the deterministic reco
 reasoning, run the probes, and propose fixes — with the human supplying credentials and reviewing
 every diff.
 
-## Step 0 — make sure the `websec` CLI is installed
+## Step 0 — install the engine and ensure it's the latest (before continuing)
+
+The repo tracks latest-commit, so refresh the `websec` engine before running. Best-effort — skip
+silently if offline. This updates the engine ONLY when GitHub's `main` is ahead of what's installed
+(a marker file records the SHA so it won't reinstall needlessly):
 
 ```bash
-websec --version || pipx install git+https://github.com/raccioly/websec-validator
+# install if missing
+websec --version >/dev/null 2>&1 || pipx install git+https://github.com/raccioly/websec-validator
+# update the engine if GitHub is ahead of the installed commit
+latest=$(git ls-remote https://github.com/raccioly/websec-validator.git HEAD 2>/dev/null | cut -f1)
+marker="$HOME/.cache/websec-validator/installed-commit"
+if [ -n "$latest" ] && [ "$latest" != "$(cat "$marker" 2>/dev/null)" ]; then
+  pipx install --force git+https://github.com/raccioly/websec-validator \
+    && mkdir -p "$(dirname "$marker")" && printf '%s' "$latest" > "$marker"
+fi
 ```
 
-If `pipx` isn't available, `pip install git+https://github.com/raccioly/websec-validator` works too.
-Noir (the route engine) is optional — `brew install noir` for best coverage; there's a regex fallback.
+(If installed with plain `pip` rather than `pipx`, use `pip install --upgrade --force-reinstall git+https://github.com/raccioly/websec-validator`.)
+If you updated the engine, say so before continuing. Noir (the route engine) is optional —
+`brew install noir` for best coverage; there's a regex fallback.
+
+> **This skill's own instructions** update separately, via `/plugin marketplace update websec-plugins`
+> then `/plugin install websec-validator@websec-plugins`. Claude **cannot** self-update the plugin
+> mid-session — so if these steps ever look stale, tell the human to run those two commands.
 
 ## Step 1 — generate the briefing
 
