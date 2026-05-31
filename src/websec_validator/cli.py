@@ -330,7 +330,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="websec",
         description="Local-first security recon that briefs your AI coding agent.")
     p.add_argument("--version", action="version", version=f"websec-validator {__version__}")
-    sub = p.add_subparsers(dest="cmd", required=True)
+    # metavar lists only the user-facing commands; recon/proof/calibrate still work but are
+    # omitted (they get no `help=`, so argparse leaves them out of the listing entirely).
+    sub = p.add_subparsers(dest="cmd", required=True, metavar="{run,doctor,dynamic}")
 
     r = sub.add_parser("run", help="full pipeline → briefing + tailored probes")
     r.add_argument("target")
@@ -338,7 +340,10 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--out", help="output dir (default: ./websec-out)")
     r.set_defaults(func=cmd_run)
 
-    rc = sub.add_parser("recon", help="recon only → FACTS.json")
+    # recon/proof/calibrate are hidden from the main --help (argparse.SUPPRESS): recon is a
+    # subset of `run`, and proof/calibrate are for developing the tool itself. They still work
+    # if invoked explicitly — the user-facing surface is just `run` (+ the advanced `dynamic`).
+    rc = sub.add_parser("recon")
     rc.add_argument("target")
     rc.add_argument("--out", help="output dir (default: ./websec-out)")
     rc.set_defaults(func=cmd_recon)
@@ -347,12 +352,12 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("target", nargs="?", help="optional repo to scope scanner relevance")
     d.set_defaults(func=cmd_doctor)
 
-    pf = sub.add_parser("proof", help="score recon coverage against a known-vuln-app corpus")
+    pf = sub.add_parser("proof")
     pf.add_argument("--corpus", help="corpus JSON (default: bundled)")
     pf.add_argument("--workdir", help="where to clone corpus apps (default: ~/.cache/websec-corpus)")
     pf.set_defaults(func=cmd_proof)
 
-    cal = sub.add_parser("calibrate", help="fit confidence calibration against the labeled vuln corpus → calibration.json")
+    cal = sub.add_parser("calibrate")
     cal.add_argument("--corpus", help="corpus JSON with `truth` blocks (default: bundled)")
     cal.add_argument("--workdir", help="where corpus apps are cloned (default: ~/.cache/websec-corpus)")
     cal.add_argument("--out", help="where to write calibration.json (default: bundled, next to the package)")
@@ -370,8 +375,19 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+_COMMANDS = {"run", "recon", "doctor", "proof", "dynamic", "calibrate"}
+
+
 def main(argv=None) -> int:
-    args = build_parser().parse_args(argv)
+    argv = list(argv if argv is not None else sys.argv[1:])
+    parser = build_parser()
+    if not argv:                      # bare `websec` → show help, don't error
+        parser.print_help()
+        return 0
+    # bare `websec <path>` (no subcommand) ⇒ treat as `websec run <path>` — point-and-go
+    if argv[0] not in _COMMANDS and not argv[0].startswith("-"):
+        argv = ["run"] + argv
+    args = parser.parse_args(argv)
     return args.func(args)
 
 

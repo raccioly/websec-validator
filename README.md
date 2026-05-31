@@ -11,10 +11,28 @@ turns a repo into a precise, fact-grounded security brief an AI agent (with a hu
 can act on — an auto-filled, repo-aware version of a senior pentester's "here's what to test and
 how" handoff. Full landscape + why this niche is real: [`MARKET-ANALYSIS-AND-VERDICT.md`](MARKET-ANALYSIS-AND-VERDICT.md).
 
+## Quickstart — just point it at your repo
+
+**Simplest: tell your AI agent.** In Claude Code (or any coding agent), open your project and say:
+
+> *"Install and run the security tool at github.com/raccioly/websec-validator on this repo, then follow its briefing."*
+
+It installs, runs, and walks the findings with you. There's nothing to host and no website — it's
+local. The four ways to get there, all ending in the same `AGENT-BRIEFING.md` your agent acts on:
+
+| Path | One-time setup | Then |
+|---|---|---|
+| **Tell your agent** (simplest) | — | say the line above |
+| **CLI** (a terminal) | `pipx install git+https://github.com/raccioly/websec-validator` | `websec run /path/to/your/app` |
+| **Claude Code plugin** (slash) | `/plugin marketplace add raccioly/websec-validator`  →  `/plugin install websec-validator@websec-plugins` | invoke the **security-pass** skill, or just ask |
+| **Docker** (no install) | `docker build -t websec-validator .` | `docker run --rm -v "$PWD:/scan" websec-validator run /scan --out /scan/websec-out` |
+
+➡️ **Want the reasoning behind every check?** Read **[docs/METHODOLOGY.md](docs/METHODOLOGY.md)** — what each test does and why.
+
 ## Install
 
 ```bash
-pipx install .            # or: pip install -e .
+pipx install git+https://github.com/raccioly/websec-validator   # or, from a clone: pipx install .
 brew install noir         # OWASP Noir — the route engine (50+ frameworks); regex fallback if absent
 websec --version
 ```
@@ -38,16 +56,17 @@ artifacts land in `/scan/websec-out`.
 ## Use
 
 ```bash
-websec doctor ./my-app        # which scanners are installed?
-websec run ./my-app           # recon + de-dup scanners + stage tailored probes + emit the briefing
-websec run ./my-app --scan    # …and actually execute the available static scanners
-websec proof                  # score recon coverage against a known-vuln-app corpus (CI gate)
-websec calibrate              # fit confidence calibration vs the labeled corpus → calibration.json
+websec run ./my-app           # ← the one command: recon + stage tailored probes + emit the briefing
+websec ./my-app               # same thing — a bare path defaults to `run`
+websec run ./my-app --scan    # …and also execute the available static scanners
+websec doctor ./my-app        # (optional) which scanners are installed?
 ```
 
 Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and follow it."**
 
-## What it extracts (10 deterministic extractors, no LLM)
+> That's the whole user surface: **`run`** (plus the optional, advanced **`dynamic`** live-probing step below). `recon`/`proof`/`calibrate` exist for developing the tool itself and are hidden from `--help` — you never need them.
+
+## What it extracts (11 deterministic extractors, no LLM)
 
 | | Dimension | Notable output |
 |---|---|---|
@@ -57,6 +76,7 @@ Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and 
 | **authz** | access-control map | guard coverage + **write endpoints with no visible guard** + roles |
 | tenant | multi-tenancy key candidates | the BOLA boundary, by frequency |
 | surface | 12 user-input-gated sink classes | SSRF/SQLi/NoSQLi/traversal/SSTI/redirect/deser/XXE/proto-pollution/ReDoS/cmd/eval |
+| schemas | data models + **privileged fields** | Pydantic/SQLAlchemy/Django/Prisma/Mongoose/TypeORM/Zod → `role`/`isAdmin`/`groupId` for mass-assignment targeting |
 | iac_ci | IaC + CI/CD | GitHub Actions injection, unpinned actions, Dockerfile-root, tfstate |
 | client_exposure | browser leakage | `NEXT_PUBLIC_*` secrets, server-secret-in-client, source maps |
 | graphql | GraphQL surface | introspection / playground / missing depth-limit |
@@ -156,11 +176,19 @@ hand-pentest's 14/14).
 calibration on hand-labeled real repos (more representative base rate), ASVS index lookup, optional
 model-SDK adapters for no-agent fallback.
 
-## Using it as a skill
+## Using it as a Claude Code skill / plugin
 
-[`skill/SKILL.md`](skill/SKILL.md) wraps this for Claude Code / the Agent SDK so the agent invokes
-`websec` and follows the briefing automatically. For other agents the universal interface is just:
-run the CLI, read `AGENT-BRIEFING.md`.
+This repo **is** a Claude Code plugin. Install it once —
+
+```
+/plugin marketplace add raccioly/websec-validator
+/plugin install websec-validator@websec-plugins
+```
+
+— and the bundled **security-pass** skill ([`skills/security-pass/SKILL.md`](skills/security-pass/SKILL.md))
+lets you just ask, in plain English, for a security pass: it runs `websec`, reads the briefing, and
+works the findings with you. For other agents the universal interface is unchanged: run the CLI, read
+`AGENT-BRIEFING.md`.
 
 ## Credits
 
