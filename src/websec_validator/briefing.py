@@ -30,7 +30,7 @@ def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list
     tgt = routes.get("targeting", {})
     tenant = facts.get("tenant", {})
     surface = facts.get("surface", {})
-    sink_summary = ", ".join(f"{k} ({len(v)})" for k, v in surface.get("sinks", {}).items()) or "_none_"
+    sink_summary = ", ".join(f"{k} ({n})" for k, n in surface.get("sink_counts", {}).items()) or "_none_"
 
     authz = facts.get("authz", {})
     ac = authz.get("protection_summary", {})

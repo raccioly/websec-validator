@@ -33,16 +33,21 @@ class SurfaceExtractor(Extractor):
         has_sql = any("sql" in d or d in ("postgres", "mysql", "sqlite") for d in datastores)
 
         found: dict = {k: [] for k in SINKS}
+        counts: dict = {k: 0 for k in SINKS}
         for _p, rel, text in ctx.iter_code():
             for cls, rx in SINKS.items():
                 if cls == "raw-sql" and not has_sql:
                     continue
-                if rx.search(text) and len(found[cls]) < 30:
-                    found[cls].append(rel)
+                if rx.search(text):
+                    counts[cls] += 1
+                    if len(found[cls]) < 60:
+                        found[cls].append(rel)
 
-        found = {k: v for k, v in found.items() if v}   # drop empties
+        found = {k: v for k, v in found.items() if v}        # drop empties
+        counts = {k: v for k, v in counts.items() if v}
         return {
             "sinks": found,
+            "sink_counts": counts,                            # true totals (files capped at 60)
             "datastore_class": ("sql" if has_sql else ("nosql" if datastores else "unknown")),
             "note": "On a NoSQL/JSON API, scanner SQLi alerts are usually false positives — "
                     "triage accordingly. Cross-reference these sink files with routes.targeting.",

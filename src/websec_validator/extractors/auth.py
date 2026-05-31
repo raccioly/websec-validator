@@ -43,24 +43,34 @@ class AuthExtractor(Extractor):
                 guard_files.append(rel)
 
         nextauth = "nextauth" in frameworks or any("nextauth" in e.lower() for e in auth_eps)
+
+        # Detect ALL schemes present, then pick a primary by priority. A JWT app
+        # that also wires Passport for SSO must read as primary=jwt, not passport
+        # (the bug the WhatsApp app exposed). Priority: nextauth > jwt > session > passport > api-key.
+        detected = []
         if nextauth:
-            scheme, token_location = "nextauth (session JWT in cookie)", "cookie"
-        elif passport:
-            scheme, token_location = "passport", "cookie-or-bearer"
-        elif jwt:
-            scheme, token_location = "jwt", "bearer"
-        elif session:
-            scheme, token_location = "session-cookie", "cookie"
-        elif apikey:
-            scheme, token_location = "api-key", "header"
-        else:
-            scheme, token_location = "unknown", "unknown"
+            detected.append("nextauth (session JWT in cookie)")
+        if jwt:
+            detected.append("jwt (bearer)")
+        if session:
+            detected.append("session-cookie")
+        if passport:
+            detected.append("passport (often SSO/OAuth strategies)")
+        if apikey:
+            detected.append("api-key")
+        primary = detected[0] if detected else "unknown"
+        token_location = ("cookie" if primary.startswith("nextauth") or primary.startswith("session")
+                          else "bearer" if primary.startswith("jwt")
+                          else "header" if primary.startswith("api-key")
+                          else "cookie-or-bearer" if primary.startswith("passport") else "unknown")
 
         return {
-            "scheme": scheme,
+            "scheme": primary,
+            "schemes_detected": detected,
             "token_location": token_location,
             "login_endpoints": auth_eps,
             "guard_files": guard_files,
             "signal_counts": {"jwt": jwt, "passport": passport, "session": session, "api_key": apikey},
-            "note": "AGENT: confirm the real auth flow + how a test token is minted before running the JWT/auth probes.",
+            "note": "AGENT: confirm the PRIMARY auth flow + how a test token is minted before the JWT/auth "
+                    "probes. Multiple schemes often mean primary bearer/session + secondary SSO (passport).",
         }

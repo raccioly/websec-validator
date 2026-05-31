@@ -35,6 +35,23 @@ SSRF_NAMES = re.compile(r"^(url|uri|link|domain|host|endpoint|webhook|feed|rss|i
 REDIRECT_NAMES = re.compile(r"^(redirect|redirect_?uri|next|return|return_?url|callback|continue|dest|destination|goto)s?$", re.I)
 TRAVERSAL_NAMES = re.compile(r"^(file|filename|filepath|path|dir|folder|template|name|key|attachment|download|doc)s?$", re.I)
 
+TEMPLATED = ("BASE_URL", "localhost", "127.0.0.1", "${", "{{")
+ASSET_GLOB = re.compile(r"\*\.\w+")
+
+
+def _clean_path(p: str) -> str:
+    p = re.sub(r":(\w+)", r"{\1}", p)    # Express :id  -> {id}
+    p = re.sub(r"\*(\w+)", r"{\1}", p)    # splat *key   -> {key}
+    return p
+
+
+def _is_noise(path: str) -> bool:
+    if not path or not path.startswith("/"):
+        return True
+    if any(t in path for t in TEMPLATED):
+        return True
+    return bool(ASSET_GLOB.search(path))   # static-asset glob route (/*.png)
+
 
 def _noir_scan(root: Path) -> list | None:
     """Run Noir → list of endpoint dicts, or None if Noir unavailable/failed."""
@@ -61,18 +78,25 @@ def _noir_scan(root: Path) -> list | None:
 
 
 def _normalize_noir(eps: list) -> list:
-    rows = []
+    rows, seen = [], set()
     for e in eps:
         if e.get("internal"):
             continue
         path = e.get("url") or e.get("path") or ""
         # Noir keeps Django <int:pk> / <str:name> notation — normalize to {pk}/{name}
         path = re.sub(r"<(?:[\w]+:)?([\w]+)>", r"{\1}", path)
+        path = _clean_path(path)
+        if _is_noise(path):
+            continue
+        method = (e.get("method") or "GET").upper()
+        if (method, path) in seen:
+            continue
+        seen.add((method, path))
         params = [{"name": p.get("name", ""), "where": p.get("param_type", "")}
                   for p in (e.get("params") or [])]
         cp = (e.get("details", {}) or {}).get("code_paths") or [{}]
         rows.append({
-            "method": (e.get("method") or "GET").upper(),
+            "method": method,
             "path": path,
             "params": params,
             "technology": (e.get("details", {}) or {}).get("technology", ""),
@@ -88,9 +112,12 @@ def _fallback(ctx: RepoContext) -> list:
     rows = []
     rows += _fallback_next_app_router(ctx)
     rows += _fallback_regex(ctx)
-    # de-dup on (method, path)
+    # clean + filter noise + de-dup on (method, path)
     seen, out = set(), []
     for r in rows:
+        r["path"] = _clean_path(r["path"])
+        if _is_noise(r["path"]):
+            continue
         k = (r["method"], r["path"])
         if k not in seen:
             seen.add(k)
