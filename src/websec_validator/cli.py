@@ -16,7 +16,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import __version__, briefing, dynamic, probes, proof, recon, scanners
+from . import __version__, briefing, dynamic, probes, proof, recon, report, scanners
 
 
 def _resolve_target(raw: str) -> Path:
@@ -30,6 +30,24 @@ def _default_out(target: Path, out: str | None) -> Path:
     d = Path(out).expanduser().resolve() if out else Path.cwd() / "websec-out"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _new_run_dir(out: str | None) -> tuple:
+    """Create an immutable timestamped run dir and point `latest` at it. Returns (run_dir, ts).
+    Every run is preserved — nothing is overwritten."""
+    import datetime
+    base = Path(out).expanduser().resolve() if out else Path.cwd() / "websec-out"
+    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    run = base / "runs" / ts
+    run.mkdir(parents=True, exist_ok=True)
+    latest = base / "latest"
+    try:
+        if latest.is_symlink() or latest.exists():
+            latest.unlink()
+        latest.symlink_to(Path("runs") / ts, target_is_directory=True)
+    except Exception:
+        pass
+    return run, ts
 
 
 def cmd_doctor(args) -> int:
@@ -63,9 +81,9 @@ def cmd_recon(args) -> int:
 
 def cmd_run(args) -> int:
     target = _resolve_target(args.target)
-    out = _default_out(target, args.out)
+    out, ts = _new_run_dir(args.out)
 
-    print(f"websec-validator v{__version__}  ·  target: {target}\n")
+    print(f"websec-validator v{__version__}  ·  target: {target}  ·  run {ts}\n")
 
     # 1. recon
     facts = recon.build_facts(target, __version__)
@@ -95,15 +113,17 @@ def cmd_run(args) -> int:
     manifest = probes.stage(chosen, out)
     print(f"\n  staged {len([m for m in manifest if 'attack_class' in m])} tailored probe template(s) → {out / 'probes'}")
 
-    # 4. briefing
-    brief = briefing.render(facts, det, scan_results, manifest, unified)
-    (out / "AGENT-BRIEFING.md").write_text(brief)
+    # 4. briefing + comprehensive REPORT.md (immutable run record)
+    (out / "AGENT-BRIEFING.md").write_text(briefing.render(facts, det, scan_results, manifest, unified))
+    (out / "REPORT.md").write_text(report.render(facts, det, scan_results, unified, manifest, ts))
     (out / "manifest.json").write_text(json.dumps(
         {"facts": "FACTS.json", "scanners": det, "scan_results": scan_results,
-         "findings_summary": unified, "probes": manifest}, indent=2))
+         "findings_summary": unified, "probes": manifest, "timestamp": ts}, indent=2))
 
-    print(f"\n✓ done. Hand this to your AI coding agent:\n    {out / 'AGENT-BRIEFING.md'}")
-    print(f"  (add `{out.name}/` to .gitignore — it holds findings + tokens once you run the probes)")
+    print(f"\n✓ run {ts} saved (immutable — nothing overwritten):\n    {out}")
+    print("    REPORT.md          — full historical record")
+    print("    AGENT-BRIEFING.md  — hand this to your AI coding agent")
+    print(f"  latest → {out.parent.parent / 'latest'}    ·    add `websec-out/` to .gitignore")
     return 0
 
 
