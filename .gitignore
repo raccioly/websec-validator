@@ -2,6 +2,7 @@
 websec-out/
 websec-corpus/
 security/
+dynamic-config.json
 
 # private reference material (prior WU pentest — large + contains real secrets/findings)
 base-research/

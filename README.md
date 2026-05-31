@@ -94,6 +94,22 @@ each app's documented attack surface — a deterministic, CI-trackable proxy (cu
 The real kill-criterion (does the briefing lift an agent's bug-finding vs a generic prompt?) is the
 manual A/B in [`corpus/PROOF-PROTOCOL.md`](corpus/PROOF-PROTOCOL.md).
 
+## Dynamic phase (v2 — read-only so far)
+
+When you have a *running TEST instance*, `websec dynamic` mints role tokens and runs the probes the
+static recon pointed at. v1 is **read-only**: authenticated **cross-tenant BOLA** on the group-scoped
+GET endpoints recon discovered.
+
+```bash
+cp dynamic-config.example.json dynamic-config.json    # TEST target + role creds (gitignored)
+websec run ./my-app                                    # static recon → websec-out/FACTS.json
+websec dynamic --config dynamic-config.json --facts websec-out/FACTS.json
+# → "14/14 cross-tenant GET reads blocked — all isolated"   (or 🚨 LEAK with the exact endpoint)
+```
+
+Never point it at production. Write-verb BOLA, JWT/auth attacks, and a ZAP/Nuclei two-role diff are
+the next dynamic probes (explicitly gated — they mutate).
+
 ## Validated on
 
 HugoCross (Next.js), `wu-whatsappinbox` (106-service Express/AWS monorepo), VAmPI, NodeGoat, DVGA —
@@ -109,9 +125,10 @@ python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 12 t
 ## Status / roadmap
 
 **Done:** 10-extractor recon, cross-tool de-dup, tailored probe staging, agent briefing, proof
-harness, test suite, **Docker bundle** (all scanners + Noir, arch-aware). **Next:** v2
-dynamic-running phase (ZAP/Nuclei engines + the two-role access-control diff), optional model-SDK
-adapters for no-agent fallback.
+harness, test suite, **Docker bundle** (all scanners + Noir, arch-aware), **dynamic phase v1**
+(authenticated read-only cross-tenant BOLA — validated live, reproduced a hand-pentest's 14/14).
+**Next:** dynamic write-verb BOLA + JWT/auth probes + ZAP/Nuclei two-role diff (gated, they mutate),
+optional model-SDK adapters for no-agent fallback.
 
 ## Using it as a skill
 

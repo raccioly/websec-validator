@@ -1,0 +1,13 @@
+{
+  "_comment": "Copy to dynamic-config.json (gitignored), fill in your TEST target + role creds, then: websec dynamic --config dynamic-config.json --facts websec-out/FACTS.json. Never point this at production. v1 is read-only (cross-tenant BOLA on GET endpoints).",
+  "target": "https://your-TEST-host.example.com",
+  "login_path": "/api/auth/login",
+  "token_json_path": "tokens.accessToken",
+  "user_json_path": "user",
+  "tenant_field": "groupIds",
+  "tenant_path_param": "groupId",
+  "roles": {
+    "agentA": { "email": "agent-a@example.com", "password": "REDACTED" },
+    "agentB": { "email": "agent-b@example.com", "password": "REDACTED" }
+  }
+}

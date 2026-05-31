@@ -16,7 +16,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import __version__, briefing, probes, proof, recon, scanners
+from . import __version__, briefing, dynamic, probes, proof, recon, scanners
 
 
 def _resolve_target(raw: str) -> Path:
@@ -107,6 +107,31 @@ def cmd_run(args) -> int:
     return 0
 
 
+def cmd_dynamic(args) -> int:
+    cfg = Path(args.config).expanduser().resolve()
+    if not cfg.is_file():
+        sys.exit(f"error: config not found: {cfg}")
+    out = Path(args.out).expanduser().resolve() if args.out else Path.cwd() / "websec-out"
+    out.mkdir(parents=True, exist_ok=True)
+    facts = Path(args.facts).expanduser().resolve() if args.facts else out / "FACTS.json"
+    if not facts.is_file():
+        sys.exit(f"error: FACTS.json not found at {facts} — run `websec run <repo>` first (or pass --facts)")
+    print("websec dynamic — authenticated, READ-ONLY v1 (cross-tenant BOLA on GET endpoints)\n")
+    res = dynamic.run_dynamic(cfg, facts, out)
+    ct = res.get("cross_tenant_bola", {})
+    if ct.get("error"):
+        print("  ERROR:", ct["error"])
+        return 1
+    print(f"  agentA: {ct['agentA']['email']}  (tenant {ct['agentA']['tenant']})")
+    print(f"  agentB: {ct['agentB']['email']}  (tenant {ct['agentB']['tenant']})")
+    print(f"  tested {ct['endpoints_tested']} tenant-scoped GET endpoint(s) · {ct['checks']} cross-tenant checks")
+    print(f"  → {ct['summary']}")
+    for lk in ct.get("leaks", []):
+        print(f"     🚨 LEAK {lk['direction']} {lk['path']} → HTTP {lk['status']}")
+    print(f"\n  details: {out / 'dynamic-findings.json'}")
+    return 1 if ct.get("leaks") else 0
+
+
 def cmd_proof(args) -> int:
     from importlib import resources
     corpus_path = (Path(args.corpus).expanduser().resolve() if args.corpus
@@ -178,6 +203,12 @@ def build_parser() -> argparse.ArgumentParser:
     pf.add_argument("--corpus", help="corpus JSON (default: bundled)")
     pf.add_argument("--workdir", help="where to clone corpus apps (default: ~/.cache/websec-corpus)")
     pf.set_defaults(func=cmd_proof)
+
+    dyn = sub.add_parser("dynamic", help="authenticated dynamic probes vs a LIVE target (read-only v1: cross-tenant BOLA)")
+    dyn.add_argument("--config", required=True, help="dynamic config JSON (target + role creds)")
+    dyn.add_argument("--facts", help="FACTS.json from a prior run (default: ./websec-out/FACTS.json)")
+    dyn.add_argument("--out", help="output dir (default: ./websec-out)")
+    dyn.set_defaults(func=cmd_dynamic)
     return p
 
 
