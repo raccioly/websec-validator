@@ -170,7 +170,7 @@ class CalibrationTests(unittest.TestCase):
 
 
 class FieldFeedbackBatch1Tests(unittest.TestCase):
-    """Regressions for the HugoCross live-run false positives (proxy.ts, self-scan, ASIA)."""
+    """Regressions for the field-test false positives (proxy.ts, self-scan, ASIA)."""
 
     def _next_app(self, proxy_body):
         d = Path(tempfile.mkdtemp())
