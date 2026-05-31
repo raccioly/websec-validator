@@ -1,0 +1,59 @@
+name: Publish to PyPI
+
+# Publishes on a version tag (e.g. v0.2.0). Uses PyPI Trusted Publishing (OIDC) —
+# no API token is stored in the repo. One-time setup on PyPI: add a trusted
+# publisher for owner=raccioly, repo=websec-validator, workflow=publish.yml,
+# environment=pypi. See the "Releasing" section in README.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify the tag matches the package version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VER="$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+          echo "tag=$TAG  pyproject=$VER"
+          [ "$TAG" = "$VER" ] || { echo "::error::tag v$TAG does not match pyproject version $VER — bump pyproject.toml before tagging"; exit 1; }
+
+      - name: Build sdist + wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+
+      - name: Check the built artifacts
+        run: |
+          python -m pip install --upgrade twine
+          python -m twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi          # configure this environment name in the PyPI trusted publisher
+    permissions:
+      id-token: write          # OIDC — this is what authenticates to PyPI, no token needed
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

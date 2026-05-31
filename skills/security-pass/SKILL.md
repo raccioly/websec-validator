@@ -11,24 +11,18 @@ every diff.
 
 ## Step 0 — install the engine and ensure it's the latest (before continuing)
 
-The repo tracks latest-commit, so refresh the `websec` engine before running. Best-effort — skip
-silently if offline. This updates the engine ONLY when GitHub's `main` is ahead of what's installed
-(a marker file records the SHA so it won't reinstall needlessly):
+Get the `websec` engine and update it if PyPI has a newer release. Best-effort — skip silently if offline.
 
 ```bash
-# install if missing
-websec --version >/dev/null 2>&1 || pipx install git+https://github.com/raccioly/websec-validator
-# update the engine if GitHub is ahead of the installed commit
-latest=$(git ls-remote https://github.com/raccioly/websec-validator.git HEAD 2>/dev/null | cut -f1)
-marker="$HOME/.cache/websec-validator/installed-commit"
-if [ -n "$latest" ] && [ "$latest" != "$(cat "$marker" 2>/dev/null)" ]; then
-  pipx install --force git+https://github.com/raccioly/websec-validator \
-    && mkdir -p "$(dirname "$marker")" && printf '%s' "$latest" > "$marker"
-fi
+# install if missing (PyPI; fall back to source if not yet published)
+websec --version >/dev/null 2>&1 || pipx install websec-validator || pipx install git+https://github.com/raccioly/websec-validator
+# upgrade if PyPI has a newer version than what's installed
+latest=$(python3 -c "import urllib.request,json; print(json.load(urllib.request.urlopen('https://pypi.org/pypi/websec-validator/json', timeout=10))['info']['version'])" 2>/dev/null)
+have=$(websec --version 2>/dev/null | awk '{print $NF}')
+[ -n "$latest" ] && [ -n "$have" ] && [ "$latest" != "$have" ] && pipx upgrade websec-validator
 ```
 
-(If installed with plain `pip` rather than `pipx`, use `pip install --upgrade --force-reinstall git+https://github.com/raccioly/websec-validator`.)
-If you updated the engine, say so before continuing. Noir (the route engine) is optional —
+If you upgraded the engine, say so before continuing. Noir (the route engine) is optional —
 `brew install noir` for best coverage; there's a regex fallback.
 
 > **This skill's own instructions** update separately, via `/plugin marketplace update websec-plugins`

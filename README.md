@@ -23,7 +23,7 @@ local. The four ways to get there, all ending in the same `AGENT-BRIEFING.md` yo
 | Path | One-time setup | Then |
 |---|---|---|
 | **Tell your agent** (simplest) | — | say the line above |
-| **CLI** (a terminal) | `pipx install git+https://github.com/raccioly/websec-validator` | `websec run /path/to/your/app` |
+| **CLI** (a terminal) | `pipx install websec-validator` | `websec run /path/to/your/app` |
 | **Claude Code plugin** (slash) | `/plugin marketplace add raccioly/websec-validator`  →  `/plugin install websec-validator@websec-plugins` | invoke the **security-pass** skill, or just ask |
 | **Docker** (no install) | `docker build -t websec-validator .` | `docker run --rm -v "$PWD:/scan" websec-validator run /scan --out /scan/websec-out` |
 
@@ -32,10 +32,13 @@ local. The four ways to get there, all ending in the same `AGENT-BRIEFING.md` yo
 ## Install
 
 ```bash
-pipx install git+https://github.com/raccioly/websec-validator   # or, from a clone: pipx install .
-brew install noir         # OWASP Noir — the route engine (50+ frameworks); regex fallback if absent
+pipx install websec-validator   # from PyPI
+brew install noir               # OWASP Noir — the route engine (50+ frameworks); regex fallback if absent
 websec --version
 ```
+
+_Until the first PyPI release publishes (or for bleeding-edge), install straight from source instead:_
+`pipx install git+https://github.com/raccioly/websec-validator` (or from a clone: `pipx install .`).
 
 Requires **Python 3.11+** (on stock macOS, `python3` is often 3.9 — use `pipx`, which picks a newer
 interpreter, or install via Homebrew/pyenv). Zero Python runtime dependencies: it shells out to
@@ -163,8 +166,27 @@ upload, conversation-BOLA routes, roles).
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 20 tests
+python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 23 tests
 ```
+
+## Releasing (maintainer)
+
+Published to PyPI via **Trusted Publishing** (OIDC — no API token in the repo). To cut a release:
+
+```bash
+# 1. bump the version in pyproject.toml (e.g. 0.2.0 → 0.2.1)
+# 2. tag it and push — the tag must match pyproject's version (CI verifies):
+git tag v0.2.1 && git push origin v0.2.1
+# → .github/workflows/publish.yml builds + publishes to PyPI
+```
+
+One-time PyPI setup (before the first release): on pypi.org → **Account → Publishing → Add a pending
+publisher** with project `websec-validator`, owner `raccioly`, repo `websec-validator`, workflow
+`publish.yml`, environment `pypi`. The project is created on the first successful publish.
+
+> Two independent channels, two update mechanisms: the **CLI** ships to **PyPI** (semver releases,
+> `pip install --upgrade`); the **Claude Code plugin** ships from **git** (tracks latest commit,
+> refreshed via `/plugin marketplace update`).
 
 ## Status / roadmap
 
