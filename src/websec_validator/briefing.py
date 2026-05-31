@@ -33,11 +33,12 @@ def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list
     sink_summary = ", ".join(f"{k} ({n})" for k, n in surface.get("sink_counts", {}).items()) or "_none_"
 
     authz = facts.get("authz", {})
-    ac = authz.get("protection_summary", {})
+    gs = authz.get("guard_summary", {})
+    global_auth = authz.get("global_auth_middleware", False)
     roles_str = ", ".join(f"`{r}`" for r in authz.get("roles_detected", [])) or "_none detected_"
-    unprot = authz.get("unprotected_write_endpoints", [])
-    unprot_section = (_section("⚠ UNPROTECTED write endpoints — likeliest missing-authz", unprot)
-                      if unprot else "_No unprotected write endpoints detected (good) — still confirm._")
+    unprot = authz.get("write_endpoints_without_visible_guard", [])
+    unprot_section = (_section("Write endpoints with NO guard visible in their handler file (verify)", unprot)
+                      if unprot else "_Every write endpoint has a visible guard or looks public — still spot-check._")
     mw = authz.get("next_middleware", {})
     mw_line = (f"Next.js middleware `{mw.get('file')}` gates matchers: {mw.get('matchers')}"
                if mw.get("present") else "_No Next.js middleware.ts found — auth is per-handler._")
@@ -112,7 +113,9 @@ credentials** — ask the human, never fabricate, never hit production.
 
 ## 3b. ★ Access control (who can reach what — your #1 test)
 
-Coverage (file-level heuristic): {ac.get("protected",0)} protected · **{ac.get("unprotected",0)} unprotected** · {ac.get("unknown",0)} unknown.  Roles in code: {roles_str}
+Guard coverage (file-level heuristic): {gs.get("with_visible_guard",0)} with visible guard · {gs.get("no_visible_guard",0)} none visible · {gs.get("unknown",0)} unknown.  Global auth middleware: **{global_auth}**.  Roles in code: {roles_str}
+
+{authz.get("note","")}
 
 {unprot_section}
 {mw_line}
