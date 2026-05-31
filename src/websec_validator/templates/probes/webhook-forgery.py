@@ -19,16 +19,13 @@ This probe tests:
   8. Empty body                        -> expect 401
   9. Wrong content-type                -> expect 401
 """
-import json, subprocess, time, sys
+import json, os, subprocess, time, sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2].parent
-ENV = {}
-for line in (ROOT / 'security/zap/.env').read_text().splitlines():
-    if '=' in line and not line.lstrip().startswith('#'):
-        k, v = line.split('=', 1); ENV[k.strip()] = v.strip()
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _lib  # noqa: E402
 
-TARGET = ENV['ZAP_TARGET']
+TARGET = _lib.base_url()
 
 # PROJECT-SPECIFIC START
 # TODO: replace with your project's inbound-webhook path, signature header
@@ -38,9 +35,11 @@ TARGET = ENV['ZAP_TARGET']
 #   Twilio:             /webhooks/twilio,      X-Twilio-Signature
 #   GitHub:             /webhooks/github,      X-Hub-Signature-256
 #   Custom:             /webhooks/<provider>,  X-Signature, X-Timestamp
-WEBHOOK_PATH = "/webhooks/<provider>"
-SIG_HEADER = "x-signature"
-TS_HEADER  = "x-timestamp"
+# set WEBHOOK_PATH / SIG_HEADER / TS_HEADER env vars, or edit these. probe-context.json
+# lists this app's detected integrations/webhooks to pick the real path from.
+WEBHOOK_PATH = os.environ.get("WEBHOOK_PATH", "/webhooks/<provider>")
+SIG_HEADER = os.environ.get("SIG_HEADER", "x-signature")
+TS_HEADER  = os.environ.get("TS_HEADER", "x-timestamp")
 
 URL = f"{TARGET}{WEBHOOK_PATH}"
 
@@ -94,9 +93,7 @@ for name, headers, body, expected, reason in probes:
         'body_preview': body_text[:120],
     })
 
-out_p = ROOT / 'security/pentest-prep/reports/webhook-forgery/findings.json'
-out_p.parent.mkdir(parents=True, exist_ok=True)
-out_p.write_text(json.dumps(findings, indent=2))
+out_p = _lib.save("webhook-forgery", findings)
 
 passed = sum(1 for f in findings if f['pass'])
 print(f"\n=== Summary ===")

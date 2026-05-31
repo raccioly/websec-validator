@@ -1,18 +1,18 @@
 # Security tooling pass — findings summary
 
 > Date: <YYYY-MM-DD>. Tools run locally; **zero repo footprint added**.
-> All outputs in `security/<tool>/` (gitignored).
+> All outputs in `websec-out/scanners/<tool>/` (gitignored).
 
 ## Tools run
 
 | Tool | Status | Outputs |
 |---|---|---|
-| **Prowler** <ver> | ☐ | `security/prowler/` |
-| **Nuclei** <ver> | ☐ | `security/nuclei/` |
-| **Semgrep** <ver> | ☐ | `security/semgrep/` |
-| **Gitleaks** <ver> | ☐ | `security/gitleaks/` |
-| **Trivy** <ver> | ☐ | `security/trivy/` |
-| **ZAP** <ver> + manual probes | ☐ | `security/zap/`, `security/pentest-prep/` |
+| **Prowler** <ver> | ☐ | `websec-out/scanners/prowler/` |
+| **Nuclei** <ver> | ☐ | `websec-out/scanners/nuclei/` |
+| **Semgrep** <ver> | ☐ | `websec-out/scanners/semgrep/` |
+| **Gitleaks** <ver> | ☐ | `websec-out/scanners/gitleaks/` |
+| **Trivy** <ver> | ☐ | `websec-out/scanners/trivy/` |
+| **ZAP** <ver> + manual probes | ☐ | `websec-out/scanners/zap/`, `websec-out/scanners/pentest-prep/` |
 
 ## Most important finding
 
@@ -49,27 +49,27 @@
 prowler aws --region us-east-1 \
   --compliance cis_2.0_aws aws_foundational_security_best_practices_aws \
   --output-formats html json-asff csv \
-  --output-directory security/prowler/
+  --output-directory websec-out/scanners/prowler/
 
 # Nuclei
-TOKEN=$(./security/zap/run.sh --print-token)
+TOKEN=$(./websec-out/scanners/zap/run.sh --print-token)
 nuclei -target "$ZAP_TARGET" -H "Authorization: Bearer $TOKEN" \
   -tags "jwt,ssrf,sqli,lfi,redirect,rce,exposure,misconfig,cve" \
   -severity medium,high,critical -rate-limit 30 -concurrency 5 \
-  -json-export security/nuclei/nuclei-baseline.json \
-  -output security/nuclei/nuclei-baseline.txt
+  -json-export websec-out/scanners/nuclei/nuclei-baseline.json \
+  -output websec-out/scanners/nuclei/nuclei-baseline.txt
 
 # Semgrep
 semgrep --config auto --config p/typescript --config p/javascript \
   --config p/security-audit --severity WARNING --severity ERROR \
-  --json -o security/semgrep/semgrep-backend.json backend/src
+  --json -o websec-out/scanners/semgrep/semgrep-backend.json backend/src
 
 # Gitleaks
-gitleaks detect --source . --report-format json --report-path security/gitleaks/current.json
-gitleaks git --report-format json --report-path security/gitleaks/history.json
+gitleaks detect --source . --report-format json --report-path websec-out/scanners/gitleaks/current.json
+gitleaks git --report-format json --report-path websec-out/scanners/gitleaks/history.json
 
 # Trivy
 trivy fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL \
   --skip-dirs node_modules --skip-dirs security \
-  --format json --output security/trivy/trivy-fs.json .
+  --format json --output websec-out/scanners/trivy/trivy-fs.json .
 ```

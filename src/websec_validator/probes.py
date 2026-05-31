@@ -136,6 +136,11 @@ def stage(chosen: list, outdir: Path, facts: dict | None = None) -> list:
     manifest = [{"key": "_context", "file": "probes/probe-context.json",
                  "note": "the target's real routes/auth/fields — finalize the drafts against this"}]
     src_root = resources.files("websec_validator").joinpath("templates/probes")
+    # always ship the shared helper the Python probes import (load context + env auth)
+    try:
+        (dest / "_lib.py").write_text(src_root.joinpath("_lib.py").read_text())
+    except Exception:
+        pass
     for key in chosen:
         fname, attack, needs = PROBES[key]
         targets = (tgt.get(_TARGET_KEYS[key], []) if key in _TARGET_KEYS else [])[:15]

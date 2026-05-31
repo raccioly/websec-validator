@@ -13,34 +13,28 @@ Output: per-rule per-encoding match/bypass table.
 PRECONDITION: your project has a DLP / content-filtering feature with rules
 the admin can list via API. If not, this script is N/A.
 """
-import base64, json, re, subprocess, sys, urllib.parse
+import base64, json, os, re, sys, urllib.parse
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2].parent
-ENV = {}
-for line in (ROOT / 'security/zap/.env').read_text().splitlines():
-    if '=' in line and not line.lstrip().startswith('#'):
-        k, v = line.split('=', 1); ENV[k.strip()] = v.strip()
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _lib  # noqa: E402
 
-TARGET = ENV['ZAP_TARGET']
-# TODO: adjust login response shape if needed.
-ADMIN_TOK_RESP = subprocess.run(['curl','-fsS','-X','POST',f"{TARGET}/api/auth/login",
-                                 '-H','Content-Type: application/json',
-                                 '-d',json.dumps({'email':ENV['ZAP_ADMIN_USER'],'password':ENV['ZAP_ADMIN_PASS']})],
-                                capture_output=True, text=True).stdout
-ADMIN_TOK = json.loads(ADMIN_TOK_RESP)['tokens']['accessToken']
+TARGET = _lib.base_url()
+HDR = _lib.auth_headers("A")    # a privileged/admin token that can list DLP rules
+if not HDR:
+    sys.exit("Supply an admin token: TOKEN_A=<jwt> (or COOKIE_A). See _lib.py.")
 
-# PROJECT-SPECIFIC START
-# TODO: adjust the DLP-rules endpoint and the rule schema. Common shapes:
-#   GET /api/dlp/rules    -> [{id, name, pattern, action, scope}]
-#   GET /api/policies     -> [{id, regex, action}]
-RULES_ENDPOINT = "/api/dlp/rules"
-# PROJECT-SPECIFIC END
+# DLP-rules endpoint + rule schema vary by app. Set RULES_ENDPOINT, or edit this.
+RULES_ENDPOINT = os.environ.get("RULES_ENDPOINT", "/api/dlp/rules")
 
-rules_raw = subprocess.run(['curl','-fsS',f"{TARGET}{RULES_ENDPOINT}",
-                            '-H',f"Authorization: Bearer {ADMIN_TOK}"],
-                           capture_output=True, text=True).stdout
-all_rules = json.loads(rules_raw)
+code, rules_raw = _lib.curl("GET", f"{TARGET}{RULES_ENDPOINT}", headers=HDR)
+if code != 200:
+    sys.exit(f"Couldn't fetch DLP rules from {RULES_ENDPOINT} (HTTP {code}). If this app has no "
+             "DLP/content-filter feature this probe is N/A; otherwise set RULES_ENDPOINT to the real path.")
+try:
+    all_rules = json.loads(rules_raw)
+except Exception:
+    sys.exit(f"DLP rules endpoint returned non-JSON (HTTP {code}).")
 
 # Filter to content (regex) rules, skipping any media/file-type-prefix rules
 content_rules = [r for r in all_rules if not r.get('pattern','').startswith('MEDIA_TYPE:')]
@@ -127,9 +121,7 @@ for rule in content_rules:
                 'sample': encoded[:80],
             })
 
-out = ROOT / 'security/pentest-prep/reports/dlp-bypass/findings.json'
-out.parent.mkdir(parents=True, exist_ok=True)
-out.write_text(json.dumps(findings, indent=2))
+out = _lib.save("dlp-bypass", findings)
 
 bypasses = [f for f in findings if not f['matched'] and f['encoding'] != 'plain']
 plain_misses = [f for f in findings if not f['matched'] and f['encoding'] == 'plain']

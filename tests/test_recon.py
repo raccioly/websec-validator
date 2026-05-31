@@ -252,6 +252,20 @@ class ProbeStagingTests(unittest.TestCase):
         ub = [m for m in man if m.get("key") == "unauth-baseline"][0]
         self.assertEqual(ub["targets"], ["POST /api/sponsors"])           # real per-probe targets
 
+    def test_staged_probes_ship_lib_and_have_no_private_paths(self):
+        d = Path(tempfile.mkdtemp())
+        facts = {"routes": {"endpoints": [{"method": "POST", "path": "/api/x"}],
+                            "targeting": {"write_endpoints": ["POST /api/x"]}},
+                 "tenant": {"candidates": [{"key": "tenantId"}]}}
+        probes.stage(probes.applicable(facts), d, facts)
+        staged = list((d / "probes").glob("*"))
+        names = {p.name for p in staged}
+        self.assertIn("_lib.py", names)               # shared helper is always shipped
+        self.assertIn("probe-context.json", names)
+        blob = "\n".join(p.read_text() for p in staged if p.suffix in (".py", ".sh"))
+        self.assertNotIn("security/zap", blob)        # no author-private fixture paths (P0-3)
+        self.assertNotIn("security/pentest", blob)
+
 
 class RouteUnitTests(unittest.TestCase):
     def test_clean_path(self):

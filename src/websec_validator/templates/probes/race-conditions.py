@@ -19,76 +19,31 @@ Uses async httpx for true parallelism (synchronous loops can't trigger races).
 
 Install: pip install httpx
 """
-import asyncio, httpx, json, sys
+import asyncio, httpx, json, os, re, sys
 from pathlib import Path
 from collections import Counter
 
-ROOT = Path(__file__).resolve().parents[2].parent
-fixture = json.loads((ROOT / 'security/pentest-prep/fixtures/test-context.json').read_text())
-ENV = {}
-for line in (ROOT / 'security/zap/.env').read_text().splitlines():
-    if '=' in line and not line.lstrip().startswith('#'):
-        k, v = line.split('=', 1); ENV[k.strip()] = v.strip()
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _lib  # noqa: E402
 
-TARGET = fixture['target']
-A_GROUP = fixture['agent_a']['group_id']
-A_CONV = fixture['agent_a']['conversation_ids'][0]
-A_USER_ID = fixture['agent_a'].get('user_id', '<AGENT_A_USER_ID>')
+TARGET = _lib.base_url()
+_lib.require("OBJ_A")                      # an object id you own (the single-winner target)
+OBJ_A = os.environ["OBJ_A"]
+_tok, _cookie = os.environ.get("TOKEN_A"), os.environ.get("COOKIE_A")
+HEADERS = {"Authorization": f"Bearer {_tok}"} if _tok else ({"Cookie": _cookie} if _cookie else {})
+if not HEADERS:
+    sys.exit("Supply auth: TOKEN_A=<jwt> (or COOKIE_A). See _lib.py.")
 
-import subprocess
-def login(u, p):
-    r = subprocess.run(['curl','-fsS','-X','POST',f"{TARGET}/api/auth/login",
-                        '-H','Content-Type: application/json',
-                        '-d',json.dumps({'email':u,'password':p})],
-                       capture_output=True, text=True)
-    return json.loads(r.stdout)['tokens']['accessToken']
+PARALLEL = 50  # concurrent requests per target
 
-AGENT_TOK = login(ENV['ZAP_AGENT_USER'], ENV['ZAP_AGENT_PASS'])
-
-PARALLEL = 50  # number of concurrent requests per target
-
-# PROJECT-SPECIFIC START
-# TODO: replace these with the race-prone endpoints from your project.
-# Common shapes:
-#   - assign / claim: one winner expected
-#   - state toggle (snooze, archive, status flip): converges to one state
-#   - tag/label add: deduplicates
-#   - inventory decrement, points spend, quota use: must not over-spend
-TARGETS = [
-    {
-        'name': 'assign-resource',
-        'method': 'POST',
-        'url': f"{TARGET}/api/groups/{A_GROUP}/conversations/{A_CONV}/assign",
-        'payload': {'agentId': A_USER_ID},
-        'expected_unique': 1,
-        'note': '50 parallel assigns to self -- should only one succeed (or all idempotent 200s if backend dedupes)',
-    },
-    {
-        'name': 'snooze-resource',
-        'method': 'POST',
-        'url': f"{TARGET}/api/groups/{A_GROUP}/conversations/{A_CONV}/snooze",
-        'payload': {'snoozeUntil': '2027-01-01T00:00:00Z'},
-        'expected_unique': 1,
-        'note': 'Toggle endpoint -- multiple parallel calls should converge to one state',
-    },
-    {
-        'name': 'status-toggle',
-        'method': 'PUT',
-        'url': f"{TARGET}/api/users/me/status",
-        'payload': {'status': 'online'},
-        'expected_unique': 1,
-        'note': 'User status update -- parallel calls should converge',
-    },
-    {
-        'name': 'tag-add',
-        'method': 'POST',
-        'url': f"{TARGET}/api/groups/{A_GROUP}/conversations/{A_CONV}/tags",
-        'payload': {'tagId': 'race-test-tag-xxxxxxxx'},
-        'expected_unique': 1,
-        'note': '50 parallel adds of same tag -- should only add once if dedupe works',
-    },
-]
-# PROJECT-SPECIFIC END
+# Race-prone targets = this app's mutating endpoints (from probe-context.json). For each, the
+# server should keep its single-winner / converge / dedupe invariant under PARALLEL concurrency.
+TARGETS = [{"name": f"{m} {p}", "method": m, "url": TARGET + re.sub(r"\{[^}]+\}", OBJ_A, p),
+            "payload": {}, "expected_unique": 1,
+            "note": "parallel fire — a single-winner/converge/dedupe invariant should hold"}
+           for m, p in _lib.write_endpoints()][:8]
+if not TARGETS:
+    sys.exit("No write endpoints in probe-context.json — nothing to probe.")
 
 async def fire(client, t):
     """Single request, return (status_code, response_body_preview)"""
@@ -96,7 +51,7 @@ async def fire(client, t):
         r = await client.request(
             t['method'], t['url'],
             json=t['payload'],
-            headers={'Authorization': f'Bearer {AGENT_TOK}'},
+            headers=HEADERS,
             timeout=30.0,
         )
         return (r.status_code, r.text[:120])
@@ -130,9 +85,7 @@ async def main():
         print(f"\n=== {t['name']}: {t['note']}")
         f = await run_target(t)
         findings.append(f)
-    out = ROOT / 'security/pentest-prep/reports/race-conditions/findings.json'
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(findings, indent=2))
+    out = _lib.save("race-conditions", findings)
     crit = sum(1 for f in findings if f['race_suspected'])
     print(f"\n=== Summary ===")
     print(f"  race suspected on {crit}/{len(findings)} endpoints")
