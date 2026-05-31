@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "websec-validator"
-version = "0.2.3"
+version = "0.2.4"
 description = "Local-first security recon that briefs your AI coding agent: facts + tailored probe scripts, code-in / artifacts-out. No LLM, no server, no running app."
 readme = "README.md"
 requires-python = ">=3.11"
