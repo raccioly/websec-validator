@@ -25,7 +25,18 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from .base import Extractor, RepoContext
+from .base import SKIP_DIRS, Extractor, RepoContext
+
+# Noir is a subprocess that scans the raw tree — it does NOT know the walker's SKIP_DIRS,
+# so without this it grinds through (and emits routes from) build output (.next, cdk.out,
+# dist), dependencies (node_modules, vendor), and NESTED WORKTREES (.claude/worktrees — a
+# full copy of the repo → doubled routes). Pass the skip dirs as exclude globs (perf) AND
+# post-filter Noir's output by code_path (the correctness guarantee).
+_NOIR_SKIP_GLOBS = ",".join(f"**/{d}/**" for d in sorted(SKIP_DIRS))
+
+
+def _in_skip_dir(code_path: str) -> bool:
+    return any(part in SKIP_DIRS for part in (code_path or "").replace("\\", "/").split("/"))
 
 WRITE_VERBS = {"POST", "PUT", "PATCH", "DELETE"}
 EXCLUDE_GLOBS = "*.test.ts,*.test.tsx,*.spec.ts,*.test.js,*.spec.js,*_test.go,*_test.py,test_*.py,*.stories.tsx"
@@ -71,7 +82,7 @@ def _noir_scan(root: Path, extra_excludes: list | None = None) -> list | None:
     """Run Noir → list of endpoint dicts, or None if Noir unavailable/failed."""
     if not shutil.which("noir"):
         return None
-    excl = EXCLUDE_GLOBS + ("," + ",".join(extra_excludes) if extra_excludes else "")
+    excl = ",".join([EXCLUDE_GLOBS, _NOIR_SKIP_GLOBS] + (list(extra_excludes) if extra_excludes else []))
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
         out = Path(tf.name)
     try:
@@ -222,6 +233,9 @@ class RoutesExtractor(Extractor):
         # unreliable for bare dir names; this guarantees `--exclude <path>` drops those routes).
         if getattr(ctx, "excludes", None):
             routes = [r for r in routes if not ctx._excluded(r.get("code_path", ""))]
+        # Noir doesn't honor SKIP_DIRS — drop any route it found under build output / deps /
+        # nested worktrees (e.g. .claude/worktrees/* doubling the whole app).
+        routes = [r for r in routes if not _in_skip_dir(r.get("code_path", ""))]
         by_method: dict = {}
         by_tech: dict = {}
         for r in routes:

@@ -1,136 +1,89 @@
 #!/usr/bin/env bash
-#
-# rate-limit-burst.sh — verify rate limiters actually fire under load.
+# rate-limit-burst — verify rate limiters actually fire, and that they can't be bypassed by
+# spoofing X-Forwarded-For. FACTS-driven: reads the login route + base URL from
+# ./probe-context.json (written by websec) — no separate .env needed.
 #
 # Three tests:
-#   1. AUTH_RATE_LIMIT — N failed login attempts; expect a 429 by attempt K
-#      (the project's documented per-IP login throttle).
-#   2. General apiRateLimiter — burst of GET requests against a public health
-#      endpoint; expect 429s once over the per-IP budget.
-#   3. X-Forwarded-For bypass — repeat (1) but rotate the XFF header between
-#      requests. If the backend honors XFF for rate-limit keying WITHOUT
-#      verifying the proxy chain, attackers bypass the limiter.
+#   1. AUTH limiter — N+1 failed logins; expect a 429 by attempt N+1. (A limit of N ALLOWS N and
+#      blocks the N+1th, so sending only N false-FAILs a working limiter — the classic off-by-one.)
+#   2. General limiter — burst of GETs at a public endpoint; expect 429s once over the per-IP budget.
+#   3. XFF bypass — once limited, rotate X-Forwarded-For between requests. If the limit lifts, the
+#      backend keys on a client-controlled header without verifying the proxy chain (bypassable).
 #
-# Usage:  ./rate-limit-burst.sh
-set -euo pipefail
-cd "$(dirname "$0")"
+# Env: TARGET (or target_base_url in probe-context.json). Optional overrides:
+#      AUTH_LIMIT (default 10), LOGIN_PATH, HEALTH_PATH.
+# Usage:  TARGET=http://localhost:3000 bash rate-limit-burst.sh
+set -uo pipefail
+ctx="$(dirname "$0")/probe-context.json"
+BASE="${TARGET:-$(python3 -c "import json;print(json.load(open('$ctx'))['target_base_url'])" 2>/dev/null)}"
+if [ -z "${BASE:-}" ] || [ "${BASE#FILL}" != "$BASE" ]; then
+  echo "Set TARGET=http://host:port (or fill target_base_url in probe-context.json)"; exit 2
+fi
+BASE="${BASE%/}"
 
-[[ -f .env ]] || { echo "No .env found" >&2; exit 1; }
+# Login path: explicit override → the POST .../login from probe-context → a sane default.
+LOGIN_PATH="${LOGIN_PATH:-$(python3 -c "
+import json
+c = json.load(open('$ctx'))
+eps = c.get('auth', {}).get('login_endpoints', []) + c.get('endpoints', {}).get('auth_endpoints', [])
+cand = [e.split(' ', 1)[1] for e in eps if e.upper().startswith('POST ') and 'login' in e.lower()]
+print(cand[0] if cand else '/api/auth/login')
+" 2>/dev/null)}"
+LOGIN_PATH="${LOGIN_PATH:-/api/auth/login}"
+HEALTH_PATH="${HEALTH_PATH:-/api/health}"
+LIMIT="${AUTH_LIMIT:-10}"
+N=$((LIMIT + 1))   # N+1: a limit of N allows N and blocks the (N+1)th
 
-read_env() {
-    local key="$1"
-    python3 -c "
-for l in open('.env'):
-    l = l.rstrip('\n')
-    if l.startswith('#') or '=' not in l: continue
-    k, v = l.split('=', 1)
-    if k.strip() == '$key':
-        print(v); break
-"
-}
+fails=0
 
-TARGET="$(read_env ZAP_TARGET)"
-[[ -n "$TARGET" ]] || { echo "ZAP_TARGET missing from .env" >&2; exit 2; }
-
-# TODO: adjust login path and public health path to match your API.
-LOGIN_PATH="/api/auth/login"
-HEALTH_PATH="/api/health"
-
-PASS_COUNT=0
-FAIL_COUNT=0
-FAIL_LINES=()
-
-# === Test 1: AUTH_RATE_LIMIT ===
-echo "=== Test 1: AUTH_RATE_LIMIT (expected ≥1 of 10 attempts to be 429) ==="
-codes_seen=()
-for i in $(seq 1 10); do
-    code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$TARGET$LOGIN_PATH" \
-        -H 'Content-Type: application/json' \
-        -d '{"email":"rl-test@example.com","password":"wrong"}')
-    codes_seen+=("$code")
-    printf '  attempt %2d → %s\n' "$i" "$code"
+echo "=== Test 1: AUTH limiter — $N failed logins at $LOGIN_PATH (expect a 429 by #$N) ==="
+saw429=0
+for i in $(seq 1 "$N"); do
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE$LOGIN_PATH" \
+         -H 'content-type: application/json' --data '{"email":"rl-test@example.com","password":"wrong"}' --max-time 15)
+  printf '  attempt %2d → %s\n' "$i" "$code"
+  [ "$code" = "429" ] && saw429=1
 done
-if printf '%s\n' "${codes_seen[@]}" | grep -q '^429$'; then
-    echo "  PASS  AUTH_RATE_LIMIT fires (saw 429)"
-    PASS_COUNT=$((PASS_COUNT+1))
+if [ "$saw429" = "1" ]; then
+  echo "  PASS  AUTH limiter fired (saw 429)"
 else
-    echo "  FAIL  AUTH_RATE_LIMIT never fired — limiter may be misconfigured"
-    FAIL_COUNT=$((FAIL_COUNT+1))
-    FAIL_LINES+=("AUTH_RATE_LIMIT did not fire in 10 attempts")
+  echo "  FAIL  AUTH limiter never fired in $N attempts — misconfigured, or the limit is > $LIMIT (raise AUTH_LIMIT)"
+  fails=$((fails+1))
 fi
 echo
 
-# === Test 2: General health burst ===
-echo "=== Test 2: 200 GET ${HEALTH_PATH} requests in ~10s ==="
-codes_file=$(mktemp)
-trap 'rm -f "$codes_file"' EXIT
-seq 1 200 | xargs -n 1 -P 20 -I{} curl -s -o /dev/null -w '%{http_code}\n' "$TARGET$HEALTH_PATH" > "$codes_file"
-
-total=$(wc -l < "$codes_file" | tr -d ' ')
-two_oh_oh=$(grep -c '^200$' "$codes_file" || true)
-four_two_nine=$(grep -c '^429$' "$codes_file" || true)
-other=$((total - two_oh_oh - four_two_nine))
-echo "  Total responses: $total"
-echo "  200: $two_oh_oh"
-echo "  429: $four_two_nine"
-echo "  Other: $other"
-if [[ "$four_two_nine" -gt 0 ]]; then
-    echo "  INFO  apiRateLimiter fires under burst (saw 429s)"
-else
-    echo "  INFO  apiRateLimiter did NOT fire — 200 reqs is below threshold."
-    echo "        (general limit is per-IP; for a pentest, escalate to ~5000 reqs)"
-fi
+echo "=== Test 2: general limiter — 200 GET $HEALTH_PATH in ~10s ==="
+codes=$(seq 1 200 | xargs -n1 -P20 -I{} curl -s -o /dev/null -w '%{http_code}\n' "$BASE$HEALTH_PATH" --max-time 15)
+n429=$(printf '%s\n' "$codes" | grep -c '^429$' || true)
+n200=$(printf '%s\n' "$codes" | grep -c '^200$' || true)
+echo "  200: $n200 · 429: $n429"
+if [ "$n429" -gt 0 ]; then echo "  INFO  general limiter fires under burst"; else
+  echo "  INFO  general limiter did not fire at 200 reqs — below threshold (raise for a real pentest)"; fi
 echo
 
-# === Test 3: X-Forwarded-For bypass attempt ===
-echo "=== Test 3: try XFF spoof to bypass AUTH_RATE_LIMIT ==="
-echo "    (If the backend respects 'trust proxy = 1' correctly, spoofed XFF"
-echo "     headers from us — a direct client — should be IGNORED for rate-limit"
-echo "     keying.)"
-
-# First, get rate-limited so subsequent requests are blocked
-for i in $(seq 1 7); do
-    curl -s -o /dev/null -X POST "$TARGET$LOGIN_PATH" \
-        -H 'Content-Type: application/json' \
-        -d '{"email":"xff-test@example.com","password":"wrong"}' >/dev/null
+echo "=== Test 3: X-Forwarded-For spoof bypass ==="
+for i in $(seq 1 "$N"); do
+  curl -s -o /dev/null -X POST "$BASE$LOGIN_PATH" -H 'content-type: application/json' \
+       --data '{"email":"xff-test@example.com","password":"wrong"}' --max-time 15 || true
 done
-
-code_baseline=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$TARGET$LOGIN_PATH" \
-    -H 'Content-Type: application/json' \
-    -d '{"email":"xff-test@example.com","password":"wrong"}')
-echo "  baseline (no XFF):       $code_baseline"
-
-spoofed_pass_count=0
+baseline=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE$LOGIN_PATH" \
+           -H 'content-type: application/json' --data '{"email":"xff-test@example.com","password":"wrong"}' --max-time 15)
+echo "  baseline (no XFF): $baseline"
+spoofed=0
 for xff in "1.2.3.4" "10.0.0.1" "192.168.1.99" "127.0.0.1" "1.1.1.1, 2.2.2.2"; do
-    code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$TARGET$LOGIN_PATH" \
-        -H 'Content-Type: application/json' \
-        -H "X-Forwarded-For: $xff" \
-        -d '{"email":"xff-test@example.com","password":"wrong"}')
-    printf '  XFF=%-25s → %s\n' "$xff" "$code"
-    if [[ "$code_baseline" == "429" && "$code" != "429" ]]; then
-        spoofed_pass_count=$((spoofed_pass_count + 1))
-    fi
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE$LOGIN_PATH" -H "X-Forwarded-For: $xff" \
+         -H 'content-type: application/json' --data '{"email":"xff-test@example.com","password":"wrong"}' --max-time 15)
+  printf '  XFF=%-22s → %s\n' "$xff" "$code"
+  { [ "$baseline" = "429" ] && [ "$code" != "429" ]; } && spoofed=$((spoofed+1))
 done
-
-if [[ "$code_baseline" != "429" ]]; then
-    echo "  SKIP  AUTH limiter not in 429 state for baseline — can't test bypass"
-elif [[ $spoofed_pass_count -gt 0 ]]; then
-    echo "  FAIL  XFF spoof bypassed AUTH_RATE_LIMIT ($spoofed_pass_count probes)"
-    FAIL_COUNT=$((FAIL_COUNT+1))
-    FAIL_LINES+=("XFF spoof bypasses AUTH_RATE_LIMIT — limiter may be keyed on req.ip without trust proxy validation")
+if [ "$baseline" != "429" ]; then
+  echo "  SKIP  limiter not in 429 state for the baseline — can't test bypass (raise AUTH_LIMIT or the window)"
+elif [ "$spoofed" -gt 0 ]; then
+  echo "  FAIL  XFF spoof bypassed the limiter ($spoofed/5) — it keys on client-supplied XFF without verifying the proxy chain"
+  fails=$((fails+1))
 else
-    echo "  PASS  XFF spoof did NOT bypass the limiter (all stayed 429)"
-    PASS_COUNT=$((PASS_COUNT+1))
+  echo "  PASS  XFF spoof did NOT bypass the limiter (all stayed 429)"
 fi
 echo
-
-echo "=== Summary ==="
-echo "  PASS: $PASS_COUNT"
-echo "  FAIL: $FAIL_COUNT"
-if [[ $FAIL_COUNT -gt 0 ]]; then
-    echo
-    echo "FAILED:"
-    printf '  - %s\n' "${FAIL_LINES[@]}"
-    exit 1
-fi
-echo "Rate limiters behave as expected."
+echo "=== summary: $fails failure(s) ==="
+exit "$fails"

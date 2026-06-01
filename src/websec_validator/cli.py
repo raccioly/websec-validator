@@ -103,9 +103,16 @@ def cmd_run(args) -> int:
         for r in scan_results:
             tag = r.get("findings", r.get("status", "?"))
             print(f"    {r['name']}: {tag}")
-        unified = scanners.normalize_findings(scan_results, out)
+        unified = scanners.normalize_findings(scan_results, out, target=target)
         print(f"  → {unified['total']} de-duplicated findings "
               f"({unified['cross_tool_or_dup_merged']} merged) · {unified['by_severity']}")
+        _hyg = []
+        if unified.get('contamination_dropped'):
+            _hyg.append(f"{unified['contamination_dropped']} dropped (skip-dir contamination)")
+        if unified.get('local_only_downgraded'):
+            _hyg.append(f"{unified['local_only_downgraded']} downgraded (gitignored/local-only secret)")
+        if _hyg:
+            print(f"    hygiene: {' · '.join(_hyg)}")
     else:
         print(f"\n  scanners available: {', '.join(s['name'] for s in det['available']) or 'none'}"
               "  (add --scan to execute them)")
@@ -162,6 +169,12 @@ def cmd_dynamic(args) -> int:
         for r in u["results"]:
             mark = "🔓" if r["verdict"] == "OPEN-no-auth" else (" ·" if r["verdict"] == "protected" else "  ")
             print(f"    {mark} {str(r['status']):>4}  {r['verdict']:26} {r['path']}")
+        ftb = dyn.get("forged_token_bypass", {})
+        if ftb:
+            print(f"\n  forged-token (unverified-signature) → {ftb['summary']}")
+            for r in ftb.get("results", []):
+                if r["verdict"] == "BYPASS":
+                    print(f"    🚨 BYPASS  {r['baseline']}→{r['forged']}  {r['method']} {r['path']}  (via {r['via']})")
         if args.probe_writes:
             w = dyn["write_auth_enforcement"]
             print(f"\n  write-verb auth enforcement → {w['summary']}")

@@ -20,6 +20,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from .extractors.base import SKIP_DIRS
+
 
 @dataclass(frozen=True)
 class Scanner:
@@ -33,11 +35,19 @@ class Scanner:
     argv: object = None
 
 
-# Never scan the tool's own output, deps, or build artifacts. Scanning `websec-out/`
-# made Semgrep re-flag the AWS keys Gitleaks had just written into the report (and the
-# count compounded across runs). Filesystem scanners get these excluded explicitly.
-EXCLUDE_DIRS = ("websec-out", "node_modules", ".next", "dist", "build", ".git",
-                "security", ".venv", "venv", "__pycache__", ".mypy_cache", "coverage")
+# ONE source of truth for "don't scan here": the walker's SKIP_DIRS (extractors/base.py).
+# A subprocess scanner has its OWN traversal and will otherwise re-enter dirs the walker
+# skips — e.g. trivy walked `.claude/worktrees/<full-repo-copy>/websec-out/.../gitleaks.json`
+# and reported the tool's OWN prior output back as an AWS-key CRITICAL (bug-066). The
+# --skip-dirs / --exclude flags below are best-effort perf; `_in_skip_dir` post-filtering in
+# normalize_findings is the correctness guarantee (it also covers gitleaks, which has no skip
+# flag). Was previously a hand-maintained subset that omitted .claude / .worktrees / .wolf.
+EXCLUDE_DIRS = tuple(sorted(SKIP_DIRS))
+
+
+def _in_skip_dir(path: str) -> bool:
+    """True if any path segment is a SKIP_DIR — mirrors the walker's per-segment rule."""
+    return any(part in SKIP_DIRS for part in (path or "").replace("\\", "/").split("/"))
 
 
 def _trivy(target: Path, out: Path, excludes=()) -> list:
@@ -243,9 +253,30 @@ def _norm_semgrep(data: dict) -> list:
 _PARSERS = {"trivy": _norm_trivy, "gitleaks": _norm_gitleaks, "semgrep": _norm_semgrep}
 
 
-def normalize_findings(scan_results: list, outdir: Path) -> dict:
+def _gitignored(target: Path | None, paths) -> set:
+    """Subset of `paths` (relative to `target`) that git IGNORES — local-only files that were
+    never committed. A WORKING-TREE secret in such a file (e.g. a gitignored `.env.local`) is
+    not a repo leak, so we downgrade it instead of crying CRITICAL (bug-066). Empty set if not
+    a git repo / git absent (fail-open). Git-HISTORY findings (gitleaks) are left untouched —
+    those ARE committed."""
+    paths = sorted({p for p in paths if p})
+    if not target or not paths or not shutil.which("git"):
+        return set()
+    try:
+        proc = subprocess.run(["git", "-C", str(target), "check-ignore", "--stdin"],
+                              input="\n".join(paths), capture_output=True, text=True, timeout=30)
+        return {ln.strip() for ln in proc.stdout.splitlines() if ln.strip()}
+    except Exception:
+        return set()
+
+
+def normalize_findings(scan_results: list, outdir: Path, target: Path | None = None) -> dict:
     """Merge every scanner's native JSON into one de-duplicated, severity-ranked
-    findings.json. Returns a summary (raw vs deduped, by severity/category)."""
+    findings.json. Returns a summary (raw vs deduped, by severity/category).
+
+    `target` (the scanned repo) enables two bug-066 hygiene passes: drop findings under a
+    SKIP_DIR (a scanner re-entered a dir the walker skips), and downgrade working-tree secrets
+    that live in gitignored (never-committed) files."""
     raw = []
     for r in scan_results:
         out, key = r.get("output"), r.get("key")
@@ -256,6 +287,28 @@ def normalize_findings(scan_results: list, outdir: Path) -> dict:
             raw += parser(json.loads(Path(out).read_text() or "{}"))
         except Exception:
             continue
+
+    # bug-066 (a): a subprocess scanner can re-enter dirs the walker skips (nested worktrees,
+    # build output, the tool's own websec-out) → drop anything under a SKIP_DIR. The
+    # correctness guarantee behind the best-effort flags; also catches gitleaks (no skip flag).
+    before = len(raw)
+    raw = [f for f in raw if not _in_skip_dir(f.get("file", ""))]
+    contamination_dropped = before - len(raw)
+
+    # bug-066 (b): working-tree secrets (trivy fs) in GITIGNORED files are local-only / never
+    # committed — not a repo leak. Downgrade + annotate rather than report CRITICAL. Gitleaks
+    # findings come from git HISTORY (already committed) and are deliberately left alone.
+    ignored = _gitignored(target, (f.get("file", "") for f in raw
+                                   if f.get("tool") == "trivy" and f.get("category") == "secret"))
+    local_only_downgraded = 0
+    for f in raw:
+        if (f.get("tool") == "trivy" and f.get("category") == "secret"
+                and f.get("file", "") in ignored
+                and SEV_ORDER.get(f.get("severity"), 0) >= SEV_ORDER["MEDIUM"]):
+            f["severity"] = "LOW"
+            if "local-only" not in f["title"]:
+                f["title"] += " — local-only (gitignored, never committed; rotate if real, not a repo leak)"
+            local_only_downgraded += 1
 
     by_fp: dict = {}
     for f in raw:
@@ -278,6 +331,8 @@ def normalize_findings(scan_results: list, outdir: Path) -> dict:
         by_cat[f["category"]] = by_cat.get(f["category"], 0) + 1
     return {"total_raw": len(raw), "total": len(deduped),
             "cross_tool_or_dup_merged": len(raw) - len(deduped),
+            "contamination_dropped": contamination_dropped,
+            "local_only_downgraded": local_only_downgraded,
             "by_severity": by_sev, "by_category": by_cat,
             "top": [{"severity": f["severity"], "category": f["category"], "title": f["title"],
                      "file": f["file"], "tools": f["tools"]} for f in deduped[:15]]}

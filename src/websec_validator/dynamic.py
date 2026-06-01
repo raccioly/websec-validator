@@ -37,10 +37,13 @@ def _dig(d: dict, dotted: str):
     return cur
 
 
-def _request(method: str, url: str, token: str | None, timeout: int = 20, data: bytes | None = None):
+def _request(method: str, url: str, token: str | None, timeout: int = 20,
+             data: bytes | None = None, cookie: str | None = None):
     headers = {"Accept": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    if cookie:
+        headers["Cookie"] = cookie
     if data is not None:
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, method=method, headers=headers, data=data)
@@ -254,9 +257,89 @@ def write_auth_enforcement(target: str, facts: dict, max_endpoints: int = 80) ->
     }
 
 
+# Codes that mean "the request reached the handler/validation" — i.e. auth PASSED. Used to
+# judge a forged-token attempt. Deliberately EXCLUDES 401/403 (blocked), 429 (rate-limited —
+# would otherwise be a false bypass), 5xx and 000/None (ambiguous/transport). A gated route
+# (401/403 with no token) that returns one of these WITH a forged token = signature not verified.
+_REACHED_HANDLER = {200, 201, 202, 203, 204, 206, 400, 404, 405, 409, 413, 415, 422}
+
+
+def _forge_jwt(payload: dict, alg: str = "RS256") -> str:
+    """A structurally-valid JWT with a DELIBERATELY INVALID signature (no real key). The whole
+    point is to see whether the target verifies the signature at all — a correct verifier
+    rejects this outright; a decode-only auth path (the decodeJwtPayloadUnsafe class) trusts it."""
+    import base64
+
+    def b(o):
+        return base64.urlsafe_b64encode(json.dumps(o).encode()).rstrip(b"=").decode()
+    sig = "" if alg == "none" else "d2Vic2VjLWZvcmdlZC1zaWc"  # 'websec-forged-sig' — not a real signature
+    return ".".join([b({"alg": alg, "typ": "JWT", "kid": "forged"}), b(payload), sig])
+
+
+def forged_token_bypass(target: str, facts: dict, cookie_names=None,
+                        probe_writes: bool = False, max_endpoints: int = 60) -> dict:
+    """Does the app actually VERIFY JWT signatures? Forge a token with a far-future `exp` and a
+    BOGUS signature, present it to each route that is GATED without auth, and compare. A route
+    that answers 401/403 with NO token but REACHES THE HANDLER with the forged token is trusting
+    an unverified token = authentication bypass (CWE-347 / OWASP API2:2023) — the dynamic verdict
+    on the `decodeJwtPayloadUnsafe`/`jwt.decode(verify=False)` hypothesis.
+
+    GET reads by default (read-safe); write verbs (empty body, dummy ids — non-destructive) only
+    when `probe_writes`. Tries `Authorization: Bearer` (universal) plus any `cookie_names` given,
+    since apps read tokens from different locations. 429/5xx are treated as inconclusive, never
+    a bypass, so an aggressive rate limiter can't manufacture a false positive."""
+    forged = _forge_jwt({"sub": "websec-forged", "email": "websec-forged@example.com",
+                         "role": "admin", "roles": ["admin"], "exp": 9999999999})
+    cookie_names = list(cookie_names or [])
+
+    targets = [("GET", e.get("path", "")) for e in (facts.get("routes") or {}).get("endpoints", [])
+               if e.get("method") == "GET" and "{" not in e.get("path", "")
+               and not SIDE_EFFECTING.search(e.get("path", ""))]
+    if probe_writes:
+        targets += [(e.get("method"), e.get("path", "")) for e in (facts.get("routes") or {}).get("endpoints", [])
+                    if e.get("method") in WRITE_VERBS and "{" not in e.get("path", "")
+                    and not SIDE_EFFECTING.search(e.get("path", ""))]
+    targets = sorted(set(targets))[:max_endpoints]
+
+    results, bypassed = [], []
+    for method, path in targets:
+        url = target + path
+        body = b"{}" if method in WRITE_VERBS else None
+        base_code, _ = _request(method, url, token=None, data=body)
+        if base_code not in (401, 403):
+            continue  # only routes that are gated WITHOUT auth tell us anything about forgery
+        attempts = [("Authorization: Bearer", _request(method, url, token=forged, data=body)[0])]
+        for cn in cookie_names:
+            attempts.append((f"cookie:{cn}", _request(method, url, token=None, data=body, cookie=f"{cn}={forged}")[0]))
+        hit = next(((via, code) for via, code in attempts if code in _REACHED_HANDLER), None)
+        if hit:
+            via, fcode = hit
+            row = {"method": method, "path": path, "baseline": base_code, "forged": fcode,
+                   "via": via, "verdict": "BYPASS"}
+            bypassed.append(row)
+        else:
+            row = {"method": method, "path": path, "baseline": base_code,
+                   "forged": attempts[0][1], "via": "Authorization: Bearer", "verdict": "rejected"}
+        results.append(row)
+
+    return {
+        "target": target,
+        "mode": "present an UNSIGNED/bogus-sig JWT (far-future exp) to each gated route; "
+                "reached-handler = signature not verified",
+        "token_locations": ["Authorization: Bearer"] + [f"cookie:{c}" for c in cookie_names],
+        "tested": len(results),
+        "bypassed": bypassed,
+        "results": results,
+        "summary": f"{len(bypassed)}/{len(results)} gated route(s) accepted a forged unsigned token"
+                   + (" — ⚠ SIGNATURE NOT VERIFIED (CWE-347 auth bypass)" if bypassed
+                      else " — all rejected the forged token"),
+    }
+
+
 def run_unauth(target: str, facts_path: Path, outdir: Path, probe_writes: bool = False) -> dict:
     facts = json.loads(Path(facts_path).read_text())
-    res = {"unauth_reachability": unauth_reachability(target, facts)}
+    res = {"unauth_reachability": unauth_reachability(target, facts),
+           "forged_token_bypass": forged_token_bypass(target, facts, probe_writes=probe_writes)}
     if probe_writes:
         res["write_auth_enforcement"] = write_auth_enforcement(target, facts)
     outdir.mkdir(parents=True, exist_ok=True)

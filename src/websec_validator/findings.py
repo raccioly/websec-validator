@@ -164,6 +164,20 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                         f"{ud.get('decoder')}() — if that decodes a token/signature WITHOUT verifying it, a forged "
                         "value is trusted (the decodeJwtPayloadUnsafe → requireAdmin class of bug). Trace the call path."}]))
 
+    # ---- 1d. Forged-token acceptance — unverified signature, DYNAMICALLY CONFIRMED ----
+    # The verdict for 1c: we presented an UNSIGNED/bogus-sig token and the route reached its
+    # handler anyway (no-auth 401/403 → reached-handler with the forged token). That is the
+    # decodeJwtPayloadUnsafe/jwt.decode(verify=False) hypothesis proven — CWE-347 broken auth.
+    for b in ((dynamic or {}).get("forged_token_bypass", {}) or {}).get("bypassed", []):
+        out.append(_f(
+            f"Auth bypass: forged unsigned token accepted — {b.get('method')} {b.get('path')}",
+            "access-control", "unsafe-auth-decoder", "CRITICAL", "HIGH",
+            f"{b.get('method')} {b.get('path')}",
+            [{"layer": "dynamic", "detail": f"no auth → HTTP {b.get('baseline')}; a token with NO valid "
+              f"signature (via {b.get('via')}, far-future exp) → HTTP {b.get('forged')} — the auth gate "
+              "accepted it, so the signature is NOT verified. Reachable by anyone who can craft a token "
+              "string; route the guard through a verifying decode (jwt.verify w/ the key / a checked session)."}]))
+
     # ---- 2. Static scanner findings (de-duplicated `unified`) ----
     cat_to_class = {"sca": "cve", "secret": "secret", "iac": "iac", "sast": "sast"}
     for t in (unified or {}).get("top", []):

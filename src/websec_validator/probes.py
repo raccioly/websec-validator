@@ -28,6 +28,8 @@ PROBES = {
                         "a low-priv token + a write endpoint that updates a record"),
     "jwt-attacks": ("jwt-attacks.sh", "JWT: alg:none, tamper, expiry, replay",
                    "a valid token + the login + a protected endpoint"),
+    "forged-token": ("forged-token.sh", "Forged/unsigned-JWT acceptance (CWE-347 broken auth)",
+                     "just the target base URL — it forges its own token + reads routes from probe-context.json"),
     "hs256-brute-force": ("hs256-brute-force.py", "Offline HS256 weak-secret brute",
                          "one HS256 JWT (offline — no live app needed)"),
     "ssrf-probes": ("ssrf-probes.sh", "SSRF: IMDS / RFC1918 / file://",
@@ -47,7 +49,7 @@ PROBES = {
 
 # unauth-baseline is ALWAYS staged: it's the cheapest probe and directly exercises the
 # #1 lead class (missing authentication) — the one a no-creds run can confirm immediately.
-ALWAYS = ["unauth-baseline", "jwt-attacks", "hs256-brute-force", "rate-limit-burst"]
+ALWAYS = ["unauth-baseline", "forged-token", "jwt-attacks", "hs256-brute-force", "rate-limit-burst"]
 
 # which targeting bucket each probe should be pointed at (for the manifest's real targets)
 _TARGET_KEYS = {
@@ -100,6 +102,10 @@ def build_context(facts: dict) -> dict:
     auth = facts.get("auth") or {}
     writes = [f"{e.get('method')} {e.get('path')}" for e in routes.get("endpoints", [])
               if e.get("method") in WRITE_VERBS][:80]
+    # GET/HEAD data-read routes — the read half of the protected surface (the forged-token probe
+    # needs these; the bypass class hits reads like /api/wallets/lookup that are in no other bucket).
+    reads = [f"{e.get('method')} {e.get('path')}" for e in routes.get("endpoints", [])
+             if e.get("method") in ("GET", "HEAD")][:80]
     return {
         "target_base_url": "FILL_ME (e.g. http://localhost:3000)",
         "auth": {
@@ -111,6 +117,7 @@ def build_context(facts: dict) -> dict:
         },
         "endpoints": {
             "writes": writes,
+            "reads": reads,
             "idor_candidates": tgt.get("idor_candidates", [])[:60],
             "ssrf_candidates": tgt.get("ssrf_candidates", [])[:40],
             "upload_candidates": tgt.get("upload_candidates", [])[:40],
