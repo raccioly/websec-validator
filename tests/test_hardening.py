@@ -17,6 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from websec_validator import dynamic, findings, probes, scanners  # noqa: E402
+from websec_validator.extractors.auth import AuthExtractor  # noqa: E402
+from websec_validator.extractors.base import RepoContext  # noqa: E402
 
 FACTS = {"routes": {"endpoints": [
     {"method": "GET", "path": "/api/bypass"},      # gated; accepts forged token  -> BYPASS
@@ -167,6 +169,38 @@ class SecretPrecisionTests(unittest.TestCase):
         led = findings.build_ledger({}, unified, None, [])
         hit = [f for f in led["findings"] if f["category"] == "static-secret"][0]
         self.assertEqual(hit["confidence"], "MEDIUM")
+
+
+class CookieCoverageTests(unittest.TestCase):
+    """0.2.7: extract auth cookie names so the forged-token engine covers cookie-ONLY apps."""
+
+    def test_extracts_cookie_names(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "auth.ts").write_text(
+                "const s = request.cookies.get('agent_wallet_session');\n"
+                "const p = req.cookies['ping_id_token'];\n"
+                "const x = getCookie('dynamic_authentication_token');\n")
+            out = AuthExtractor().extract(RepoContext(d), {"stack": {"frameworks": []}, "routes": {}})
+        names = set(out["cookie_names"])
+        self.assertIn("agent_wallet_session", names)
+        self.assertIn("ping_id_token", names)
+        self.assertIn("dynamic_authentication_token", names)
+        self.assertNotIn("get", names)  # reserved method name filtered
+
+    def test_forged_bypass_detected_via_cookie(self):
+        facts = {"routes": {"endpoints": [{"method": "GET", "path": "/api/cookieonly"}]}}
+
+        def fake(method, url, token=None, timeout=20, data=None, cookie=None):
+            if token:
+                return 401, "x"                       # Bearer rejected
+            if cookie and "sess=" in cookie:
+                return 200, "x"                        # forged cookie accepted (cookie-only app)
+            return 401, "x"                            # no-auth baseline (gated)
+        with mock.patch.object(dynamic, "_request", fake):
+            r = dynamic.forged_token_bypass("http://t", facts, cookie_names=["sess"])
+        self.assertEqual([b["path"] for b in r["bypassed"]], ["/api/cookieonly"])
+        self.assertTrue(r["bypassed"][0]["via"].startswith("cookie:"))
 
 
 if __name__ == "__main__":

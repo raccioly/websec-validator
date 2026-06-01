@@ -308,19 +308,24 @@ def forged_token_bypass(target: str, facts: dict, cookie_names=None,
         base_code, _ = _request(method, url, token=None, data=body)
         if base_code not in (401, 403):
             continue  # only routes that are gated WITHOUT auth tell us anything about forgery
-        attempts = [("Authorization: Bearer", _request(method, url, token=forged, data=body)[0])]
-        for cn in cookie_names:
-            attempts.append((f"cookie:{cn}", _request(method, url, token=None, data=body, cookie=f"{cn}={forged}")[0]))
-        hit = next(((via, code) for via, code in attempts if code in _REACHED_HANDLER), None)
-        if hit:
-            via, fcode = hit
-            row = {"method": method, "path": path, "baseline": base_code, "forged": fcode,
-                   "via": via, "verdict": "BYPASS"}
-            bypassed.append(row)
+        # Bearer first (cheapest, most universal); only forge into each known auth cookie if
+        # Bearer didn't reach the handler — short-circuits to keep request volume (and
+        # rate-limiter pressure) down. cookie_names is what catches cookie-ONLY session apps.
+        hit, bearer_code = None, _request(method, url, token=forged, data=body)[0]
+        if bearer_code in _REACHED_HANDLER:
+            hit = ("Authorization: Bearer", bearer_code)
         else:
-            row = {"method": method, "path": path, "baseline": base_code,
-                   "forged": attempts[0][1], "via": "Authorization: Bearer", "verdict": "rejected"}
+            for cn in (cookie_names or []):
+                cc = _request(method, url, token=None, data=body, cookie=f"{cn}={forged}")[0]
+                if cc in _REACHED_HANDLER:
+                    hit = (f"cookie:{cn}", cc)
+                    break
+        via, fcode = hit if hit else ("Authorization: Bearer", bearer_code)
+        row = {"method": method, "path": path, "baseline": base_code, "forged": fcode,
+               "via": via, "verdict": "BYPASS" if hit else "rejected"}
         results.append(row)
+        if hit:
+            bypassed.append(row)
 
     return {
         "target": target,
@@ -338,8 +343,10 @@ def forged_token_bypass(target: str, facts: dict, cookie_names=None,
 
 def run_unauth(target: str, facts_path: Path, outdir: Path, probe_writes: bool = False) -> dict:
     facts = json.loads(Path(facts_path).read_text())
+    cookie_names = (facts.get("auth") or {}).get("cookie_names")
     res = {"unauth_reachability": unauth_reachability(target, facts),
-           "forged_token_bypass": forged_token_bypass(target, facts, probe_writes=probe_writes)}
+           "forged_token_bypass": forged_token_bypass(target, facts, cookie_names=cookie_names,
+                                                       probe_writes=probe_writes)}
     if probe_writes:
         res["write_auth_enforcement"] = write_auth_enforcement(target, facts)
     outdir.mkdir(parents=True, exist_ok=True)

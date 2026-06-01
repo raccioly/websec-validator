@@ -111,6 +111,7 @@ def build_context(facts: dict) -> dict:
         "auth": {
             "scheme": auth.get("scheme"),
             "token_location": auth.get("token_location"),
+            "cookie_names": auth.get("cookie_names", []),
             "login_endpoints": tgt.get("auth_endpoints", [])[:10],
             "how_to_authenticate": "cookie-session (e.g. NextAuth) → send the session cookie; "
                                    "bearer → Authorization: Bearer <jwt>; api-key → the documented key header",
