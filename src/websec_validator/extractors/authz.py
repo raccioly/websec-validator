@@ -142,6 +142,28 @@ class AuthzExtractor(Extractor):
                 for dec in sorted(set(UNSAFE_DECODER.findall(text))):
                     unsafe_decoders.append({"file": rel, "decoder": dec})
 
+        # A guard DEFINED in a file that also calls an unsafe/unverified decoder authenticates via
+        # an unverified decode. Routes that call such a guard are the static "at-risk" set for the
+        # forged-token bypass class — the dynamic probe confirms which actually fall, but this points
+        # at them even with NO live target (turns the F5 hypothesis into named routes).
+        unverified_routes: list = []
+        unsafe_files = {ud["file"] for ud in unsafe_decoders}
+        if unsafe_files:
+            guard_def = re.compile(r"(?:export\s+)?(?:async\s+)?(?:function|const)\s+"
+                                   r"(require\w+|ensure\w+|\w*[Aa]uth\w*|verify\w+)\b")
+            unsafe_guards = set()
+            for _p, rel, text in ctx.iter_code():
+                if rel in unsafe_files:
+                    unsafe_guards.update(g for g in guard_def.findall(text) if len(g) >= 5)
+            if unsafe_guards:
+                call = re.compile(r"\b(?:" + "|".join(re.escape(g) for g in sorted(unsafe_guards)) + r")\s*\(")
+                for e in endpoints:
+                    cp = e.get("code_path", "")
+                    t = ctx.text(Path(cp)) if cp else ""
+                    if t and call.search(t):
+                        unverified_routes.append(f"{e.get('method')} {e.get('path')}")
+            unverified_routes = sorted(set(unverified_routes))[:60]
+
         if global_auth:
             where = f"`{mw['file']}` (matcher {mw.get('matchers') or '—'})" if mw_auth else "`app.use(<auth>)`"
             note = (f"A GLOBAL auth middleware ({where}) was detected — most routes are protected by default. "
@@ -162,5 +184,6 @@ class AuthzExtractor(Extractor):
             "endpoint_guards": egs[:400],
             "write_endpoints_without_visible_guard": sorted(set(no_guard_writes))[:60],
             "unsafe_auth_decoders": unsafe_decoders[:30],
+            "unverified_signature_routes": unverified_routes,
             "note": note,
         }

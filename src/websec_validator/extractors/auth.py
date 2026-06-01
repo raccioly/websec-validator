@@ -63,6 +63,7 @@ class AuthExtractor(Extractor):
         # Detect ALL schemes present, then pick a primary by priority. A JWT app
         # that also wires Passport for SSO must read as primary=jwt, not passport
         # (Passport is often SSO-only). Priority: nextauth > jwt > session > passport > api-key.
+        route_count = len(routes.get("endpoints", []))
         detected = []
         if nextauth:
             detected.append("nextauth (session JWT in cookie)")
@@ -88,6 +89,11 @@ class AuthExtractor(Extractor):
             "cookie_names": cookie_names[:15],
             "guard_files": guard_files,
             "signal_counts": {"jwt": jwt, "passport": passport, "session": session, "api_key": apikey},
-            "note": "AGENT: confirm the PRIMARY auth flow + how a test token is minted before the JWT/auth "
-                    "probes. Multiple schemes often mean primary bearer/session + secondary SSO (passport).",
+            "route_count": route_count,
+            "reliable_signal": route_count > 0 or bool(nextauth),
+            "note": (("⚠ No HTTP routes detected — this auth scheme is LOW-CONFIDENCE (likely a "
+                      "library/CLI/scanner that merely mentions auth, or routes weren't parsed). "
+                      if not (route_count > 0 or nextauth) else "")
+                     + "AGENT: confirm the PRIMARY auth flow + how a test token is minted before the "
+                     "JWT/auth probes. Multiple schemes often mean primary bearer/session + secondary SSO."),
         }

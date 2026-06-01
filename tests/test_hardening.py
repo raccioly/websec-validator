@@ -18,7 +18,9 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from websec_validator import dynamic, findings, probes, scanners  # noqa: E402
 from websec_validator.extractors.auth import AuthExtractor  # noqa: E402
+from websec_validator.extractors.authz import AuthzExtractor  # noqa: E402
 from websec_validator.extractors.base import RepoContext  # noqa: E402
+from websec_validator.extractors.tenant import TenantExtractor  # noqa: E402
 
 FACTS = {"routes": {"endpoints": [
     {"method": "GET", "path": "/api/bypass"},      # gated; accepts forged token  -> BYPASS
@@ -229,6 +231,62 @@ class CookieCoverageTests(unittest.TestCase):
             r = dynamic.forged_token_bypass("http://t", facts, cookie_names=["sess"])
         self.assertEqual([b["path"] for b in r["bypassed"]], ["/api/cookieonly"])
         self.assertTrue(r["bypassed"][0]["via"].startswith("cookie:"))
+
+
+class NonWebAppFPTests(unittest.TestCase):
+    """0.2.9 (bug-081): on a 0-route repo (library/CLI/scanner) FLAG auth/tenant as low-confidence
+    + record tenant evidence files — but NEVER suppress. Suppression would be fragile (depends on
+    the optional noir route scanner) and could drop a real backend whose routes didn't parse."""
+
+    def test_auth_low_confidence_without_routes_but_still_detected(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "patterns.ts").write_text("const RULE = 'express-session';\n")
+            out = AuthExtractor().extract(RepoContext(d), {"stack": {"frameworks": []}, "routes": {"endpoints": []}})
+        self.assertFalse(out["reliable_signal"])                   # 0 routes, no framework -> flagged
+        self.assertIn("session-cookie", out["schemes_detected"])   # NOT suppressed
+        self.assertIn("No HTTP routes", out["note"])               # caveat surfaced
+
+    def test_auth_reliable_with_routes(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "app.ts").write_text("const RULE = 'express-session';\n")
+            out = AuthExtractor().extract(RepoContext(d), {"stack": {"frameworks": []},
+                                                           "routes": {"endpoints": [{"method": "GET", "path": "/x"}]}})
+        self.assertTrue(out["reliable_signal"])
+
+    def test_tenant_records_files_and_not_multitenant_without_routes(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "a.ts").write_text("const x = groupId; const y = groupId; const z = groupId;\n")  # x3
+            out = TenantExtractor().extract(RepoContext(d), {"routes": {"endpoints": []}})
+        gc = next(c for c in out["candidates"] if c["key"] == "groupId")
+        self.assertIn("a.ts", gc["files"])                         # evidence recorded
+        self.assertFalse(out["multi_tenant_likely"])               # 0 routes -> not asserted even at >=3
+
+    def test_tenant_multitenant_with_routes(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "a.ts").write_text("groupId groupId groupId\n")   # x3
+            out = TenantExtractor().extract(RepoContext(d), {"routes": {"endpoints": [{"method": "GET", "path": "/x"}]}})
+        self.assertTrue(out["multi_tenant_likely"])                # routes + >=3 -> asserted
+
+
+class StaticAtRiskRouteTests(unittest.TestCase):
+    """0.2.9 (B): routes calling a guard defined alongside an unverified decoder are listed
+    statically — the forged-token bypass set, even with no live target."""
+
+    def test_unverified_signature_routes_listed(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "auth.ts").write_text(
+                "export async function requireAuth(req){ const p = decodeJwtPayloadUnsafe(t); return p; }\n")
+            (d / "route.ts").write_text(
+                "import {requireAuth} from './auth';\nexport async function GET(req){ await requireAuth(req); }\n")
+            facts = {"routes": {"endpoints": [
+                {"method": "GET", "path": "/api/x", "code_path": str(d / "route.ts")}]}}
+            out = AuthzExtractor().extract(RepoContext(d), facts)
+        self.assertIn("GET /api/x", out["unverified_signature_routes"])
 
 
 if __name__ == "__main__":

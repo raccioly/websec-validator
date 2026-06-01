@@ -157,12 +157,18 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                         f"(HTTP {lk.get('status')}, {lk.get('direction')})"}]))
 
     # ---- 1c. Unsafe/unverified decoder feeding an auth decision (F5) ----
-    for ud in ((facts.get("authz", {}) or {}).get("unsafe_auth_decoders", []) or []):
+    _authz = facts.get("authz", {}) or {}
+    _uvr = _authz.get("unverified_signature_routes", []) or []
+    for ud in (_authz.get("unsafe_auth_decoders", []) or []):
+        ev = [{"layer": "recon", "detail": f"{ud.get('file')} makes an auth/identity decision AND calls "
+               f"{ud.get('decoder')}() — if that decodes a token/signature WITHOUT verifying it, a forged "
+               "value is trusted (the decodeJwtPayloadUnsafe → requireAdmin class of bug). Trace the call path."}]
+        if _uvr:
+            ev.append({"layer": "recon", "detail": f"static at-risk routes ({len(_uvr)}) — call a guard defined "
+                       f"alongside this unverified decode: {', '.join(_uvr[:8])}{' …' if len(_uvr) > 8 else ''}. "
+                       "Run `websec dynamic --unauth` / the forged-token probe to confirm which accept a forged token."})
         out.append(_f(f"Auth decision uses an unverified decoder: {ud.get('decoder')}", "access-control",
-                      "unsafe-auth-decoder", "HIGH", "MEDIUM", ud.get("file", ""),
-                      [{"layer": "recon", "detail": f"{ud.get('file')} makes an auth/identity decision AND calls "
-                        f"{ud.get('decoder')}() — if that decodes a token/signature WITHOUT verifying it, a forged "
-                        "value is trusted (the decodeJwtPayloadUnsafe → requireAdmin class of bug). Trace the call path."}]))
+                      "unsafe-auth-decoder", "HIGH", "MEDIUM", ud.get("file", ""), ev))
 
     # ---- 1d. Forged-token acceptance — unverified signature, DYNAMICALLY CONFIRMED ----
     # The verdict for 1c: we presented an UNSIGNED/bogus-sig token and the route reached its
