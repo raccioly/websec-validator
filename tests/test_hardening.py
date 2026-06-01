@@ -133,5 +133,41 @@ class ProbeRegistrationTests(unittest.TestCase):
         self.assertEqual(ctx["endpoints"]["reads"], ["GET /api/a"])
 
 
+class SecretPrecisionTests(unittest.TestCase):
+    """bug-072: low-precision generic/entropy secret rules -> MEDIUM (+verify note); specific
+    rules (AKIA, private-key, …) keep HIGH. Nothing is hidden."""
+
+    def test_generic_rule_detection(self):
+        self.assertTrue(scanners._generic_secret("generic-api-key"))
+        self.assertTrue(scanners._generic_secret("high-entropy-string"))
+        self.assertFalse(scanners._generic_secret("aws-access-token"))
+        self.assertFalse(scanners._generic_secret("private-key"))
+
+    def test_gitleaks_generic_is_medium_specific_is_high(self):
+        rows = [
+            {"File": "src/lib/chains.ts", "RuleID": "generic-api-key", "Secret": "x" * 40, "Match": "x" * 40, "StartLine": 1},
+            {"File": "src/k.pem", "RuleID": "private-key", "Secret": "-----BEGIN", "Match": "-----BEGIN", "StartLine": 1},
+            {"File": "src/a.ts", "RuleID": "aws-access-token", "Secret": "AKIA" + "A" * 16, "Match": "AKIA" + "A" * 16, "StartLine": 1},
+        ]
+        by = {r["key"]: r for r in scanners._norm_gitleaks(rows)}
+        self.assertEqual(by["generic-api-key"]["severity"], "MEDIUM")
+        self.assertIn("generic/entropy", by["generic-api-key"]["title"])
+        self.assertEqual(by["private-key"]["severity"], "HIGH")          # specific rule untouched
+        self.assertEqual(by["aws-access-token"]["severity"], "HIGH")     # AKIA via _aws_secret_tier
+
+    def test_trivy_generic_secret_is_medium(self):
+        data = {"Results": [{"Target": "src/x.ts", "Secrets": [
+            {"RuleID": "generic-api-key", "Title": "Generic API Key", "Match": "y" * 40, "StartLine": 2}]}]}
+        secs = [f for f in scanners._norm_trivy(data) if f["category"] == "secret"]
+        self.assertEqual(secs[0]["severity"], "MEDIUM")
+
+    def test_medium_secret_gets_medium_confidence_in_ledger(self):
+        unified = {"top": [{"severity": "MEDIUM", "category": "secret",
+                            "title": "secret: Generic API Key — generic/entropy match", "file": "src/x.ts", "tools": ["gitleaks"]}]}
+        led = findings.build_ledger({}, unified, None, [])
+        hit = [f for f in led["findings"] if f["category"] == "static-secret"][0]
+        self.assertEqual(hit["confidence"], "MEDIUM")
+
+
 if __name__ == "__main__":
     unittest.main()

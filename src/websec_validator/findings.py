@@ -184,7 +184,9 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         cat = t.get("category", "")
         cls = cat_to_class.get(cat, "sast")
         sev = t.get("severity", "MEDIUM")
-        conf = "HIGH" if cat in ("secret",) or (cat == "sca" and sev in ("HIGH", "CRITICAL")) else "MEDIUM"
+        # Confidence follows severity for secrets/CVEs: a generic-api-key tiered down to MEDIUM
+        # (low-precision rule, bug-072) should NOT be stamped HIGH-confidence — keep P(real) honest.
+        conf = "HIGH" if (cat in ("secret", "sca") and sev in ("HIGH", "CRITICAL")) else "MEDIUM"
         out.append(_f(t.get("title", cat), f"static-{cat}", cls, sev, conf, t.get("file", ""),
                       [{"layer": "static", "detail": f"{'+'.join(t.get('tools', []))}: {t.get('title','')}"}]))
 

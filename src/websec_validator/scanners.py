@@ -200,6 +200,23 @@ def _aws_secret_tier(secret: str, match: str):
     return None, None
 
 
+# gitleaks/trivy "generic" + entropy/keyword rules are high-recall, low-precision: they fire on
+# public keys, wallet addresses, hashes, env-var refs and test fixtures about as often as real
+# credentials. Tier those to MEDIUM + a verify note (NEVER hide them) so the HIGH secret tier
+# stays trustworthy in a shareable report; specific-format rules (AKIA, private-key, GitHub/
+# Stripe/Slack/JWT, etc.) keep HIGH. (bug-072 — dogfooding a wallet app surfaced ~20 HIGH
+# generic-api-key FPs in committed source.)
+_GENERIC_SECRET_RULES = {"generic-api-key", "generic-api-key-1", "generic", "api-key",
+                         "secret-keyword", "high-entropy", "high-entropy-string", "entropy"}
+_GENERIC_NOTE = ("generic/entropy match — verify it's a live credential "
+                 "(often a public key, address, hash or env-ref, not a secret)")
+
+
+def _generic_secret(rule: str) -> bool:
+    r = (rule or "").lower()
+    return r in _GENERIC_SECRET_RULES or "generic" in r or "entropy" in r
+
+
 def _norm_trivy(data: dict) -> list:
     out = []
     for res in (data.get("Results") or []):
@@ -210,11 +227,14 @@ def _norm_trivy(data: dict) -> list:
                         "title": f"{v.get('PkgName')} {v.get('InstalledVersion')} → {v.get('FixedVersion', '(no fix)')}",
                         "fingerprint": f"cve|{v.get('PkgName')}|{v.get('VulnerabilityID')}"})
         for s in (res.get("Secrets") or []):
+            rid = s.get("RuleID", "")
             sev, note = _aws_secret_tier(s.get("Match", ""), s.get("Code", "") or "")
-            title = f"secret: {s.get('Title') or s.get('RuleID')}" + (f" — {note}" if note else "")
+            if not sev and _generic_secret(rid):
+                sev, note = "MEDIUM", _GENERIC_NOTE
+            title = f"secret: {s.get('Title') or rid}" + (f" — {note}" if note else "")
             out.append({"tool": "trivy", "category": "secret", "severity": sev or _sev(s.get("Severity") or "HIGH"),
-                        "key": s.get("RuleID", ""), "file": tgt, "line": s.get("StartLine", 0),
-                        "title": title, "fingerprint": f"secret|{tgt}|{s.get('RuleID')}"})
+                        "key": rid, "file": tgt, "line": s.get("StartLine", 0),
+                        "title": title, "fingerprint": f"secret|{tgt}|{rid}"})
         for m in (res.get("Misconfigurations") or []):
             out.append({"tool": "trivy", "category": "iac", "severity": _sev(m.get("Severity")),
                         "key": m.get("ID", ""), "file": tgt, "line": 0, "title": (m.get("Title") or "")[:90],
@@ -228,6 +248,8 @@ def _norm_gitleaks(data) -> list:
     for x in rows:
         f, rule = x.get("File", ""), x.get("RuleID", "")
         sev, note = _aws_secret_tier(x.get("Secret", ""), x.get("Match", ""))
+        if not sev and _generic_secret(rule):
+            sev, note = "MEDIUM", _GENERIC_NOTE
         title = f"secret: {(x.get('Description') or rule)[:80]}" + (f" — {note}" if note else "")
         out.append({"tool": "gitleaks", "category": "secret", "severity": sev or "HIGH",
                     "key": rule, "file": f, "line": x.get("StartLine", 0),
