@@ -171,6 +171,34 @@ class SecretPrecisionTests(unittest.TestCase):
         self.assertEqual(hit["confidence"], "MEDIUM")
 
 
+class DocExampleSecretTests(unittest.TestCase):
+    """0.2.8: secrets in documentation/example files (curl examples in a README, .env.example
+    placeholders) tier to LOW + a verify note. Real code files are untouched."""
+
+    def test_is_doc_or_example(self):
+        self.assertTrue(scanners._is_doc_or_example("README.md"))
+        self.assertTrue(scanners._is_doc_or_example("docs/API-REFERENCE.md"))
+        self.assertTrue(scanners._is_doc_or_example(".env.example"))
+        self.assertTrue(scanners._is_doc_or_example("config/settings.sample.json"))
+        self.assertFalse(scanners._is_doc_or_example("src/app/route.ts"))
+
+    def test_gitleaks_doc_secret_to_low_code_stays_high(self):
+        rows = [
+            {"File": "README.md", "RuleID": "curl-auth-header", "Secret": "x" * 30, "Match": "Authorization: Bearer x", "StartLine": 1},
+            {"File": "src/server.ts", "RuleID": "private-key", "Secret": "-----BEGIN", "Match": "-----BEGIN", "StartLine": 1},
+        ]
+        by = {r["file"]: r for r in scanners._norm_gitleaks(rows)}
+        self.assertEqual(by["README.md"]["severity"], "LOW")
+        self.assertIn("documentation/example", by["README.md"]["title"])
+        self.assertEqual(by["src/server.ts"]["severity"], "HIGH")  # real code file untouched
+
+    def test_trivy_doc_secret_to_low(self):
+        data = {"Results": [{"Target": "docs/SECURITY.md", "Secrets": [
+            {"RuleID": "curl-auth-header", "Title": "Auth header", "Match": "Bearer x", "StartLine": 1}]}]}
+        secs = [f for f in scanners._norm_trivy(data) if f["category"] == "secret"]
+        self.assertEqual(secs[0]["severity"], "LOW")
+
+
 class CookieCoverageTests(unittest.TestCase):
     """0.2.7: extract auth cookie names so the forged-token engine covers cookie-ONLY apps."""
 

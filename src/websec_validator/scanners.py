@@ -217,6 +217,27 @@ def _generic_secret(rule: str) -> bool:
     return r in _GENERIC_SECRET_RULES or "generic" in r or "entropy" in r
 
 
+# Secrets matched in DOCUMENTATION / EXAMPLE files are overwhelmingly placeholders, not live
+# credentials — e.g. `curl -H "Authorization: Bearer <token>"` in a README/API doc, or a
+# value in `.env.example`. Tier those to LOW + a verify note (still visible — a real key CAN be
+# pasted into docs by mistake). Dogfooding flagged 4 HIGH curl-auth-header FPs across an API's
+# README + docs/*.md (bug below).
+_DOC_EXT = (".md", ".mdx", ".markdown", ".rst", ".txt", ".adoc")
+_DOC_DIR_MARKERS = ("/docs/", "/doc/", "/examples/", "/example/", "/samples/", "/sample/", "/.github/")
+_DOC_NAME_PREFIX = ("readme", "changelog", "contributing", "license", "authors", "history", "notice")
+_EXAMPLE_SUFFIX = (".example", ".sample", ".dist", ".template", ".tmpl")
+_DOC_NOTE = "in a documentation/example file — almost always a placeholder, verify before treating as real"
+
+
+def _is_doc_or_example(path: str) -> bool:
+    p = (path or "").replace("\\", "/").lower()
+    base = p.rsplit("/", 1)[-1]
+    return (p.endswith(_DOC_EXT)
+            or any(m in p for m in _DOC_DIR_MARKERS)
+            or any(base.startswith(m) for m in _DOC_NAME_PREFIX)
+            or any(s in base for s in _EXAMPLE_SUFFIX))
+
+
 def _norm_trivy(data: dict) -> list:
     out = []
     for res in (data.get("Results") or []):
@@ -231,6 +252,8 @@ def _norm_trivy(data: dict) -> list:
             sev, note = _aws_secret_tier(s.get("Match", ""), s.get("Code", "") or "")
             if not sev and _generic_secret(rid):
                 sev, note = "MEDIUM", _GENERIC_NOTE
+            if _is_doc_or_example(tgt):
+                sev, note = "LOW", (note + "; " if note else "") + _DOC_NOTE
             title = f"secret: {s.get('Title') or rid}" + (f" — {note}" if note else "")
             out.append({"tool": "trivy", "category": "secret", "severity": sev or _sev(s.get("Severity") or "HIGH"),
                         "key": rid, "file": tgt, "line": s.get("StartLine", 0),
@@ -250,6 +273,8 @@ def _norm_gitleaks(data) -> list:
         sev, note = _aws_secret_tier(x.get("Secret", ""), x.get("Match", ""))
         if not sev and _generic_secret(rule):
             sev, note = "MEDIUM", _GENERIC_NOTE
+        if _is_doc_or_example(f):
+            sev, note = "LOW", (note + "; " if note else "") + _DOC_NOTE
         title = f"secret: {(x.get('Description') or rule)[:80]}" + (f" — {note}" if note else "")
         out.append({"tool": "gitleaks", "category": "secret", "severity": sev or "HIGH",
                     "key": rule, "file": f, "line": x.get("StartLine", 0),
