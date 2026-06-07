@@ -46,6 +46,17 @@ STANDARDS = {
     "client-exposure": (["CWE-200 Information Exposure"], "ASVS V14.3", []),
     "graphql": (["CWE-200 Information Exposure"], "ASVS V13.1", ["API8:2023"]),
     "sast": (["CWE-710 Coding Standards"], "ASVS V1.1", []),
+    # --- PTREQ0013000 classes ---
+    "insecure-secret-default": (["CWE-798 Hard-coded Credentials", "CWE-1188 Insecure Default Initialization"],
+                                "ASVS V2.10", ["API2:2023 Broken Authentication"]),
+    "cswsh": (["CWE-1385 Missing Origin Validation in WebSockets", "CWE-346 Origin Validation Error"],
+              "ASVS V13.2", ["API2:2023 Broken Authentication"]),
+    "error-disclosure": (["CWE-209 Sensitive Information in Error Message", "CWE-200 Information Exposure"],
+                         "ASVS V7.4.1", ["API8:2023 Misconfiguration"]),
+    "password-policy": (["CWE-521 Weak Password Requirements"], "ASVS V2.1", ["API2:2023 Broken Authentication"]),
+    "tamperable-display": (["CWE-451 UI Misrepresentation of Critical Information",
+                            "CWE-829 Inclusion of Functionality from Untrusted Control Sphere"],
+                           "ASVS V14.4", ["API8:2023 Misconfiguration"]),
 }
 REMEDIATION = {
     "missing-auth": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a "
@@ -60,6 +71,17 @@ REMEDIATION = {
     "iac": "Apply the hardening (non-root user, pin actions to a SHA, enforce TLS, etc.).",
     "client-exposure": "Move the secret server-side; never reference it from a client component or a NEXT_PUBLIC_/VITE_ var.",
     "graphql": "Disable introspection + the playground in production; add query depth/complexity limits.",
+    "insecure-secret-default": "Remove the hard-coded fallback; fail closed when the secret env var is unset, "
+                               "and ROTATE the leaked value. Load signing keys from a secrets manager.",
+    "cswsh": "Make the AppSync default authorization USER_POOL/OIDC/IAM/Lambda (not API_KEY); validate the "
+             "WebSocket Origin; keep any API key to a scoped, non-default authorization mode only.",
+    "error-disclosure": "Return a generic error to the client; log the stack/detail server-side only. Gate "
+                        "verbose errors behind a non-production flag that defaults to OFF.",
+    "password-policy": "Enforce ONE shared password policy across every route (a single validator/helper); "
+                       "align the weaker siblings to the strongest character-class set.",
+    "tamperable-display": "Kill the scalable vector with a strict CSP (script-src 'self' + per-request nonce, no "
+                          "unsafe-inline/eval); anchor trust out-of-band (emailed canonical value, safety code, "
+                          "server-rendered identicon, EIP-55 checksum) so single-surface tampering is user-detectable.",
 }
 _DEFAULT_REM = "Review and remediate per the cited standard."
 
@@ -184,6 +206,24 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
               "accepted it, so the signature is NOT verified. Reachable by anyone who can craft a token "
               "string; route the guard through a verifying decode (jwt.verify w/ the key / a checked session)."}]))
 
+    # ---- 1e. Insecure DEFAULT signing secret — forgeable JWT (PTREQ0013000 #8) ----
+    _auth = facts.get("auth", {}) or {}
+    _jwt_used = bool((_auth.get("signal_counts") or {}).get("jwt")) or bool(_auth.get("jwt_sign_verify_present"))
+    for sd in (_auth.get("insecure_secret_defaults", []) or []):
+        if sd.get("dev_ish") and _jwt_used:
+            sev, conf = "CRITICAL", "MEDIUM"        # dev placeholder + the repo signs JWTs → forgeable
+        elif sd.get("dev_ish"):
+            sev, conf = "HIGH", "MEDIUM"
+        else:
+            sev, conf = "MEDIUM", "LOW"             # a non-dev-ish fallback on a secret var — still verify
+        out.append(_f(f"Hard-coded fallback signing secret in {sd.get('file')}", "authn",
+                      "insecure-secret-default", sev, conf, sd.get("file", ""),
+                      [{"layer": "recon", "detail": f"a *SECRET/*KEY var falls back to the literal "
+                        f"{sd.get('literal')!r} — if that fallback is reached at runtime, anyone who reads the "
+                        f"source can forge tokens."
+                        + (" The repo signs/verifies JWTs." if _jwt_used else "")
+                        + " Confirm reachability with the forged-token / hs256 probe (it seeds this literal)."}]))
+
     # ---- 2. Static scanner findings (de-duplicated `unified`) ----
     cat_to_class = {"sca": "cve", "secret": "secret", "iac": "iac", "sast": "sast"}
     for t in (unified or {}).get("top", []):
@@ -205,34 +245,76 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
     is_nosql_only = bool(_ds & _nosql) and not (_ds & _sql)
     for cls, info in (facts.get("surface", {}).get("sinks", {}) or {}).items():
         sev = "MEDIUM"
-        ev = [{"layer": "recon", "detail": f"user-input-gated {cls} in {info.get('count')} file(s)"}]
+        if cls == "error-disclosure":
+            # output-side sink — NOT user-input-gated (documented exception); don't mislabel it
+            attack = "error-disclosure"
+            ev = [{"layer": "recon", "detail": f"response-side disclosure in {info.get('count')} file(s): a handler "
+                   "returns err.stack/err.message, or a NODE_ENV!=='production' branch spreads the stack (#7). "
+                   "Confirm with the error-disclosure probe (force a 500, grep the body for stack frames)."}]
+        elif cls.startswith("ssrf"):
+            attack = "ssrf"
+            ev = [{"layer": "recon", "detail": f"outbound HTTP with a non-literal (variable) URL in "
+                   f"{info.get('count')} file(s) — SSRF if that URL is user-influenced (trace the source; the "
+                   "same-line user marker isn't required here, so verify reachability from a req.query reader)"}]
+            if cls == "ssrf-outbound-http":
+                sev = "LOW"               # var-arg only — weaker than the user-gated `ssrf` class
+        else:
+            attack = cls if cls in STANDARDS else "sast"
+            ev = [{"layer": "recon", "detail": f"user-input-gated {cls} in {info.get('count')} file(s)"}]
         if cls in ("sqli", "sql-injection") and is_nosql_only:
             sev = "LOW"
             ev.append({"layer": "recon", "detail": f"datastore is {', '.join(sorted(_ds)) or 'NoSQL'} — "
                        "classic SQLi is unlikely here; check for NoSQL injection instead (usually a false positive)"})
         out.append(_f(f"{cls} sink ({info.get('count')} site(s))", "attack-surface",
-                      cls if cls in STANDARDS else "sast", sev, "LOW",
-                      (info.get("files") or ["?"])[0], ev))
+                      attack, sev, "LOW", (info.get("files") or ["?"])[0], ev))
 
     # ---- 4. Client-side secret exposure (HIGH — ships to browser) ----
-    for leak in (facts.get("client_exposure", {}).get("public_secret_leaks", []) +
-                 facts.get("client_exposure", {}).get("server_secret_in_client_component", [])):
+    # Name-based + value-shape (rename-proof) + CDK build-injection (#3) all land here.
+    _cx = facts.get("client_exposure", {})
+    for leak in (_cx.get("public_secret_leaks", []) + _cx.get("server_secret_in_client_component", [])
+                 + _cx.get("public_secret_value_leaks", []) + _cx.get("public_var_from_cfn_output", [])):
         out.append(_f(f"Secret exposed to client: {leak}", "client-exposure", "client-exposure",
-                      "HIGH", "HIGH", leak, [{"layer": "recon", "detail": "secret-named var reaches the browser bundle"}]))
+                      "HIGH", "HIGH", leak, [{"layer": "recon", "detail": "a secret (by name, value-shape, or CDK "
+                       "build-injection) reaches the browser bundle"}]))
 
-    # ---- 5. IaC / CI-CD ----
+    # ---- 5. IaC / CI-CD (AppSync API_KEY default → CSWSH class #4) ----
     for fnd in (facts.get("iac_ci", {}).get("findings", []) or []):
-        out.append(_f(f"{fnd.get('kind')}: {fnd.get('detail','')[:80]}", "iac-ci", "iac",
+        kind = fnd.get("kind", "")
+        cls = "cswsh" if kind.startswith("appsync-apikey") else "iac"
+        out.append(_f(f"{kind}: {fnd.get('detail','')[:80]}", "iac-ci", cls,
                       fnd.get("severity", "MEDIUM"), "MEDIUM", fnd.get("file", ""),
                       [{"layer": "recon", "detail": fnd.get("detail", "")}]))
 
-    # ---- 6. GraphQL ----
+    # ---- 6. GraphQL (AppSync introspection #2 + subscription BOLA #5 carry their own attack_class) ----
     g = facts.get("graphql", {})
     if g.get("present"):
         for fnd in g.get("findings", []):
-            out.append(_f(f"GraphQL: {fnd.get('issue')}", "graphql", "graphql",
+            out.append(_f(f"GraphQL: {fnd.get('issue')}", "graphql", fnd.get("attack_class", "graphql"),
                           fnd.get("severity", "MEDIUM"), "MEDIUM", (g.get("endpoints") or ["/graphql"])[0],
                           [{"layer": "recon", "detail": fnd.get("detail", "")}]))
+
+    # ---- 7. Password-policy drift across sibling routes (PTREQ0013000 #6) ----
+    pp = facts.get("password_policy", {}) or {}
+    for dr in pp.get("drift", []):
+        out.append(_f(f"Inconsistent password policy: {dr.get('file')}", "authn", "password-policy",
+                      "MEDIUM", "MEDIUM", dr.get("file", ""),
+                      [{"layer": "recon", "detail": f"enforces {dr.get('enforces')} while the strongest sibling "
+                        f"enforces {dr.get('strongest_enforces')} — the weaker validator is a regression (#6); "
+                        "align all routes to one shared policy."}]))
+    if pp.get("weak_policy"):
+        out.append(_f("Weak password policy (uniform across routes)", "authn", "password-policy", "LOW", "LOW",
+                      (pp.get("password_blocks") or [{}])[0].get("file", ""),
+                      [{"layer": "recon", "detail": f"strongest policy found enforces only {pp.get('weak_policy')} "
+                        "character class(es) — strengthen the requirements."}]))
+
+    # ---- 8. Client-integrity / tamperable display — man-in-the-browser (the agent-wallet class) ----
+    _ci = facts.get("client_integrity", {}) or {}
+    for fnd in _ci.get("findings", []):
+        out.append(_f(fnd.get("issue", "tamperable client display"), "client-integrity",
+                      fnd.get("attack_class", "tamperable-display"),
+                      fnd.get("severity", "LOW"), fnd.get("confidence", "LOW"),
+                      (_ci.get("sensitive_display") or ["client"])[0],
+                      [{"layer": "recon", "detail": fnd.get("detail", "")}]))
 
     # ---- suppress + rank ----
     kept = [f for f in out if not _suppressed(f, suppressions)]

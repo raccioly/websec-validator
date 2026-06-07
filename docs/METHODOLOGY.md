@@ -42,7 +42,7 @@ it safe to run anywhere.
 ```
                  ┌─────────────────────────── deterministic, no LLM, no running app ──────────────────────────┐
   your repo ──▶  1. RECON          2. STATIC SCANNERS      3. FINDINGS LEDGER        4. BRIEFING + REPORT
-                 (11 extractors)   (Trivy/Gitleaks/…,      (evidence chain +         (marching orders for
+                 (13 extractors)   (Trivy/Gitleaks/…,      (evidence chain +         (marching orders for
                  walk once         de-duplicated)          standards + calibrated     your agent) + immutable
                                                            confidence)                run record
                                                                   │
@@ -55,24 +55,37 @@ Every `run` is written to an **immutable, timestamped directory** (`websec-out/r
 
 ---
 
-## Layer 1 — Recon: the 11 extractors
+## Layer 1 — Recon: the 13 extractors
 
-Recon walks the repository **once** into a shared `RepoContext`, then runs eleven focused
+Recon walks the repository **once** into a shared `RepoContext`, then runs thirteen focused
 extractors over it. Each answers one question a pentester asks first. The output is `FACTS.json`.
 
 | # | Extractor | What it asks | Why it matters (the security reasoning) |
 |---|---|---|---|
 | 1 | **stack** | What languages, frameworks, datastores? Monorepo? | Everything downstream is stack-aware. The datastore class also tells the agent which static alerts are likely noise (e.g. on a NoSQL/JSON API, most SQLi alerts are false positives). |
 | 2 | **routes** | What are all the HTTP endpoints? | The endpoint inventory *is* the attack surface. Powered by [OWASP Noir](https://github.com/owasp-noir/noir) (50+ frameworks) with a regex fallback. Every probe targets a real route. |
-| 3 | **auth** | What authentication scheme, where's the token, where are the guards? | You cannot reason about "who can do what" without knowing how identity is established. Detects all schemes and picks a primary (JWT, session, passport/SSO, API key). |
-| 4 | **authz** | Which endpoints have a visible auth guard, which don't? | **Broken access control is the #1 web risk (OWASP A01).** This builds the per-endpoint guard map and flags write endpoints with no visible guard — the highest-value missing-authz leads. |
-| 5 | **tenant** | Is this multi-tenant, and what field isolates one customer from another? | The tenant boundary (`groupId`, `orgId`, `tenantId`…) is what every cross-tenant BOLA probe depends on, and it's the easiest thing to get subtly wrong. |
-| 6 | **surface** | Where does user input reach a dangerous sink? | Maps 12 user-input-gated sink classes (SSRF, command injection, SQLi, path traversal, SSTI, open redirect, deserialization, XXE, prototype pollution…). "User-gated" is the key filter — a hardcoded `exec("ls")` is not a vuln; `exec(req.body.cmd)` is. |
-| 7 | **schemas** | What are the data models, and which fields are *privileged*? | Finds ORM/schema models (Pydantic, SQLAlchemy, Django, Prisma, Mongoose, TypeORM, Zod, Sequelize) and the sensitive field names (`role`, `isAdmin`, `groupId`, `passwordHash`…). Turns mass-assignment from a generic guess into "try injecting *this* app's privileged fields." |
-| 8 | **iac_ci** | Misconfigurations in Docker/CI/IaC? | Insecure defaults (containers as root, unpinned CI actions, disabled TLS) are real, common, and invisible at the app layer. |
-| 9 | **client_exposure** | Do secrets leak into the browser bundle? | A secret in a `NEXT_PUBLIC_`/`VITE_` var or a client component ships to every visitor. High impact, easy to miss. |
-| 10 | **graphql** | Is there a GraphQL surface, and is introspection open? | GraphQL has its own failure modes — introspection/playground in production, no depth/complexity limits (DoS), batching attacks. |
-| 11 | **integrations** | Third-party integrations + webhooks; are webhooks signature-verified? | An unverified webhook endpoint is a forgeable, often-unauthenticated write path straight into your system. |
+| 3 | **auth** | What scheme, where's the token — and is the signing secret hard-coded? | You cannot reason about "who can do what" without knowing how identity is established. Detects all schemes and picks a primary; also flags an **insecure default signing secret** (`JWT_SECRET \|\| 'dev-secret'`) — if that fallback is reached at runtime, anyone who reads the source can forge tokens (a Critical the pen test found). |
+| 4 | **authz** | Which endpoints have a visible auth guard, which don't? | **Broken access control is the #1 web risk (OWASP A01).** Builds the per-endpoint guard map and flags write endpoints with no visible guard — the highest-value missing-authz leads. |
+| 5 | **tenant** | Is this multi-tenant, and what field isolates one customer from another? | The tenant boundary (`groupId`, `orgId`, `tenantId`…) is what every cross-tenant BOLA probe depends on, and the easiest thing to get subtly wrong. |
+| 6 | **password_policy** | Is the password policy consistent across routes? | A strong policy on one route proves a weaker sibling is a *regression*, not a design choice. Fingerprints the `{min,upper,lower,digit,special}` requirement set per validator and flags any that is a strict subset of the strongest (the exact cross-route drift the pen test found). The subset comparison is logic a per-file linter can't express. |
+| 7 | **surface** | Where does user input reach a dangerous sink — and where does the app leak internals back? | Maps 14 sink classes: 12 user-input-gated (SSRF, command injection, SQLi, traversal, SSTI, redirect, deserialization, XXE, prototype-pollution, ReDoS, eval) **plus var-arg SSRF** (`axios.get(someVar)` a file away from `req.query`) and a **response-side error-disclosure** sink (a 500 echoing `err.stack`). "User-gated" is the key filter — `exec("ls")` is not a vuln; `exec(req.body.cmd)` is. |
+| 8 | **schemas** | What are the data models, and which fields are *privileged*? | Finds ORM/schema models (Pydantic, SQLAlchemy, Django, Prisma, Mongoose, TypeORM, Zod, Sequelize) and the sensitive field names (`role`, `isAdmin`, `groupId`, `passwordHash`…). Turns mass-assignment into "try injecting *this* app's privileged fields." |
+| 9 | **iac_ci** | Misconfigurations in Docker/CI/IaC — and in the managed-cloud auth config? | Insecure defaults (containers as root, unpinned CI actions) are real and invisible at the app layer. Now also reads **AWS-CDK**: an AppSync `defaultAuthorization: API_KEY` means the realtime WebSocket takes a static key with no Origin binding (**Cross-Site WebSocket Hijacking**); a WAFv2 WebACL is reported as *"present — VERIFY association,"* never as mitigation. |
+| 10 | **client_exposure** | Do secrets leak into the browser bundle? | A secret in a `NEXT_PUBLIC_`/`VITE_` var ships to every visitor. Detected three ways: by **name**, by **value-shape** (the AppSync `da2-…` key has no scanner rule, and this survives a benign var rename), and by **CDK build-injection** (a CloudFormation output wired into a public build var — invisible to every secret scanner). |
+| 11 | **client_integrity** | Does a page display a fund-redirecting value a browser-resident attacker could tamper? | The man-in-the-browser class (the agent-wallet lesson). When a wallet/receive address, QR, or routing number is rendered client-side, malware / a rogue extension / a poisoned dependency can rewrite it. **No web app can make on-screen display tamper-proof** — so this is a LOW-confidence architectural flag checking the two controls that *do* move the needle: a strict CSP (kill the scalable vector) + an out-of-band anchor (make tamper user-detectable). |
+| 12 | **graphql** | Is there a GraphQL surface — is introspection / subscription authz sound? | GraphQL has its own failure modes. For **AppSync**: introspection can't be disabled at the API layer (so a WAF string-match is the only control — and it's bypassable via Unicode-escape / junk-byte padding), and a `Subscription onEvent(groupId)` whose VTL resolver doesn't bind the tenant arg to the caller's identity is a **cross-group BOLA** (reads the `.graphql` SDL + the co-located `.vtl`). |
+| 13 | **integrations** | Third-party integrations + webhooks; are webhooks signature-verified? | An unverified webhook endpoint is a forgeable, often-unauthenticated write path straight into your system. |
+
+> **The managed-cloud boundary (why rows 3, 9, 11, 12 grew).** A real authenticated pen test
+> (`PTREQ0013000`) found that the two Criticals and two Highs lived in file types and constructs the
+> recon never used to parse: the **AWS-CDK** auth config, the **AppSync GraphQL SDL**, and the **VTL**
+> resolvers (`base.py` now walks `.graphql`/`.gql`/`.vtl`). Modern serverless apps put their
+> authorization in exactly that managed-cloud boundary — so an AWS-heavy target's most important half
+> was previously invisible. Two honest limits stated up front: regex over CDK TypeScript (not an AST)
+> can be evaded by aliased / helper-extracted constructs (false negatives), and the man-in-the-browser
+> class (row 11) can never be a confident static catch — it is the inherent web-platform ceiling that
+> hardware wallets exist to solve, so it ships as a LOW-confidence "verify these compensating controls"
+> lead, never a verdict.
 
 **Design note — the authz heuristic is a *hint*, not a verdict.** File-level guard detection
 over-flags on apps that split routing from controllers (common in Express). That's intentional:
@@ -227,6 +240,11 @@ opinion:
 | Vulnerable dependency | CWE-1395 | V14.2.1 | API8 |
 | Client-side secret exposure | CWE-200 | V14.3 | — |
 | GraphQL exposure | CWE-200 | V13.1 | API8 |
+| Forgeable JWT (insecure default secret) | CWE-798 / CWE-1188 | V2.10 | API2 |
+| CSWSH (AppSync API_KEY default auth) | CWE-1385 / CWE-346 | V13.2 | API2 |
+| Error / stack-trace disclosure | CWE-209 / CWE-200 | V7.4.1 | API8 |
+| Weak / inconsistent password policy | CWE-521 | V2.1 | API2 |
+| Tamperable display (man-in-the-browser) | CWE-451 / CWE-829 | V14.4 | API8 |
 
 (Full map, with remediation patterns, lives in `findings.py`. A future increment turns this curated
 map into a full ASVS index lookup.)

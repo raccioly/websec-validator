@@ -49,8 +49,26 @@ def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list
     iac_lines = "\n".join(f"- **{f['severity']}** `{f['kind']}` — `{f['file']}` — {f['detail']}"
                           for f in iac_findings[:20]) or "_none_"
     client = facts.get("client_exposure", {})
-    client_leaks = client.get("public_secret_leaks", []) + client.get("server_secret_in_client_component", [])
+    client_leaks = (client.get("public_secret_leaks", []) + client.get("server_secret_in_client_component", [])
+                    + client.get("public_secret_value_leaks", []) + client.get("public_var_from_cfn_output", []))
     client_section = _bullets(client_leaks) if client_leaks else "_none detected_"
+
+    ci = facts.get("client_integrity", {})
+    ci_findings = ci.get("findings", [])
+    ci_section = ("\n".join(f"- **{f.get('severity')}/{f.get('confidence','LOW')}** {f.get('issue')}"
+                            for f in ci_findings) if ci_findings
+                  else "_no fund-redirecting display values detected (MITB class N/A)_" if not ci.get("sensitive_display")
+                  else "_sensitive display present; strict CSP + out-of-band anchor look present — spot-check_")
+
+    pp = facts.get("password_policy", {})
+    if pp.get("drift"):
+        pp_line = f"⚠ DRIFT — {len(pp['drift'])} sibling route(s) weaker than the strongest set {pp.get('strongest_policy')}"
+    elif pp.get("weak_policy"):
+        pp_line = f"uniform but WEAK — enforces only {pp.get('weak_policy')}"
+    elif pp.get("password_blocks"):
+        pp_line = f"looks consistent across {len(pp['password_blocks'])} validator block(s)"
+    else:
+        pp_line = "_no password validators detected_"
 
     gql = facts.get("graphql", {})
     if gql.get("present"):
@@ -157,6 +175,11 @@ Guard coverage (file-level heuristic): {gs.get("with_visible_guard",0)} with vis
 Production source maps exposed: {client.get("production_source_maps", False)}
 
 **GraphQL surface:** {gql_line}
+
+**Password policy (cross-route consistency):** {pp_line}
+
+**Client integrity — man-in-the-browser / tamperable display:**
+{ci_section}
 
 **Third-party integrations:** {integ_line}
 {wh_line}

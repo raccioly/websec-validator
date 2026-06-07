@@ -70,20 +70,22 @@ Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and 
 
 > That's the whole user surface: **`run`** (plus the optional, advanced **`dynamic`** live-probing step below). `recon`/`proof`/`calibrate` exist for developing the tool itself and are hidden from `--help` — you never need them.
 
-## What it extracts (11 deterministic extractors, no LLM)
+## What it extracts (13 deterministic extractors, no LLM)
 
 | | Dimension | Notable output |
 |---|---|---|
 | stack | languages, frameworks, datastores | monorepo-aware (aggregates every manifest) |
 | routes | every endpoint via **OWASP Noir** | method · path · typed params · code path |
-| auth | scheme + login surface | multi-scheme (primary jwt > passport), PyJWT/NextAuth/session aware |
+| auth | scheme + login surface + **insecure-default signing secrets** | multi-scheme; flags a hard-coded `JWT_SECRET \|\| 'dev-secret'` fallback (forgeable JWT) |
 | **authz** | access-control map | guard coverage + **write endpoints with no visible guard** + roles |
 | tenant | multi-tenancy key candidates | the BOLA boundary, by frequency |
-| surface | 12 user-input-gated sink classes | SSRF/SQLi/NoSQLi/traversal/SSTI/redirect/deser/XXE/proto-pollution/ReDoS/cmd/eval |
+| **password_policy** | cross-route policy consistency | flags a route enforcing fewer character classes than the strongest sibling (policy drift) |
+| surface | 14 sink classes | 12 user-input-gated (SSRF/SQLi/traversal/SSTI/…) **+ var-arg SSRF + response-side error-disclosure** |
 | schemas | data models + **privileged fields** | Pydantic/SQLAlchemy/Django/Prisma/Mongoose/TypeORM/Zod → `role`/`isAdmin`/`groupId` for mass-assignment targeting |
-| iac_ci | IaC + CI/CD | GitHub Actions injection, unpinned actions, Dockerfile-root, tfstate |
-| client_exposure | browser leakage | `NEXT_PUBLIC_*` secrets, server-secret-in-client, source maps |
-| graphql | GraphQL surface | introspection / playground / missing depth-limit |
+| iac_ci | IaC + CI/CD | GHA injection, unpinned actions, Dockerfile-root, tfstate **+ CDK AppSync `API_KEY` default-auth (CSWSH)** |
+| client_exposure | browser leakage | public-var secrets by **name + value-shape (`da2-…`) + CDK build-injection**, server-secret-in-client, source maps |
+| **client_integrity** | tamperable display (man-in-the-browser) | a fund-redirecting value (wallet address/QR) shown without a strict CSP / out-of-band anchor |
+| graphql | GraphQL surface | introspection / playground / depth-limit **+ AppSync subscription-authz (cross-group BOLA) + WAF-bypass-aware introspection** |
 | integrations | third-party + webhooks | webhooks missing signature verification |
 
 Plus **derived targeting** — IDOR / SSRF / open-redirect / upload / write / auth-endpoint
@@ -192,11 +194,13 @@ publisher** with project `websec-validator`, owner `raccioly`, repo `websec-vali
 
 ## Status / roadmap
 
-**Done:** 11-extractor recon (incl. schema/entity → mass-assignment targeting), cross-tool de-dup,
-tailored probe staging, agent briefing, traceable findings ledger with **calibrated confidence
-(CJE — Wilson CIs)**, proof harness, test suite, **Docker bundle** (all scanners + Noir, arch-aware),
-**dynamic phase v1** (authenticated read-only cross-tenant BOLA — validated live, reproduced a
-hand-pentest's 14/14).
+**Done:** 13-extractor recon (incl. schema/entity → mass-assignment targeting, the **AWS-CDK /
+managed-AppSync / VTL boundary** — CSWSH, cross-group subscription BOLA, forgeable-JWT default
+secrets — and a **man-in-the-browser / tamperable-display** class), cross-tool de-dup + **bundled
+Semgrep rules**, tailored probe staging, agent briefing, traceable findings ledger with **calibrated
+confidence (CJE — Wilson CIs)**, proof harness, test suite, **Docker bundle** (all scanners + Noir,
+arch-aware), **dynamic phase v1** (authenticated read-only cross-tenant BOLA — validated live,
+reproduced a hand-pentest's 14/14).
 **Next:** dynamic write-verb BOLA + JWT/auth probes + ZAP/Nuclei two-role diff (gated, they mutate),
 calibration on hand-labeled real repos (more representative base rate), ASVS index lookup, optional
 model-SDK adapters for no-agent fallback.

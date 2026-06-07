@@ -13,9 +13,11 @@ from .auth import AuthExtractor
 from .authz import AuthzExtractor
 from .base import Extractor, RepoContext
 from .client_exposure import ClientExposureExtractor
+from .client_integrity import ClientIntegrityExtractor
 from .graphql import GraphQLExtractor
 from .iac_ci import IacCiExtractor
 from .integrations import IntegrationsExtractor
+from .policy_consistency import PolicyConsistencyExtractor
 from .routes import RoutesExtractor
 from .schemas import SchemasExtractor
 from .stack import StackExtractor
@@ -30,10 +32,12 @@ REGISTRY: list[Extractor] = [
     AuthExtractor(),
     AuthzExtractor(),
     TenantExtractor(),
+    PolicyConsistencyExtractor(),
     SurfaceExtractor(),
     SchemasExtractor(),
     IacCiExtractor(),
     ClientExposureExtractor(),
+    ClientIntegrityExtractor(),
     GraphQLExtractor(),
     IntegrationsExtractor(),
 ]

@@ -45,6 +45,17 @@ PROBES = {
     "dlp-bypass-offline": ("dlp-bypass-offline.py", "DLP/detection regex encoding bypass",
                           "your DLP/redaction regexes (offline)"),
     "s3-assess": ("s3-assess.sh", "S3 bucket posture", "a bucket name + AWS creds"),
+    # --- PTREQ0013000 probes ---
+    "error-disclosure-probe": ("error-disclosure-probe.sh", "Error/stack-trace disclosure in 500s (CWE-209)",
+                               "a running TEST instance (+ usually a token) — reads routes from probe-context.json"),
+    "appsync-introspection": ("appsync-introspection.sh", "AppSync introspection + WAF Unicode/junk bypass (#2)",
+                              "APPSYNC_URL + APPSYNC_API_KEY (or a session header) for a TEST AppSync API"),
+    "appsync-cswsh": ("appsync-cswsh.sh", "Cross-Site WebSocket Hijacking on AppSync realtime (#4)",
+                      "APPSYNC_URL + APPSYNC_API_KEY (TEST); pip install websocket-client for the live attempt"),
+    "appsync-subscription-bola": ("appsync-subscription-bola.sh", "Cross-group subscription BOLA (#5)",
+                                  "APPSYNC_URL + a low-priv session + VICTIM_GROUP_ID you do NOT own + SUB_FIELD"),
+    "client-integrity-checklist": ("client-integrity-checklist.sh", "Man-in-the-browser / tamperable-display posture",
+                                   "a running TEST instance + the page that shows the address (PAGE=/receive)"),
 }
 
 # unauth-baseline is ALWAYS staged: it's the cheapest probe and directly exercises the
@@ -59,6 +70,7 @@ _TARGET_KEYS = {
     "bola-cross-tenant": "idor_candidates",
     "ssrf-probes": "ssrf_candidates",
     "webhook-forgery": "write_endpoints",
+    "error-disclosure-probe": "write_endpoints",
 }
 
 _BANNER = (
@@ -70,6 +82,22 @@ _BANNER = (
     "# agent should finalize this draft against probe-context.json, then fill secrets.\n"
     "# ─────────────────────────────────────────────────────────────────────────────\n"
 )
+
+
+def _seed_hs256(text: str, facts: dict) -> str:
+    """Inject this repo's harvested fallback signing-secret literals (auth.insecure_secret_defaults,
+    #8) into the hs256 probe's PROJECT-SPECIFIC block, so a captured token confirms directly against
+    the app's OWN default secret — the fastest path from 'flagged' to 'proven forgeable'."""
+    import re as _re
+    lits = [sd.get("literal") for sd in ((facts.get("auth") or {}).get("insecure_secret_defaults") or [])
+            if sd.get("literal")]
+    if not lits:
+        return text
+    seeded = "\n".join(f"    {json.dumps(lit)}," for lit in dict.fromkeys(lits))
+    block = ("    # PROJECT-SPECIFIC START — seeded from this repo's insecure_secret_defaults (#8)\n"
+             + seeded + "\n    # PROJECT-SPECIFIC END")
+    new, n = _re.subn(r"    # PROJECT-SPECIFIC START.*?# PROJECT-SPECIFIC END", block, text, flags=_re.S)
+    return new if n else text
 
 
 def applicable(facts: dict) -> list:
@@ -86,6 +114,17 @@ def applicable(facts: dict) -> list:
         chosen += ["ssrf-probes"]
     if targeting.get("write_endpoints"):
         chosen += ["webhook-forgery", "race-conditions"]
+
+    # PTREQ0013000 — stage probes for the surfaces the new extractors found
+    surface_sinks = (facts.get("surface") or {}).get("sinks", {})
+    if surface_sinks.get("error-disclosure"):
+        chosen += ["error-disclosure-probe"]
+    appsync = bool((facts.get("graphql") or {}).get("appsync")) or any(
+        f.get("kind", "").startswith("appsync") for f in (facts.get("iac_ci") or {}).get("findings", []))
+    if appsync:
+        chosen += ["appsync-introspection", "appsync-cswsh", "appsync-subscription-bola"]
+    if (facts.get("client_integrity") or {}).get("findings"):
+        chosen += ["client-integrity-checklist"]
 
     seen, ordered = set(), []
     for k in chosen:
@@ -156,6 +195,8 @@ def stage(chosen: list, outdir: Path, facts: dict | None = None) -> list:
             body = src_root.joinpath(fname).read_bytes()
             # prepend the draft banner after any shebang line
             text = body.decode("utf-8", "replace")
+            if key == "hs256-brute-force":
+                text = _seed_hs256(text, facts)
             if text.startswith("#!"):
                 shebang, _, rest = text.partition("\n")
                 text = f"{shebang}\n{_BANNER}{rest}"

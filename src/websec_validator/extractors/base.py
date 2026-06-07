@@ -20,7 +20,13 @@ SKIP_DIRS = {".git", "node_modules", "dist", "build", ".next", ".nuxt", "venv",
              # agent tooling + editor dirs + worktree copies — not the target app
              ".wolf", ".claude", ".worktrees", ".idea", ".vscode", ".agent", ".agents"}
 CODE_EXT = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".py", ".go", ".rb",
-            ".java", ".php", ".prisma"}
+            ".java", ".php", ".prisma",
+            # Managed-cloud surfaces: AppSync GraphQL SDL (@aws_* auth directives) + VTL
+            # resolvers (where realtime/subscription authz actually lives, or is missing).
+            # PTREQ0013000 #2/#5 lived in these file types — previously invisible to every
+            # iter_code()-based extractor. routes.py SPEC_PATH still splits .graphql/.gql out
+            # of the route list so SDL doesn't generate phantom endpoints.
+            ".graphql", ".gql", ".vtl"}
 MAX_FILES = 12000
 MAX_BYTES = 2_000_000
 

@@ -1,0 +1,36 @@
+# ── websec-validator self-scan suppressions ──────────────────────────────────────────────────
+# This repo is a security TOOL, so its source legitimately contains attack patterns:
+#   • the extractors hold the very patterns they detect as illustrative examples
+#     (a `JWT_SECRET || 'dev-secret'` docstring, a `da2-…` AppSync key shape, an `err.stack`
+#     regex, `@aws_*` directives, password lookaheads),
+#   • the tests are deliberately-vulnerable fixtures,
+#   • the probe + report templates and bundled Semgrep rules ARE attack payloads.
+# Self-scanning surfaces those as the detection DEFINITIONS, not as real findings — so we suppress
+# them and `websec run .` dogfoods clean. Genuine self-findings (e.g. the real Dockerfile) are left.
+#
+# IMPORTANT: this file is loaded from the SCANNED repo's root, so it only affects scans of THIS
+# repo. A user scanning their own app gets their own `.websec-ignore` (or none) — never this one.
+# Format: glob path patterns, or `category:<x>` lines (see findings.load_suppressions).
+
+# Test corpus — intentionally-vulnerable fixtures + tests that reference attack patterns by name.
+tests/
+
+# Probe + report templates (attack payloads) and bundled Semgrep rules (attack patterns by design).
+src/websec_validator/templates/
+src/websec_validator/rules/
+
+# Extractor source — each detector's matched patterns appear here as example literals/regexes.
+src/websec_validator/extractors/auth.py
+src/websec_validator/extractors/client_exposure.py
+src/websec_validator/extractors/client_integrity.py
+src/websec_validator/extractors/surface.py
+src/websec_validator/extractors/graphql.py
+src/websec_validator/extractors/iac_ci.py
+src/websec_validator/extractors/policy_consistency.py
+
+# Briefing renderer uses path-join templating that trips the path-traversal heuristic (not a sink).
+src/websec_validator/briefing.py
+
+# The AppSync GraphQL "surface" is detected purely from our own `@aws_*` example strings — no real
+# GraphQL server lives in this repo, so the synthetic graphql finding is a self-reference.
+category:graphql

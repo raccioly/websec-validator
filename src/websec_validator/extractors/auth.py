@@ -27,6 +27,31 @@ COOKIE_READ = re.compile(
 _COOKIE_RESERVED = {"get", "set", "getall", "has", "delete", "clear", "tostring",
                     "foreach", "entries", "keys", "values", "size", "name", "value", "length"}
 
+# Insecure DEFAULT signing secret — a hard-coded fallback on a secret/key var (the forgeable-JWT
+# class, PTREQ0013000 #8). JS/TS: `process.env.JWT_SECRET || 'dev-secret-do-not-use-in-prod'`;
+# Python: os.environ.get('JWT_SECRET', 'dev-secret'). A quoted fallback on a *SECRET/*KEY var is
+# almost never benign — and if it's a dev-ish placeholder AND the repo actually signs JWTs, anyone
+# who reads the source can forge tokens for any user/role.
+_SECRET_VAR = (r"(?:JWT[_-]?SECRET|TOKEN[_-]?SECRET|REFRESH[_-]?SECRET|SIGNING[_-]?KEY"
+               r"|SESSION[_-]?SECRET|COOKIE[_-]?SECRET|AUTH[_-]?SECRET|APP[_-]?SECRET"
+               r"|HMAC[_-]?KEY|PRIVATE[_-]?KEY|SECRET[_-]?KEY|SECRET)")
+SECRET_DEFAULT_JS = re.compile(
+    _SECRET_VAR + r"['\"\]\s]*\s*(?:\|\||\?\?)\s*[`'\"]([^`'\"]{3,80})[`'\"]", re.I)
+SECRET_DEFAULT_PY = re.compile(
+    r"(?:os\.environ\.get|os\.getenv|getenv)\(\s*['\"][^'\"]*" + _SECRET_VAR
+    + r"[^'\"]*['\"]\s*,\s*['\"]([^'\"]{3,80})['\"]", re.I)
+# placeholder markers that make a fallback unambiguously a non-production dev secret
+SECRET_DEVISH = re.compile(r"dev|do[_-]?not[_-]?use|change[_-]?(?:me|it|this)|placeholder|secret|test"
+                           r"|local|example|sample|default|your[_-]|xxx|todo|fixme|123456|password", re.I)
+JWT_SIGN_VERIFY = re.compile(r"jwt\.(?:sign|verify)|jsonwebtoken|\bjose\b|jwtVerify|SignJWT|jwt\.encode", re.I)
+
+
+def _looks_like_example(rel: str) -> bool:
+    """Example/doc files are MEANT to hold placeholder secrets — don't cry forgeable-JWT on them."""
+    r = rel.lower()
+    return (".example" in r or ".sample" in r or ".dist" in r or ".template" in r
+            or "/docs/" in r or "/doc/" in r or "/examples/" in r or r.endswith((".md", ".mdx")))
+
 
 class AuthExtractor(Extractor):
     name = "auth"
@@ -41,6 +66,8 @@ class AuthExtractor(Extractor):
         jwt = passport = session = apikey = 0
         guard_files = []
         cookie_names: list[str] = []
+        secret_defaults: list = []          # (file, literal) hard-coded fallback signing secrets
+        jwt_sign_verify = False             # does the repo actually sign/verify JWTs?
         for _p, rel, text in ctx.iter_code():
             if JWT_LIBS.search(text):
                 jwt += 1
@@ -57,6 +84,27 @@ class AuthExtractor(Extractor):
                     name = m.group(1) or m.group(2) or m.group(3)
                     if name and name.lower() not in _COOKIE_RESERVED and name not in cookie_names:
                         cookie_names.append(name)
+            if JWT_SIGN_VERIFY.search(text):
+                jwt_sign_verify = True
+            if not _looks_like_example(rel):
+                for mm in SECRET_DEFAULT_JS.finditer(text):
+                    secret_defaults.append((rel, mm.group(1)))
+                for mm in SECRET_DEFAULT_PY.finditer(text):
+                    secret_defaults.append((rel, mm.group(1)))
+
+        # Hard-coded fallback signing secret → forgeable-JWT lead (PTREQ0013000 #8). De-dup by
+        # (file, literal); mark dev-ish placeholders. findings.py escalates dev-ish + jwt-in-use to
+        # CRITICAL; probes.stage seeds the literal into the hs256 brute-force candidate list.
+        seen_sd: set = set()
+        insecure_secret_defaults: list = []
+        for rel_, lit in secret_defaults:
+            if (rel_, lit) in seen_sd:
+                continue
+            seen_sd.add((rel_, lit))
+            insecure_secret_defaults.append({"file": rel_, "literal": lit,
+                                             "dev_ish": bool(SECRET_DEVISH.search(lit))})
+            if len(insecure_secret_defaults) >= 20:
+                break
 
         nextauth = "nextauth" in frameworks or any("nextauth" in e.lower() for e in auth_eps)
 
@@ -89,6 +137,8 @@ class AuthExtractor(Extractor):
             "cookie_names": cookie_names[:15],
             "guard_files": guard_files,
             "signal_counts": {"jwt": jwt, "passport": passport, "session": session, "api_key": apikey},
+            "insecure_secret_defaults": insecure_secret_defaults,   # CRITICAL-class (forgeable JWT #8)
+            "jwt_sign_verify_present": jwt_sign_verify,
             "route_count": route_count,
             "reliable_signal": route_count > 0 or bool(nextauth),
             "note": (("⚠ No HTTP routes detected — this auth scheme is LOW-CONFIDENCE (likely a "

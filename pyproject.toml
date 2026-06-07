@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "websec-validator"
-version = "0.2.9"
+version = "0.3.0"
 description = "Local-first security recon that briefs your AI coding agent: facts + tailored probe scripts, code-in / artifacts-out. No LLM, no server, no running app."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,4 +25,4 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-websec_validator = ["templates/probes/*", "templates/reports/*", "corpus.json", "calibration.json"]
+websec_validator = ["templates/probes/*", "templates/reports/*", "rules/*.yml", "corpus.json", "calibration.json"]

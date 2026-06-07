@@ -63,8 +63,24 @@ def _gitleaks(target: Path, out: Path, excludes=()) -> list:
             "--report-format", "json", "--report-path", str(out)]
 
 
+def _bundled_rules_dir():
+    """Path to the shipped Semgrep rules (websec_validator/rules/), or None if unavailable. These
+    cover patterns the community registry misses — insecure-default signing secret + error-stack
+    disclosure (PTREQ0013000 #8/#7). Validated at build; gated on existence so a packaging miss
+    never breaks the `--config auto` run."""
+    try:
+        from importlib import resources
+        p = resources.files("websec_validator").joinpath("rules")
+        return str(p) if p.is_dir() and any(p.iterdir()) else None
+    except Exception:
+        return None
+
+
 def _semgrep(target: Path, out: Path, excludes=()) -> list:
     cmd = ["semgrep", "scan", "--config", "auto", "--json", "--output", str(out)]
+    rules = _bundled_rules_dir()
+    if rules:
+        cmd += ["--config", rules]      # bundled rules run ALONGSIDE auto — the repo-wide multiplier
     for d in list(EXCLUDE_DIRS) + list(excludes):
         cmd += ["--exclude", d]
     return cmd + [str(target)]

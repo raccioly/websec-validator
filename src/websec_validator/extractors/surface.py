@@ -48,6 +48,22 @@ SINKS = {
         r"new\s+RegExp\s*\([^)]*(?:req\.|request\.|\+)|re\.(?:compile|match|search|fullmatch)\s*\([^,)]*(?:request\.|f['\"])")),
     "eval-injection": ("bola-write-verbs", None, re.compile(
         r"\beval\s*\([^)]*" + _U + r"|new\s+Function\s*\([^)]*" + _U)),
+    # Var-arg SSRF: an http client called with a BARE identifier first-arg (not a string literal) —
+    # e.g. `axios.get(mediaUrl, {…})` a file away from `req.query.url` (PTREQ0013000 #1, which the
+    # same-line `ssrf` class above misses). Emits the `ssrf-outbound-http` key probes.py waits for.
+    # MED-FP by design (axios.get(someVar) is common) → kept LOW-confidence; promote when reachable
+    # from a controller that reads req.query.
+    "ssrf-outbound-http": ("ssrf-probes", None, re.compile(
+        r"(?:axios(?:\.(?:get|post|put|delete|patch|request|head))?|got|node-fetch|needle|superagent|undici"
+        r"|https?\.request|requests\.(?:get|post|put|patch|request)|httpx\.(?:get|post|request|AsyncClient))"
+        r"\s*\(\s*[A-Za-z_$][\w$.]*\s*[,)]")),
+    # OUTPUT-side disclosure — a DOCUMENTED EXCEPTION to the user-input-marker rule (this is a
+    # response sink, not an input sink). A 500 handler echoing err.stack/err.message, or a
+    # NODE_ENV!=='production' branch that spreads the stack, leaks internals (PTREQ0013000 #7).
+    "error-disclosure": ("error-disclosure-probe", None, re.compile(
+        r"res\.(?:json|send)\s*\([^;]{0,200}\b(?:err|error|e|ex|exc)\.(?:stack|message)\b"
+        r"|res\.status\(\s*\d+\s*\)\.(?:json|send)\s*\([^;]{0,200}\b(?:err|error|e)\.(?:stack|message)\b"
+        r"|NODE_ENV\s*[!=]==?\s*['\"]production['\"][^;{}]{0,160}\b(?:stack|message)\b")),
 }
 
 
