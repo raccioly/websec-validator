@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .auth import AuthExtractor
 from .authz import AuthzExtractor
-from .base import Extractor, RepoContext
+from .base import MAX_FILES, Extractor, RepoContext
 from .client_exposure import ClientExposureExtractor
 from .client_integrity import ClientIntegrityExtractor
 from .graphql import GraphQLExtractor
@@ -51,6 +51,10 @@ def run_all(root: Path, version: str, excludes: list | None = None) -> dict:
         "version": version,
         "target": str(root.resolve()),
         "files_scanned": len(ctx.code_files),
+        # PARTIAL-scan guard: the walker stops at MAX_FILES (filesystem order), so on a very large
+        # monorepo recon may miss files. Surface it loudly rather than implying full coverage.
+        "files_truncated": bool(getattr(ctx, "truncated", False)),
+        "file_cap": MAX_FILES,
     }
     for ext in REGISTRY:
         try:

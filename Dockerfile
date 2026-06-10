@@ -12,6 +12,7 @@ FROM python:3.12-slim
 ARG TARGETARCH
 ARG NOIR_VERSION=1.0.0
 ARG GITLEAKS_VERSION=8.30.1
+ARG TRIVY_VERSION=0.58.1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl git \
@@ -23,9 +24,11 @@ RUN curl -fsSL -o /tmp/noir.deb \
     && apt-get update && apt-get install -y --no-install-recommends /tmp/noir.deb \
     && rm /tmp/noir.deb && rm -rf /var/lib/apt/lists/*
 
-# Trivy (SCA / secrets / IaC) — install script auto-detects arch
-RUN curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-      | sh -s -- -b /usr/local/bin
+# Trivy (SCA / secrets / IaC) — pin the installer to a TAGGED ref (not the mutable `main`
+# branch, which is a curl|sh-to-root supply-chain risk) and pin the version (install.sh takes
+# the tag as a trailing arg; it auto-detects arch). Bump TRIVY_VERSION + re-run `docker build`.
+RUN curl -sfL "https://raw.githubusercontent.com/aquasecurity/trivy/v${TRIVY_VERSION}/contrib/install.sh" \
+      | sh -s -- -b /usr/local/bin "v${TRIVY_VERSION}"
 
 # Gitleaks (secrets)
 RUN case "${TARGETARCH}" in amd64) GL=x64 ;; arm64) GL=arm64 ;; *) GL="${TARGETARCH}" ;; esac \

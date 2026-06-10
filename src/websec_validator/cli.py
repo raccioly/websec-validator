@@ -134,9 +134,11 @@ def cmd_run(args) -> int:
     # 5. briefing + comprehensive REPORT.md (immutable run record)
     (out / "AGENT-BRIEFING.md").write_text(briefing.render(facts, det, scan_results, manifest, unified))
     (out / "REPORT.md").write_text(report.render(facts, det, scan_results, unified, manifest, ts, ledger))
+    # drop the full `all` finding list from the manifest — it's a duplicate of findings.json
+    manifest_summary = {k: v for k, v in unified.items() if k != "all"} if unified else None
     (out / "manifest.json").write_text(json.dumps(
         {"facts": "FACTS.json", "scanners": det, "scan_results": scan_results,
-         "findings_summary": unified, "ledger": {"total": ledger["total"], "by_severity": ledger["by_severity"]},
+         "findings_summary": manifest_summary, "ledger": {"total": ledger["total"], "by_severity": ledger["by_severity"]},
          "probes": manifest, "timestamp": ts}, indent=2))
 
     print(f"\n✓ run {ts} saved (immutable — nothing overwritten):\n    {out}")
@@ -327,6 +329,9 @@ def _which(b):
 
 
 def _print_facts_summary(facts: dict) -> None:
+    if facts.get("files_truncated"):
+        print(f"  ⚠ PARTIAL SCAN — hit the {facts.get('file_cap', '?')}-file cap; recon may be incomplete. "
+              "Narrow with --exclude or scan a subdirectory.")
     st = facts.get("stack", {})
     rt = facts.get("routes", {})
     tg = rt.get("targeting", {})
