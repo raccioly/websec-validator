@@ -56,6 +56,13 @@ PROBES = {
                                   "APPSYNC_URL + a low-priv session + VICTIM_GROUP_ID you do NOT own + SUB_FIELD"),
     "client-integrity-checklist": ("client-integrity-checklist.sh", "Man-in-the-browser / tamperable-display posture",
                                    "a running TEST instance + the page that shows the address (PAGE=/receive)"),
+    # --- PTREQ0013000 retest probes ---
+    "upload-matrix": ("upload-matrix.sh", "Unrestricted upload + serve-side stored XSS (#2b)",
+                      "a TEST instance + an upload token + the upload path (UPLOAD_PATH / UPLOAD_FIELD)"),
+    "pii-output-diff": ("pii-output-diff.sh", "Unmasked PII by value-shape, per-role (#8)",
+                        "a TEST instance + a LOW-priv token (TOKEN_A); optional priv TOKEN_B to diff"),
+    "password-reuse": ("password-reuse.sh", "Password reuse / history on every set-password path (#6)",
+                       "a TEST account token + CURRENT_PW + the set-password path(s)"),
 }
 
 # unauth-baseline is ALWAYS staged: it's the cheapest probe and directly exercises the
@@ -71,6 +78,7 @@ _TARGET_KEYS = {
     "ssrf-probes": "ssrf_candidates",
     "webhook-forgery": "write_endpoints",
     "error-disclosure-probe": "write_endpoints",
+    "upload-matrix": "upload_candidates",
 }
 
 _BANNER = (
@@ -125,6 +133,12 @@ def applicable(facts: dict) -> list:
         chosen += ["appsync-introspection", "appsync-cswsh", "appsync-subscription-bola"]
     if (facts.get("client_integrity") or {}).get("findings"):
         chosen += ["client-integrity-checklist"]
+    if (facts.get("upload_security") or {}).get("findings") or targeting.get("upload_candidates"):
+        chosen += ["upload-matrix"]
+    if (facts.get("pii_exposure") or {}).get("findings"):
+        chosen += ["pii-output-diff"]
+    if ((facts.get("password_policy") or {}).get("password_reuse") or {}).get("gap"):
+        chosen += ["password-reuse"]
 
     seen, ordered = set(), []
     for k in chosen:

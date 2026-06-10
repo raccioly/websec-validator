@@ -29,6 +29,12 @@ APPSYNC_DEFAULT_APIKEY = re.compile(
 APPSYNC_APIKEY_MODE = re.compile(r"AuthorizationType\.API_KEY|authorizationType\s*:\s*['\"]?API_KEY")
 WAFV2 = re.compile(r"wafv2\.CfnWebACL|\bCfnWebACL\b|aws_wafv2|wafv2\.CfnWebACLAssociation")
 WAF_ASSOC = re.compile(r"CfnWebACLAssociation|WebACLAssociation")
+# WAF used as the PRIMARY control for an app-layer flaw — a bypassable band-aid, not a remediation
+# (PTREQ0013000 #2/#11). A byteMatchStatement/regex matching `__schema`, SQL keywords or `<script`
+# means the app-layer bug is still there; the string-match is evadable via encoding + only one door.
+WAF_APPLAYER_MATCH = re.compile(
+    r"(?:byteMatchStatement|searchString|RegexPatternSet|regexString)[\s\S]{0,220}?"
+    r"(__schema|__type|UNION\s+SELECT|information_schema|<script|onerror=|\bor\s+1\s*=\s*1\b|sleep\s*\()", re.I)
 
 
 class IacCiExtractor(Extractor):
@@ -69,7 +75,7 @@ class IacCiExtractor(Extractor):
             findings.append({"severity": "HIGH", "kind": "terraform-state-committed", "file": ctx.rel(tf),
                              "detail": "tfstate may contain plaintext secrets (DB passwords, keys) — must not be committed"})
 
-        # --- CDK / managed-AppSync auth (#4 CSWSH; surfaces the #2/#5 boundary) ---
+        # --- CDK / managed-AppSync auth (#4 anonymous default-auth; WAF-as-control smell #2) ---
         appsync_files, waf_present, waf_assoc = [], False, False
         for _p, rel, text in ctx.iter_code():
             if not rel.endswith((".ts", ".js", ".mjs", ".cjs")):
@@ -78,15 +84,24 @@ class IacCiExtractor(Extractor):
                 waf_present = True
             if WAF_ASSOC.search(text):
                 waf_assoc = True
+            if WAF_APPLAYER_MATCH.search(text):
+                tok = (WAF_APPLAYER_MATCH.search(text).group(1) or "").strip()
+                findings.append({"severity": "MEDIUM", "kind": "waf-as-app-control", "file": rel,
+                                 "detail": f"A WAF string/regex match on an app-layer attack token ({tok!r}) is used as a "
+                                           "control. A WAF is a bypassable compensating control, never the remediation: "
+                                           "string-matches are evaded by encoding (the retest bypassed `__schema` with a "
+                                           "Unicode escape) and only cover one endpoint. Fix at the app/engine layer "
+                                           "(disable introspection, parametrize queries) and keep the WAF as defense-in-depth."})
             if APPSYNC_API.search(text):
                 appsync_files.append(rel)
                 if APPSYNC_DEFAULT_APIKEY.search(text):
                     findings.append({"severity": "HIGH", "kind": "appsync-apikey-default", "file": rel,
-                                     "detail": "AppSync defaultAuthorization is API_KEY — the realtime WebSocket "
-                                               "accepts a static key with no Origin/cookie binding (Cross-Site "
-                                               "WebSocket Hijacking + anonymous subscribe). Make the default "
-                                               "USER_POOL/OIDC/IAM/LAMBDA; keep API_KEY (if needed) as a scoped "
-                                               "additional mode only."})
+                                     "detail": "AppSync defaultAuthorization is API_KEY — the API (HTTP + realtime) accepts "
+                                               "a static key by default, and that key typically ships to the browser, so "
+                                               "this is effectively ANONYMOUS/unauthenticated access. Make the default "
+                                               "USER_POOL/OIDC/IAM/LAMBDA; keep API_KEY (if needed) to a scoped additional "
+                                               "mode. (NB: this is NOT in itself CSWSH — that needs cookie-based WS auth; "
+                                               "see the client_integrity websocket-auth check.)"})
                 elif APPSYNC_APIKEY_MODE.search(text):
                     findings.append({"severity": "MEDIUM", "kind": "appsync-apikey-mode", "file": rel,
                                      "detail": "AppSync accepts an API_KEY authorization mode — confirm it is NOT the "

@@ -27,6 +27,8 @@ src/websec_validator/extractors/surface.py
 src/websec_validator/extractors/graphql.py
 src/websec_validator/extractors/iac_ci.py
 src/websec_validator/extractors/policy_consistency.py
+src/websec_validator/extractors/upload_security.py
+src/websec_validator/extractors/pii_exposure.py
 
 # Briefing renderer uses path-join templating that trips the path-traversal heuristic (not a sink).
 src/websec_validator/briefing.py

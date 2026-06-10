@@ -42,6 +42,17 @@ _RE_STRONG = re.compile(r"isStrongPassword", re.I)
 
 _ALL = ("min", "upper", "lower", "digit", "special")
 
+# Password REUSE / history — a DIFFERENT control from complexity (PTREQ0013000 #6, which we initially
+# misread as complexity). A set-password path that hashes a new password with no comparison to the
+# current / previous hashes lets a user re-set the same password. Signals:
+HASH_NEW = re.compile(r"bcrypt(?:js)?\.hash|argon2\.hash|\bscrypt\b|pbkdf2|hashPassword\(|\.setPassword\(", re.I)
+REUSE_CHECK = re.compile(r"isPasswordReused|passwordHistory|password_history|previousPasswords|prior[_-]?hashes"
+                         r"|bcrypt(?:js)?\.compare[\s\S]{0,200}?(?:history|previous|current|old)", re.I)
+PW_HASH_FIELD = re.compile(r"\b(?:passwordHash|password_hash|hashedPassword|pwdHash|passwordDigest)\b")
+PW_HISTORY_FIELD = re.compile(r"\b(?:passwordHistory|password_history|previousPasswords|passwordHistoryHashes|priorPasswords)\b")
+SET_PW_CTX = re.compile(r"changePassword|updatePassword|setPassword|resetPassword|updateProfile|adminUpdate"
+                        r"|set[_-]?password|change[_-]?password", re.I)
+
 
 def _classes(window: str) -> set:
     """The character-class requirement set enforced in one validation window."""
@@ -68,7 +79,23 @@ class PolicyConsistencyExtractor(Extractor):
     def extract(self, ctx: RepoContext, facts: dict) -> dict:
         blocks = []        # (file, frozenset(classes))
         seen = set()
+        hashes = reuse_check = set_ctx = model_pwhash = model_history = False
         for _p, rel, text in ctx.iter_code():
+            # Reuse signals live in camelCase compounds (changePassword/passwordHash) that PW_FIELD's
+            # \bword\b boundaries miss — so track them on a cheap substring pre-check, NOT behind the
+            # complexity gate below (that bug initially made the reuse check silently never fire).
+            low = text.lower()
+            if "password" in low or "bcrypt" in low or "argon2" in low or "scrypt" in low or "pbkdf2" in low:
+                if HASH_NEW.search(text):
+                    hashes = True
+                if REUSE_CHECK.search(text):
+                    reuse_check = True
+                if SET_PW_CTX.search(text):
+                    set_ctx = True
+                if PW_HASH_FIELD.search(text):
+                    model_pwhash = True
+                if PW_HISTORY_FIELD.search(text):
+                    model_history = True
             if not PW_FIELD.search(text):
                 continue
             # FORWARD-only window, capped at the next password field — validation follows the field
@@ -110,11 +137,22 @@ class PolicyConsistencyExtractor(Extractor):
             if len(smax) < 3:
                 weak_policy = strongest
 
+        # Password REUSE / history (#6) — the DIFFERENT control: a set-password path that hashes a new
+        # password with no reuse comparison, and/or a passwordHash model with no history field, lets a
+        # user re-set the same/old password. (Complexity is the drift check above; this is reuse.)
+        reuse_gap = bool(hashes and (set_ctx or model_pwhash) and not reuse_check and not model_history)
+        password_reuse = {
+            "hashes_passwords": hashes, "has_set_password_path": set_ctx,
+            "has_reuse_check": reuse_check, "model_has_passwordHash": model_pwhash,
+            "model_has_history": model_history, "gap": reuse_gap,
+        }
+
         return {
             "password_blocks": blocks[:20],
             "strongest_policy": strongest,
             "drift": drift,                    # MEDIUM in findings.py — inconsistent siblings (#6)
             "weak_policy": weak_policy,        # LOW — uniformly weak, no strong sibling to compare
+            "password_reuse": password_reuse,  # MEDIUM — no reuse/history control on set-password (#6)
             "consistent": not drift,
             "note": ("Password-policy DRIFT: a sibling route enforces fewer character classes than the "
                      "strongest one found — align them (the WU #6 regression). " if drift else

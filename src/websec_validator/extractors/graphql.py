@@ -33,6 +33,11 @@ TENANT_ARG = re.compile(r"\b(\w+)\s*\(([^)]*\b(?:groupId|group_id|orgId|org_id|t
 # Identity-binding signals in a VTL resolver — the field is tied to the CALLER, not a free arg.
 VTL_AUTHZ = re.compile(r"\$ctx(?:tx)?\.identity|\$context\.identity|identity\.(?:sub|username|claims|resolverContext)"
                        r"|util\.unauthorized|\bgroupIds?\b[\s\S]{0,80}?\bcontains\b|#if\s*\(\s*!?\s*\$ctx\.identity")
+# Engine-level introspection disable on aws-cdk-lib appsync.GraphqlApi. The PTREQ0013000 RETEST
+# proved this IS available and un-bypassable (unlike a WAF string-match) — so a correctly-configured
+# AppSync API must NOT be flagged. This corrects the 0.3.0 false positive that always cried wolf.
+APPSYNC_INTROSPECTION_OFF = re.compile(r"introspectionConfig\s*:\s*[\w.]*\bDISABLED\b")
+APPSYNC_LIMITING = re.compile(r"\bqueryDepthLimit\b|\bresolverCountLimit\b")
 
 
 class GraphQLExtractor(Extractor):
@@ -47,10 +52,15 @@ class GraphQLExtractor(Extractor):
 
         introspection, playground, limiting, code_hit = "unknown", False, False, False
         appsync, aws_directives = False, False
+        appsync_introspection_off = appsync_limiting = False
         schema_texts = []          # (rel, text) for SDL files — parsed for Subscription authz
         for _p, rel, text in ctx.iter_code():
             if APPSYNC_MARK.search(text):
                 appsync = True
+            if APPSYNC_INTROSPECTION_OFF.search(text):
+                appsync_introspection_off = True
+            if APPSYNC_LIMITING.search(text):
+                appsync_limiting = True
             if rel.endswith((".graphql", ".gql")):
                 schema_texts.append((rel, text))
                 if AWS_AUTH_DIRECTIVE.search(text):
@@ -74,14 +84,20 @@ class GraphQLExtractor(Extractor):
         findings = []
         sub_authz = []
         if managed:
-            # AppSync exposes introspection and it is NOT disablable at the API layer (no Apollo-style
-            # `introspection:false`). The report's #2 proved the WAF that "blocks" it is bypassable.
-            findings.append({"severity": "MEDIUM", "issue": "AppSync GraphQL introspection reachable",
-                             "attack_class": "graphql",
-                             "detail": "AppSync exposes schema introspection; it can't be disabled at the API layer. "
-                                       "If a WAF blocks the keyword, that string-match is bypassable via Unicode-escape "
-                                       "/ junk-byte padding (PTREQ0013000 #2). Enforce field-level @aws_* auth + run the "
-                                       "appsync-introspection probe (it attempts the bypass) — don't rely on the WAF."})
+            # AppSync introspection CAN be disabled engine-level via
+            # `introspectionConfig: IntrospectionConfig.DISABLED` (aws-cdk-lib) — un-bypassable, unlike
+            # a WAF byte-match. Only flag when it is NOT disabled (retest correction to the 0.3.0 FP).
+            if not appsync_introspection_off:
+                findings.append({"severity": "MEDIUM", "issue": "AppSync GraphQL introspection not disabled engine-level",
+                                 "attack_class": "graphql",
+                                 "detail": "Set `introspectionConfig: appsync.IntrospectionConfig.DISABLED` so the engine "
+                                           "rejects __schema/__type regardless of encoding. A WAF byte-match on `__schema` "
+                                           "is NOT sufficient — bypassable via Unicode/JSON escapes and it only fronts one "
+                                           "endpoint (PTREQ0013000 #2). Run the appsync-introspection probe to confirm."})
+            if not (appsync_limiting or limiting):
+                findings.append({"severity": "LOW", "issue": "AppSync has no query depth / resolver-count limit",
+                                 "attack_class": "graphql",
+                                 "detail": "add `queryDepthLimit` + `resolverCountLimit` (alias / deep-query DoS guard)."})
             sub_authz = self._subscription_authz(ctx, schema_texts, findings)
         else:
             if introspection in ("enabled", "unknown"):
@@ -103,7 +119,8 @@ class GraphQLExtractor(Extractor):
                              or (["AppSync GraphQL API (HTTP + realtime WebSocket)"] if managed
                                  else ["(server detected; endpoint not routed by Noir)"]),
                 "schema_files": schema_files[:20],
-                "introspection": "appsync-reachable" if managed else introspection,
+                "introspection": (("appsync-disabled" if appsync_introspection_off else "appsync-reachable")
+                                  if managed else introspection),
                 "playground_enabled": playground, "query_limiting_detected": limiting,
                 "subscription_authz": sub_authz,
                 "findings": findings,

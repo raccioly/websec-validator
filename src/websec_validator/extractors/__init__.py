@@ -17,12 +17,14 @@ from .client_integrity import ClientIntegrityExtractor
 from .graphql import GraphQLExtractor
 from .iac_ci import IacCiExtractor
 from .integrations import IntegrationsExtractor
+from .pii_exposure import PiiExposureExtractor
 from .policy_consistency import PolicyConsistencyExtractor
 from .routes import RoutesExtractor
 from .schemas import SchemasExtractor
 from .stack import StackExtractor
 from .surface import SurfaceExtractor
 from .tenant import TenantExtractor
+from .upload_security import UploadSecurityExtractor
 
 # Order matters: stack first (others read facts['stack']); authz after routes
 # (reads facts['routes']).
@@ -34,10 +36,12 @@ REGISTRY: list[Extractor] = [
     TenantExtractor(),
     PolicyConsistencyExtractor(),
     SurfaceExtractor(),
+    UploadSecurityExtractor(),
     SchemasExtractor(),
     IacCiExtractor(),
     ClientExposureExtractor(),
     ClientIntegrityExtractor(),
+    PiiExposureExtractor(),
     GraphQLExtractor(),
     IntegrationsExtractor(),
 ]
