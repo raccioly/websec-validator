@@ -15,6 +15,11 @@
 # Test corpus — intentionally-vulnerable fixtures + tests that reference attack patterns by name.
 tests/
 
+# Maintainer's private, GITIGNORED reference material (prior pen-test artifacts + a vendored copy of
+# ZAP's own scripts) — not the product, and full of attack patterns by nature. Only present in the
+# maintainer's working tree (never committed/shipped), so this keeps a local `websec run .` clean.
+base-research/
+
 # Probe + report templates (attack payloads) and bundled Semgrep rules (attack patterns by design).
 src/websec_validator/templates/
 src/websec_validator/rules/
