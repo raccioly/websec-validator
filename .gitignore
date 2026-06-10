@@ -13,6 +13,12 @@ base-research/
 .wolf/
 .claude/
 CLAUDE.md
+# DocGuard / Spec Kit agent tooling — auto-installed skills + slash commands + runtime cache.
+# The PRODUCT (committed): .docguard.json, .docguardignore, docs-canonical/, AGENTS.md, CHANGELOG.md, DRIFT-LOG.md
+.docguard/
+.agent/
+commands/
+.specify/
 
 # python
 __pycache__/
