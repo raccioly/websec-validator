@@ -16,7 +16,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from websec_validator import dynamic, findings, probes, scanners  # noqa: E402
+from websec_validator import calibration, dynamic, findings, probes, scanners  # noqa: E402
 from websec_validator.extractors.auth import AuthExtractor  # noqa: E402
 from websec_validator.extractors.authz import AuthzExtractor  # noqa: E402
 from websec_validator.extractors.base import RepoContext  # noqa: E402
@@ -181,6 +181,31 @@ class CrossTenantNumericIdTests(unittest.TestCase):
             r = dynamic.cross_tenant_bola(cfg, facts)
         self.assertNotIn("error", r)                                  # numeric ids didn't crash the replace
         self.assertTrue(any(u.endswith("/api/groups/2/items") for u in captured))  # int coerced into the path
+
+
+class WriteAuthEnforcement500Tests(unittest.TestCase):
+    def test_500_is_inconclusive_not_no_auth_gate(self):
+        # a 500 may be the AUTH layer throwing, not the handler running unauth — must NOT become a
+        # no-auth-gate verdict (would escalate to a HIGH missing-auth finding AND poison the
+        # calibration oracle with a confirmed-real sample). Matches the forged-token engine.
+        facts = {"routes": {"endpoints": [{"method": "POST", "path": "/api/x"}]}}
+
+        def fake(method, url, token=None, timeout=20, data=None, cookie=None):
+            return 500, "err"
+        with mock.patch.object(dynamic, "_request", fake):
+            r = dynamic.write_auth_enforcement("http://t", facts)
+        self.assertEqual(r["results"][0]["verdict"], "http-500")     # inconclusive, not no-auth-gate
+        self.assertEqual(r["no_auth_gate"], [])                       # so it feeds no missing-auth finding
+        self.assertEqual(calibration.samples_from_dynamic({"write_auth_enforcement": r}), [])  # oracle clean
+
+    def test_400_still_no_auth_gate(self):  # regression guard: real reached-handler codes unaffected
+        facts = {"routes": {"endpoints": [{"method": "POST", "path": "/api/y"}]}}
+
+        def fake(method, url, token=None, timeout=20, data=None, cookie=None):
+            return 400, "bad"
+        with mock.patch.object(dynamic, "_request", fake):
+            r = dynamic.write_auth_enforcement("http://t", facts)
+        self.assertTrue(r["results"][0]["verdict"].startswith("no-auth-gate"))
 
 
 class ProbeRegistrationTests(unittest.TestCase):
