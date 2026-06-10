@@ -1,7 +1,7 @@
 {
   "$schema": "https://raccioly.github.io/docguard/schemas/docguard-config.schema.json",
   "projectName": "websec-validator",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "profile": "cli",
   "projectType": "library",
   "projectTypeConfig": {

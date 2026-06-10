@@ -15,6 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Removed
 
+## [0.4.2] — 2026-06-10
+
+Documentation-only release (no source change).
+
+### Added
+- DocGuard (Canonical-Driven Development) doc set: `docs-canonical/` (ARCHITECTURE, SECURITY, TEST-SPEC,
+  ENVIRONMENT), `AGENTS.md`, `CHANGELOG.md`, `DRIFT-LOG.md`; `.docguard.json` + `.docguardignore`. Repo
+  now passes `docguard guard` (86/86, 96/100 A+).
+
+### Fixed
+- README: corrected a stale test count (23 → 103); added Usage + License sections.
+
 ## [0.4.1] — 2026-06-10
 
 ### Fixed
@@ -64,7 +76,8 @@ The initial public line. Highlights across 0.2.1–0.2.9:
 ### Fixed
 - Scanner-contamination and rate-limit fixes (agent-wallet dogfood).
 
-[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/raccioly/websec-validator/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/raccioly/websec-validator/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/raccioly/websec-validator/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/raccioly/websec-validator/compare/v0.2.9...v0.3.0
