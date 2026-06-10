@@ -42,7 +42,7 @@ it safe to run anywhere.
 ```
                  ┌─────────────────────────── deterministic, no LLM, no running app ──────────────────────────┐
   your repo ──▶  1. RECON          2. STATIC SCANNERS      3. FINDINGS LEDGER        4. BRIEFING + REPORT
-                 (13 extractors)   (Trivy/Gitleaks/…,      (evidence chain +         (marching orders for
+                 (15 extractors)   (Trivy/Gitleaks/…,      (evidence chain +         (marching orders for
                  walk once         de-duplicated)          standards + calibrated     your agent) + immutable
                                                            confidence)                run record
                                                                   │
@@ -55,9 +55,9 @@ Every `run` is written to an **immutable, timestamped directory** (`websec-out/r
 
 ---
 
-## Layer 1 — Recon: the 13 extractors
+## Layer 1 — Recon: the 15 extractors
 
-Recon walks the repository **once** into a shared `RepoContext`, then runs thirteen focused
+Recon walks the repository **once** into a shared `RepoContext`, then runs fifteen focused
 extractors over it. Each answers one question a pentester asks first. The output is `FACTS.json`.
 
 | # | Extractor | What it asks | Why it matters (the security reasoning) |
@@ -70,11 +70,13 @@ extractors over it. Each answers one question a pentester asks first. The output
 | 6 | **password_policy** | Is the password policy consistent across routes? | A strong policy on one route proves a weaker sibling is a *regression*, not a design choice. Fingerprints the `{min,upper,lower,digit,special}` requirement set per validator and flags any that is a strict subset of the strongest (the exact cross-route drift the pen test found). The subset comparison is logic a per-file linter can't express. |
 | 7 | **surface** | Where does user input reach a dangerous sink — and where does the app leak internals back? | Maps 14 sink classes: 12 user-input-gated (SSRF, command injection, SQLi, traversal, SSTI, redirect, deserialization, XXE, prototype-pollution, ReDoS, eval) **plus var-arg SSRF** (`axios.get(someVar)` a file away from `req.query`) and a **response-side error-disclosure** sink (a 500 echoing `err.stack`). "User-gated" is the key filter — `exec("ls")` is not a vuln; `exec(req.body.cmd)` is. |
 | 8 | **schemas** | What are the data models, and which fields are *privileged*? | Finds ORM/schema models (Pydantic, SQLAlchemy, Django, Prisma, Mongoose, TypeORM, Zod, Sequelize) and the sensitive field names (`role`, `isAdmin`, `groupId`, `passwordHash`…). Turns mass-assignment into "try injecting *this* app's privileged fields." |
-| 9 | **iac_ci** | Misconfigurations in Docker/CI/IaC — and in the managed-cloud auth config? | Insecure defaults (containers as root, unpinned CI actions) are real and invisible at the app layer. Now also reads **AWS-CDK**: an AppSync `defaultAuthorization: API_KEY` means the realtime WebSocket takes a static key with no Origin binding (**Cross-Site WebSocket Hijacking**); a WAFv2 WebACL is reported as *"present — VERIFY association,"* never as mitigation. |
+| 9 | **iac_ci** | Misconfigurations in Docker/CI/IaC — and in the managed-cloud auth config? | Insecure defaults (containers as root, unpinned CI actions) are real and invisible at the app layer. Also reads **AWS-CDK**: an AppSync `defaultAuthorization: API_KEY` is effectively **anonymous/over-permissive access** (the key ships to the browser) — the retest clarified this is *not* CSWSH (that needs cookie-WS auth, checked in `client_integrity`). And a **WAF byte-match on an app-layer token** (`__schema`, SQL keywords) is flagged as a bypassable band-aid, never a fix. WAFv2 WebACL = *"present — VERIFY association,"* never mitigation. |
 | 10 | **client_exposure** | Do secrets leak into the browser bundle? | A secret in a `NEXT_PUBLIC_`/`VITE_` var ships to every visitor. Detected three ways: by **name**, by **value-shape** (the AppSync `da2-…` key has no scanner rule, and this survives a benign var rename), and by **CDK build-injection** (a CloudFormation output wired into a public build var — invisible to every secret scanner). |
 | 11 | **client_integrity** | Does a page display a fund-redirecting value a browser-resident attacker could tamper? | The man-in-the-browser class (the agent-wallet lesson). When a wallet/receive address, QR, or routing number is rendered client-side, malware / a rogue extension / a poisoned dependency can rewrite it. **No web app can make on-screen display tamper-proof** — so this is a LOW-confidence architectural flag checking the two controls that *do* move the needle: a strict CSP (kill the scalable vector) + an out-of-band anchor (make tamper user-detectable). |
-| 12 | **graphql** | Is there a GraphQL surface — is introspection / subscription authz sound? | GraphQL has its own failure modes. For **AppSync**: introspection can't be disabled at the API layer (so a WAF string-match is the only control — and it's bypassable via Unicode-escape / junk-byte padding), and a `Subscription onEvent(groupId)` whose VTL resolver doesn't bind the tenant arg to the caller's identity is a **cross-group BOLA** (reads the `.graphql` SDL + the co-located `.vtl`). |
-| 13 | **integrations** | Third-party integrations + webhooks; are webhooks signature-verified? | An unverified webhook endpoint is a forgeable, often-unauthenticated write path straight into your system. |
+| 12 | **graphql** | Is there a GraphQL surface — is introspection / subscription authz sound? | GraphQL has its own failure modes. For **AppSync**: introspection **is** disablable engine-level (`introspectionConfig: IntrospectionConfig.DISABLED`), so it is flagged **only when not set** — the retest corrected an earlier over-flag, and the advice points to the engine control, not a WAF byte-match (which is bypassable via Unicode/JSON escapes). A `Subscription onEvent(groupId)` whose VTL resolver doesn't bind the tenant arg to the caller's identity is a **cross-group BOLA** (reads the `.graphql` SDL + co-located `.vtl`). |
+| 13 | **upload_security** | Are file uploads (and the serve path) safe? | The polyglot/MIME-spoof class. Flags a handler that deny-lists instead of allow-listing by **sniffed bytes**, builds the stored key from the client filename (`Jpg.php` → stored executable), trusts the client `Content-Type`, or accepts SVG; and a serve path that returns a stored file with **no `X-Content-Type-Options: nosniff`** (stored XSS, re-interpreted as HTML same-origin). Checks both upload and serve, because the fix is defense-in-depth across both. |
+| 14 | **pii_exposure** | Does customer PII leak at the API output boundary? | `res.json(rawEntity)` of a model with PII fields, with no DTO/masker — phone/email ship in cleartext, **including indirect carriers** (a phone embedded in a composed `messageBirdId`). The decisive tell: a masking helper / `view_full` permission **defined but with zero live call sites** (a dead control wired only into export paths). Verification is by **value shape, not field name** — a field allow-list misses the carriers. |
+| 15 | **integrations** | Third-party integrations + webhooks; are webhooks signature-verified? | An unverified webhook endpoint is a forgeable, often-unauthenticated write path straight into your system. |
 
 > **The managed-cloud boundary (why rows 3, 9, 11, 12 grew).** A real authenticated pen test
 > (`PTREQ0013000`) found that the two Criticals and two Highs lived in file types and constructs the
@@ -86,6 +88,17 @@ extractors over it. Each answers one question a pentester asks first. The output
 > class (row 11) can never be a confident static catch — it is the inherent web-platform ceiling that
 > hardware wallets exist to solve, so it ships as a LOW-confidence "verify these compensating controls"
 > lead, never a verdict.
+
+> **The retest meta-lessons (what prevents the *next* finding).** A second pen-test pass on the same app
+> taught five things now baked into the rules above: **(1)** a WAF/regex is never the *remediation* for an
+> app-layer flaw, only a compensating control — so a `byteMatchStatement` on `__schema` is flagged as a
+> smell, not a fix; **(2)** read the finding precisely — "set *old* password" is **reuse**, a different
+> control from complexity, and "CSWSH" is only real with **ambient-cookie** auth; **(3)** assert by **value
+> shape, not field name** — a phone embedded in a composed id slips past a field allow-list; **(4)**
+> validate the whole **chain**, not the entry point — every redirect *hop*, the subscription not just the
+> handshake, the byte content and the serve path not the declared type; **(5)** "tests pass" ≠ secure —
+> run an adversarial pass after green. Two of these corrected the tool's *own* prior output (the AppSync
+> introspection over-flag and the CSWSH mislabel) — the same discipline, applied inward.
 
 **Design note — the authz heuristic is a *hint*, not a verdict.** File-level guard detection
 over-flags on apps that split routing from controllers (common in Express). That's intentional:
@@ -243,8 +256,11 @@ opinion:
 | Forgeable JWT (insecure default secret) | CWE-798 / CWE-1188 | V2.10 | API2 |
 | CSWSH (AppSync API_KEY default auth) | CWE-1385 / CWE-346 | V13.2 | API2 |
 | Error / stack-trace disclosure | CWE-209 / CWE-200 | V7.4.1 | API8 |
-| Weak / inconsistent password policy | CWE-521 | V2.1 | API2 |
+| Weak / inconsistent password policy + **reuse** | CWE-521 / CWE-263 | V2.1 | API2 |
 | Tamperable display (man-in-the-browser) | CWE-451 / CWE-829 | V14.4 | API8 |
+| Unrestricted file upload | CWE-434 | V12.2 | API8 |
+| MIME-sniffing → stored XSS (serve side) | CWE-430 / CWE-79 | V14.4.3 | API8 |
+| Unmasked PII at the output boundary | CWE-359 / CWE-200 | V8.3 | API3 |
 
 (Full map, with remediation patterns, lives in `findings.py`. A future increment turns this curated
 map into a full ASVS index lookup.)

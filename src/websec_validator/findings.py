@@ -63,6 +63,13 @@ STANDARDS = {
     "tamperable-display": (["CWE-451 UI Misrepresentation of Critical Information",
                             "CWE-829 Inclusion of Functionality from Untrusted Control Sphere"],
                            "ASVS V14.4", ["API8:2023 Misconfiguration"]),
+    # --- PTREQ0013000 retest classes ---
+    "unrestricted-upload": (["CWE-434 Unrestricted Upload of File with Dangerous Type"],
+                            "ASVS V12.2", ["API8:2023 Misconfiguration"]),
+    "content-sniffing": (["CWE-430 Deployment of Wrong Handler (MIME sniffing)", "CWE-79 Stored XSS"],
+                         "ASVS V14.4.3", ["API8:2023 Misconfiguration"]),
+    "pii-exposure": (["CWE-359 Exposure of Private Personal Information", "CWE-200 Information Exposure"],
+                     "ASVS V8.3", ["API3:2023 BOPLA / Excessive Data Exposure"]),
 }
 REMEDIATION = {
     "missing-auth": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a "
@@ -97,6 +104,15 @@ REMEDIATION = {
     "tamperable-display": "Kill the scalable vector with a strict CSP (script-src 'self' + per-request nonce, no "
                           "unsafe-inline/eval); anchor trust out-of-band (emailed canonical value, safety code, "
                           "server-rendered identicon, EIP-55 checksum) so single-surface tampering is user-detectable.",
+    "unrestricted-upload": "Positive allow-list by SNIFFED magic bytes (reject octet-stream/unknown); derive the "
+                           "stored name/extension from the detected type, never the client filename; don't trust the "
+                           "client Content-Type; drop SVG (or sanitize + serve as attachment).",
+    "content-sniffing": "On every file-serving path send `X-Content-Type-Options: nosniff` and force any browser-"
+                        "executable type (html/svg/xml/js/text) to `application/octet-stream` + "
+                        "`Content-Disposition: attachment` so a stored object can't render as HTML same-origin.",
+    "pii-exposure": "Mask PII at ONE output boundary (a DTO/serializer), gated by an explicit permission; keep raw "
+                    "data only in storage. Verify by VALUE SHAPE (no phone/email value in the response, incl. nested "
+                    "objects, composed IDs and exports), not field name. Wire the masker into the LIVE handlers.",
 }
 _DEFAULT_REM = "Review and remediate per the cited standard."
 
@@ -298,6 +314,15 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         out.append(_f(f"{cls} sink ({info.get('count')} site(s))", "attack-surface",
                       attack, sev, "LOW", (info.get("files") or ["?"])[0], ev))
 
+    # ---- 3b. SSRF-via-redirect — outbound client follows redirects with no per-hop guard (#1) ----
+    for rel in (facts.get("surface", {}).get("ssrf_redirect_unguarded", []) or []):
+        out.append(_f(f"SSRF-via-redirect (no per-hop guard): {rel}", "attack-surface", "ssrf",
+                      "MEDIUM", "LOW", rel,
+                      [{"layer": "recon", "detail": "an outbound HTTP client here follows redirects (axios/requests do "
+                        "by default) with no beforeRedirect / maxRedirects:0 / per-hop host check — only hop 0 is "
+                        "validated, so a 302 to 169.254.169.254 / RFC-1918 is followed (#1). Allow-list the host on "
+                        "EVERY hop; run the ssrf-probes redirect matrix to confirm."}]))
+
     # ---- 4. Client-side secret exposure (HIGH — ships to browser) ----
     # Name-based + value-shape (rename-proof) + CDK build-injection (#3) all land here.
     _cx = facts.get("client_exposure", {})
@@ -307,10 +332,10 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                       "HIGH", "HIGH", leak, [{"layer": "recon", "detail": "a secret (by name, value-shape, or CDK "
                        "build-injection) reaches the browser bundle"}]))
 
-    # ---- 5. IaC / CI-CD (AppSync API_KEY default → CSWSH class #4) ----
+    # ---- 5. IaC / CI-CD (AppSync API_KEY default → anonymous/missing-auth, retest-corrected from CSWSH) ----
     for fnd in (facts.get("iac_ci", {}).get("findings", []) or []):
         kind = fnd.get("kind", "")
-        cls = "cswsh" if kind.startswith("appsync-apikey") else "iac"
+        cls = "missing-auth" if kind.startswith("appsync-apikey") else "iac"
         out.append(_f(f"{kind}: {fnd.get('detail','')[:80]}", "iac-ci", cls,
                       fnd.get("severity", "MEDIUM"), "MEDIUM", fnd.get("file", ""),
                       [{"layer": "recon", "detail": fnd.get("detail", "")}]))
@@ -336,6 +361,13 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                       (pp.get("password_blocks") or [{}])[0].get("file", ""),
                       [{"layer": "recon", "detail": f"strongest policy found enforces only {pp.get('weak_policy')} "
                         "character class(es) — strengthen the requirements."}]))
+    if (pp.get("password_reuse") or {}).get("gap"):
+        out.append(_f("No password-reuse / history control", "authn", "password-policy", "MEDIUM", "MEDIUM",
+                      "set-password paths",
+                      [{"layer": "recon", "detail": "a set-password path hashes a new password with NO comparison to "
+                        "the current/previous hashes, and no passwordHistory field — a user can re-set the same or a "
+                        "prior password (PTREQ0013000 #6, the REUSE control, separate from complexity). Add a history "
+                        "check on EVERY set-password path (self-service, admin, profile, SSO-JIT) via one shared helper."}]))
 
     # ---- 8. Client-integrity / tamperable display — man-in-the-browser (the agent-wallet class) ----
     _ci = facts.get("client_integrity", {}) or {}
@@ -357,6 +389,20 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                         "Stripe-Signature / svix / compare_digest) found in this webhook handler — a forged or "
                         "replayed request could be processed as authentic. Confirm it isn't handled in middleware, "
                         "then run the webhook-forgery probe."}]))
+
+    # ---- 10. Upload security — polyglot / MIME-spoof / serve-side stored XSS (PTREQ0013000 #2b) ----
+    for fnd in (facts.get("upload_security", {}) or {}).get("findings", []):
+        kind = fnd.get("kind", "")
+        cls = "content-sniffing" if kind == "serve-no-nosniff" else "unrestricted-upload"
+        out.append(_f(f"{kind}: {fnd.get('file')}", "upload", cls,
+                      fnd.get("severity", "MEDIUM"), "MEDIUM", fnd.get("file", ""),
+                      [{"layer": "recon", "detail": fnd.get("detail", "")}]))
+
+    # ---- 11. PII output-boundary — unmasked customer data + dead masking controls (#8) ----
+    for fnd in (facts.get("pii_exposure", {}) or {}).get("findings", []):
+        out.append(_f(f"{fnd.get('kind')}: {fnd.get('file')}", "pii", "pii-exposure",
+                      fnd.get("severity", "MEDIUM"), "MEDIUM", fnd.get("file", ""),
+                      [{"layer": "recon", "detail": fnd.get("detail", "")}]))
 
     # ---- suppress + rank ----
     kept = [f for f in out if not _suppressed(f, suppressions)]

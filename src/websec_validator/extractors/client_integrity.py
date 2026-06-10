@@ -48,6 +48,16 @@ OOB_ANCHOR = re.compile(
     r"|out[_-]of[_-]band|toChecksumAddress|getAddress\(|checksumAddress|\beip[_-]?55\b|verifyAddress"
     r"|address[_-]?verif|verif\w*[_-]?address|sendVerificationEmail|canonical[_-]?address", re.I)
 
+# WebSocket / realtime auth model — the CSWSH determinant (PTREQ0013000 #4). CSWSH is only
+# exploitable when the socket authenticates via an AMBIENT COOKIE the browser auto-attaches
+# cross-origin. A token placed in the connection payload / subprotocol and stored origin-scoped is
+# NOT exploitable (SOP blocks a cross-origin page from reading it). This lets us ANSWER a CSWSH
+# scanner flag instead of guessing — the retest pushed back on exactly this and won.
+WS_USAGE = re.compile(r"new\s+WebSocket\(|socket\.io|graphql-ws|subscriptions-transport-ws|appsync-realtime"
+                      r"|\bwss?://", re.I)
+WS_COOKIE_AUTH = re.compile(r"withCredentials\s*:\s*true|credentials\s*:\s*['\"]include['\"]"
+                            r"|document\.cookie[\s\S]{0,80}?(?:socket|ws\b|websocket)", re.I)
+
 
 class ClientIntegrityExtractor(Extractor):
     name = "client_integrity"
@@ -57,6 +67,7 @@ class ClientIntegrityExtractor(Extractor):
         sensitive, qr_files, clip_files = [], [], []
         csp_present = csp_self = csp_nonce = csp_unsafe = False
         oob = []
+        ws_usage = ws_cookie = False
         for _p, rel, text in ctx.iter_code():
             if SENSITIVE_VALUE.search(text):
                 if len(sensitive) < 30:
@@ -75,10 +86,15 @@ class ClientIntegrityExtractor(Extractor):
                     csp_unsafe = True
             if OOB_ANCHOR.search(text) and len(oob) < 20:
                 oob.append(rel)
+            if WS_USAGE.search(text):
+                ws_usage = True
+            if WS_COOKIE_AUTH.search(text):
+                ws_cookie = True
 
         # strict = a real `script-src 'self'` (+ a nonce / strict-dynamic) with NO unsafe-inline/eval
         strict_csp = bool(csp_present and csp_self and csp_nonce and not csp_unsafe)
         out_of_band = bool(oob)
+        ws_cookie_auth = bool(ws_usage and ws_cookie)   # the CSWSH determinant (ambient-cookie WS auth)
 
         findings = []
         present = bool(sensitive)
@@ -109,8 +125,24 @@ class ClientIntegrityExtractor(Extractor):
                               "cryptographically tamper-proof on the web — the goal is detectable, not "
                               "impossible (the limit that hardware wallets exist to solve)."})
 
+        # CSWSH is ONLY real when the WS auth is an ambient cookie (PTREQ0013000 #4). This lets us
+        # answer a CSWSH scanner flag instead of guessing — a bearer token in the payload is not it.
+        if ws_cookie_auth:
+            findings.append({
+                "severity": "MEDIUM", "confidence": "LOW", "attack_class": "cswsh",
+                "issue": "WebSocket authenticated via an ambient cookie (Cross-Site WebSocket Hijacking)",
+                "detail": "A WebSocket/realtime connection appears to authenticate via a cookie "
+                          "(withCredentials / credentials:'include'), which the browser auto-attaches "
+                          "cross-origin — so a page on any origin can open an authenticated socket (CSWSH, #4). "
+                          "Validate the Origin on the handshake, or move the credential into the connection "
+                          "payload / subprotocol and store it origin-scoped (not a cookie). If WS auth is "
+                          "already a token in the payload, CSWSH is NOT exploitable."})
+
         return {
             "sensitive_display": sorted(set(sensitive)),
+            "websocket_auth": ("cookie (CSWSH-exposed — validate Origin)" if ws_cookie_auth
+                               else "token-or-none (CSWSH not exploitable)" if ws_usage
+                               else "no websocket detected"),
             "qr_generation": sorted(set(qr_files)),
             "clipboard_copy": sorted(set(clip_files)),
             "strict_csp": strict_csp,

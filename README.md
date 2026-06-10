@@ -70,7 +70,7 @@ Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and 
 
 > That's the whole user surface: **`run`** (plus the optional, advanced **`dynamic`** live-probing step below). `recon`/`proof`/`calibrate` exist for developing the tool itself and are hidden from `--help` — you never need them.
 
-## What it extracts (13 deterministic extractors, no LLM)
+## What it extracts (15 deterministic extractors, no LLM)
 
 | | Dimension | Notable output |
 |---|---|---|
@@ -79,13 +79,15 @@ Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and 
 | auth | scheme + login surface + **insecure-default signing secrets** | multi-scheme; flags a hard-coded `JWT_SECRET \|\| 'dev-secret'` fallback (forgeable JWT) |
 | **authz** | access-control map | guard coverage + **write endpoints with no visible guard** + roles |
 | tenant | multi-tenancy key candidates | the BOLA boundary, by frequency |
-| **password_policy** | cross-route policy consistency | flags a route enforcing fewer character classes than the strongest sibling (policy drift) |
-| surface | 14 sink classes | 12 user-input-gated (SSRF/SQLi/traversal/SSTI/…) **+ var-arg SSRF + response-side error-disclosure** |
+| **password_policy** | cross-route consistency **+ reuse/history** | complexity drift across routes **+ a set-password path that hashes without a reuse check** |
+| surface | 14 sink classes **+ redirect-SSRF** | user-input-gated sinks + var-arg SSRF + error-disclosure **+ follows-redirects-without-per-hop-guard** |
+| **upload_security** | unrestricted upload + unsafe serve | deny-list-only, stored-name-from-filename, trust-client-MIME, accept-SVG, **serve without `nosniff`** |
 | schemas | data models + **privileged fields** | Pydantic/SQLAlchemy/Django/Prisma/Mongoose/TypeORM/Zod → `role`/`isAdmin`/`groupId` for mass-assignment targeting |
-| iac_ci | IaC + CI/CD | GHA injection, unpinned actions, Dockerfile-root, tfstate **+ CDK AppSync `API_KEY` default-auth (CSWSH)** |
+| iac_ci | IaC + CI/CD | GHA injection, unpinned actions, tfstate, **CDK AppSync `API_KEY` anonymous-default-auth + WAF-as-control smell** |
 | client_exposure | browser leakage | public-var secrets by **name + value-shape (`da2-…`) + CDK build-injection**, server-secret-in-client, source maps |
-| **client_integrity** | tamperable display (man-in-the-browser) | a fund-redirecting value (wallet address/QR) shown without a strict CSP / out-of-band anchor |
-| graphql | GraphQL surface | introspection / playground / depth-limit **+ AppSync subscription-authz (cross-group BOLA) + WAF-bypass-aware introspection** |
+| **client_integrity** | tamperable display + **WS auth model** | wallet value without strict CSP / out-of-band anchor **+ the CSWSH determinant (ambient-cookie WS auth)** |
+| **pii_exposure** | unmasked PII at the output boundary | `res.json(rawEntity)` with PII + **a masking control defined but with zero live call sites** (value-shape, not field-name) |
+| graphql | GraphQL surface | introspection (**AppSync `introspectionConfig: DISABLED`-aware**) / playground / depth-limit **+ AppSync subscription-authz (cross-group BOLA)** |
 | integrations | third-party + webhooks | webhooks missing signature verification |
 
 Plus **derived targeting** — IDOR / SSRF / open-redirect / upload / write / auth-endpoint
@@ -194,13 +196,15 @@ publisher** with project `websec-validator`, owner `raccioly`, repo `websec-vali
 
 ## Status / roadmap
 
-**Done:** 13-extractor recon (incl. schema/entity → mass-assignment targeting, the **AWS-CDK /
-managed-AppSync / VTL boundary** — CSWSH, cross-group subscription BOLA, forgeable-JWT default
-secrets — and a **man-in-the-browser / tamperable-display** class), cross-tool de-dup + **bundled
-Semgrep rules**, tailored probe staging, agent briefing, traceable findings ledger with **calibrated
-confidence (CJE — Wilson CIs)**, proof harness, test suite, **Docker bundle** (all scanners + Noir,
-arch-aware), **dynamic phase v1** (authenticated read-only cross-tenant BOLA — validated live,
-reproduced a hand-pentest's 14/14).
+**Done:** 15-extractor recon (incl. schema/entity → mass-assignment targeting, the **AWS-CDK /
+managed-AppSync / VTL boundary**, **upload-security** + **PII-output-boundary** + **redirect-SSRF**
++ **password-reuse** classes, and a **man-in-the-browser / tamperable-display** class), cross-tool
+de-dup + **bundled Semgrep rules**, tailored probe staging, agent briefing, traceable findings ledger
+with **calibrated confidence (CJE — Wilson CIs)**, proof harness, test suite, **Docker bundle** (all
+scanners + Noir, arch-aware), **dynamic phase v1** (authenticated read-only cross-tenant BOLA —
+validated live, reproduced a hand-pentest's 14/14). Validated against the **PTREQ0013000 pen test +
+retest** (incl. correcting two findings the retest disproved: AppSync introspection *is* disablable
+engine-level, and API_KEY-default is anonymous-auth, not CSWSH).
 **Next:** dynamic write-verb BOLA + JWT/auth probes + ZAP/Nuclei two-role diff (gated, they mutate),
 calibration on hand-labeled real repos (more representative base rate), ASVS index lookup, optional
 model-SDK adapters for no-agent fallback.

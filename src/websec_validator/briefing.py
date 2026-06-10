@@ -69,6 +69,20 @@ def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list
         pp_line = f"looks consistent across {len(pp['password_blocks'])} validator block(s)"
     else:
         pp_line = "_no password validators detected_"
+    if ((pp.get("password_reuse") or {}).get("gap")):
+        pp_line += "  ·  ⚠ NO reuse/history control (#6)"
+
+    up = facts.get("upload_security", {})
+    up_findings = up.get("findings", [])
+    up_section = ("\n".join(f"- **{f.get('severity')}** {f.get('kind')} — `{f.get('file')}`" for f in up_findings[:20])
+                  if up_findings else
+                  ("_upload handler(s) present; allow-list + nosniff look ok — spot-check_" if up.get("upload_handlers")
+                   else "_no upload handlers detected_"))
+    pii = facts.get("pii_exposure", {})
+    pii_findings = pii.get("findings", [])
+    pii_section = ("\n".join(f"- **{f.get('severity')}** {f.get('kind')} — `{f.get('file')}`" for f in pii_findings[:20])
+                   if pii_findings else "_no obvious raw-PII responses / dead masking controls_")
+    ws_line = (facts.get("client_integrity", {}) or {}).get("websocket_auth", "no websocket detected")
 
     gql = facts.get("graphql", {})
     if gql.get("present"):
@@ -186,6 +200,14 @@ Production source maps exposed: {client.get("production_source_maps", False)}
 
 **Client integrity — man-in-the-browser / tamperable display:**
 {ci_section}
+
+**WebSocket auth model (CSWSH determinant — is it an ambient cookie?):** {ws_line}
+
+**File-upload security (#2b — sniff bytes, derive stored name, nosniff on serve):**
+{up_section}
+
+**PII output boundary (#8 — verify by VALUE SHAPE, not field name):**
+{pii_section}
 
 **Third-party integrations:** {integ_line}
 {wh_line}

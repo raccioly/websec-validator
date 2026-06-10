@@ -67,6 +67,14 @@ SINKS = {
 }
 
 
+# SSRF-via-redirect (PTREQ0013000 #1): axios/requests FOLLOW redirects by DEFAULT, so an outbound
+# client on a variable URL re-validates only the FIRST hop unless it pins maxRedirects:0 or adds a
+# per-hop guard. One of these present = the chain is guarded; absent next to an SSRF sink = the lead
+# (allow-list on the input URL is necessary but never sufficient — a 302 to 169.254.169.254 wins).
+REDIRECT_GUARD = re.compile(r"beforeRedirect|maxRedirects\s*:\s*0\b|allow_redirects\s*=\s*False"
+                            r"|validateRedirect|isAllowed\w*Url|on[_-]?redirect|checkRedirect", re.I)
+
+
 class SurfaceExtractor(Extractor):
     name = "surface"
     category = "sinks"
@@ -78,6 +86,7 @@ class SurfaceExtractor(Extractor):
 
         found: dict = {k: [] for k in SINKS}
         counts: dict = {k: 0 for k in SINKS}
+        ssrf_redirect: list = []    # SSRF sink in a file with NO per-hop redirect guard (#1)
         for _p, rel, text in ctx.iter_code():
             for cls, (_probe, gate, rx) in SINKS.items():
                 if gate == "sql" and not has_sql:
@@ -88,12 +97,16 @@ class SurfaceExtractor(Extractor):
                     counts[cls] += 1
                     if len(found[cls]) < 60:
                         found[cls].append(rel)
+            if (len(ssrf_redirect) < 40 and not REDIRECT_GUARD.search(text)
+                    and (SINKS["ssrf-outbound-http"][2].search(text) or SINKS["ssrf"][2].search(text))):
+                ssrf_redirect.append(rel)
 
         sinks = {k: {"probe": SINKS[k][0], "count": counts[k], "files": found[k]}
                  for k in SINKS if counts[k]}
         return {
             "sinks": sinks,
             "sink_counts": {k: counts[k] for k in SINKS if counts[k]},
+            "ssrf_redirect_unguarded": ssrf_redirect,   # validate EVERY hop, not just the input URL (#1)
             "datastore_class": ("sql" if has_sql else ("nosql" if has_nosql else "unknown")),
             "note": "Each sink hit is user-input-gated (req./request./concat/interp), so these are "
                     "higher-confidence leads. Cross-reference the files with routes.targeting to pick "
