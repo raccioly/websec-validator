@@ -1,5 +1,7 @@
 # websec-validator
 
+<!-- docguard:quality negation-load off — "no LLM / no server / no running app / not a SaaS / never touches prod" is this tool's core positioning; defining it by contrast with the scanners-and-SaaS it deliberately is NOT is intentional, not a phrasing defect. -->
+
 > Local-first security recon that **briefs your AI coding agent**. It does the deterministic
 > half — read the repo, map the full attack surface, run + de-duplicate the static scanners, and
 > stage a probe library tailored to what it found — then hands your agent (Claude Code, Codex,
@@ -57,7 +59,7 @@ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/scan" websec-validator run 
 The image carries Noir + Trivy + Gitleaks + Semgrep + Checkov; mount your repo at `/scan` and the
 artifacts land in `/scan/websec-out`.
 
-## Use
+## Usage
 
 ```bash
 websec run ./my-app           # ← the one command: recon + stage tailored probes + emit the briefing
@@ -170,7 +172,7 @@ upload, cross-tenant BOLA, role/authz gaps).
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 23 tests
+python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 103 tests
 ```
 
 ## Releasing (maintainer)
@@ -247,3 +249,7 @@ works the findings with you. For other agents the universal interface is unchang
 
 Methodology + probe library are distilled from a real authenticated penetration-testing pass.
 This tool productizes that hand-written methodology into something an AI agent can run on any repo.
+
+## License
+
+[MIT](LICENSE) © Ricardo Accioly

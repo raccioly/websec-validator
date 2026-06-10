@@ -1,0 +1,42 @@
+# .docguardignore — paths to exclude from DocGuard validation.
+# Gitignore-style syntax: one pattern per line, # for comments.
+# Merged into config.ignore (in .docguard.json) at runtime.
+#
+# Common examples:
+#   build/                   # exclude a directory
+#   **/__generated__/**      # exclude anything in any __generated__ dir
+#   vendor/legacy.ts         # exclude a single file
+#   **/*.snap                # exclude all files matching a glob
+#
+# Build outputs, vendored libs, generated code are good candidates here.
+
+# Vendored / generated code that's not yours to document
+**/__generated__/**
+**/generated/**
+**/*.generated.*
+
+# Migrations and lock files
+**/migrations/**
+**/*.lock
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+Cargo.lock
+poetry.lock
+
+# Common build artifacts (defaults also cover these, but listing here is clearer)
+# dist/
+# build/
+# coverage/
+
+# ── websec-validator specifics ──────────────────────────────────────────────
+# tests/fixtures/ holds the deliberately-vulnerable sample apps (Express, Flask)
+# this tool SCANS in its test suite — they are test data, not this project's own
+# surface. Without this exclusion DocGuard mis-reports the tool as an Express/Flask
+# web app with AWS/DynamoDB integrations and HTTP endpoints (none of which it has).
+tests/fixtures/**
+
+# Probe TEMPLATES are scaffolding emitted to the END USER (placeholders like
+# <PROJECT_NAME> they fill in for their own app). The "fill this in" instructional
+# comments are not project TODOs, so exclude them from TODO/surface validation.
+src/websec_validator/templates/probes/**
