@@ -20,7 +20,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from .extractors.base import SKIP_DIRS
+from .extractors.base import SKIP_DIRS, path_in_skip_dir
 
 
 @dataclass(frozen=True)
@@ -45,9 +45,14 @@ class Scanner:
 EXCLUDE_DIRS = tuple(sorted(SKIP_DIRS))
 
 
-def _in_skip_dir(path: str) -> bool:
-    """True if any path segment is a SKIP_DIR — mirrors the walker's per-segment rule."""
-    return any(part in SKIP_DIRS for part in (path or "").replace("\\", "/").split("/"))
+def _in_skip_dir(path: str, root=None) -> bool:
+    """True if `path` is under a SKIP_DIR, measured RELATIVE to the scan `root` when given.
+
+    Delegates to the shared helper. Trivy/Semgrep can emit ABSOLUTE paths, so pass `target`
+    (the scanned repo) or a repo living under a skip-named ancestor has its real findings
+    dropped as 'contamination' (bug-005/066 recurrence). `root=None` keeps the legacy
+    raw-segment behavior for relative inputs (and the existing single-arg unit test)."""
+    return path_in_skip_dir(path, root)
 
 
 def _trivy(target: Path, out: Path, excludes=()) -> list:
@@ -355,7 +360,7 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
     # build output, the tool's own websec-out) → drop anything under a SKIP_DIR. The
     # correctness guarantee behind the best-effort flags; also catches gitleaks (no skip flag).
     before = len(raw)
-    raw = [f for f in raw if not _in_skip_dir(f.get("file", ""))]
+    raw = [f for f in raw if not _in_skip_dir(f.get("file", ""), target)]
     contamination_dropped = before - len(raw)
 
     # bug-066 (b): working-tree secrets (trivy fs) in GITIGNORED files are local-only / never
@@ -392,11 +397,18 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
     for f in deduped:
         by_sev[f["severity"]] = by_sev.get(f["severity"], 0) + 1
         by_cat[f["category"]] = by_cat.get(f["category"], 0) + 1
+    summaries = [{"severity": f["severity"], "category": f["category"], "title": f["title"],
+                  "file": f["file"], "tools": f["tools"]} for f in deduped]
     return {"total_raw": len(raw), "total": len(deduped),
             "cross_tool_or_dup_merged": len(raw) - len(deduped),
             "contamination_dropped": contamination_dropped,
             "local_only_downgraded": local_only_downgraded,
             "by_severity": by_sev, "by_category": by_cat,
-            "top": [{"severity": f["severity"], "category": f["category"], "title": f["title"],
-                     "file": f["file"], "tools": f["tools"]} for f in deduped[:15]]}
+            # `top` = a short slice for the human briefing; `all` = the FULL ranked set the
+            # findings ledger consumes. The ledger must NOT silently drop a HIGH/CRITICAL static
+            # finding ranked #16+ — that undercounted the ledger + calibration on scan-heavy repos
+            # while the CLI printed ledger.total as if complete. (cli excludes `all` from manifest
+            # to avoid duplicating findings.json.)
+            "top": summaries[:15],
+            "all": summaries}
 

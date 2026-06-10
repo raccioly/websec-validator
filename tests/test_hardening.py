@@ -79,6 +79,45 @@ class ScannerHygieneTests(unittest.TestCase):
         self.assertTrue(scanners._in_skip_dir("node_modules/dep/a.js"))
         self.assertFalse(scanners._in_skip_dir("src/app/api/route.ts"))
 
+    def test_skipdir_matched_relative_to_root_not_absolute(self):
+        # Regression: a repo living UNDER a skip-named ANCESTOR (.claude/worktrees, vendor/,
+        # target/) had every absolute-path route/finding silently dropped, because SKIP_DIRS
+        # was matched against the ABSOLUTE path's segments (bug-005 recurrence). Match relative
+        # to the scan root instead. Proven empirically: identical fixture → 2 routes at a clean
+        # path, 0 routes under a `target/` ancestor.
+        from websec_validator.extractors.base import path_in_skip_dir
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "target" / "app"        # 'target' is a SKIP_DIR — but it's an ANCESTOR
+            (root / "src").mkdir(parents=True)
+            real = root / "src" / "routes.js"
+            real.write_text("x")
+            self.assertIn("target", str(real).split("/"))          # the trap segment is present...
+            self.assertFalse(path_in_skip_dir(str(real), root))    # ...but NOT below the root → keep it
+            nm = root / "node_modules" / "dep.js"                  # a genuine skip-dir BELOW the root
+            nm.parent.mkdir(parents=True)
+            nm.write_text("x")
+            self.assertTrue(path_in_skip_dir(str(nm), root))       # still correctly skipped
+        # backward-compat: no root → legacy raw-segment behavior (single-arg call sites/tests)
+        self.assertTrue(path_in_skip_dir("node_modules/dep/a.js"))
+        self.assertFalse(path_in_skip_dir("src/app/api/route.ts"))
+
+    def test_normalize_keeps_findings_when_repo_under_skipdir_ancestor(self):
+        # End-to-end consequence: a trivy finding with an ABSOLUTE path under a skip-named
+        # ancestor must SURVIVE when `target` is that repo root (else real secrets vanish on
+        # anyone whose repo lives under e.g. ~/dev/vendor-portal/ or a .claude worktree).
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "vendor" / "app"        # 'vendor' ancestor
+            (root / "src").mkdir(parents=True)
+            abs_file = str(root / "src" / "config.ts")
+            trivy = {"Results": [{"Target": abs_file, "Secrets": [
+                {"RuleID": "private-key", "Title": "k", "Match": "-----BEGIN", "StartLine": 1}]}]}
+            (root / "trivy.json").write_text(json.dumps(trivy))
+            res = [{"key": "trivy", "output": str(root / "trivy.json"), "name": "Trivy", "category": "sca"}]
+            summary = scanners.normalize_findings(res, root, target=root)
+            files = [f["file"] for f in json.loads((root / "findings.json").read_text())]
+        self.assertIn(abs_file, files)               # NOT dropped despite the 'vendor' ancestor
+        self.assertEqual(summary["contamination_dropped"], 0)
+
     def test_exclude_dirs_includes_agent_tooling(self):
         self.assertIn(".claude", scanners.EXCLUDE_DIRS)
         self.assertIn(".worktrees", scanners.EXCLUDE_DIRS)
@@ -122,6 +161,26 @@ class ScannerHygieneTests(unittest.TestCase):
         self.assertIn("local-only", by_file["secret.local"]["title"])
         self.assertEqual(by_file["src/real.ts"]["severity"], "HIGH")           # tracked → unchanged
         self.assertEqual(summary["local_only_downgraded"], 1)
+
+
+class CrossTenantNumericIdTests(unittest.TestCase):
+    def test_numeric_tenant_id_does_not_crash(self):
+        # fix #6: tenant ids are often numeric (auto-increment); str.replace's 2nd arg must be a str,
+        # so an int tenant would crash this authenticated path uncaught. Coerce with str().
+        cfg = {"target": "http://t", "tenant_path_param": "groupId", "roles": {}}
+        facts = {"routes": {"endpoints": [{"method": "GET", "path": "/api/groups/{groupId}/items"}]}}
+        captured = []
+
+        def fake_mint(c, role):
+            return {"token": f"tok-{role}", "tenant": 1 if role == "agentA" else 2, "email": f"{role}@x"}
+
+        def fake_request(method, url, token=None, timeout=20, data=None, cookie=None):
+            captured.append(url)
+            return 403, "x"
+        with mock.patch.object(dynamic, "mint", fake_mint), mock.patch.object(dynamic, "_request", fake_request):
+            r = dynamic.cross_tenant_bola(cfg, facts)
+        self.assertNotIn("error", r)                                  # numeric ids didn't crash the replace
+        self.assertTrue(any(u.endswith("/api/groups/2/items") for u in captured))  # int coerced into the path
 
 
 class ProbeRegistrationTests(unittest.TestCase):

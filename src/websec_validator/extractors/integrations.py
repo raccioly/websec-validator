@@ -14,10 +14,16 @@ from pathlib import Path
 from .base import Extractor, RepoContext
 
 WEBHOOK_PATH = re.compile(r"webhook|/hook|/callback|/inbound", re.I)
+# Signals that a handler ACTUALLY verifies an inbound signature. The bare word `signature` used to
+# be here and was over-broad: a comment like "no signature verification" — or any stray mention —
+# SUPPRESSED the finding (a false negative, the worst failure for a security tool). Keep crypto
+# primitives, known signature HEADER names (reading one implies verification intent), webhook
+# libraries, and VERB-prefixed signature idioms (verify/check/validate/compute…Signature) — drop
+# the standalone word. Erring toward MORE flagging is the safe direction; the human verifies.
 SIG_VERIFY = re.compile(
-    r"createHmac|\bhmac\b|timingSafeEqual|verif\w*[Ss]ignature|X-Hub-Signature|"
-    r"X-Signature|Stripe-Signature|\bsvix\b|constant_time_compare|compare_digest|"
-    r"verifyWebhook|signature", re.I)
+    r"createHmac|\bhmac\b|timingSafeEqual|X-Hub-Signature|X-Signature|Stripe-Signature|"
+    r"\bsvix\b|constant_time_compare|compare_digest|verifyWebhook|webhookSecret|"
+    r"(?:verif|check|validate|assert|compute|expected|valid)\w*[_-]?[Ss]ignature", re.I)
 
 SDKS = {"stripe": "Stripe", "twilio": "Twilio", "@sendgrid": "SendGrid", "messagebird": "MessageBird/Bird",
         "@slack": "Slack", "openai": "OpenAI", "@anthropic": "Anthropic", "octokit": "GitHub",

@@ -25,7 +25,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from .base import SKIP_DIRS, Extractor, RepoContext
+from .base import SKIP_DIRS, Extractor, RepoContext, path_in_skip_dir
 
 # Noir is a subprocess that scans the raw tree — it does NOT know the walker's SKIP_DIRS,
 # so without this it grinds through (and emits routes from) build output (.next, cdk.out,
@@ -35,8 +35,11 @@ from .base import SKIP_DIRS, Extractor, RepoContext
 _NOIR_SKIP_GLOBS = ",".join(f"**/{d}/**" for d in sorted(SKIP_DIRS))
 
 
-def _in_skip_dir(code_path: str) -> bool:
-    return any(part in SKIP_DIRS for part in (code_path or "").replace("\\", "/").split("/"))
+def _in_skip_dir(code_path: str, root=None) -> bool:
+    # Delegates to the shared, root-relative helper. Noir emits ABSOLUTE code_paths, so we MUST
+    # pass the scan root — otherwise a repo under a skip-named ancestor (e.g. .claude/worktrees,
+    # vendor/, target/) has EVERY route dropped (bug-005 recurrence; proven on a `target/` path).
+    return path_in_skip_dir(code_path, root)
 
 WRITE_VERBS = {"POST", "PUT", "PATCH", "DELETE"}
 EXCLUDE_GLOBS = "*.test.ts,*.test.tsx,*.spec.ts,*.test.js,*.spec.js,*_test.go,*_test.py,test_*.py,*.stories.tsx"
@@ -223,10 +226,14 @@ class RoutesExtractor(Extractor):
 
     def extract(self, ctx: RepoContext, facts: dict) -> dict:
         eps = _noir_scan(ctx.root, getattr(ctx, "excludes", None))
-        if eps is not None:
+        if eps:                                    # noir ran AND found routes
             routes, spec_derived = _normalize_noir(eps)
             engine = "noir"
-        else:
+        elif eps is not None:                      # noir ran but found ZERO — back it up with the regex
+            fb = _fallback(ctx)                     # pass so a framework noir can't parse doesn't become a
+            routes, spec_derived = fb, []           # silent blind spot (0 routes → no authz, no probes)
+            engine = "noir (0 routes) → regex-fallback backstop" if fb else "noir (0 routes)"
+        else:                                      # noir absent
             routes, spec_derived = _fallback(ctx), []
             engine = "regex-fallback (install OWASP Noir for full coverage: brew install noir)"
         # honor user --exclude against route code_paths too (Noir's own --exclude-path glob is
@@ -234,8 +241,10 @@ class RoutesExtractor(Extractor):
         if getattr(ctx, "excludes", None):
             routes = [r for r in routes if not ctx._excluded(r.get("code_path", ""))]
         # Noir doesn't honor SKIP_DIRS — drop any route it found under build output / deps /
-        # nested worktrees (e.g. .claude/worktrees/* doubling the whole app).
-        routes = [r for r in routes if not _in_skip_dir(r.get("code_path", ""))]
+        # nested worktrees (e.g. .claude/worktrees/* doubling the whole app). Pass ctx.root so
+        # SKIP_DIRS is matched RELATIVE to the scan root (a skip-named ANCESTOR must not nuke
+        # the whole route list).
+        routes = [r for r in routes if not _in_skip_dir(r.get("code_path", ""), ctx.root)]
         by_method: dict = {}
         by_tech: dict = {}
         for r in routes:

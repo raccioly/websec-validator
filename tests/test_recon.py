@@ -22,6 +22,7 @@ from websec_validator.extractors.authz import AuthzExtractor           # noqa: E
 from websec_validator.extractors.base import RepoContext               # noqa: E402
 from websec_validator.extractors.stack import StackExtractor           # noqa: E402
 from websec_validator.extractors.schemas import SchemasExtractor       # noqa: E402
+from websec_validator.extractors.integrations import IntegrationsExtractor  # noqa: E402
 from websec_validator.extractors.surface import SINKS, SurfaceExtractor  # noqa: E402
 from websec_validator.extractors.tenant import TenantExtractor         # noqa: E402
 
@@ -93,6 +94,29 @@ class SchemasTests(unittest.TestCase):
         out = SchemasExtractor().extract(ctx("node_app"), {})
         self.assertEqual(out["sensitive_fields"], [])
         self.assertEqual(out["orms"], [])
+
+
+class IntegrationsTests(unittest.TestCase):
+    def _run(self, handler_src):
+        d = Path(tempfile.mkdtemp())
+        (d / "h.js").write_text(handler_src)
+        facts = {"routes": {"endpoints": [
+            {"method": "POST", "path": "/webhooks/stripe", "code_path": str(d / "h.js")}]}}
+        return IntegrationsExtractor().extract(RepoContext(d), facts)
+
+    def test_unverified_webhook_flagged_despite_signature_word_in_comment(self):
+        # the bare-word `signature` SIG_VERIFY alternative used to SUPPRESS the finding when a
+        # comment merely mentioned signatures — a false negative. Only real verification counts now.
+        out = self._run("// no signature verification here\n"
+                        "router.post('/webhooks/stripe', (req,res)=>res.json({ok:1}));\n")
+        self.assertEqual(len(out["webhooks_without_sig_verification"]), 1)
+
+    def test_genuinely_verified_webhook_not_flagged(self):
+        out = self._run("const crypto=require('crypto');\n"
+                        "router.post('/webhooks/stripe', (req,res)=>{\n"
+                        "  const h=crypto.createHmac('sha256',k).update(req.body).digest('hex');\n"
+                        "  if(h!==req.headers['stripe-signature']) return res.status(401).end();\n});\n")
+        self.assertEqual(out["webhooks_without_sig_verification"], [])
 
 
 class CalibrationTests(unittest.TestCase):
@@ -391,6 +415,36 @@ class LedgerTests(unittest.TestCase):
         led = findings.build_ledger(facts, None, None, ["category:access-control"])
         self.assertEqual(led["total"], 0)
         self.assertEqual(led["suppressed"], 1)
+
+    def test_webhook_without_sig_enters_ledger(self):
+        # parity fix: unverified webhooks were surfaced in the briefing but never ranked/calibrated.
+        facts = {"integrations": {"webhooks_without_sig_verification": ["POST /webhooks/stripe  (h.ts)"]}}
+        led = findings.build_ledger(facts, None, None, [])
+        hit = [f for f in led["findings"] if f["attack_class"] == "webhook-forgery"]
+        self.assertEqual(len(hit), 1)
+        self.assertEqual(hit[0]["severity"], "MEDIUM")
+        self.assertIn("CWE-345 Insufficient Verification of Data Authenticity", hit[0]["standards"]["cwe"])
+        self.assertTrue(hit[0]["remediation"])
+
+    def test_sqli_not_downranked_when_sql_orm_present(self):
+        # fix #9: stack.py emits `sql-orm`/`prisma(sql)` labels; findings._sql must count them as SQL
+        # so a SQL-ORM + Mongo app isn't misread as nosql-only and its SQLi wrongly cut to LOW.
+        sinks = {"surface": {"sinks": {"sql-injection": {"count": 1, "files": ["db.ts"]}}}}
+        led = findings.build_ledger({**sinks, "stack": {"datastores": ["sql-orm", "mongo"]}}, None, None, [])
+        self.assertEqual([f for f in led["findings"] if "sql-injection" in f["title"]][0]["severity"], "MEDIUM")
+        led2 = findings.build_ledger({**sinks, "stack": {"datastores": ["mongo"]}}, None, None, [])
+        self.assertEqual([f for f in led2["findings"] if "sql-injection" in f["title"]][0]["severity"], "LOW")
+
+    def test_ledger_consumes_full_static_set_not_just_top15(self):
+        # 20 HIGH static findings → all 20 must reach the ledger (was silently capped at top-15,
+        # dropping HIGH/CRITICAL CVEs/secrets ranked #16+ from the ledger + calibration).
+        allf = [{"severity": "HIGH", "category": "sca", "title": f"CVE-{i}", "file": f"p{i}", "tools": ["trivy"]}
+                for i in range(20)]
+        led = findings.build_ledger({}, {"top": allf[:15], "all": allf}, None, [])
+        self.assertEqual(len([f for f in led["findings"] if f["attack_class"] == "cve"]), 20)
+        # back-compat: a caller passing only `top` still works
+        led2 = findings.build_ledger({}, {"top": allf[:15]}, None, [])
+        self.assertEqual(len([f for f in led2["findings"] if f["attack_class"] == "cve"]), 15)
 
 
 if __name__ == "__main__":

@@ -106,7 +106,9 @@ def cross_tenant_bola(cfg: dict, facts: dict) -> dict:
     for path in endpoints:
         # attacker A tries to read B's tenant data, and vice-versa
         for atk, vic, direction in ((a, b, "A→B"), (b, a, "B→A")):
-            url = cfg["target"] + path.replace("{" + param + "}", vic["tenant"])
+            # str(): a tenant id is often numeric (auto-increment) — str.replace's 2nd arg must be a
+            # str, so a JSON int would crash this (uncaught) authenticated path.
+            url = cfg["target"] + path.replace("{" + param + "}", str(vic["tenant"]))
             code, body = _request("GET", url, atk["token"])
             if code in (401, 403, 404):
                 verdict = "blocked"
@@ -164,7 +166,9 @@ def unauth_reachability(target: str, facts: dict, max_endpoints: int = 50) -> di
         if e.get("method") != "GET" or "{" in p or SIDE_EFFECTING.search(p):
             continue
         eps.append(p)
-    eps = sorted(set(eps))[:max_endpoints]
+    _all_eps = sorted(set(eps))
+    eps = _all_eps[:max_endpoints]
+    over_cap = max(0, len(_all_eps) - max_endpoints)   # disclose, don't silently drop (a missed endpoint = a missed lead)
 
     results, skipped = [], [e.get("path") for e in (facts.get("routes") or {}).get("endpoints", [])
                             if e.get("method") == "GET" and SIDE_EFFECTING.search(e.get("path", ""))]
@@ -195,11 +199,13 @@ def unauth_reachability(target: str, facts: dict, max_endpoints: int = 50) -> di
         "skipped_side_effecting": sorted(set(skipped)),
         "open_no_auth": openish,
         "results": results,
+        "endpoints_over_cap": over_cap,
         "fail_open_suspected": fail_open,
         "authn_trustworthy": not fail_open,
         "warning": FAIL_OPEN_WARNING if fail_open else "",
         "summary": f"{len(openish)}/{len(results)} data-read GET endpoints reachable WITHOUT auth"
                    + (" — review whether these should be public" if openish else " — all gated")
+                   + (f"  ·  ⚠ {over_cap} more over the {max_endpoints}-endpoint cap NOT tested" if over_cap else "")
                    + ("  ·  ⚠ FAIL-OPEN SUSPECTED (nothing enforced auth — results untrustworthy)" if fail_open else ""),
     }
 
@@ -219,7 +225,9 @@ def write_auth_enforcement(target: str, facts: dict, max_endpoints: int = 80) ->
         p = e.get("path", "")
         if e.get("method") in WRITE_VERBS and not SIDE_EFFECTING.search(p):
             eps.append((e["method"], p))
-    eps = sorted(set(eps))[:max_endpoints]
+    _all_eps = sorted(set(eps))
+    eps = _all_eps[:max_endpoints]
+    over_cap = max(0, len(_all_eps) - max_endpoints)
 
     results = []
     for method, path in eps:
@@ -248,11 +256,13 @@ def write_auth_enforcement(target: str, facts: dict, max_endpoints: int = 80) ->
         "no_auth_gate": missing,
         "executed_unauth": executed,
         "results": results,
+        "endpoints_over_cap": over_cap,
         "fail_open_suspected": fail_open,
         "authn_trustworthy": not fail_open,
         "warning": FAIL_OPEN_WARNING if fail_open else "",
         "summary": f"{enforced}/{len(results)} write endpoints enforce auth · "
                    f"{len(missing)} reached with no auth gate · {len(executed)} executed unauthenticated"
+                   + (f"  ·  ⚠ {over_cap} more over the {max_endpoints}-endpoint cap NOT tested" if over_cap else "")
                    + ("  ·  ⚠ FAIL-OPEN SUSPECTED — results untrustworthy" if fail_open else ""),
     }
 
@@ -299,7 +309,9 @@ def forged_token_bypass(target: str, facts: dict, cookie_names=None,
         targets += [(e.get("method"), e.get("path", "")) for e in (facts.get("routes") or {}).get("endpoints", [])
                     if e.get("method") in WRITE_VERBS and "{" not in e.get("path", "")
                     and not SIDE_EFFECTING.search(e.get("path", ""))]
-    targets = sorted(set(targets))[:max_endpoints]
+    _all_targets = sorted(set(targets))
+    targets = _all_targets[:max_endpoints]
+    over_cap = max(0, len(_all_targets) - max_endpoints)
 
     results, bypassed = [], []
     for method, path in targets:
@@ -335,9 +347,11 @@ def forged_token_bypass(target: str, facts: dict, cookie_names=None,
         "tested": len(results),
         "bypassed": bypassed,
         "results": results,
+        "endpoints_over_cap": over_cap,
         "summary": f"{len(bypassed)}/{len(results)} gated route(s) accepted a forged unsigned token"
                    + (" — ⚠ SIGNATURE NOT VERIFIED (CWE-347 auth bypass)" if bypassed
-                      else " — all rejected the forged token"),
+                      else " — all rejected the forged token")
+                   + (f"  ·  ⚠ {over_cap} more over the {max_endpoints}-endpoint cap NOT tested" if over_cap else ""),
     }
 
 

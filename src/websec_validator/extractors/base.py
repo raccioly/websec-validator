@@ -31,6 +31,31 @@ MAX_FILES = 12000
 MAX_BYTES = 2_000_000
 
 
+def path_in_skip_dir(path: str, root: "Path | str | None" = None) -> bool:
+    """True if `path` lies under a SKIP_DIR segment, measured RELATIVE to the scan root.
+
+    Checking the ABSOLUTE path's segments is the bug-005/bug-066 trap: when the scanned repo
+    itself lives under a skip-named ancestor (e.g. `.claude/worktrees/<id>`, `vendor/`,
+    `target/`, `~/.cache`), a segment ABOVE the root matches and the WHOLE tree — every route,
+    every finding — is silently dropped. Noir + the static scanners emit ABSOLUTE paths, so any
+    traversal that post-filters their output MUST strip the root prefix first (the walker already
+    does, via relative_to). Fail OPEN (keep the item) when the path can't be made relative — a
+    silent drop is the dangerous direction for a security tool. `root=None` preserves the legacy
+    raw-segment behavior for already-relative inputs.
+    """
+    p = (path or "").replace("\\", "/")
+    if not p:
+        return False
+    if root is not None:
+        try:
+            p = Path(path).resolve().relative_to(Path(root).resolve()).as_posix()
+        except (ValueError, OSError):
+            if Path(p).is_absolute():
+                return False  # absolute but outside the root → don't risk a false drop
+            # else: already a root-relative path → check its segments as-is below
+    return any(part in SKIP_DIRS for part in p.split("/"))
+
+
 class RepoContext:
     """Walk the tree once; cache file text; serve cheap queries to every extractor."""
 
@@ -47,9 +72,11 @@ class RepoContext:
 
     def _walk(self) -> None:
         n = 0
+        self.truncated = False          # set when MAX_FILES is hit → recon is PARTIAL, surface it
         for p in self.root.rglob("*"):
             if n >= MAX_FILES:
-                break
+                self.truncated = True   # rglob order is filesystem-dependent → which files drop is
+                break                   # nondeterministic; the consumer MUST know coverage is partial
             # match SKIP_DIRS against parts RELATIVE to the scan root — otherwise a
             # repo located under e.g. ~/.cache or any dir named like a skip-dir would
             # have its whole tree skipped.

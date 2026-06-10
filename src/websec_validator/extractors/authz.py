@@ -21,6 +21,12 @@ from .base import Extractor, RepoContext
 
 WRITE_VERBS = {"POST", "PUT", "PATCH", "DELETE"}
 
+# endpoint_guards feeds the missing-auth ledger (findings.build_ledger), so capping it low was a
+# silent coverage cliff: a big monorepo's unguarded write #401 never became a finding. Raised to
+# cover realistic monorepos; truncation beyond this is DISCLOSED (endpoint_guards_truncated), never
+# silent — mirrors constitution.py's "…and N more" pattern.
+_MAX_ENDPOINT_GUARDS = 5000
+
 GUARD = re.compile(
     r"requireAuth|requirePermission|requireRole|requireGroupAccess|isAuthenticated|"
     r"@login_required|@jwt_required|@permission_required|@roles_required|ensureAuth|"
@@ -181,7 +187,8 @@ class AuthzExtractor(Extractor):
             "roles_detected": sorted(r for r in roles if r),
             "guard_summary": {"with_visible_guard": protected,
                               "no_visible_guard": no_guard, "unknown": unknown},
-            "endpoint_guards": egs[:400],
+            "endpoint_guards": egs[:_MAX_ENDPOINT_GUARDS],
+            "endpoint_guards_truncated": max(0, len(egs) - _MAX_ENDPOINT_GUARDS),
             "write_endpoints_without_visible_guard": sorted(set(no_guard_writes))[:60],
             "unsafe_auth_decoders": unsafe_decoders[:30],
             "unverified_signature_routes": unverified_routes,

@@ -41,6 +41,9 @@ STANDARDS = {
     "xxe": (["CWE-611 XXE"], "ASVS V5.5.2", []),
     "prototype-pollution": (["CWE-1321 Prototype Pollution"], "ASVS V5.1", []),
     "mass-assignment": (["CWE-915 Mass Assignment"], "ASVS V5.1.2", ["API3:2023 BOPLA"]),
+    "webhook-forgery": (["CWE-345 Insufficient Verification of Data Authenticity",
+                         "CWE-347 Improper Verification of Cryptographic Signature"],
+                        "ASVS V13.4", ["API8:2023 Misconfiguration"]),
     "cve": (["CWE-1395 Vulnerable Dependency"], "ASVS V14.2.1", ["API8:2023"]),
     "iac": (["CWE-1188 Insecure Default"], "ASVS V14.1", []),
     "client-exposure": (["CWE-200 Information Exposure"], "ASVS V14.3", []),
@@ -62,6 +65,9 @@ REMEDIATION = {
     "missing-auth": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a "
                     "middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.",
     "bola": "Enforce object ownership: verify the authenticated principal owns/can access the resource id (tenant scope).",
+    "webhook-forgery": "Verify the provider's signature (HMAC over the RAW body, constant-time compare) before "
+                       "processing, reject stale timestamps / replays, and fail closed when the signature header "
+                       "is absent — don't trust an unsigned inbound webhook.",
     "unsafe-auth-decoder": "Verify the token/signature before trusting it for an auth/identity decision — use a "
                            "verifying decode (e.g. jwt.verify with the key / a checked session), never an *Unsafe* "
                            "or decode-only path whose output then feeds requireAuth/requireAdmin.",
@@ -225,8 +231,11 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                         + " Confirm reachability with the forged-token / hs256 probe (it seeds this literal)."}]))
 
     # ---- 2. Static scanner findings (de-duplicated `unified`) ----
+    # Consume the FULL ranked set (`all`), not the briefing's short `top` slice — else a
+    # HIGH/CRITICAL CVE/secret ranked #16+ never reaches the ledger/REPORT/calibration. Falls
+    # back to `top` for older callers/tests that only pass that key.
     cat_to_class = {"sca": "cve", "secret": "secret", "iac": "iac", "sast": "sast"}
-    for t in (unified or {}).get("top", []):
+    for t in ((unified or {}).get("all") or (unified or {}).get("top", [])):
         cat = t.get("category", "")
         cls = cat_to_class.get(cat, "sast")
         sev = t.get("severity", "MEDIUM")
@@ -241,8 +250,13 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
     # down-rank them (the inflation the field test flagged) rather than ranking them MEDIUM.
     _ds = {d.lower() for d in (facts.get("stack", {}).get("datastores") or [])}
     _nosql = {"dynamodb", "dynamo", "mongodb", "mongo", "firestore", "cosmos", "cosmosdb", "couchdb", "cassandra"}
-    _sql = {"postgres", "postgresql", "mysql", "mariadb", "sqlite", "mssql", "sqlserver", "aurora", "oracle", "cockroach"}
-    is_nosql_only = bool(_ds & _nosql) and not (_ds & _sql)
+    # Include the ORM-ish labels stack.py actually emits (prisma(sql)/sql-orm) — and treat any label
+    # CONTAINING "sql" (but not "nosql") as SQL — so a SQL-ORM app + Mongo isn't misread as nosql-only
+    # and its SQLi findings wrongly down-ranked.
+    _sql = {"postgres", "postgresql", "mysql", "mariadb", "sqlite", "mssql", "sqlserver", "aurora",
+            "oracle", "cockroach", "prisma(sql)", "sql-orm"}
+    has_sql = bool(_ds & _sql) or any("sql" in d and "nosql" not in d for d in _ds)
+    is_nosql_only = bool(_ds & _nosql) and not has_sql
     for cls, info in (facts.get("surface", {}).get("sinks", {}) or {}).items():
         sev = "MEDIUM"
         if cls == "error-disclosure":
@@ -315,6 +329,18 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                       fnd.get("severity", "LOW"), fnd.get("confidence", "LOW"),
                       (_ci.get("sensitive_display") or ["client"])[0],
                       [{"layer": "recon", "detail": fnd.get("detail", "")}]))
+
+    # ---- 9. Inbound webhooks with no signature verification (forgery / replay) ----
+    # Recon found webhook handlers with no HMAC/signature check. This was surfaced in the briefing
+    # but — alone among the recon signals — never entered the ranked, calibrated ledger. Wire it in
+    # for parity (MEDIUM: heuristic — the check may live in middleware, so verify).
+    for wh in (facts.get("integrations", {}) or {}).get("webhooks_without_sig_verification", []):
+        out.append(_f(f"Webhook without signature verification: {wh}", "integrations",
+                      "webhook-forgery", "MEDIUM", "MEDIUM", wh,
+                      [{"layer": "recon", "detail": "no signature-verification code (HMAC / timingSafeEqual / "
+                        "Stripe-Signature / svix / compare_digest) found in this webhook handler — a forged or "
+                        "replayed request could be processed as authentic. Confirm it isn't handled in middleware, "
+                        "then run the webhook-forgery probe."}]))
 
     # ---- suppress + rank ----
     kept = [f for f in out if not _suppressed(f, suppressions)]
