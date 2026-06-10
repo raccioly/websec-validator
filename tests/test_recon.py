@@ -426,6 +426,24 @@ class LedgerTests(unittest.TestCase):
         self.assertIn("CWE-345 Insufficient Verification of Data Authenticity", hit[0]["standards"]["cwe"])
         self.assertTrue(hit[0]["remediation"])
 
+    def test_sink_attack_class_maps_to_specific_cwe(self):
+        # surface.py emits `sql-injection`/`nosql-injection`/`redos`/`eval-injection`; each must cite
+        # its SPECIFIC CWE, not fall back to the generic "sast" (CWE-710).
+        facts = {"surface": {"sinks": {
+            "sql-injection": {"count": 1, "files": ["a.ts"]},
+            "nosql-injection": {"count": 1, "files": ["b.ts"]},
+            "redos": {"count": 1, "files": ["c.ts"]},
+            "eval-injection": {"count": 1, "files": ["d.ts"]}}},
+            "stack": {"datastores": ["postgres"]}}
+        by = {f["title"]: f for f in findings.build_ledger(facts, None, None, [])["findings"]}
+        self.assertEqual(by["sql-injection sink (1 site(s))"]["attack_class"], "sqli")
+        self.assertIn("CWE-89 SQL Injection", by["sql-injection sink (1 site(s))"]["standards"]["cwe"])
+        self.assertEqual(by["nosql-injection sink (1 site(s))"]["attack_class"], "nosql-injection")
+        self.assertTrue(by["nosql-injection sink (1 site(s))"]["standards"]["cwe"][0].startswith("CWE-943"))
+        self.assertEqual(by["eval-injection sink (1 site(s))"]["attack_class"], "eval-injection")
+        # a specific remediation, not the generic default
+        self.assertNotEqual(by["redos sink (1 site(s))"]["remediation"], "Review and remediate per the cited standard.")
+
     def test_sqli_not_downranked_when_sql_orm_present(self):
         # fix #9: stack.py emits `sql-orm`/`prisma(sql)` labels; findings._sql must count them as SQL
         # so a SQL-ORM + Mongo app isn't misread as nosql-only and its SQLi wrongly cut to LOW.

@@ -237,9 +237,14 @@ def write_auth_enforcement(target: str, facts: dict, max_endpoints: int = 80) ->
             verdict = "auth-enforced"
         elif code in (200, 201, 204):
             verdict = "EXECUTED-UNAUTH"
-        elif code in (400, 422, 404, 405, 409, 415, 500):
+        elif code in (400, 422, 404, 405, 409, 415):
             verdict = "no-auth-gate (reached handler/validation)"
         else:
+            # 500 (and any other code) is INCONCLUSIVE: a 500 may be the auth layer itself throwing,
+            # not the handler running unauthenticated — so it must NOT become a no-auth-gate verdict
+            # (which would escalate to a HIGH missing-auth finding AND poison the calibration oracle
+            # with a confirmed-real sample). Matches the forged-token engine, which also excludes 500
+            # from "reached handler".
             verdict = f"http-{code}"
         results.append({"method": method, "path": path, "status": code, "verdict": verdict})
 

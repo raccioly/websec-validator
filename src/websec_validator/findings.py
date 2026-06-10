@@ -33,6 +33,9 @@ STANDARDS = {
     "ssrf": (["CWE-918 SSRF"], "ASVS V12.6", ["API7:2023 SSRF"]),
     "secret": (["CWE-798 Hard-coded Credentials"], "ASVS V2.10", ["API8:2023 Misconfiguration"]),
     "sqli": (["CWE-89 SQL Injection"], "ASVS V5.3.4", ["API8:2023"]),
+    "nosql-injection": (["CWE-943 Improper Neutralization of Data within a Query"], "ASVS V5.3.4", ["API8:2023"]),
+    "redos": (["CWE-1333 Inefficient Regular Expression Complexity (ReDoS)"], "ASVS V5.2.4", []),
+    "eval-injection": (["CWE-95 Eval Injection", "CWE-94 Code Injection"], "ASVS V5.2.4", []),
     "command-injection": (["CWE-78 OS Command Injection"], "ASVS V5.3.8", []),
     "path-traversal": (["CWE-22 Path Traversal"], "ASVS V12.3", []),
     "ssti": (["CWE-1336 SSTI"], "ASVS V5.2.5", []),
@@ -72,6 +75,12 @@ REMEDIATION = {
                            "verifying decode (e.g. jwt.verify with the key / a checked session), never an *Unsafe* "
                            "or decode-only path whose output then feeds requireAuth/requireAdmin.",
     "ssrf": "Validate + allowlist outbound URLs; block RFC1918/IMDS/file://; never fetch a raw user-supplied URL.",
+    "nosql-injection": "Never pass raw req.body into a query/operator position; reject $-prefixed keys, use a typed "
+                       "query builder or schema validation, and cast expected types before querying.",
+    "redos": "Bound the regex (no nested/ambiguous quantifiers), cap input length, or use a linear-time engine "
+             "(RE2) — and never build a pattern from unsanitized user input.",
+    "eval-injection": "Remove eval()/new Function()/exec on user input; use a safe parser, a typed dispatch table, "
+                      "or an explicit allowlist of operations instead.",
     "secret": "Rotate the credential, remove from code/history, load from a secrets manager.",
     "cve": "Upgrade the dependency to the fixed version.",
     "iac": "Apply the hardening (non-root user, pin actions to a SHA, enforce TLS, etc.).",
@@ -94,6 +103,12 @@ _DEFAULT_REM = "Review and remediate per the cited standard."
 SEV_RANK = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "INFO": 0}
 CONF_RANK = {"HIGH": 2, "MEDIUM": 1, "LOW": 0}
 WRITE_VERBS = {"POST", "PUT", "PATCH", "DELETE"}
+
+# surface.py sink keys → STANDARDS/attack-class keys where they differ, so a sink cites its SPECIFIC
+# CWE instead of falling back to the generic "sast" (CWE-710). sql-injection is the high-value case
+# (surface.py emits `sql-injection`; STANDARDS keys it `sqli`). nosql-injection/redos/eval-injection
+# now have their own STANDARDS entries, so they resolve directly.
+_SINK_ATTACK = {"sql-injection": "sqli"}
 
 
 def _cite(cls):
@@ -273,7 +288,8 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
             if cls == "ssrf-outbound-http":
                 sev = "LOW"               # var-arg only — weaker than the user-gated `ssrf` class
         else:
-            attack = cls if cls in STANDARDS else "sast"
+            _acls = _SINK_ATTACK.get(cls, cls)
+            attack = _acls if _acls in STANDARDS else "sast"
             ev = [{"layer": "recon", "detail": f"user-input-gated {cls} in {info.get('count')} file(s)"}]
         if cls in ("sqli", "sql-injection") and is_nosql_only:
             sev = "LOW"
