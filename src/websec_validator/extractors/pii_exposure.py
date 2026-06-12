@@ -1,4 +1,4 @@
-"""PII output-boundary extractor — unmasked customer data in API responses (PTREQ0013000 #8).
+"""PII output-boundary extractor — unmasked customer data in API responses (REF-PENTEST #8).
 
 Two high-signal static tells the retest taught us:
 
@@ -10,7 +10,7 @@ Two high-signal static tells the retest taught us:
 
 2. **Raw entity to the client.** A controller does `res.json(entity)` on a raw ORM/repo object that
    carries PII fields, with no DTO/serializer/masker — so phone/email ship in cleartext, *including*
-   indirect carriers (a phone embedded in a composed `messageBirdId`, a denormalized `lastMessage`).
+   indirect carriers (a phone embedded in a composed `providerMessageId`, a denormalized `lastMessage`).
    The decisive verification is **value-shape, not field-name** — a field allow-list misses the
    indirect carriers — so the probe asserts no phone/email *value* reaches a non-privileged caller.
 """
@@ -64,7 +64,7 @@ class PiiExposureExtractor(Extractor):
                                            "call site outside its own file/tests — a security control that exists but "
                                            "isn't wired into the request handlers (it was likely only on export/report "
                                            "paths). Apply it at the live API output boundary, or remove the false "
-                                           "sense of safety (PTREQ0013000 #8)."})
+                                           "sense of safety (REF-PENTEST #8)."})
 
         # 2. raw entity with PII to the client, no masker/DTO in the handler
         raw_leaks = []
@@ -80,7 +80,7 @@ class PiiExposureExtractor(Extractor):
                                                "ship in cleartext. Mask at ONE output boundary (a DTO), gated by a "
                                                "permission. VERIFY BY VALUE SHAPE (no phone/email value in the JSON), "
                                                "not field name — indirect carriers (composed IDs, denormalized fields) "
-                                               "leak too (the `messageBirdId`-embeds-the-phone class, #8)."})
+                                               "leak too (the `providerMessageId`-embeds-the-phone class, #8)."})
 
         by_sev: dict = {}
         for f in findings:

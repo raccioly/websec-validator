@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # appsync-introspection.sh — confirm AppSync GraphQL introspection is reachable AND, if a WAF
-# "blocks" it, that the block is bypassable (PTREQ0013000 #2). AppSync can't disable introspection
+# "blocks" it, that the block is bypassable (REF-PENTEST #2). AppSync can't disable introspection
 # at the API layer, so a WAF string-match is the only control — and string-match is evadable.
 #
 # Tries: (1) plain introspection, (2) the field name with a JSON \u unicode-escape (decodes to the

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# password-reuse.sh — password history / reuse control (PTREQ0013000 #6). Change the password to the
+# password-reuse.sh — password history / reuse control (REF-PENTEST #6). Change the password to the
 # SAME value, and to a value used one change ago, on EVERY set-password path (self-service change,
 # admin set, profile update, SCIM/SSO-JIT) — coverage gaps BETWEEN paths are the usual bug. Expect a
 # rejection ("password previously used") on both. This is a DIFFERENT control from complexity.

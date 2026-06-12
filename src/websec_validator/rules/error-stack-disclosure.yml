@@ -5,7 +5,7 @@ rules:
     message: >-
       Error stack/message returned in an HTTP response. This leaks internal file paths,
       dependency versions and code structure to clients, aiding further attacks. Return a
-      generic message to the client and log the detail server-side. (PTREQ0013000 #7.)
+      generic message to the client and log the detail server-side. (REF-PENTEST #7.)
     metadata:
       cwe: "CWE-209: Generation of Error Message Containing Sensitive Information"
       owasp: "A05:2021 - Security Misconfiguration"

@@ -52,7 +52,7 @@ STANDARDS = {
     "client-exposure": (["CWE-200 Information Exposure"], "ASVS V14.3", []),
     "graphql": (["CWE-200 Information Exposure"], "ASVS V13.1", ["API8:2023"]),
     "sast": (["CWE-710 Coding Standards"], "ASVS V1.1", []),
-    # --- PTREQ0013000 classes ---
+    # --- REF-PENTEST classes ---
     "insecure-secret-default": (["CWE-798 Hard-coded Credentials", "CWE-1188 Insecure Default Initialization"],
                                 "ASVS V2.10", ["API2:2023 Broken Authentication"]),
     "cswsh": (["CWE-1385 Missing Origin Validation in WebSockets", "CWE-346 Origin Validation Error"],
@@ -63,13 +63,31 @@ STANDARDS = {
     "tamperable-display": (["CWE-451 UI Misrepresentation of Critical Information",
                             "CWE-829 Inclusion of Functionality from Untrusted Control Sphere"],
                            "ASVS V14.4", ["API8:2023 Misconfiguration"]),
-    # --- PTREQ0013000 retest classes ---
+    # --- REF-PENTEST retest classes ---
     "unrestricted-upload": (["CWE-434 Unrestricted Upload of File with Dangerous Type"],
                             "ASVS V12.2", ["API8:2023 Misconfiguration"]),
     "content-sniffing": (["CWE-430 Deployment of Wrong Handler (MIME sniffing)", "CWE-79 Stored XSS"],
                          "ASVS V14.4.3", ["API8:2023 Misconfiguration"]),
     "pii-exposure": (["CWE-359 Exposure of Private Personal Information", "CWE-200 Information Exposure"],
                      "ASVS V8.3", ["API3:2023 BOPLA / Excessive Data Exposure"]),
+    # --- client-trust-boundary group (man-in-the-browser display integrity) ---
+    "missing-csp": (["CWE-693 Protection Mechanism Failure", "CWE-1021 Improper Restriction of Rendered UI Layers"],
+                    "ASVS V14.4.3", ["API8:2023 Misconfiguration"]),
+    "incomplete-hsts": (["CWE-523 Unprotected Transport of Credentials",
+                         "CWE-319 Cleartext Transmission of Sensitive Information"],
+                        "ASVS V9.1.2", ["API8:2023 Misconfiguration"]),
+    "weak-fingerprint": (["CWE-331 Insufficient Entropy", "CWE-326 Inadequate Encryption Strength"],
+                         "ASVS V6.3.1", []),
+    "overclaimed-control": (["CWE-693 Protection Mechanism Failure", "CWE-1059 Insufficient Technical Documentation"],
+                            "ASVS V1.1", ["API8:2023 Misconfiguration"]),
+    "client-tamper-vector": (["CWE-602 Client-Side Enforcement of Server-Side Security",
+                              "CWE-345 Insufficient Verification of Data Authenticity"],
+                             "ASVS V1.1", ["API8:2023 Misconfiguration"]),
+    "abusable-action-endpoint": (["CWE-770 Allocation of Resources Without Limits or Throttling",
+                                  "CWE-352 Cross-Site Request Forgery"],
+                                 "ASVS V11.1.4", ["API4:2023 Unrestricted Resource Consumption",
+                                                  "API6:2023 Unrestricted Access to Sensitive Business Flows"]),
+    "redundant-secret-fetch": (["CWE-200 Information Exposure"], "ASVS V2.10", ["API8:2023 Misconfiguration"]),
 }
 REMEDIATION = {
     "missing-auth": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a "
@@ -113,6 +131,27 @@ REMEDIATION = {
     "pii-exposure": "Mask PII at ONE output boundary (a DTO/serializer), gated by an explicit permission; keep raw "
                     "data only in storage. Verify by VALUE SHAPE (no phone/email value in the response, incl. nested "
                     "objects, composed IDs and exports), not field name. Wire the masker into the LIVE handlers.",
+    "missing-csp": "Add a nonce-based strict CSP (script-src 'self' + per-request nonce + strict-dynamic; no "
+                   "unsafe-inline/eval; object-src 'none'). Ship REPORT-ONLY first with a violation-report collector, "
+                   "soak, then enforce. Two gotchas: strict-dynamic IGNORES host allowlists (an allowlist gives false "
+                   "comfort), and report-only UNDER-reports cascading failures (the first block masks the rest).",
+    "incomplete-hsts": "Apply HSTS uniformly at the EDGE to ALL responses (not just /api): "
+                       "`max-age>=31536000; includeSubDomains; preload` where the domain model allows.",
+    "weak-fingerprint": "Use >=60 bits for any value an attacker can grind offline to forge a matching fingerprint; "
+                        "keep it human-comparable (grouped base32, e.g. XXXX-XXXX-XXXX). Don't slice a hash to <60 bits.",
+    "overclaimed-control": "Scope the claim honestly ('opportunistic tamper tripwire, not a guarantee') and make the "
+                           "actual trust root out-of-band or server-side — never a client-side check the DOM can rewrite.",
+    "client-tamper-vector": "Render the security-critical value server-side, or drop the redundant client round-trip; if "
+                            "a round-trip is unavoidable, SIGN the payload and verify integrity rather than trusting raw "
+                            "fields. A newly-added client fetch for a value that used to be server-rendered is itself a "
+                            "regression — it manufactures a tamper vector.",
+    "abusable-action-endpoint": "Gate outbound-action endpoints (email/SMS/push/expensive) with auth + CSRF, and rate-"
+                                "limit on BOTH dimensions — per-IP AND per-authenticated-principal (IP-only is bypassed "
+                                "via proxy pools / IPv6 rotation). Config-gate features that depend on a secret so they "
+                                "FAIL CLOSED ('not configured') when it's absent, rather than half-initializing.",
+    "redundant-secret-fetch": "Fetch each secret-manager key ONCE per request and reuse it; use the project's existing "
+                              "secret-provider abstraction instead of a bespoke loader (smaller exposure window + "
+                              "consistency).",
 }
 _DEFAULT_REM = "Review and remediate per the cited standard."
 
@@ -243,7 +282,7 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
               "accepted it, so the signature is NOT verified. Reachable by anyone who can craft a token "
               "string; route the guard through a verifying decode (jwt.verify w/ the key / a checked session)."}]))
 
-    # ---- 1e. Insecure DEFAULT signing secret — forgeable JWT (PTREQ0013000 #8) ----
+    # ---- 1e. Insecure DEFAULT signing secret — forgeable JWT (REF-PENTEST #8) ----
     _auth = facts.get("auth", {}) or {}
     _jwt_used = bool((_auth.get("signal_counts") or {}).get("jwt")) or bool(_auth.get("jwt_sign_verify_present"))
     for sd in (_auth.get("insecure_secret_defaults", []) or []):
@@ -348,7 +387,7 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                           fnd.get("severity", "MEDIUM"), "MEDIUM", (g.get("endpoints") or ["/graphql"])[0],
                           [{"layer": "recon", "detail": fnd.get("detail", "")}]))
 
-    # ---- 7. Password-policy drift across sibling routes (PTREQ0013000 #6) ----
+    # ---- 7. Password-policy drift across sibling routes (REF-PENTEST #6) ----
     pp = facts.get("password_policy", {}) or {}
     for dr in pp.get("drift", []):
         out.append(_f(f"Inconsistent password policy: {dr.get('file')}", "authn", "password-policy",
@@ -366,7 +405,7 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                       "set-password paths",
                       [{"layer": "recon", "detail": "a set-password path hashes a new password with NO comparison to "
                         "the current/previous hashes, and no passwordHistory field — a user can re-set the same or a "
-                        "prior password (PTREQ0013000 #6, the REUSE control, separate from complexity). Add a history "
+                        "prior password (REF-PENTEST #6, the REUSE control, separate from complexity). Add a history "
                         "check on EVERY set-password path (self-service, admin, profile, SSO-JIT) via one shared helper."}]))
 
     # ---- 8. Client-integrity / tamperable display — man-in-the-browser (the agent-wallet class) ----
@@ -375,8 +414,14 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         out.append(_f(fnd.get("issue", "tamperable client display"), "client-integrity",
                       fnd.get("attack_class", "tamperable-display"),
                       fnd.get("severity", "LOW"), fnd.get("confidence", "LOW"),
-                      (_ci.get("sensitive_display") or ["client"])[0],
+                      fnd.get("file") or (_ci.get("sensitive_display") or ["client"])[0],
                       [{"layer": "recon", "detail": fnd.get("detail", "")}]))
+
+    # ---- 8b. Transport / browser-hardening header baseline (CSP #3, HSTS #4) ----
+    for fnd in (facts.get("transport_security", {}) or {}).get("findings", []):
+        out.append(_f(f"{fnd.get('kind')}: browser/transport hardening header", "transport",
+                      fnd.get("attack_class", "missing-csp"), fnd.get("severity", "LOW"), "LOW",
+                      "(response headers)", [{"layer": "recon", "detail": fnd.get("detail", "")}]))
 
     # ---- 9. Inbound webhooks with no signature verification (forgery / replay) ----
     # Recon found webhook handlers with no HMAC/signature check. This was surfaced in the briefing
@@ -390,7 +435,14 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                         "replayed request could be processed as authentic. Confirm it isn't handled in middleware, "
                         "then run the webhook-forgery probe."}]))
 
-    # ---- 10. Upload security — polyglot / MIME-spoof / serve-side stored XSS (PTREQ0013000 #2b) ----
+    # ---- 9b. Outbound-action endpoints (#5) + secret-handling hygiene (#6) ----
+    for fnd in (facts.get("integrations", {}) or {}).get("findings", []):
+        out.append(_f(f"{fnd.get('kind')}: {fnd.get('detail','')[:70]}", "integrations",
+                      fnd.get("attack_class", "iac"), fnd.get("severity", "LOW"),
+                      fnd.get("confidence", "LOW"), fnd.get("file", ""),
+                      [{"layer": "recon", "detail": fnd.get("detail", "")}]))
+
+    # ---- 10. Upload security — polyglot / MIME-spoof / serve-side stored XSS (REF-PENTEST #2b) ----
     for fnd in (facts.get("upload_security", {}) or {}).get("findings", []):
         kind = fnd.get("kind", "")
         cls = "content-sniffing" if kind == "serve-no-nosniff" else "unrestricted-upload"

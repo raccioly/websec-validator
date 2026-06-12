@@ -1,4 +1,4 @@
-"""Password-policy consistency extractor — cross-route drift (PTREQ0013000 #6).
+"""Password-policy consistency extractor — cross-route drift (REF-PENTEST #6).
 
 The finding the pen test caught: one route (`change-password`) enforced 5 character classes
 (min length + upper + lower + digit + special) while sibling routes (`createUser`, `updateProfile`)
@@ -42,7 +42,7 @@ _RE_STRONG = re.compile(r"isStrongPassword", re.I)
 
 _ALL = ("min", "upper", "lower", "digit", "special")
 
-# Password REUSE / history — a DIFFERENT control from complexity (PTREQ0013000 #6, which we initially
+# Password REUSE / history — a DIFFERENT control from complexity (REF-PENTEST #6, which we initially
 # misread as complexity). A set-password path that hashes a new password with no comparison to the
 # current / previous hashes lets a user re-set the same password. Signals:
 HASH_NEW = re.compile(r"bcrypt(?:js)?\.hash|argon2\.hash|\bscrypt\b|pbkdf2|hashPassword\(|\.setPassword\(", re.I)

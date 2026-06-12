@@ -45,7 +45,7 @@ PROBES = {
     "dlp-bypass-offline": ("dlp-bypass-offline.py", "DLP/detection regex encoding bypass",
                           "your DLP/redaction regexes (offline)"),
     "s3-assess": ("s3-assess.sh", "S3 bucket posture", "a bucket name + AWS creds"),
-    # --- PTREQ0013000 probes ---
+    # --- REF-PENTEST probes ---
     "error-disclosure-probe": ("error-disclosure-probe.sh", "Error/stack-trace disclosure in 500s (CWE-209)",
                                "a running TEST instance (+ usually a token) — reads routes from probe-context.json"),
     "appsync-introspection": ("appsync-introspection.sh", "AppSync introspection + WAF Unicode/junk bypass (#2)",
@@ -56,7 +56,7 @@ PROBES = {
                                   "APPSYNC_URL + a low-priv session + VICTIM_GROUP_ID you do NOT own + SUB_FIELD"),
     "client-integrity-checklist": ("client-integrity-checklist.sh", "Man-in-the-browser / tamperable-display posture",
                                    "a running TEST instance + the page that shows the address (PAGE=/receive)"),
-    # --- PTREQ0013000 retest probes ---
+    # --- REF-PENTEST retest probes ---
     "upload-matrix": ("upload-matrix.sh", "Unrestricted upload + serve-side stored XSS (#2b)",
                       "a TEST instance + an upload token + the upload path (UPLOAD_PATH / UPLOAD_FIELD)"),
     "pii-output-diff": ("pii-output-diff.sh", "Unmasked PII by value-shape, per-role (#8)",
@@ -123,7 +123,7 @@ def applicable(facts: dict) -> list:
     if targeting.get("write_endpoints"):
         chosen += ["webhook-forgery", "race-conditions"]
 
-    # PTREQ0013000 — stage probes for the surfaces the new extractors found
+    # REF-PENTEST — stage probes for the surfaces the new extractors found
     surface_sinks = (facts.get("surface") or {}).get("sinks", {})
     if surface_sinks.get("error-disclosure"):
         chosen += ["error-disclosure-probe"]
@@ -131,8 +131,8 @@ def applicable(facts: dict) -> list:
         f.get("kind", "").startswith("appsync") for f in (facts.get("iac_ci") or {}).get("findings", []))
     if appsync:
         chosen += ["appsync-introspection", "appsync-cswsh", "appsync-subscription-bola"]
-    if (facts.get("client_integrity") or {}).get("findings"):
-        chosen += ["client-integrity-checklist"]
+    if (facts.get("client_integrity") or {}).get("findings") or (facts.get("transport_security") or {}).get("findings"):
+        chosen += ["client-integrity-checklist"]   # live CSP/HSTS + display-integrity header check
     if (facts.get("upload_security") or {}).get("findings") or targeting.get("upload_candidates"):
         chosen += ["upload-matrix"]
     if (facts.get("pii_exposure") or {}).get("findings"):

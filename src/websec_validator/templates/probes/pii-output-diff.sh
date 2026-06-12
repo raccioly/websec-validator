@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# pii-output-diff.sh — unmasked-PII detector by VALUE SHAPE, not field name (PTREQ0013000 #8). As a
+# pii-output-diff.sh — unmasked-PII detector by VALUE SHAPE, not field name (REF-PENTEST #8). As a
 # NON-privileged caller, fetch each data endpoint and assert NO phone (/\+?\d{7,}/) or email value
-# appears ANYWHERE in the JSON — including nested objects, composed IDs (the `messageBirdId` carrier),
+# appears ANYWHERE in the JSON — including nested objects, composed IDs (the `providerMessageId` carrier),
 # denormalized fields and exports. A field-name allow-list misses the indirect carriers; value-shape
 # does not. Optionally diff against a privileged role to see what's over-exposed.
 #

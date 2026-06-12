@@ -10,11 +10,11 @@
 > Last updated: 2026-06-10
 
 The suite is **stdlib `unittest` only** — no third-party test runner, no network, no Noir, no running
-app. **103 tests** across three files run in ~3s and gate every release (the `publish.yml` workflow
+app. **126 tests** across three files run in ~3s and gate every release (the `publish.yml` workflow
 also installs the built wheel and smoke-runs `websec run`).
 
 ```bash
-python3 -m unittest discover -s tests    # 103 tests, stdlib only
+python3 -m unittest discover -s tests    # 126 tests, stdlib only
 ```
 
 ---
@@ -24,7 +24,7 @@ python3 -m unittest discover -s tests    # 103 tests, stdlib only
 | Category | Required | Applies To | Tool |
 |----------|----------|-----------|------|
 | Unit | ✅ Yes | extractors, findings ledger, calibration, scanners, probes | `unittest` |
-| Regression | ✅ Yes | pen-test findings (PTREQ0013000) + every fixed bug — pinned so they can't silently come back | `unittest` |
+| Regression | ✅ Yes | pen-test findings (REF-PENTEST) + every fixed bug — pinned so they can't silently come back | `unittest` |
 | Hardening | ✅ Yes | CLI surface, dynamic-phase safety gates, partial-scan guard, edge/error paths | `unittest` |
 | Coverage proxy | ✅ Yes | recon coverage vs the labeled vuln-app corpus (`websec proof`) | `proof.py` (network on first clone) |
 | E2E / Canary / Load / Contract | ➖ N/A | no server, no HTTP API, no deployment target | — |

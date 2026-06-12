@@ -1,4 +1,4 @@
-"""Upload-security extractor — unrestricted file upload + unsafe serve (PTREQ0013000 #2b).
+"""Upload-security extractor — unrestricted file upload + unsafe serve (REF-PENTEST #2b).
 
 The polyglot / MIME-spoof class the retest exploited. An upload handler is unsafe when it:
   (a) only DENY-lists executables instead of positively ALLOW-listing by SNIFFED magic bytes,
@@ -82,7 +82,7 @@ class UploadSecurityExtractor(Extractor):
             "serve_paths_no_nosniff": sorted(set(serve_files))[:20],
             "by_severity": by_sev,
             "note": ("Upload handler(s) detected — verify positive allow-list by sniffed bytes, stored name derived "
-                     "from detected type, and nosniff+attachment on serve (PTREQ0013000 #2b). " if upload_files
+                     "from detected type, and nosniff+attachment on serve (REF-PENTEST #2b). " if upload_files
                      else "No upload handlers detected. ")
                     + "Probe with the upload matrix (polyglot, spoofed MIME, double-extension, SVG) then FETCH the "
                       "stored object back and assert it's served as octet-stream/attachment with nosniff.",

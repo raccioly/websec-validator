@@ -22,7 +22,7 @@ PLAYGROUND = re.compile(r"playground\s*:\s*true|graphiql\s*:\s*true|LandingPageG
 LIMITING = re.compile(r"graphql-depth-limit|depthLimit|costAnalysis|graphql-cost-analysis|"
                       r"createComplexityLimitRule|query-complexity|graphql-armor")
 
-# --- AppSync / managed GraphQL (PTREQ0013000 #2 introspection-via-WAF-bypass, #5 sub-authz) ---
+# --- AppSync / managed GraphQL (REF-PENTEST #2 introspection-via-WAF-bypass, #5 sub-authz) ---
 APPSYNC_MARK = re.compile(r"appsync\.GraphqlApi|CfnGraphQLApi|Definition\.fromSchema|aws-appsync|aws_appsync", re.I)
 AWS_AUTH_DIRECTIVE = re.compile(r"@aws_(?:api_key|iam|oidc|cognito_user_pools|auth|subscribe)")
 # A Subscription field that carries a tenant-scoping arg MUST be authz-bound in its resolver, or any
@@ -33,7 +33,7 @@ TENANT_ARG = re.compile(r"\b(\w+)\s*\(([^)]*\b(?:groupId|group_id|orgId|org_id|t
 # Identity-binding signals in a VTL resolver — the field is tied to the CALLER, not a free arg.
 VTL_AUTHZ = re.compile(r"\$ctx(?:tx)?\.identity|\$context\.identity|identity\.(?:sub|username|claims|resolverContext)"
                        r"|util\.unauthorized|\bgroupIds?\b[\s\S]{0,80}?\bcontains\b|#if\s*\(\s*!?\s*\$ctx\.identity")
-# Engine-level introspection disable on aws-cdk-lib appsync.GraphqlApi. The PTREQ0013000 RETEST
+# Engine-level introspection disable on aws-cdk-lib appsync.GraphqlApi. The REF-PENTEST RETEST
 # proved this IS available and un-bypassable (unlike a WAF string-match) — so a correctly-configured
 # AppSync API must NOT be flagged. This corrects the 0.3.0 false positive that always cried wolf.
 APPSYNC_INTROSPECTION_OFF = re.compile(r"introspectionConfig\s*:\s*[\w.]*\bDISABLED\b")
@@ -93,7 +93,12 @@ class GraphQLExtractor(Extractor):
                                  "detail": "Set `introspectionConfig: appsync.IntrospectionConfig.DISABLED` so the engine "
                                            "rejects __schema/__type regardless of encoding. A WAF byte-match on `__schema` "
                                            "is NOT sufficient — bypassable via Unicode/JSON escapes and it only fronts one "
-                                           "endpoint (PTREQ0013000 #2). Run the appsync-introspection probe to confirm."})
+                                           "endpoint (REF-PENTEST #2). Fronting AppSync with API Gateway is ALSO not the "
+                                           "fix: it proxies POST /graphql opaquely (it can't parse the query to block "
+                                           "introspection without the same bypassable string-match) and does not cover the "
+                                           "SEPARATE realtime WebSocket endpoint, so subscription-BOLA / CSWSH remain — fix "
+                                           "at the engine/auth layer, treat any gateway/WAF as defense-in-depth only. Run "
+                                           "the appsync-introspection probe to confirm."})
             if not (appsync_limiting or limiting):
                 findings.append({"severity": "LOW", "issue": "AppSync has no query depth / resolver-count limit",
                                  "attack_class": "graphql",
@@ -131,7 +136,7 @@ class GraphQLExtractor(Extractor):
     def _subscription_authz(self, ctx: RepoContext, schema_texts: list, findings: list) -> list:
         """For each Subscription field carrying a tenant-scoping arg, check a co-located VTL resolver
         binds that arg to the caller's identity. Missing/passthrough VTL → cross-group BOLA: any
-        authenticated user subscribes to any tenant's stream (PTREQ0013000 #5). Verified shape:
+        authenticated user subscribes to any tenant's stream (REF-PENTEST #5). Verified shape:
         the fixed (identity-bound) VTL PASSES; the pre-fix passthrough FIRES."""
         vtl_corpus = {ctx.rel(p): ctx.text(p) for p in ctx.glob("**/*.vtl", 300)}
         results = []
@@ -155,7 +160,7 @@ class GraphQLExtractor(Extractor):
                     detail = (f"Subscription `{field}({args})` accepts a tenant arg but its VTL resolver does NOT bind "
                               f"it to the caller's identity ($ctx.identity / groupIds.contains / util.unauthorized) — "
                               f"any authenticated user can subscribe to ANY tenant's stream (cross-group BOLA, "
-                              f"PTREQ0013000 #5).")
+                              f"REF-PENTEST #5).")
                 results.append({"field": field, "verdict": verdict, "severity": sev})
                 if sev != "OK":
                     findings.append({"severity": sev, "attack_class": "bola",

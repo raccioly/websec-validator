@@ -28,7 +28,7 @@ _COOKIE_RESERVED = {"get", "set", "getall", "has", "delete", "clear", "tostring"
                     "foreach", "entries", "keys", "values", "size", "name", "value", "length"}
 
 # Insecure DEFAULT signing secret — a hard-coded fallback on a secret/key var (the forgeable-JWT
-# class, PTREQ0013000 #8). JS/TS: `process.env.JWT_SECRET || 'dev-secret-do-not-use-in-prod'`;
+# class, REF-PENTEST #8). JS/TS: `process.env.JWT_SECRET || 'dev-secret-do-not-use-in-prod'`;
 # Python: os.environ.get('JWT_SECRET', 'dev-secret'). A quoted fallback on a *SECRET/*KEY var is
 # almost never benign — and if it's a dev-ish placeholder AND the repo actually signs JWTs, anyone
 # who reads the source can forge tokens for any user/role.
@@ -92,7 +92,7 @@ class AuthExtractor(Extractor):
                 for mm in SECRET_DEFAULT_PY.finditer(text):
                     secret_defaults.append((rel, mm.group(1)))
 
-        # Hard-coded fallback signing secret → forgeable-JWT lead (PTREQ0013000 #8). De-dup by
+        # Hard-coded fallback signing secret → forgeable-JWT lead (REF-PENTEST #8). De-dup by
         # (file, literal); mark dev-ish placeholders. findings.py escalates dev-ish + jwt-in-use to
         # CRITICAL; probes.stage seeds the literal into the hs256 brute-force candidate list.
         seen_sd: set = set()

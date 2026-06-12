@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# appsync-subscription-bola.sh — broken subscription authorization / cross-group BOLA (PTREQ0013000
+# appsync-subscription-bola.sh — broken subscription authorization / cross-group BOLA (REF-PENTEST
 # #5). Open a subscription bound to ANOTHER tenant's groupId and see if the server streams events you
 # must not receive. The pen test did exactly this with `onEvent(groupId)` from a low-priv user.
 #

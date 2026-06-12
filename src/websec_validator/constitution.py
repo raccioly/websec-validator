@@ -60,7 +60,7 @@ def build(facts: dict, ledger: dict | None = None) -> list:
     add("Secret hygiene", "Given the repo + git history, Then no live credential is present and no secret "
         "reaches the client bundle", "recon")
 
-    # P6 — Signing-secret integrity (forgeable JWT, PTREQ0013000 #8)
+    # P6 — Signing-secret integrity (forgeable JWT, REF-PENTEST #8)
     for sd in ((facts.get("auth", {}) or {}).get("insecure_secret_defaults", []) or [])[:5]:
         add("Signing-secret integrity", f"Given the signing-secret env var is unset, When the app boots, Then it "
             f"FAILS CLOSED — no hard-coded fallback ({sd.get('literal')!r} in {sd.get('file')})",

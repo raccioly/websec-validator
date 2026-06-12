@@ -16,14 +16,14 @@ SKIP_DIRS = {".git", "node_modules", "dist", "build", ".next", ".nuxt", "venv",
              ".venv", "__pycache__", ".mypy_cache", ".pytest_cache", "coverage",
              ".turbo", "out", "target", ".gradle", "vendor", "site-packages",
              ".terraform", "security", ".websec-out", "websec-out", ".cache",
-             ".svelte-kit", "storybook-static", ".serverless",
+             ".svelte-kit", "storybook-static", ".serverless", ".aws-sam", "cdk.out", ".sst", ".amplify",
              # agent tooling + editor dirs + worktree copies — not the target app
              ".wolf", ".claude", ".worktrees", ".idea", ".vscode", ".agent", ".agents"}
 CODE_EXT = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".py", ".go", ".rb",
             ".java", ".php", ".prisma",
             # Managed-cloud surfaces: AppSync GraphQL SDL (@aws_* auth directives) + VTL
             # resolvers (where realtime/subscription authz actually lives, or is missing).
-            # PTREQ0013000 #2/#5 lived in these file types — previously invisible to every
+            # REF-PENTEST #2/#5 lived in these file types — previously invisible to every
             # iter_code()-based extractor. routes.py SPEC_PATH still splits .graphql/.gql out
             # of the route list so SDL doesn't generate phantom endpoints.
             ".graphql", ".gql", ".vtl"}

@@ -24,6 +24,7 @@ from .schemas import SchemasExtractor
 from .stack import StackExtractor
 from .surface import SurfaceExtractor
 from .tenant import TenantExtractor
+from .transport_security import TransportSecurityExtractor
 from .upload_security import UploadSecurityExtractor
 
 # Order matters: stack first (others read facts['stack']); authz after routes
@@ -41,6 +42,7 @@ REGISTRY: list[Extractor] = [
     IacCiExtractor(),
     ClientExposureExtractor(),
     ClientIntegrityExtractor(),
+    TransportSecurityExtractor(),
     PiiExposureExtractor(),
     GraphQLExtractor(),
     IntegrationsExtractor(),

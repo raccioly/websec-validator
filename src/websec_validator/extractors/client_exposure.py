@@ -16,21 +16,32 @@ SECRETISH = re.compile(r"SECRET|PRIVATE|TOKEN|PASSWORD|PASSWD|API_?KEY|ACCESS_?K
 SERVER_SECRET = re.compile(r"process\.env\.([A-Z0-9_]*(?:SECRET|PRIVATE|TOKEN|PASSWORD|API_?KEY|ACCESS_?KEY)[A-Z0-9_]*)")
 
 # VALUE-aware leak detection — hardens the name-based scan above so it survives a benign rename
-# (the PTREQ0013000 #3 gap: a real key carried in a non-secret-named public var slips the name scan).
-# We match distinctive secret SHAPES, not var names. AppSync's `da2-` key has NO scanner rule at all,
-# so we always flag it; the generic shapes (which trivy/gitleaks already catch) are only flagged when
-# the file is client-reachable, to add the ships-to-browser angle without duplicating those scanners.
+# (the REF-PENTEST #3 gap: a real key carried in a non-secret-named public var slips the name scan).
+# We match distinctive secret SHAPES, not var names — CLOUD-AGNOSTIC by design (AWS + Azure + GCP +
+# generic), so the same value-leak detector works on a Next.js-on-Vercel, an Azure SWA, or a GCP
+# Firebase app alike. AppSync's `da2-` key has NO scanner rule at all, so we always flag it; the
+# generic shapes (which trivy/gitleaks already catch) are only flagged when the file is
+# client-reachable, to add the ships-to-browser angle without duplicating those scanners.
 SECRET_SHAPES = [
+    # AWS
     (re.compile(r"\bda2-[a-z0-9]{26}\b"), "AWS AppSync API key (da2-…)", True),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AWS access key id (AKIA)", False),
+    # GCP / Google
     (re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b"), "Google API key (AIza…)", False),
+    (re.compile(r"""["']type["']\s*:\s*["']service_account["']"""), "GCP service-account credential JSON", False),
+    # Azure
+    (re.compile(r"AccountKey=[A-Za-z0-9+/]{86}=="), "Azure Storage account key (AccountKey=…)", False),
+    (re.compile(r"DefaultEndpointsProtocol=https;AccountName="), "Azure Storage connection string", False),
+    (re.compile(r"[?&]sig=[A-Za-z0-9%/+]{43,}&se="), "Azure SAS token (sig=…&se=…)", False),
+    # cloud-neutral
+    (re.compile(r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----"), "Private-key PEM block (TLS / SSH / SA key)", False),
     (re.compile(r"\bsk_live_[0-9A-Za-z]{16,}\b"), "Stripe live secret key (sk_live_…)", False),
     (re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\b"), "JWT (eyJ…)", False),
 ]
 # CDK build-time injection: a CloudFormation output / SSM param / Secret wired INTO a public build
 # var — e.g. CodeBuild `envFromCfnOutputs: { VITE_APPSYNC_API_KEY: appsyncApiKeyOutput }`. Invisible
 # to every secret scanner because the value isn't in source; it's injected at build time (the exact
-# mechanism that shipped the AppSync key to the browser in PTREQ0013000 #3).
+# mechanism that shipped the AppSync key to the browser in REF-PENTEST #3).
 CFN_TO_PUBLIC = re.compile(
     r"(?:envFromCfnOutputs|buildEnvironment|environmentVariables|partialBuildSpec)"
     r"[\s\S]{0,400}?((?:NEXT_PUBLIC_|VITE_|REACT_APP_|GATSBY_|EXPO_PUBLIC_)\w*)\s*[:=]\s*"

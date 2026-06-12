@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # error-disclosure-probe.sh — force the app to throw, then check the 500 body for a stack trace /
-# internal file paths / dependency versions (PTREQ0013000 #7). Sends malformed input (bad JSON,
+# internal file paths / dependency versions (REF-PENTEST #7). Sends malformed input (bad JSON,
 # wrong types) to the write endpoints recon flagged, and greps the response for leak markers.
 # Expect a generic message ("Internal Server Error") with NO stack frames.
 #

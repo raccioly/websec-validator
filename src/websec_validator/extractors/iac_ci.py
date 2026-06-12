@@ -19,7 +19,7 @@ UNTRUSTED = re.compile(
 USES = re.compile(r"uses:\s*([^\s@#]+)@([^\s#'\"]+)")
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 
-# CDK / managed-AppSync auth (PTREQ0013000 #4 CSWSH, + the #2/#5 attack surface). Regex over CDK
+# CDK / managed-AppSync auth (REF-PENTEST #4 CSWSH, + the #2/#5 attack surface). Regex over CDK
 # TypeScript, not an AST — aliased/helper-extracted constructs can evade it (honest FN risk).
 APPSYNC_API = re.compile(r"appsync\.GraphqlApi|new\s+GraphqlApi|CfnGraphQLApi|aws-cdk-lib/aws-appsync|@aws-cdk/aws-appsync")
 # defaultAuthorization block resolving to API_KEY → the realtime/WebSocket endpoint takes a static
@@ -30,7 +30,7 @@ APPSYNC_APIKEY_MODE = re.compile(r"AuthorizationType\.API_KEY|authorizationType\
 WAFV2 = re.compile(r"wafv2\.CfnWebACL|\bCfnWebACL\b|aws_wafv2|wafv2\.CfnWebACLAssociation")
 WAF_ASSOC = re.compile(r"CfnWebACLAssociation|WebACLAssociation")
 # WAF used as the PRIMARY control for an app-layer flaw — a bypassable band-aid, not a remediation
-# (PTREQ0013000 #2/#11). A byteMatchStatement/regex matching `__schema`, SQL keywords or `<script`
+# (REF-PENTEST #2/#11). A byteMatchStatement/regex matching `__schema`, SQL keywords or `<script`
 # means the app-layer bug is still there; the string-match is evadable via encoding + only one door.
 WAF_APPLAYER_MATCH = re.compile(
     r"(?:byteMatchStatement|searchString|RegexPatternSet|regexString)[\s\S]{0,220}?"

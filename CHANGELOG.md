@@ -15,6 +15,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Removed
 
+## [0.5.0] — 2026-06-12
+
+### Added
+- **Client-trust-boundary detection group** — generalized the man-in-the-browser / display-integrity
+  class beyond wallets to ANY security-critical sink value (crypto/bank address, IBAN/routing, 2FA/TOTP
+  seed, recovery/mnemonic phrase, API/license key, webhook URL), detected by **data-flow role** and
+  classified by **blast radius** (money/credential → HIGH severity, config → MEDIUM); confidence stays
+  LOW (architectural, "verify the compensating controls"). Adds a **grindable safety-code / fingerprint**
+  check (`weak-fingerprint`, CWE-331) and an **over-claimed "tamper-proof" control-framing** check
+  (`overclaimed-control`, CWE-693).
+- **`transport_security` extractor** (16th) — framework-agnostic CSP + HSTS baseline audit: missing/weak
+  CSP (`missing-csp`), inline event handlers that force `unsafe-inline`, and missing/partial HSTS scope
+  (`incomplete-hsts`, the "set on /api but not the HTML document" gap).
+- **Cross-cloud secret-shape detection** in `client_exposure` — Azure (storage `AccountKey=`, SAS,
+  connection string) and GCP (service-account JSON, PEM private key) value-shapes alongside AWS, so the
+  ships-to-browser scan is cloud-agnostic (AWS/Azure/GCP).
+- **Follow-up client-trust-boundary classes** — `client-tamper-vector` (#2: a security-critical value fed
+  by an interceptable client fetch instead of server-rendered), `abusable-action-endpoint` (#5: outbound
+  email/SMS/push handlers with no auth-gate or only IP-only rate-limiting), and `redundant-secret-fetch`
+  (#6: the same secret-manager key pulled more than once per path). All LOW/architectural ("verify"), in
+  `integrations` + `client_integrity`.
+- 23 regression tests (103 → 126) covering the new groups + the false-positive fixes below.
+
+### Changed
+- AppSync introspection remediation now explains that **fronting AppSync with API Gateway is not a
+  security fix** — it can't enforce GraphQL semantics and doesn't cover the separate realtime WebSocket
+  endpoint; steer to engine-level controls and treat any gateway/WAF as defense-in-depth only.
+- `client_integrity` severity now tracks the sink's **irreversibility** (money/credential = HIGH) instead
+  of a fixed MEDIUM.
+
+### Fixed
+- **False-positive tuning from dogfooding on 5 real repos (68 → 11 new-group findings; 0 confirmed FPs left):**
+  - `abusable-action-endpoint` now requires a real comms send-CALL inside a request-handler / serverless
+    function (not a mere SDK import) and skips test/type/config/script files — was firing on dozens of
+    non-handler files in a real-world app (config, repositories, tests, load tests).
+  - `client_integrity` sinks (and the `weak-fingerprint` check) are gated to genuine frontend files, so a
+    backend service / SDK model that merely references an `account`/`recipient` field is no longer flagged
+    as a browser display; a backend HMAC truncation is no longer a "grindable safety code."
+  - `SKIP_DIRS` now excludes `.aws-sam`, `cdk.out`, `.sst`, `.amplify` — stops scanning vendored build
+    dependencies (was flagging third-party SDK code under an AWS SAM build dir).
+  - client_integrity findings now carry their own `file` (correct location in the ledger, not always
+    `sensitive_display[0]`).
+
+### Removed
+
 ## [0.4.2] — 2026-06-10
 
 Documentation-only release (no source change).
@@ -47,7 +92,7 @@ Documentation-only release (no source change).
 ## [0.4.0] — 2026-06-10
 
 ### Added
-- PTREQ0013000 retest: four new detection classes and 15 extractor refinements.
+- REF-PENTEST retest: four new detection classes and 15 extractor refinements.
 
 ### Fixed
 - Two false positives the retest disproved: AppSync introspection **is** disablable engine-level, and
@@ -56,7 +101,7 @@ Documentation-only release (no source change).
 ## [0.3.0] — 2026-06-07
 
 ### Added
-- Closed PTREQ0013000 detection gaps; added the **man-in-the-browser / tamperable-display** class
+- Closed REF-PENTEST detection gaps; added the **man-in-the-browser / tamperable-display** class
   (`client_integrity`).
 - AWS-CDK / managed-AppSync / VTL boundary parsing (`.graphql` / `.gql` / `.vtl`).
 

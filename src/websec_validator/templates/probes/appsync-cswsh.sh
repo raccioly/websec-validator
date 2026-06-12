@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# appsync-cswsh.sh — Cross-Site WebSocket Hijacking on the AppSync realtime endpoint (PTREQ0013000
+# appsync-cswsh.sh — Cross-Site WebSocket Hijacking on the AppSync realtime endpoint (REF-PENTEST
 # #4). The graphql-ws handshake must validate Origin; if it doesn't, a page on evil.com can open an
 # authenticated socket. Opens the realtime WS with a FORGED Origin and checks for connection_ack.
 #

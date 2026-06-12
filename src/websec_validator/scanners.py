@@ -71,7 +71,7 @@ def _gitleaks(target: Path, out: Path, excludes=()) -> list:
 def _bundled_rules_dir():
     """Path to the shipped Semgrep rules (websec_validator/rules/), or None if unavailable. These
     cover patterns the community registry misses — insecure-default signing secret + error-stack
-    disclosure (PTREQ0013000 #8/#7). Validated at build; gated on existence so a packaging miss
+    disclosure (REF-PENTEST #8/#7). Validated at build; gated on existence so a packaging miss
     never breaks the `--config auto` run."""
     try:
         from importlib import resources

@@ -72,7 +72,7 @@ Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and 
 
 > That's the whole user surface: **`run`** (plus the optional, advanced **`dynamic`** live-probing step below). `recon`/`proof`/`calibrate` exist for developing the tool itself and are hidden from `--help` — you never need them.
 
-## What it extracts (15 deterministic extractors, no LLM)
+## What it extracts (16 deterministic extractors, no LLM)
 
 | | Dimension | Notable output |
 |---|---|---|
@@ -87,10 +87,11 @@ Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and 
 | schemas | data models + **privileged fields** | Pydantic/SQLAlchemy/Django/Prisma/Mongoose/TypeORM/Zod → `role`/`isAdmin`/`groupId` for mass-assignment targeting |
 | iac_ci | IaC + CI/CD | GHA injection, unpinned actions, tfstate, **CDK AppSync `API_KEY` anonymous-default-auth + WAF-as-control smell** |
 | client_exposure | browser leakage | public-var secrets by **name + value-shape (`da2-…`) + CDK build-injection**, server-secret-in-client, source maps |
-| **client_integrity** | tamperable display + **WS auth model** | wallet value without strict CSP / out-of-band anchor **+ the CSWSH determinant (ambient-cookie WS auth)** |
+| **client_integrity** | tamperable display (client trust boundary) + **WS auth model** | any security-critical sink value (address/IBAN/2FA-seed/API-key/webhook) the user reads or copies, without strict CSP / out-of-band anchor **+ client-tamper-vector, grindable-fingerprint, over-claimed-control, the CSWSH determinant** |
+| **transport_security** | CSP + HSTS header baseline | missing/weak CSP, inline event handlers, **partial HSTS (set on /api but not the HTML page)** |
 | **pii_exposure** | unmasked PII at the output boundary | `res.json(rawEntity)` with PII + **a masking control defined but with zero live call sites** (value-shape, not field-name) |
 | graphql | GraphQL surface | introspection (**AppSync `introspectionConfig: DISABLED`-aware**) / playground / depth-limit **+ AppSync subscription-authz (cross-group BOLA)** |
-| integrations | third-party + webhooks | webhooks missing signature verification |
+| integrations | third-party + webhooks **+ outbound-action endpoints** | unsigned webhooks **+ email/SMS/push handlers with no auth or IP-only rate-limit + redundant secret-fetch** |
 
 Plus **derived targeting** — IDOR / SSRF / open-redirect / upload / write / auth-endpoint
 candidates — so probes get pointed at the *exact* endpoints, not fired blindly.
@@ -172,7 +173,7 @@ upload, cross-tenant BOLA, role/authz gaps).
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 103 tests
+python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 126 tests
 ```
 
 ## Releasing (maintainer)
@@ -204,7 +205,7 @@ managed-AppSync / VTL boundary**, **upload-security** + **PII-output-boundary** 
 de-dup + **bundled Semgrep rules**, tailored probe staging, agent briefing, traceable findings ledger
 with **calibrated confidence (CJE — Wilson CIs)**, proof harness, test suite, **Docker bundle** (all
 scanners + Noir, arch-aware), **dynamic phase v1** (authenticated read-only cross-tenant BOLA —
-validated live, reproduced a hand-pentest's 14/14). Validated against the **PTREQ0013000 pen test +
+validated live, reproduced a hand-pentest's 14/14). Validated against the **REF-PENTEST pen test +
 retest** (incl. correcting two findings the retest disproved: AppSync introspection *is* disablable
 engine-level, and API_KEY-default is anonymous-auth, not CSWSH).
 **Next:** dynamic write-verb BOLA + JWT/auth probes + ZAP/Nuclei two-role diff (gated, they mutate),

@@ -49,7 +49,7 @@ SINKS = {
     "eval-injection": ("bola-write-verbs", None, re.compile(
         r"\beval\s*\([^)]*" + _U + r"|new\s+Function\s*\([^)]*" + _U)),
     # Var-arg SSRF: an http client called with a BARE identifier first-arg (not a string literal) —
-    # e.g. `axios.get(mediaUrl, {…})` a file away from `req.query.url` (PTREQ0013000 #1, which the
+    # e.g. `axios.get(mediaUrl, {…})` a file away from `req.query.url` (REF-PENTEST #1, which the
     # same-line `ssrf` class above misses). Emits the `ssrf-outbound-http` key probes.py waits for.
     # MED-FP by design (axios.get(someVar) is common) → kept LOW-confidence; promote when reachable
     # from a controller that reads req.query.
@@ -59,7 +59,7 @@ SINKS = {
         r"\s*\(\s*[A-Za-z_$][\w$.]*\s*[,)]")),
     # OUTPUT-side disclosure — a DOCUMENTED EXCEPTION to the user-input-marker rule (this is a
     # response sink, not an input sink). A 500 handler echoing err.stack/err.message, or a
-    # NODE_ENV!=='production' branch that spreads the stack, leaks internals (PTREQ0013000 #7).
+    # NODE_ENV!=='production' branch that spreads the stack, leaks internals (REF-PENTEST #7).
     "error-disclosure": ("error-disclosure-probe", None, re.compile(
         r"res\.(?:json|send)\s*\([^;]{0,200}\b(?:err|error|e|ex|exc)\.(?:stack|message)\b"
         r"|res\.status\(\s*\d+\s*\)\.(?:json|send)\s*\([^;]{0,200}\b(?:err|error|e)\.(?:stack|message)\b"
@@ -67,7 +67,7 @@ SINKS = {
 }
 
 
-# SSRF-via-redirect (PTREQ0013000 #1): axios/requests FOLLOW redirects by DEFAULT, so an outbound
+# SSRF-via-redirect (REF-PENTEST #1): axios/requests FOLLOW redirects by DEFAULT, so an outbound
 # client on a variable URL re-validates only the FIRST hop unless it pins maxRedirects:0 or adds a
 # per-hop guard. One of these present = the chain is guarded; absent next to an SSRF sink = the lead
 # (allow-list on the input URL is necessary but never sufficient — a 302 to 169.254.169.254 wins).

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# upload-matrix.sh — unrestricted-upload + serve-side stored-XSS matrix (PTREQ0013000 #2b). For each
+# upload-matrix.sh — unrestricted-upload + serve-side stored-XSS matrix (REF-PENTEST #2b). For each
 # upload endpoint: send a polyglot (valid image magic bytes + trailing script) named `.php`, a spoofed
 # Content-Type (HTML body declared image/png), a double-extension, and a raw SVG — then FETCH THE
 # STORED OBJECT BACK and assert it is served as octet-stream/attachment with `nosniff` (not rendered).
