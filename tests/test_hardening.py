@@ -209,10 +209,18 @@ class WriteAuthEnforcement500Tests(unittest.TestCase):
 
 
 class ProbeRegistrationTests(unittest.TestCase):
-    def test_forged_token_always_staged(self):
-        self.assertIn("forged-token", probes.ALWAYS)
+    def test_auth_probes_gated_by_scheme(self):
+        # P2: forged-token forges into bearer OR signed cookie → staged for token/cookie auth, NOT
+        # for an app with no detected auth scheme. JWT-specific probes need actual JWT presence.
         self.assertIn("forged-token", probes.PROBES)
-        self.assertIn("forged-token", probes.applicable({"routes": {"targeting": {}}}))
+        self.assertIn("forged-token", probes.applicable({"auth": {"signal_counts": {"jwt": 2}}}))
+        self.assertIn("forged-token", probes.applicable(
+            {"auth": {"scheme": "hmac-signed-cookie", "signal_counts": {"hmac": 3}}}))
+        self.assertNotIn("forged-token", probes.applicable({"routes": {"targeting": {}}}))
+        # jwt-attacks / hs256 only when JWT is actually present (not for an HMAC-cookie app)
+        self.assertNotIn("jwt-attacks", probes.applicable(
+            {"auth": {"signal_counts": {"hmac": 3}, "cookie_names": ["sid"]}}))
+        self.assertIn("hs256-brute-force", probes.applicable({"auth": {"signal_counts": {"jwt": 2}}}))
 
     def test_context_has_reads(self):
         ctx = probes.build_context({"routes": {"endpoints": [

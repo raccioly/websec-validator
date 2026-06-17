@@ -82,7 +82,7 @@ Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and 
 | **authz** | access-control map | guard coverage + **write endpoints with no visible guard** + roles |
 | tenant | multi-tenancy key candidates | the BOLA boundary, by frequency |
 | **password_policy** | cross-route consistency **+ reuse/history** | complexity drift across routes **+ a set-password path that hashes without a reuse check** |
-| surface | 14 sink classes **+ redirect-SSRF** | user-input-gated sinks + var-arg SSRF + error-disclosure **+ follows-redirects-without-per-hop-guard** |
+| surface | 15 sink classes **+ redirect-SSRF** | user-input-gated sinks (incl. **mass-assignment via object spread**) + var-arg SSRF + error-disclosure **+ follows-redirects-without-per-hop-guard** |
 | **upload_security** | unrestricted upload + unsafe serve | deny-list-only, stored-name-from-filename, trust-client-MIME, accept-SVG, **serve without `nosniff`** |
 | schemas | data models + **privileged fields** | Pydantic/SQLAlchemy/Django/Prisma/Mongoose/TypeORM/Zod → `role`/`isAdmin`/`groupId` for mass-assignment targeting |
 | iac_ci | IaC + CI/CD | GHA injection, unpinned actions, tfstate, **CDK AppSync `API_KEY` anonymous-default-auth + WAF-as-control smell** |
@@ -173,7 +173,7 @@ upload, cross-tenant BOLA, role/authz gaps).
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 126 tests
+python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 135 tests
 ```
 
 ## Releasing (maintainer)

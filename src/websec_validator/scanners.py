@@ -221,6 +221,35 @@ def _aws_secret_tier(secret: str, match: str):
     return None, None
 
 
+# P4: name a secret by its provider PREFIX (so triage isn't "generic, verify") and tier by whether
+# the prefix denotes a real SECRET. A NAMED live-provider secret is HIGH, not MEDIUM-generic — and the
+# remediation ORDER matters: rotate FIRST (gitignoring or deleting a committed key does NOT scrub it
+# from pushed history — anyone who cloned still has it). Prefix-keyed → cloud-agnostic.
+_ROTATE = " — ROTATE at the provider FIRST; deleting/gitignoring a committed key does NOT scrub pushed history (use BFG/git-filter-repo after rotating)."
+_PROVIDER_PREFIXES = [
+    (re.compile(r"\bwhsec_[A-Za-z0-9]{16,}"), "HIGH", "Stripe/svix webhook signing secret (whsec_)"),
+    (re.compile(r"\bsk_live_[A-Za-z0-9]{16,}"), "HIGH", "Stripe LIVE secret key (sk_live_)"),
+    (re.compile(r"\brk_live_[A-Za-z0-9]{16,}"), "HIGH", "Stripe restricted LIVE key (rk_live_)"),
+    (re.compile(r"\bsk_test_[A-Za-z0-9]{16,}"), "LOW", "Stripe TEST secret key (sk_test_ — sandbox)"),
+    (re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{30,}|\bgithub_pat_[A-Za-z0-9_]{40,}"), "HIGH", "GitHub token (gh*_/github_pat_)"),
+    (re.compile(r"\bglpat-[A-Za-z0-9_\-]{20,}"), "HIGH", "GitLab personal access token (glpat-)"),
+    (re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}"), "HIGH", "Slack token (xox*-)"),
+    (re.compile(r"\bSG\.[A-Za-z0-9_\-]{16,}\.[A-Za-z0-9_\-]{16,}"), "HIGH", "SendGrid API key (SG.)"),
+    (re.compile(r"\bnpm_[A-Za-z0-9]{36}\b"), "HIGH", "npm access token (npm_)"),
+    (re.compile(r"\bdop_v1_[a-f0-9]{64}\b"), "HIGH", "DigitalOcean token (dop_v1_)"),
+    (re.compile(r"\bshpat_[a-fA-F0-9]{32}\b"), "HIGH", "Shopify access token (shpat_)"),
+    (re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b"), "MEDIUM", "Google API key (AIza — often domain/API-restricted; verify scope)"),
+    (re.compile(r"\bpk_live_[A-Za-z0-9]{16,}"), "LOW", "publishable key (pk_live_ — usually PUBLIC by design; verify with the provider)"),
+]
+
+
+def _provider_secret_tier(blob: str):
+    for rx, sev, note in _PROVIDER_PREFIXES:
+        if rx.search(blob or ""):
+            return sev, note + (_ROTATE if sev in ("HIGH", "MEDIUM") else "")
+    return None, None
+
+
 # gitleaks/trivy "generic" + entropy/keyword rules are high-recall, low-precision: they fire on
 # public keys, wallet addresses, hashes, env-var refs and test fixtures about as often as real
 # credentials. Tier those to MEDIUM + a verify note (NEVER hide them) so the HIGH secret tier
@@ -271,6 +300,8 @@ def _norm_trivy(data: dict) -> list:
         for s in (res.get("Secrets") or []):
             rid = s.get("RuleID", "")
             sev, note = _aws_secret_tier(s.get("Match", ""), s.get("Code", "") or "")
+            if not sev:
+                sev, note = _provider_secret_tier(f"{s.get('Match','')} {s.get('Code','') or ''}")
             if not sev and _generic_secret(rid):
                 sev, note = "MEDIUM", _GENERIC_NOTE
             if _is_doc_or_example(tgt):
@@ -292,6 +323,8 @@ def _norm_gitleaks(data) -> list:
     for x in rows:
         f, rule = x.get("File", ""), x.get("RuleID", "")
         sev, note = _aws_secret_tier(x.get("Secret", ""), x.get("Match", ""))
+        if not sev:
+            sev, note = _provider_secret_tier(f"{x.get('Secret','')} {x.get('Match','')}")
         if not sev and _generic_secret(rule):
             sev, note = "MEDIUM", _GENERIC_NOTE
         if _is_doc_or_example(f):

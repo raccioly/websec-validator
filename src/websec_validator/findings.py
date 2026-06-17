@@ -319,7 +319,8 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
     # On a purely-NoSQL datastore, classic SQL-injection alerts are almost always FPs —
     # down-rank them (the inflation the field test flagged) rather than ranking them MEDIUM.
     _ds = {d.lower() for d in (facts.get("stack", {}).get("datastores") or [])}
-    _nosql = {"dynamodb", "dynamo", "mongodb", "mongo", "firestore", "cosmos", "cosmosdb", "couchdb", "cassandra"}
+    _nosql = {"dynamodb", "dynamo", "mongodb", "mongo", "firestore", "cosmos", "cosmosdb", "couchdb",
+              "cassandra", "cloudflare-kv", "kv", "durable-objects", "r2-object-store", "redis"}
     # Include the ORM-ish labels stack.py actually emits (prisma(sql)/sql-orm) — and treat any label
     # CONTAINING "sql" (but not "nosql") as SQL — so a SQL-ORM app + Mongo isn't misread as nosql-only
     # and its SQLi findings wrongly down-ranked.

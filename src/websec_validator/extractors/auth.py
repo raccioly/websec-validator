@@ -16,6 +16,11 @@ JWT_LIBS = re.compile(r"jsonwebtoken|\bjose\b|\bPyJWT\b|import\s+jwt\b|get_jwt_i
 PASSPORT = re.compile(r"\bpassport\b|passport-jwt|passport-local")
 SESSION = re.compile(r"express-session|cookie-session|iron-session|flask\.session|request\.session|getServerSession|getToken", re.I)
 APIKEY = re.compile(r"x-api-key|api[_-]?key|apikey", re.I)
+# HMAC-signed session cookies / payloads — the app authenticates by VERIFYING an HMAC (common in
+# Cloudflare Workers / edge via crypto.subtle.sign/verify), NOT a JWT. Without this the scheme
+# misreads as "api-key" and JWT-specific probes get staged for a no-JWT app (P2).
+HMAC_AUTH = re.compile(r"crypto\.subtle\.(?:sign|verify)|createHmac|\bhmac\.new\b|compare_digest"
+                       r"|timingSafeEqual|HMAC-SHA", re.I)
 GUARDS = re.compile(r"requireAuth|requirePermission|requireRole|isAuthenticated|@login_required|@require|ensureAuth|withAuth|getServerSession|verifyToken|authMiddleware|@roles_required|can\(|ability\.", re.I)
 # Cookie READ sites — the names the app pulls a token/session from. The forged-token probe
 # forges into these (not just Authorization: Bearer) so a cookie-ONLY session app isn't a
@@ -26,6 +31,10 @@ COOKIE_READ = re.compile(
     r"""|\.cookies\.([A-Za-z_][A-Za-z0-9_]{1,63})\b(?!\s*\()""")          # req.cookies.X (not a .get()/.set() call)
 _COOKIE_RESERVED = {"get", "set", "getall", "has", "delete", "clear", "tostring",
                     "foreach", "entries", "keys", "values", "size", "name", "value", "length"}
+# Any cookie usage at all (set/read/header) — qualifies an HMAC app as cookie-SESSION vs webhook-only,
+# even when the exact cookie name isn't captured by COOKIE_READ (e.g. a Worker parsing the Cookie header).
+COOKIE_PRESENT = re.compile(r"set-cookie|getCookie|setCookie|req\.cookies|\.cookies\b|c\.req\.cookie"
+                            r"|headers\.get\(\s*['\"]cookie|document\.cookie", re.I)
 
 # Insecure DEFAULT signing secret — a hard-coded fallback on a secret/key var (the forgeable-JWT
 # class, REF-PENTEST #8). JS/TS: `process.env.JWT_SECRET || 'dev-secret-do-not-use-in-prod'`;
@@ -63,11 +72,12 @@ class AuthExtractor(Extractor):
         auth_eps = (routes.get("targeting") or {}).get("auth_endpoints", [])
 
         # scheme: framework/route signals first, then grep
-        jwt = passport = session = apikey = 0
+        jwt = passport = session = apikey = hmac = 0
         guard_files = []
         cookie_names: list[str] = []
         secret_defaults: list = []          # (file, literal) hard-coded fallback signing secrets
         jwt_sign_verify = False             # does the repo actually sign/verify JWTs?
+        cookie_present = False              # any cookie usage (qualifies HMAC as cookie-session)
         for _p, rel, text in ctx.iter_code():
             if JWT_LIBS.search(text):
                 jwt += 1
@@ -77,6 +87,8 @@ class AuthExtractor(Extractor):
                 session += 1
             if APIKEY.search(text):
                 apikey += 1
+            if HMAC_AUTH.search(text):
+                hmac += 1
             if GUARDS.search(text) and len(guard_files) < 25:
                 guard_files.append(rel)
             if len(cookie_names) < 20:
@@ -86,6 +98,8 @@ class AuthExtractor(Extractor):
                         cookie_names.append(name)
             if JWT_SIGN_VERIFY.search(text):
                 jwt_sign_verify = True
+            if not cookie_present and COOKIE_PRESENT.search(text):
+                cookie_present = True
             if not _looks_like_example(rel):
                 for mm in SECRET_DEFAULT_JS.finditer(text):
                     secret_defaults.append((rel, mm.group(1)))
@@ -112,11 +126,16 @@ class AuthExtractor(Extractor):
         # that also wires Passport for SSO must read as primary=jwt, not passport
         # (Passport is often SSO-only). Priority: nextauth > jwt > session > passport > api-key.
         route_count = len(routes.get("endpoints", []))
+        # an HMAC-signed cookie is a real session mechanism — rank it above api-key (an x-api-key may
+        # just be a secondary admin header), but below JWT/nextauth.
+        hmac_cookie = bool(hmac and (cookie_names or session or cookie_present))
         detected = []
         if nextauth:
             detected.append("nextauth (session JWT in cookie)")
         if jwt:
             detected.append("jwt (bearer)")
+        if hmac_cookie:
+            detected.append("hmac-signed-cookie")
         if session:
             detected.append("session-cookie")
         if passport:
@@ -124,7 +143,7 @@ class AuthExtractor(Extractor):
         if apikey:
             detected.append("api-key")
         primary = detected[0] if detected else "unknown"
-        token_location = ("cookie" if primary.startswith("nextauth") or primary.startswith("session")
+        token_location = ("cookie" if primary.startswith(("nextauth", "session", "hmac"))
                           else "bearer" if primary.startswith("jwt")
                           else "header" if primary.startswith("api-key")
                           else "cookie-or-bearer" if primary.startswith("passport") else "unknown")
@@ -136,7 +155,7 @@ class AuthExtractor(Extractor):
             "login_endpoints": auth_eps,
             "cookie_names": cookie_names[:15],
             "guard_files": guard_files,
-            "signal_counts": {"jwt": jwt, "passport": passport, "session": session, "api_key": apikey},
+            "signal_counts": {"jwt": jwt, "passport": passport, "session": session, "api_key": apikey, "hmac": hmac},
             "insecure_secret_defaults": insecure_secret_defaults,   # CRITICAL-class (forgeable JWT #8)
             "jwt_sign_verify_present": jwt_sign_verify,
             "route_count": route_count,

@@ -45,6 +45,15 @@ class StackTests(unittest.TestCase):
         self.assertIn("python", f["languages"])
         self.assertIn("flask", f["frameworks"])
 
+    def test_wrangler_config_detects_kv_and_workers(self):
+        # P5: managed-platform config reveals framework + datastore that deps don't (KV ⇒ down-rank SQLi).
+        d = Path(tempfile.mkdtemp())
+        (d / "wrangler.jsonc").write_text('{ "name": "x", "kv_namespaces": [{"binding": "CACHE"}] }\n')
+        (d / "src.ts").write_text("export default { fetch() {} };\n")
+        out = StackExtractor().extract(RepoContext(d), {})
+        self.assertIn("cloudflare-workers", out["frameworks"])
+        self.assertIn("cloudflare-kv", out["datastores"])
+
 
 class AuthTests(unittest.TestCase):
     def test_python_jwt(self):
@@ -363,6 +372,34 @@ class RouteUnitTests(unittest.TestCase):
         paths = {(r["method"], r["path"]) for r in routes._fallback(ctx("node_app"))}
         self.assertIn(("GET", "/api/users/{id}"), paths)
         self.assertIn(("POST", "/api/groups/{groupId}/items"), paths)
+
+    def test_router_heuristic_catches_modern_routers_and_guards_fps(self):
+        # P1: generic router-call heuristic — hand-rolled / itty / Hono / Workers, ANY object name.
+        d = Path(tempfile.mkdtemp())
+        (d / "index.ts").write_text(
+            "router.get('/api/health', h);\n"
+            "api.post('/api/todos/:id', h);\n"
+            "r.delete('/api/items/:id', h);\n"
+            "app.on('PUT', '/api/users/:id', h);\n"
+            "const cache = new Map(); cache.get('lookup-key');\n"   # FP guard: no leading slash
+            "btn.on('click', fn);\n")                                # FP guard: .on(non-method, non-path)
+        paths = {(r["method"], r["path"]) for r in routes._router_calls(RepoContext(d))}
+        self.assertIn(("GET", "/api/health"), paths)
+        self.assertIn(("POST", "/api/todos/:id"), paths)
+        self.assertIn(("DELETE", "/api/items/:id"), paths)
+        self.assertIn(("PUT", "/api/users/:id"), paths)
+        self.assertNotIn(("GET", "lookup-key"), paths)              # cache.get('lookup-key') is not a route
+        self.assertFalse(any("click" in p for _, p in paths))      # btn.on('click') is not a route
+
+    def test_coverage_warning_when_handlers_outnumber_routes(self):
+        # P1: many handler-ish fns but ~0 mapped routes ⇒ coverage warning (the hand-rolled-router failure mode).
+        d = Path(tempfile.mkdtemp())
+        (d / "w.ts").write_text(
+            "export default { fetch(request, env, ctx) { return dispatch(request); } };\n"
+            + "".join(f"const h{i} = (req, res) => res.end();\n" for i in range(8)))
+        out = routes.RoutesExtractor().extract(RepoContext(d), {})
+        self.assertIsNotNone(out["coverage_warning"])
+        self.assertIn("INCOMPLETE", out["coverage_warning"])
 
 
 class DedupTests(unittest.TestCase):

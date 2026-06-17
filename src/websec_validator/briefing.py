@@ -157,6 +157,7 @@ credentials** — ask the human, never fabricate, never hit production.
 - **Auth scheme:** `{auth.get("scheme","?")}` (token in {auth.get("token_location","?")})  ·  guard files: {len(auth.get("guard_files", []))}
 - **Route engine:** {routes.get("engine","?")}  ·  **{routes.get('count',0)} endpoints**  ·  by method: {routes.get("by_method", {})}
 {("> " + routes["note"]) if routes.get("note") else ""}
+{("> " + routes["coverage_warning"]) if routes.get("coverage_warning") else ""}
 
 ## 2. ★ Tenant boundary (confirm first — highest value, easiest to get wrong)
 
@@ -167,6 +168,7 @@ credentials** — ask the human, never fabricate, never hit production.
 
 ## 3. ★ Attack surface & targeting (point the probes HERE)
 
+{"_⚠ route discovery may be INCOMPLETE (see §1) — treat empty lists below as 'couldn't map', not 'nothing there'._" if routes.get("coverage_warning") else ""}
 {_section("IDOR / BOLA candidates — endpoints with a path/object id", tgt.get("idor_candidates"))}
 {_section("SSRF candidates — endpoints taking a url/domain-ish param", tgt.get("ssrf_candidates"))}
 {_section("Open-redirect candidates", tgt.get("open_redirect_candidates"))}

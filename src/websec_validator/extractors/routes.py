@@ -138,12 +138,45 @@ def _normalize_noir(eps: list) -> tuple:
     return rows, spec
 
 
-# ---- regex fallback (only when Noir is absent) ---------------------------------------------
+# ---- generic router-call heuristic (ALWAYS runs — SUPPLEMENTS Noir + powers the fallback) ----
+# Noir collapses hand-rolled routers (itty-router / Hono / Cloudflare Workers / custom dispatch) to
+# ~1 endpoint; this fills the gap. Matches `<obj>.<verb>('/path', handler)` for ANY object name, and
+# Hono's `<obj>.on('METHOD','/path')`. The leading-'/' on the path is the FP guard — so `arr.get('x')`
+# / `el.on('click')` / `cache.get('k')` are NOT mistaken for routes.
+ROUTER_CALL = re.compile(
+    r"\b\w+\.(get|post|put|patch|delete|head|options|all)\s*\(\s*['\"`](/[^'\"`]*)['\"`]", re.I)
+ROUTER_ON = re.compile(r"\b\w+\.on\s*\(\s*['\"]([A-Za-z]+)['\"]\s*,\s*['\"`](/[^'\"`]*)['\"`]")
+# "handler-ish" signatures — ONLY for the coverage-confidence warning (handlers >> routes ⇒ discovery
+# likely incomplete). Express (req,res), Hono/itty (c)=>, Workers fetch entrypoints.
+HANDLER_SIG = re.compile(
+    r"\(\s*req\s*,\s*res\b|\(\s*request\s*,\s*(?:res|reply|env|ctx|context)\b|\(\s*c\s*\)\s*=>"
+    r"|async\s*\(\s*c\s*\)|\(\s*ctx\s*\)\s*=>|export\s+default\s*\{[^}]*\bfetch\b"
+    r"|addEventListener\(\s*['\"]fetch['\"]", re.I)
+
+
+def _router_calls(ctx: RepoContext) -> list:
+    rows = []
+    for _p, rel, text in ctx.iter_code():
+        for verb, path in ROUTER_CALL.findall(text):
+            rows.append({"method": "ANY" if verb.lower() == "all" else verb.upper(), "path": path,
+                         "params": [], "technology": "router", "code_path": rel, "source": "router-heuristic"})
+        for method, path in ROUTER_ON.findall(text):
+            rows.append({"method": method.upper(), "path": path, "params": [],
+                         "technology": "router", "code_path": rel, "source": "router-heuristic"})
+    return rows
+
+
+def _handler_signal_count(ctx: RepoContext) -> int:
+    return sum(len(HANDLER_SIG.findall(text)) for _p, _rel, text in ctx.iter_code())
+
+
+# ---- regex fallback (Noir absent — decorator/file frameworks the heuristic doesn't cover) ----
 
 def _fallback(ctx: RepoContext) -> list:
     rows = []
     rows += _fallback_next_app_router(ctx)
     rows += _fallback_regex(ctx)
+    rows += _router_calls(ctx)           # generic router calls (Express/itty/Hono/Workers)
     # clean + filter noise + de-dup on (method, path)
     seen, out = set(), []
     for r in rows:
@@ -178,13 +211,9 @@ def _fallback_next_app_router(ctx: RepoContext) -> list:
 
 def _fallback_regex(ctx: RepoContext) -> list:
     rows = []
-    express = re.compile(r"\b(?:router|app)\.(get|post|put|patch|delete)\s*\(\s*['\"`]([^'\"`]+)")
     flask = re.compile(r"@\w+\.route\s*\(\s*['\"]([^'\"]+)['\"](?:.*methods\s*=\s*\[([^\]]*)\])?", re.S)
     fastapi = re.compile(r"@\w+\.(get|post|put|patch|delete)\s*\(\s*['\"]([^'\"]+)")
     for _p, rel, text in ctx.iter_code():
-        for verb, path in express.findall(text):
-            rows.append({"method": verb.upper(), "path": path, "params": [],
-                         "technology": "express", "code_path": rel, "source": "fallback"})
         for verb, path in fastapi.findall(text):
             rows.append({"method": verb.upper(), "path": path, "params": [],
                          "technology": "fastapi", "code_path": rel, "source": "fallback"})
@@ -245,11 +274,38 @@ class RoutesExtractor(Extractor):
         # SKIP_DIRS is matched RELATIVE to the scan root (a skip-named ANCESTOR must not nuke
         # the whole route list).
         routes = [r for r in routes if not _in_skip_dir(r.get("code_path", ""), ctx.root)]
+
+        # P1: when NOIR produced the routes, SUPPLEMENT with the generic router-call heuristic — Noir
+        # collapses hand-rolled routers (itty/Hono/Workers) to ~1 endpoint, so without this the entire
+        # dynamic half no-ops. (The fallback path already includes the heuristic.) Dedupe on (method,path).
+        if eps:
+            existing = {(r["method"], r["path"]) for r in routes}
+            _excl = getattr(ctx, "excludes", None)
+            for r in _router_calls(ctx):
+                r["path"] = _clean_path(r["path"])
+                if _is_noise(r["path"]) or _in_skip_dir(r.get("code_path", ""), ctx.root):
+                    continue
+                if _excl and ctx._excluded(r.get("code_path", "")):
+                    continue
+                k = (r["method"], r["path"])
+                if k not in existing:
+                    existing.add(k)
+                    routes.append(r)
+
         by_method: dict = {}
         by_tech: dict = {}
         for r in routes:
             by_method[r["method"]] = by_method.get(r["method"], 0) + 1
             by_tech[r["technology"]] = by_tech.get(r["technology"], 0) + 1
+        # P1: surface-coverage confidence — many handler-ish fns but few routes ⇒ discovery likely
+        # INCOMPLETE (hand-rolled / dynamic routing). An empty §3 then means "unmapped", not "clean".
+        handler_sigs = _handler_signal_count(ctx)
+        coverage_warning = None
+        if handler_sigs >= 5 and len(routes) <= handler_sigs // 3:
+            coverage_warning = (f"⚠ surface-coverage: mapped {len(routes)} route(s) but found ~{handler_sigs} "
+                                "handler-ish function(s) — route discovery is likely INCOMPLETE (a hand-rolled or "
+                                "dynamic router the engine can't follow). Treat empty §3 candidate lists as "
+                                "\"couldn't map\", NOT \"nothing there\" — map routes by hand before trusting the probes.")
         out = {
             "engine": engine,
             "count": len(routes),
@@ -257,6 +313,8 @@ class RoutesExtractor(Extractor):
             "by_technology": by_tech,
             "endpoints": routes,
             "targeting": _derive(routes),
+            "handler_signals": handler_sigs,
+            "coverage_warning": coverage_warning,
         }
         if spec_derived:
             from collections import Counter

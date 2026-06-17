@@ -8,6 +8,8 @@ result is stashed on ctx.stack for later extractors.
 
 from __future__ import annotations
 
+import re
+
 from .base import Extractor, RepoContext
 
 NODE_FRAMEWORKS = {"express": "express", "fastify": "fastify", "koa": "koa",
@@ -68,11 +70,38 @@ class StackExtractor(Extractor):
         if ctx.glob("**/Gemfile", 1):
             langs.add("ruby")
 
+        # P5: managed-platform config (wrangler / vercel / netlify / serverless) declares the framework
+        # + datastore + cron surface that package.json deps don't reveal — so a KV/Workers app no
+        # longer reads as `datastores: ?` (which down-ranks SQLi noise) and the cron surface is shown.
+        cron_triggers: list = []
+        wrangler = ctx.manifest("wrangler.jsonc") + ctx.manifest("wrangler.toml") + ctx.manifest("wrangler.json")
+        if wrangler:
+            frameworks.add("cloudflare-workers")
+            if re.search(r"kv_namespaces|KVNamespace", wrangler, re.I):
+                datastores.add("cloudflare-kv")
+            if re.search(r"d1_databases|D1Database", wrangler, re.I):
+                datastores.add("sqlite")                 # D1 is SQLite-backed
+            if re.search(r"r2_buckets|R2Bucket", wrangler, re.I):
+                datastores.add("r2-object-store")
+            if re.search(r"durable_objects|DurableObjectNamespace", wrangler, re.I):
+                datastores.add("durable-objects")
+            for mm in re.finditer(r"crons?\s*[=:]\s*\[([^\]]*)\]", wrangler):
+                cron_triggers += re.findall(r"['\"]([^'\"]+)['\"]", mm.group(1))
+        vercel = ctx.manifest("vercel.json")
+        if vercel:
+            frameworks.add("vercel")
+            cron_triggers += re.findall(r'"schedule"\s*:\s*"([^"]+)"', vercel)
+        if ctx.manifest("netlify.toml"):
+            frameworks.add("netlify")
+        if ctx.manifest("serverless.yml") + ctx.manifest("serverless.yaml"):
+            frameworks.add("serverless")
+
         result = {
             "languages": sorted(langs),
             "frameworks": sorted(frameworks),
             "package_managers": sorted(managers),
             "datastores": sorted(datastores),
+            "cron_triggers": sorted(set(cron_triggers)),
             "monorepo": len(pkgs) > 1 or ctx.exists("pnpm-workspace.yaml", "lerna.json", "nx.json", "turbo.json"),
             "services": len(pkgs),
         }

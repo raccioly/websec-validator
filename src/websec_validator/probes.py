@@ -65,9 +65,11 @@ PROBES = {
                        "a TEST account token + CURRENT_PW + the set-password path(s)"),
 }
 
-# unauth-baseline is ALWAYS staged: it's the cheapest probe and directly exercises the
-# #1 lead class (missing authentication) — the one a no-creds run can confirm immediately.
-ALWAYS = ["unauth-baseline", "forged-token", "jwt-attacks", "hs256-brute-force", "rate-limit-burst"]
+# Truly universal probes — cheapest, exercise the #1 lead class (missing authentication) + rate
+# limits on any HTTP app. The AUTH-SCHEME-SPECIFIC probes (forged-token / jwt-attacks / hs256) are
+# staged in applicable() ONLY when the detected scheme justifies them (P2 — JWT probes on a no-JWT
+# app are noise that erodes trust).
+ALWAYS = ["unauth-baseline", "rate-limit-burst"]
 
 # which targeting bucket each probe should be pointed at (for the manifest's real targets)
 _TARGET_KEYS = {
@@ -113,6 +115,17 @@ def applicable(facts: dict) -> list:
     chosen = list(ALWAYS)
     targeting = (facts.get("routes") or {}).get("targeting", {})
     tenant = (facts.get("tenant") or {}).get("candidates")
+
+    # P2: stage AUTH probes by the DETECTED scheme. forged-token forges an unsigned token into the
+    # bearer OR the signed cookie (fits JWT and HMAC-cookie apps); jwt-attacks/hs256 are JWT-specific
+    # and must NOT be staged for a no-JWT app.
+    auth = facts.get("auth") or {}
+    sc = auth.get("signal_counts") or {}
+    if (sc.get("jwt") or sc.get("session") or sc.get("hmac") or auth.get("cookie_names")
+            or str(auth.get("scheme", "")).startswith(("nextauth", "jwt", "hmac", "session", "passport"))):
+        chosen += ["forged-token"]
+    if sc.get("jwt") or auth.get("jwt_sign_verify_present"):
+        chosen += ["jwt-attacks", "hs256-brute-force"]
 
     if targeting.get("write_endpoints"):
         chosen += ["mass-assignment"]

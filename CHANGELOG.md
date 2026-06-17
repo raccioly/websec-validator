@@ -15,6 +15,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Removed
 
+## [0.6.0] — 2026-06-12
+
+Field-feedback release from a real run on a Cloudflare Worker (hand-rolled router + HMAC cookies).
+Fixes the route-discovery blind spot that silently no-op'd the whole dynamic half, plus auth-scheme,
+CSP, secret-triage, and config gaps.
+
+### Added
+- **Generic router-call route discovery (P1)** — a `<obj>.<verb>('/path')` / `.on('METHOD','/path')`
+  heuristic that ALWAYS supplements Noir (which collapses hand-rolled / itty-router / Hono / Workers
+  routers to ~1 endpoint), with a leading-`/` FP guard, plus a surface-coverage warning when
+  handler-ish functions outnumber mapped routes (an empty §3 then reads as "couldn't map").
+- **HMAC-signed-cookie auth detection (P2)** — `crypto.subtle.sign/verify` + cookie usage → scheme
+  `hmac-signed-cookie` (was misread as `api-key`).
+- **CSP baseline for server-rendered / template-literal HTML (P3)** — `transport_security` now fires
+  on Workers / SSR apps that build HTML in code, not just frontend frameworks.
+- **Mass-assignment via object spread (P3)** — `{...record, ...req.body}` / `Object.assign(record,
+  req.body)` (the tier-downgrade / privilege-escalation class) as a 15th surface sink.
+- **Provider-prefix secret triage (P4)** — name a secret by prefix (`whsec_`/`sk_live_`/`gho_`/`SG.`/…),
+  HIGH for real secrets vs LOW for sandbox (`sk_test_`) / publishable (`pk_live_`), with the
+  rotate-FIRST remediation order (gitignoring a committed key doesn't scrub pushed history).
+- **Managed-platform config parsing (P5)** — `wrangler`/`vercel`/`netlify`/`serverless` → framework +
+  datastore (KV / D1→sqlite / R2 / Durable Objects) + cron triggers.
+
+### Changed
+- **Auth probes gated by detected scheme (P2)** — `forged-token` stages for any token/cookie auth
+  (forges into bearer OR the signed cookie); `jwt-attacks` / `hs256-brute-force` only when JWT is
+  actually present. `ALWAYS` trimmed to `unauth-baseline` + `rate-limit-burst`.
+- **Cloudflare KV family + redis added to the NoSQL set (P6)** so classic SQLi alerts auto-down-rank
+  on a KV-only app.
+
+(135 tests; 16 extractors; 15 surface sink classes.)
+
 ## [0.5.0] — 2026-06-12
 
 ### Added

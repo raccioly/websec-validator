@@ -37,6 +37,9 @@ HSTS_PRELOAD = re.compile(r"\bpreload\b", re.I)
 # spot the "HSTS on /api but not the page" partial-coverage smell — heuristic, framed as "verify".
 API_SCOPED = re.compile(r"(?:^|/)(?:api|routes?|server|lambda|handler|functions?|controllers?)(?:/|\.|$)", re.I)
 HTML_SURFACE = re.compile(r"\.(?:html|tsx|jsx|vue|svelte|astro)$|_document|app/layout|index\.html", re.I)
+# HTML built/served in CODE (a Worker / server-rendered app emitting template-literal HTML) — so CSP
+# applies even with no frontend framework. This is the gap that missed a Cloudflare Worker's CSP.
+HTML_CONTENT = re.compile(r"<!DOCTYPE\s+html|<html[\s>]|text/html|res\.send\(\s*[`'\"]\s*<|c\.html\(", re.I)
 FRONTEND_FW = {"react", "next", "nextjs", "vue", "nuxt", "svelte", "sveltekit", "angular", "astro", "remix", "solid"}
 
 
@@ -60,7 +63,7 @@ class TransportSecurityExtractor(Extractor):
                                "netlify.toml", "public/_headers", "static/_headers", "nginx.conf"))
 
         for _p, rel, text in ctx.iter_code():
-            if HTML_SURFACE.search(rel):
+            if HTML_SURFACE.search(rel) or HTML_CONTENT.search(text):
                 html_surface = True
             blob = text
             if CSP_ANY.search(blob):
