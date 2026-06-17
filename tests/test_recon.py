@@ -401,6 +401,17 @@ class RouteUnitTests(unittest.TestCase):
         self.assertIsNotNone(out["coverage_warning"])
         self.assertIn("INCOMPLETE", out["coverage_warning"])
 
+    def test_wrangler_build_dir_routes_excluded(self):
+        # 0.6.1: .wrangler / .vercel dev-build caches hold BUNDLED output → phantom duplicate routes.
+        d = Path(tempfile.mkdtemp())
+        (d / "src").mkdir()
+        (d / ".wrangler" / "tmp").mkdir(parents=True)
+        (d / "src" / "index.ts").write_text("router.get('/api/real', h);\n")
+        (d / ".wrangler" / "tmp" / "bundle.js").write_text("router.get('/api/phantom', h);\n")
+        paths = {e["path"] for e in routes.RoutesExtractor().extract(RepoContext(d), {})["endpoints"]}
+        self.assertIn("/api/real", paths)
+        self.assertNotIn("/api/phantom", paths)
+
 
 class DedupTests(unittest.TestCase):
     def test_within_tool_dedup_and_counts(self):

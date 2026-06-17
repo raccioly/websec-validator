@@ -44,13 +44,16 @@ SINKS = {
         r"libxmljs\.parseXml\s*\(|lxml\.etree\.(?:parse|fromstring|XML)\s*\(|xml\.etree\.ElementTree\.(?:parse|fromstring)\s*\(|new\s+DOMParser")),
     "prototype-pollution": ("mass-assignment", None, re.compile(
         r"(?:_\.merge|_\.mergeWith|_\.defaultsDeep|Object\.assign)\s*\([^)]*(?:req\.|request\.)|\.update\s*\([^)]*request\.(?:json|get_json|form)")),
-    # Mass-assignment via object SPREAD — `{...record, ...req.body}` lets the client overwrite ANY
-    # field of the persisted record (role/tier/isAdmin → privilege escalation; the tier-downgrade
-    # class). User-input marker is inline → no gate. Precise double-spread/Object.assign forms only.
+    # Mass-assignment via object SPREAD — `{...record, ...req.body}` (client overwrites ANY field) or
+    # the shorthand `{...record, tier}` (a PRIVILEGED field pulled from a same-named var — the
+    # tier-downgrade / role-escalation class). User-input marker is inline; the privileged-field list
+    # gates the shorthand form so a benign `{...state, theme}` doesn't fire.
     "mass-assignment": ("mass-assignment", None, re.compile(
         r"\{\s*\.\.\.[\w.$]+\s*,\s*\.\.\.(?:(?:req\w*|request|ctx|c)\.(?:body|json|payload|data|params|query)"
         r"|body|reqBody|requestBody|userInput|updates|patch)\b"
-        r"|Object\.assign\s*\(\s*[\w.$]+\s*,\s*(?:req|request|ctx|c)\.(?:body|json|payload|data)\b")),
+        r"|Object\.assign\s*\(\s*[\w.$]+\s*,\s*(?:req|request|ctx|c)\.(?:body|json|payload|data)\b"
+        r"|\{\s*\.\.\.[\w.$]+[^{}]{0,80}?,\s*(?:role|roles|tier|plan|isAdmin|is_admin|admin|permissions?"
+        r"|scopes?|balance|credits|owner|ownerId|isOwner|isSuperuser|superuser)\s*[,}]")),
     "redos": ("ssrf-probes", None, re.compile(
         r"new\s+RegExp\s*\([^)]*(?:req\.|request\.|\+)|re\.(?:compile|match|search|fullmatch)\s*\([^,)]*(?:request\.|f['\"])")),
     "eval-injection": ("bola-write-verbs", None, re.compile(

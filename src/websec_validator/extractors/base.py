@@ -17,6 +17,7 @@ SKIP_DIRS = {".git", "node_modules", "dist", "build", ".next", ".nuxt", "venv",
              ".turbo", "out", "target", ".gradle", "vendor", "site-packages",
              ".terraform", "security", ".websec-out", "websec-out", ".cache",
              ".svelte-kit", "storybook-static", ".serverless", ".aws-sam", "cdk.out", ".sst", ".amplify",
+             ".wrangler", ".vercel",   # Cloudflare / Vercel dev-build caches (bundled output → phantom routes)
              # agent tooling + editor dirs + worktree copies — not the target app
              ".wolf", ".claude", ".worktrees", ".idea", ".vscode", ".agent", ".agents"}
 CODE_EXT = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".py", ".go", ".rb",

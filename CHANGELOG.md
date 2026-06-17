@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Removed
 
+## [0.6.1] — 2026-06-12
+
+Precision fixes found by re-running 0.6.0 on the same Cloudflare Worker.
+
+### Fixed
+- **Skip `.wrangler` / `.vercel` dev-build caches** — these hold BUNDLED output, so the new router-call
+  heuristic was emitting phantom duplicate routes from them (a real run dropped 62 → 47, all real now).
+- **Mass-assignment now catches the shorthand `{...record, tier}`** (a privileged field pulled from a
+  same-named var — the actual tier-downgrade / role-escalation form), gated on a privileged-field list
+  so `{...state, theme}` and a literal `{...record, role:'x'}` stay silent.
+
 ## [0.6.0] — 2026-06-12
 
 Field-feedback release from a real run on a Cloudflare Worker (hand-rolled router + HMAC cookies).
