@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Removed
 
+## [0.6.2] — 2026-06-12
+
+### Added
+- **Report-the-passes for cookies (P3)** — `transport_security` now reports a cookie-hardening PASS
+  (`HttpOnly + Secure + SameSite` present → ✓, surfaced in the briefing's §3c "report-the-pass / gap"
+  line) and flags the gap as a new `insecure-cookie` finding (CWE-1004/614) when a flag is missing.
+  Saying "checked ✓" builds trust and turns the control into a regression assertion.
+
 ## [0.6.1] — 2026-06-12
 
 Precision fixes found by re-running 0.6.0 on the same Cloudflare Worker.
