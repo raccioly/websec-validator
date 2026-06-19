@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# ⚠ DEFENSIVE CHECK — run only against a system you own/operate, with consent. Not for production or third-party targets.
 # S3 bucket posture assessment.
 # ZAP can't meaningfully test an S3 bucket, so this checks it directly with the AWS CLI:
 # public-access posture, ACL/policy exposure, CORS, encryption, and anonymous reachability.

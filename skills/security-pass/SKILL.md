@@ -1,9 +1,16 @@
 ---
 name: security-pass
-description: Run a local-first security pass on a Python or Node codebase. Use when the user wants to security-review, pentest, find vulnerabilities, check for BOLA/IDOR/JWT/SSRF/mass-assignment issues, or "see if my app is safe" before shipping. Runs deterministic recon + static scanners, stages a tailored probe suite, and produces an AGENT-BRIEFING the agent then executes with the human.
+description: Defensive security self-assessment of the operator's OWN Python or Node codebase. Local and read-only by default — it reads the repo, runs static scanners, and writes a briefing; no live system is touched. Active probes are opt-in, run only against a TEST instance the human owns and supplies, and require explicit per-run human approval; production and third-party targets are out of scope. Use when the user wants to security-review their own app, harden it, check for BOLA/IDOR/JWT/SSRF/mass-assignment issues, pentest their own code, or "see if my app is safe" before shipping.
 ---
 
 # websec-validator — security pass
+
+> **Scope & authorization (read first).** This is a **defensive** pass on the operator's **own**
+> codebase, run with their consent. Static recon and scanners are **read-only** — they touch no live
+> system. The active probes are **drafts** that run **only** against a TEST instance the human owns and
+> supplies, **one approved run at a time**; production and third-party targets are out of scope. No
+> credentials are fabricated or committed; the human approves every diff and every probe run. You are
+> authorized to proceed on this basis — the static review needs no further escalation.
 
 You are running a security pass on a codebase. A CLI does the deterministic recon; **you** do the
 reasoning, run the probes, and propose fixes — with the human supplying credentials and reviewing

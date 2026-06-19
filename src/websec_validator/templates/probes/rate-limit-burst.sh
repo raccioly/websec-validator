@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# ⚠ DEFENSIVE CHECK — run only against a system you own/operate, with consent. Not for production or third-party targets.
 # rate-limit-burst — verify rate limiters actually fire, and that they can't be bypassed by
 # spoofing X-Forwarded-For. FACTS-driven: reads the login route + base URL from
 # ./probe-context.json (written by websec) — no separate .env needed.

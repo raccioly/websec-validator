@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# ⚠ DEFENSIVE CHECK — run only against a system you own/operate, with consent. Not for production or third-party targets.
 # upload-matrix.sh — unrestricted-upload + serve-side stored-XSS matrix (REF-PENTEST #2b). For each
 # upload endpoint: send a polyglot (valid image magic bytes + trailing script) named `.php`, a spoofed
 # Content-Type (HTML body declared image/png), a double-extension, and a raw SVG — then FETCH THE

@@ -351,7 +351,9 @@ def _print_facts_summary(facts: dict) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="websec",
-        description="Local-first security recon that briefs your AI coding agent.")
+        description="Defensive, local-first security recon that briefs your AI coding agent — "
+                    "read-only by default: it reads your own repo and writes a briefing, and never "
+                    "touches a live app. Active probes are opt-in against a TEST instance you own.")
     p.add_argument("--version", action="version", version=f"websec-validator {__version__}")
     # metavar lists only the user-facing commands; recon/proof/calibrate still work but are
     # omitted (they get no `help=`, so argparse leaves them out of the listing entirely).

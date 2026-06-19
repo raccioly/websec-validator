@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ⚠ DEFENSIVE CHECK — run only against a system you own/operate, with consent. Not for production or third-party targets.
 """Mass assignment / BOPLA (OWASP API #3) — FACTS-driven.
 
 Injects THIS app's privileged model fields (from probe-context.json → sensitive_fields,

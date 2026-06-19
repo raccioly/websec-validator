@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# ⚠ DEFENSIVE CHECK — run only against a system you own/operate, with consent. Not for production or third-party targets.
 # jwt-attacks.sh — manual JWT attack probe (FACTS-driven; no app-specific login).
 #
 # Five classic JWT attacks, run against a protected endpoint with a token YOU supply:

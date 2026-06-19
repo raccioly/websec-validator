@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# ⚠ DEFENSIVE CHECK — run only against a system you own/operate, with consent. Not for production or third-party targets.
 # BOLA / cross-tenant READ probe — FACTS-driven. Role A uses its OWN token against
 # tenant B's id (and B→A), on this app's tenant-scoped routes (from probe-context.json).
 # Expect 401/403/404. A 200 that returns the OTHER tenant's data = cross-tenant BOLA

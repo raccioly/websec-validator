@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ⚠ DEFENSIVE CHECK — run only against a system you own/operate, with consent. Not for production or third-party targets.
 """BOLA / cross-tenant WRITE probe — FACTS-driven and generic.
 
 As role A, send each mutating verb (PUT/PATCH/POST/DELETE) at tenant B's resources

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ⚠ DEFENSIVE CHECK — run only against a system you own/operate, with consent. Not for production or third-party targets.
 """
 Webhook forgery probe — signature verification for inbound webhooks.
 

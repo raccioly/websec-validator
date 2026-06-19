@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ⚠ DEFENSIVE CHECK — run only against a system you own/operate, with consent. Not for production or third-party targets.
 """
 Race condition probe — fires N parallel requests at race-prone endpoints
 and checks if the server's invariants hold.

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# ⚠ DEFENSIVE CHECK — run only against a system you own/operate, with consent. Not for production or third-party targets.
 # appsync-subscription-bola.sh — broken subscription authorization / cross-group BOLA (REF-PENTEST
 # #5). Open a subscription bound to ANOTHER tenant's groupId and see if the server streams events you
 # must not receive. The pen test did exactly this with `onEvent(groupId)` from a low-priv user.
