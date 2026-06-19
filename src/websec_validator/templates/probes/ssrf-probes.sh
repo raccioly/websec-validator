@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# ⚠ DEFENSIVE CHECK — run only against a system you own/operate, with consent. Not for production or third-party targets.
 # ssrf-probes.sh — SSRF probe, FACTS-driven. For each url-accepting endpoint the recon
 # flagged (probe-context.json → ssrf_candidates), inject classic SSRF targets into that
 # param and watch for IMDS/file/redis evidence or a tell-tale slow fetch. Expect

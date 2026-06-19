@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# ⚠ DEFENSIVE CHECK — run only against a system you own/operate, with consent. Not for production or third-party targets.
 # error-disclosure-probe.sh — force the app to throw, then check the 500 body for a stack trace /
 # internal file paths / dependency versions (REF-PENTEST #7). Sends malformed input (bad JSON,
 # wrong types) to the write endpoints recon flagged, and greps the response for leak markers.

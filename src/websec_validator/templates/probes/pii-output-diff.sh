@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# ⚠ DEFENSIVE CHECK — run only against a system you own/operate, with consent. Not for production or third-party targets.
 # pii-output-diff.sh — unmasked-PII detector by VALUE SHAPE, not field name (REF-PENTEST #8). As a
 # NON-privileged caller, fetch each data endpoint and assert NO phone (/\+?\d{7,}/) or email value
 # appears ANYWHERE in the JSON — including nested objects, composed IDs (the `providerMessageId` carrier),

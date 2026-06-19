@@ -235,6 +235,37 @@ AITPG/TRACE research, because **verification is the false-positive killer**:
 
 ---
 
+## Why your agent might pause — and how to phrase the request
+
+This tool is **defensive**: it reviews *your own* code, is read-only by default, and never touches a
+live system unless you supply a TEST target and approve each probe. But a capable coding agent is
+*trained* to slow down around security tooling — its own guidelines say dual-use security tools
+"require clear authorization context." So if you open a repo and say **"pentest this,"** a careful
+agent may stop and ask whether you're authorized. That's not a bug; it's the agent doing its job
+without enough context. You remove the friction by *supplying* that context. Three levers, in order
+of leverage:
+
+1. **How you ask.** Frame it as a *defensive review of your own code*, not an *attack*. A line like —
+   *"Do a defensive security self-review of my own codebase with websec-validator. It's local and
+   read-only — read the repo and follow its briefing. I own this code and authorize the review."* —
+   carries ownership + intent + scope + authorization in one breath, and is usually all it takes.
+2. **What the tool tells the agent.** The skill description, the top of `SKILL.md`, and the
+   `AGENT-BRIEFING.md` header all lead with the same scope-and-authorization statement, so an agent
+   that reads them is *handed* its authorization instead of reconstructing it. Each staged probe
+   carries a one-line `DEFENSIVE CHECK — run only against a system you own` header for the same reason.
+3. **Where the tool comes from.** `pipx install websec-validator` from PyPI reads very differently
+   from running code straight off a URL — provenance is its own trust signal.
+
+What **doesn't** help: GitHub badges, stars, or extra README prose. An agent doesn't fetch those
+before deciding — it reads your request, the skill text, and the briefing. Those are the surfaces
+this tool front-loads, and the ones worth getting right.
+
+One pause is worth **keeping**: before any probe fires at a *running* host, the agent should confirm
+the target and scope with you. That checkpoint is a feature, not friction — the goal is to remove the
+hesitation around *statically reading your own repo*, not the one before *live-firing at a server*.
+
+---
+
 ## Standards coverage
 
 Every finding is mapped to authoritative standards so it's traceable and actionable, not just an

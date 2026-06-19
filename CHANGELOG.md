@@ -15,6 +15,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Removed
 
+## [0.6.3] — 2026-06-19
+
+Framing-only release: lead every agent-facing surface with a defensive scope-and-authorization
+statement so a careful coding agent stops flagging a plain "security-review my repo" as suspicious.
+No behavior change.
+
+### Added
+- **METHODOLOGY: "Why your agent might pause — and how to phrase the request"** — explains the
+  dual-use false-positive (a careful agent stalling on a plain "security-review my repo") and the
+  three levers that fix it (how you ask · what the tool tells the agent · provenance).
+
+### Changed
+- **Authorization-envelope framing across the agent-facing surfaces** — the skill `description`, the
+  top of `SKILL.md`, the `AGENT-BRIEFING.md` header (`briefing.py`), the plugin/marketplace/PyPI/CLI
+  descriptions, and all 22 staged probe templates now lead with a defensive scope-and-authorization
+  statement (defensive · your OWN code · read-only by default · prod/third-party out of scope · human
+  approves each probe). Reduces dual-use false-positive pauses. The README hero line now leads with a
+  defensive, ownership-asserting phrasing and the PyPI install. **No behavior change** — wording/order
+  only; the live-fire confirmation checkpoint is intentionally preserved.
+
 ## [0.6.2] — 2026-06-12
 
 ### Added

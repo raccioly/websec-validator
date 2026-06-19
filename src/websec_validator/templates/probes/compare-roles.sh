@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# ⚠ DEFENSIVE CHECK — run only against a system you own/operate, with consent. Not for production or third-party targets.
 # compare-roles.sh — diff two ZAP role-scoped SARIF reports.
 #
 # Usage:

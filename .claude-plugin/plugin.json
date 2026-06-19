@@ -1,7 +1,7 @@
 {
   "name": "websec-validator",
   "displayName": "Web Security Validator",
-  "description": "Local-first security recon that briefs your AI coding agent: facts + tailored probes, calibrated findings ledger. Code-in, artifacts-out. No LLM, no server, no running app.",
+  "description": "Defensive, local-first security recon that briefs your AI coding agent on your OWN codebase. Read-only by default: facts + tailored probes + a calibrated findings ledger, code-in / artifacts-out, no LLM / no server / no running app. Live probes are opt-in against a TEST instance you own; production is out of scope.",
   "author": { "name": "Ricardo Accioly" },
   "homepage": "https://github.com/raccioly/websec-validator",
   "repository": "https://github.com/raccioly/websec-validator",

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# ⚠ DEFENSIVE CHECK — run only against a system you own/operate, with consent. Not for production or third-party targets.
 # unauth-baseline — the cheapest, highest-value probe: hit every MUTATING route with
 # NO credentials and expect 401/403. Any 2xx (or a non-401 that reached the handler)
 # is a missing-authentication lead. Run this FIRST — it confirms the auth model before

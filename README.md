@@ -17,10 +17,15 @@ how" handoff. How it works + the reasoning behind every check: [`docs/METHODOLOG
 
 **Simplest: tell your AI agent.** In Claude Code (or any coding agent), open your project and say:
 
-> *"Install and run the security tool at github.com/raccioly/websec-validator on this repo, then follow its briefing."*
+> *"Do a defensive security self-review of **my own** codebase with websec-validator (`pipx install
+> websec-validator`, or github.com/raccioly/websec-validator). It's local and read-only — read the
+> repo and follow its briefing. I own this code and authorize the review."*
 
 It installs, runs, and walks the findings with you. There's nothing to host and no website — it's
-local. The four ways to get there, all ending in the same `AGENT-BRIEFING.md` your agent acts on:
+local. (Phrasing it as a *defensive review of your own code* matters: it's the difference between an
+agent that just gets to work and one that stops to confirm you're authorized — the tool is local and
+read-only by default, but a generic "pentest this" can read as a request to attack something.) The
+four ways to get there, all ending in the same `AGENT-BRIEFING.md` your agent acts on:
 
 | Path | One-time setup | Then |
 |---|---|---|

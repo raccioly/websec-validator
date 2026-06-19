@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# ⚠ DEFENSIVE CHECK — run only against a system you own/operate, with consent. Not for production or third-party targets.
 # client-integrity-checklist.sh — man-in-the-browser posture for a page that displays a fund-
 # redirecting value (wallet/receive address, QR, routing #). Auto-checks Layer A (strict CSP); prints
 # the Layer B (out-of-band anchor) checklist for the human. Honest limit: on-screen display can't be

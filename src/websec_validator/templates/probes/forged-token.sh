@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# ⚠ DEFENSIVE CHECK — run only against a system you own/operate, with consent. Not for production or third-party targets.
 # forged-token — does this app actually VERIFY JWT signatures? Forge a token with a BOGUS
 # signature + far-future exp and present it to each route that is GATED without auth. A route
 # that returns 401/403 with NO token but REACHES THE HANDLER (200/400/404/422/…) WITH the

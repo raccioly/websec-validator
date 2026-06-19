@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# ⚠ DEFENSIVE CHECK — run only against a system you own/operate, with consent. Not for production or third-party targets.
 # appsync-introspection.sh — confirm AppSync GraphQL introspection is reachable AND, if a WAF
 # "blocks" it, that the block is bypassable (REF-PENTEST #2). AppSync can't disable introspection
 # at the API layer, so a WAF string-match is the only control — and string-match is evadable.
