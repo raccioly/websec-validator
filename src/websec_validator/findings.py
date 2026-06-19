@@ -88,6 +88,8 @@ STANDARDS = {
                                  "ASVS V11.1.4", ["API4:2023 Unrestricted Resource Consumption",
                                                   "API6:2023 Unrestricted Access to Sensitive Business Flows"]),
     "redundant-secret-fetch": (["CWE-200 Information Exposure"], "ASVS V2.10", ["API8:2023 Misconfiguration"]),
+    "insecure-cookie": (["CWE-1004 Sensitive Cookie Without HttpOnly", "CWE-614 Sensitive Cookie Without Secure"],
+                        "ASVS V3.4.1", ["API8:2023 Misconfiguration"]),
 }
 REMEDIATION = {
     "missing-auth": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a "
@@ -152,6 +154,8 @@ REMEDIATION = {
     "redundant-secret-fetch": "Fetch each secret-manager key ONCE per request and reuse it; use the project's existing "
                               "secret-provider abstraction instead of a bespoke loader (smaller exposure window + "
                               "consistency).",
+    "insecure-cookie": "Set auth/session cookies `HttpOnly` (blocks JS/XSS theft) + `Secure` (HTTPS-only) + "
+                       "`SameSite=Lax`/`Strict` (CSRF). Verify against the live Set-Cookie header.",
 }
 _DEFAULT_REM = "Review and remediate per the cited standard."
 

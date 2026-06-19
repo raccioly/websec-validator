@@ -83,6 +83,15 @@ def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list
     pii_section = ("\n".join(f"- **{f.get('severity')}** {f.get('kind')} — `{f.get('file')}`" for f in pii_findings[:20])
                    if pii_findings else "_no obvious raw-PII responses / dead masking controls_")
     ws_line = (facts.get("client_integrity", {}) or {}).get("websocket_auth", "no websocket detected")
+    _cs = (facts.get("transport_security", {}) or {}).get("cookie_security")
+    if _cs:
+        if _cs.get("httponly") and _cs.get("secure") and _cs.get("samesite"):
+            cookie_line = "✓ HttpOnly + Secure + SameSite present (checked — verify against the live Set-Cookie)"
+        else:
+            _miss = [n for n, k in (("HttpOnly", "httponly"), ("Secure", "secure"), ("SameSite", "samesite")) if not _cs.get(k)]
+            cookie_line = f"⚠ cookie set WITHOUT {', '.join(_miss)} — an auth/session cookie should be HttpOnly + Secure + SameSite"
+    else:
+        cookie_line = "_no Set-Cookie detected_"
 
     gql = facts.get("graphql", {})
     if gql.get("present"):
@@ -204,6 +213,8 @@ Production source maps exposed: {client.get("production_source_maps", False)}
 {ci_section}
 
 **WebSocket auth model (CSWSH determinant — is it an ambient cookie?):** {ws_line}
+
+**Cookie hardening (report-the-pass / gap):** {cookie_line}
 
 **File-upload security (#2b — sniff bytes, derive stored name, nosniff on serve):**
 {up_section}

@@ -41,6 +41,12 @@ HTML_SURFACE = re.compile(r"\.(?:html|tsx|jsx|vue|svelte|astro)$|_document|app/l
 # applies even with no frontend framework. This is the gap that missed a Cloudflare Worker's CSP.
 HTML_CONTENT = re.compile(r"<!DOCTYPE\s+html|<html[\s>]|text/html|res\.send\(\s*[`'\"]\s*<|c\.html\(", re.I)
 FRONTEND_FW = {"react", "next", "nextjs", "vue", "nuxt", "svelte", "sveltekit", "angular", "astro", "remix", "solid"}
+# Cookie hardening — "report the PASS" (HttpOnly+Secure+SameSite ✓ builds trust + is a regression
+# assertion) and flag the gap. Flags are matched per cookie-setting file (lenient — a positive lead).
+SET_COOKIE = re.compile(r"set-?cookie|res\.cookie\(|cookies\.set\(|\.setCookie\(|c\.cookie\(", re.I)
+CK_HTTPONLY = re.compile(r"httponly", re.I)
+CK_SECURE = re.compile(r";\s*secure\b|\bsecure\s*[:=]\s*true|\bsecure\s*:\s*!", re.I)
+CK_SAMESITE = re.compile(r"samesite", re.I)
 
 
 class TransportSecurityExtractor(Extractor):
@@ -55,6 +61,7 @@ class TransportSecurityExtractor(Extractor):
         hsts_present = hsts_sub = hsts_preload = False
         html_surface = bool(frameworks & FRONTEND_FW)
         inline_handlers = []
+        sets_cookie = ck_httponly = ck_secure = ck_samesite = False
         hsts_files, hsts_api_only, hsts_html = [], True, False
 
         # config manifests carry headers too (next.config, vercel.json, netlify.toml, _headers)
@@ -87,6 +94,11 @@ class TransportSecurityExtractor(Extractor):
                     hsts_html = True
                 elif not API_SCOPED.search(rel):
                     hsts_api_only = False   # a non-API, non-HTML place (e.g. global edge middleware)
+            if SET_COOKIE.search(blob):
+                sets_cookie = True
+                ck_httponly = ck_httponly or bool(CK_HTTPONLY.search(blob))
+                ck_secure = ck_secure or bool(CK_SECURE.search(blob))
+                ck_samesite = ck_samesite or bool(CK_SAMESITE.search(blob))
 
         if CSP_ANY.search(manifests):
             csp_present = True
@@ -155,12 +167,28 @@ class TransportSecurityExtractor(Extractor):
                                      "detail": f"HSTS is present but missing {', '.join(gaps)} — add where the domain "
                                                "model allows (don't preload a domain whose subdomains aren't all HTTPS)."})
 
+        # 0.6.2: report the cookie-hardening PASS (✓ builds trust + is a regression assertion), or flag the gap.
+        passes, cookie_security = [], None
+        if sets_cookie:
+            cookie_security = {"httponly": ck_httponly, "secure": ck_secure, "samesite": ck_samesite}
+            if ck_httponly and ck_secure and ck_samesite:
+                passes.append("cookies set HttpOnly + Secure + SameSite (checked ✓)")
+            else:
+                miss = [n for n, ok in (("HttpOnly", ck_httponly), ("Secure", ck_secure),
+                                        ("SameSite", ck_samesite)) if not ok]
+                findings.append({"severity": "LOW", "kind": "cookie-flags", "attack_class": "insecure-cookie",
+                                 "detail": f"A cookie is set without {', '.join(miss)} — an auth/session cookie should be "
+                                           "HttpOnly (no JS read), Secure (HTTPS-only), and SameSite=Lax/Strict (CSRF). "
+                                           "Verify against the live Set-Cookie."})
+
         return {
             "web_surface": web_surface, "html_surface": html_surface,
             "csp_present": csp_present, "strict_csp": strict_csp, "csp_has_unsafe": csp_unsafe,
             "hsts_present": hsts_present, "hsts_includes_subdomains": hsts_sub, "hsts_preload": hsts_preload,
             "hsts_files": sorted(set(hsts_files))[:20],
             "inline_event_handlers": sorted(set(inline_handlers)),
+            "cookie_security": cookie_security,
+            "passes": passes,
             "findings": findings,
             "note": ("CSP/HSTS baseline audit — these are the enabling controls for the client trust boundary. "
                      "LOW/architectural: verify against the LIVE response headers (a static scan can't see the edge/CDN "
