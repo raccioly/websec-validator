@@ -28,6 +28,9 @@ poetry.lock
 # dist/
 # build/
 # coverage/
+# `pip install .` / editable installs drop a gitignored *.egg-info/ metadata dir under src/ — it's a
+# build artifact, not a source dir to document (DocGuard's Docs-Coverage otherwise flags it).
+**/*.egg-info/**
 
 # ── websec-validator specifics ──────────────────────────────────────────────
 # tests/fixtures/ holds the deliberately-vulnerable sample apps (Express, Flask)

@@ -1,13 +1,13 @@
 # Environment & Configuration
 
-<!-- docguard:version 0.4.1 -->
+<!-- docguard:version 0.8.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-06-10 -->
+<!-- docguard:last-reviewed 2026-06-22 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — the tool's defining property is needing almost nothing (no runtime deps, no required env vars, no running app); the negations accurately describe optional-everything setup. -->
 
 > **Canonical document** — Design intent. This file documents everything needed to run this project.  
-> Last updated: 2026-06-10
+> Last updated: 2026-06-22
 
 The core pass needs **only Python 3.11+** — zero Python runtime dependencies. External scanners and
 the Noir route engine are **optional**: the tool detects them, uses them when present, reports them
@@ -96,6 +96,6 @@ Never point the dynamic phase at production.
 ```bash
 git clone https://github.com/raccioly/websec-validator && cd websec-validator
 pipx install --editable .                # or: pip install -e . in a 3.11+ venv
-python3 -m unittest discover -s tests    # 139 tests, stdlib only
+python3 -m unittest discover -s tests    # 196 tests, stdlib only
 docguard guard                           # validate the documentation (CDD)
 ```

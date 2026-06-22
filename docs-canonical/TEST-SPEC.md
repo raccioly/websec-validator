@@ -1,20 +1,20 @@
 # Test Specification
 
-<!-- docguard:version 0.4.1 -->
+<!-- docguard:version 0.8.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-06-10 -->
+<!-- docguard:last-reviewed 2026-06-22 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — the suite deliberately uses no third-party runner, no network, and no running app; the negations describe real, intentional test constraints. -->
 
 > **Canonical document** — Design intent. This file declares what tests MUST exist.  
-> Last updated: 2026-06-10
+> Last updated: 2026-06-22
 
 The suite is **stdlib `unittest` only** — no third-party test runner, no network, no Noir, no running
-app. **139 tests** across three files run in ~3s and gate every release (the `publish.yml` workflow
+app. **196 tests** across three files run in ~1s and gate every release (the `publish.yml` workflow
 also installs the built wheel and smoke-runs `websec run`).
 
 ```bash
-python3 -m unittest discover -s tests    # 139 tests, stdlib only
+python3 -m unittest discover -s tests    # 196 tests, stdlib only
 ```
 
 ---
@@ -42,10 +42,10 @@ python3 -m unittest discover -s tests    # 139 tests, stdlib only
 
 | Source area | Test File | Tests | Status |
 |-------------|-----------|-------|--------|
-| Recon extractors, ledger, calibration, scanners, probes, briefing | `tests/test_recon.py` | 41 | ✅ |
-| Pen-test + bug-fix regressions (detection precision, false-positive/negative guards) | `tests/test_pentest_regressions.py` | 33 | ✅ |
+| Recon extractors, ledger, calibration, scanners, probes, briefing (incl. the FP-killer + 0.7.0/0.8.0 detector tests: LLM-security, crypto-usage, authz-dataflow, CORS/SRI/header-gap, mount-auth) | `tests/test_recon.py` | 102 | ✅ |
+| Pen-test + bug-fix regressions (detection precision, false-positive/negative guards) | `tests/test_pentest_regressions.py` | 65 | ✅ |
 | CLI / dynamic-phase hardening + safety gates + edge cases | `tests/test_hardening.py` | 29 | ✅ |
-| **Total** | | **103** | ✅ |
+| **Total** | | **196** | ✅ |
 
 ## Test Fixtures
 

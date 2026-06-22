@@ -1,8 +1,8 @@
 # Architecture
 
-<!-- docguard:version 0.4.1 -->
+<!-- docguard:version 0.8.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-06-10 -->
+<!-- docguard:last-reviewed 2026-06-22 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — this tool is defined by what it deliberately omits (no LLM, no server, no running app, no runtime deps, no database); the negations describe real architectural properties, not phrasing defects. -->
 
@@ -12,8 +12,8 @@
 | Metadata | Value |
 |----------|-------|
 | **Status** | ![Status](https://img.shields.io/badge/status-approved-green) |
-| **Version** | `0.4.1` |
-| **Last Updated** | 2026-06-10 |
+| **Version** | `0.8.0` |
+| **Last Updated** | 2026-06-22 |
 | **Owner** | @raccioly |
 
 ---
@@ -31,14 +31,14 @@ that makes the agent + human dramatically more effective.
 ## Component Map
 
 The tool is a single pure-Python package, `src/websec_validator/`. Recon walks the repo **once** into a
-shared `RepoContext`, then runs 16 extractors over it; the downstream modules turn those facts into
+shared `RepoContext`, then runs 19 extractors over it; the downstream modules turn those facts into
 scanner runs, a calibrated findings ledger, staged probes, and the briefing/report artifacts.
 
 | Component | Responsibility | Location | Tests |
 |-----------|---------------|----------|-------|
 | CLI entry point | Arg parsing + the `run` / `doctor` / `dynamic` commands (and hidden `recon` / `proof` / `calibrate`) | `src/websec_validator/cli.py` | `tests/test_recon.py`, `tests/test_hardening.py` |
 | Recon driver | Thin wrapper that runs the extractor registry over one repo walk | `src/websec_validator/recon.py` | `tests/test_recon.py` |
-| Extractors (16) | One focused question each → the merged `FACTS.json` (stack, routes, auth, authz, tenant, password_policy, surface, schemas, iac_ci, client_exposure, client_integrity, transport_security, graphql, upload_security, pii_exposure, integrations) | `src/websec_validator/extractors/` | `tests/test_recon.py`, `tests/test_pentest_regressions.py` |
+| Extractors (19) | One focused question each → the merged `FACTS.json` (stack, routes, auth, authz, **authz_dataflow**, tenant, password_policy, surface, schemas, iac_ci, client_exposure, client_integrity, transport_security, graphql, upload_security, pii_exposure, integrations, **llm_security**, **crypto_usage**) | `src/websec_validator/extractors/` | `tests/test_recon.py`, `tests/test_pentest_regressions.py` |
 | Static scanners | Detect + (with `--scan`) shell out to Trivy/Gitleaks/Semgrep/Checkov/Prowler and de-duplicate across tools | `src/websec_validator/scanners.py` | `tests/test_recon.py` |
 | Findings ledger | Correlate recon + static + dynamic into one ranked, standards-cited, calibrated record set | `src/websec_validator/findings.py` | `tests/test_pentest_regressions.py` |
 | Calibration (CJE) | Wilson-interval `P(real)` per `(attack-class, confidence)` bucket; self-improving local overlay | `src/websec_validator/calibration.py` | `tests/test_recon.py` |
@@ -130,7 +130,7 @@ symlink — nothing is ever overwritten.
 
 ```mermaid
 graph LR
-    R[your repo] --> A[1. Recon<br/>16 extractors]
+    R[your repo] --> A[1. Recon<br/>19 extractors]
     A --> B[2. Static scanners<br/>de-duplicated]
     B --> C[3. Findings ledger<br/>evidence + standards + calibrated P-real]
     A --> D[3. Stage tailored probes]
@@ -148,3 +148,5 @@ graph LR
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.4.1 | 2026-06-10 | @raccioly | Canonical architecture documented from the shipped v0.4.1 tree |
+| 0.7.0 | 2026-06-22 | @raccioly | Re-synced after the self-improvement wave: router-mount-auth modeling + the FP-killer pass; **2 new extractors** (`llm_security` — OWASP LLM Top 10; `crypto_usage`) → 18 |
+| 0.8.0 | 2026-06-22 | @raccioly | Deferred-backlog detectors: **1 new extractor** (`authz_dataflow` — unsigned-cookie / claim-keyed / transaction-local-RLS authz correctness) → 19; plus CORS/SRI/host-redirect/SSRF-redirect classes in existing extractors |

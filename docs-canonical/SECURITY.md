@@ -1,13 +1,13 @@
 # Security
 
-<!-- docguard:version 0.4.1 -->
+<!-- docguard:version 0.8.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-06-10 -->
+<!-- docguard:last-reviewed 2026-06-22 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — a security model is correctly stated as invariants (MUST NOT, never, read-only, out-of-scope); negation is the right register for safety guarantees. -->
 
 > **Canonical document** — Design intent. This file defines the security model.  
-> Last updated: 2026-06-10
+> Last updated: 2026-06-22
 
 `websec-validator` is itself a security tool, so its security model is about **the safety of running
 the tool**, not about authenticating end users (it has none). The governing principle: the core pass

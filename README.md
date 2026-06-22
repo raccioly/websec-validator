@@ -13,7 +13,7 @@ turns a repo into a precise, fact-grounded security brief an AI agent (with a hu
 can act on — an auto-filled, repo-aware version of a senior pentester's "here's what to test and
 how" handoff. How it works + the reasoning behind every check: [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md).
 
-## Quickstart — just point it at your repo
+## Getting Started — just point it at your repo
 
 **Simplest: tell your AI agent.** In Claude Code (or any coding agent), open your project and say:
 
@@ -181,7 +181,7 @@ upload, cross-tenant BOLA, role/authz gaps).
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 139 tests
+python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 196 tests
 ```
 
 ## Releasing (maintainer)
