@@ -38,6 +38,8 @@ STANDARDS = {
     "eval-injection": (["CWE-95 Eval Injection", "CWE-94 Code Injection"], "ASVS V5.2.4", []),
     "command-injection": (["CWE-78 OS Command Injection"], "ASVS V5.3.8", []),
     "path-traversal": (["CWE-22 Path Traversal"], "ASVS V12.3", []),
+    "proxy-escape": (["CWE-441 Unintended Proxy (Confused Deputy)", "CWE-22 Path Traversal"],
+                     "ASVS V12.3", ["API7:2023 SSRF", "API8:2023 Misconfiguration"]),
     "ssti": (["CWE-1336 SSTI"], "ASVS V5.2.5", []),
     "open-redirect": (["CWE-601 Open Redirect"], "ASVS V5.1.5", []),
     "insecure-deserialization": (["CWE-502 Deserialization"], "ASVS V5.5", []),
@@ -90,6 +92,25 @@ STANDARDS = {
     "redundant-secret-fetch": (["CWE-200 Information Exposure"], "ASVS V2.10", ["API8:2023 Misconfiguration"]),
     "insecure-cookie": (["CWE-1004 Sensitive Cookie Without HttpOnly", "CWE-614 Sensitive Cookie Without Secure"],
                         "ASVS V3.4.1", ["API8:2023 Misconfiguration"]),
+    # --- LLM / AI-agent classes (OWASP LLM Top 10) ---
+    "llm-prompt-injection": (["CWE-1427 Prompt Injection", "CWE-77 Command Injection"],
+                             "ASVS V5.1", ["LLM01:2025 Prompt Injection"]),
+    "llm-insecure-output": (["CWE-94 Code Injection", "CWE-79 XSS"],
+                            "ASVS V5.2", ["LLM02:2025 Insecure Output Handling"]),
+    "excessive-agency": (["CWE-862 Missing Authorization", "CWE-250 Execution with Unnecessary Privileges"],
+                         "ASVS V1.1", ["LLM06:2025 Excessive Agency", "LLM08:2025"]),
+    "llm-unbounded": (["CWE-770 Allocation of Resources Without Limits or Throttling"],
+                      "ASVS V11.1.4", ["LLM10:2025 Unbounded Consumption", "API4:2023 Unrestricted Resource Consumption"]),
+    "llm-guardrail": (["CWE-693 Protection Mechanism Failure", "CWE-755 Improper Handling of Exceptional Conditions"],
+                      "ASVS V1.1", ["LLM02:2025", "LLM01:2025"]),
+    # --- crypto-usage classes ---
+    "weak-password-hash": (["CWE-916 Use of Password Hash With Insufficient Computational Effort", "CWE-759 Missing Salt"],
+                           "ASVS V2.4.1", ["API2:2023 Broken Authentication"]),
+    "jwt-verify-options": (["CWE-347 Improper Verification of Cryptographic Signature"],
+                           "ASVS V3.5.2", ["API2:2023 Broken Authentication"]),
+    "predictable-principal": (["CWE-330 Use of Insufficiently Random Values", "CWE-340 Predictable from Observable State"],
+                              "ASVS V6.3.1", ["API1:2023 BOLA"]),
+    "timing-unsafe-compare": (["CWE-208 Observable Timing Discrepancy"], "ASVS V6.2.3", ["API2:2023 Broken Authentication"]),
 }
 REMEDIATION = {
     "missing-auth": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a "
@@ -108,6 +129,10 @@ REMEDIATION = {
              "(RE2) — and never build a pattern from unsanitized user input.",
     "eval-injection": "Remove eval()/new Function()/exec on user input; use a safe parser, a typed dispatch table, "
                       "or an explicit allowlist of operations instead.",
+    "proxy-escape": "Reject any catch-all segment that is `.`/`..` or contains an encoded slash/dot before building "
+                    "the upstream URL; better, assemble it with `new URL` and assert the normalized pathname still "
+                    "startsWith the intended prefix, else 400. The forwarded token makes an escaped path a "
+                    "full-credential request to any upstream route.",
     "secret": "Rotate the credential, remove from code/history, load from a secrets manager.",
     "cve": "Upgrade the dependency to the fixed version.",
     "iac": "Apply the hardening (non-root user, pin actions to a SHA, enforce TLS, etc.).",
@@ -156,6 +181,33 @@ REMEDIATION = {
                               "consistency).",
     "insecure-cookie": "Set auth/session cookies `HttpOnly` (blocks JS/XSS theft) + `Secure` (HTTPS-only) + "
                        "`SameSite=Lax`/`Strict` (CSRF). Verify against the live Set-Cookie header.",
+    "llm-prompt-injection": "Fence externally-sourced content (RAG/tool/web/document) as untrusted data in the "
+                            "prompt, run it through a prompt scrubber, and allow-list any URL host/scheme before "
+                            "emitting it. Never instruct the model to render attacker-suppliable URLs verbatim.",
+    "llm-insecure-output": "Treat model output as display-only, never a control channel. Don't parse model prose "
+                           "into tool calls; if a text fallback exists, constrain it to a strict allow-list and "
+                           "never let it invoke state-changing tools. Validate/encode output before any sink.",
+    "excessive-agency": "Gate state-changing tools (send/delete/transfer/exec/spend) behind explicit human "
+                        "confirmation when the model chooses the args; scope each tool's authority to least "
+                        "privilege and run moderation over tool args/results, not just the final text.",
+    "llm-unbounded": "Set an explicit maxOutputTokens and a request timeout/abortSignal on every model call, cap "
+                     "in-flight concurrency, and rate-limit by token spend (not just request count) — especially "
+                     "on unauthenticated endpoints.",
+    "llm-guardrail": "Make guards FAIL CLOSED (return the refusal on guard error/timeout), require an explicit "
+                     "opt-out to run without an output guard, scan retrieved/tool content (not just the user "
+                     "message), and add circuit-breaker semantics instead of per-request silent fail-open.",
+    "weak-password-hash": "Verify passwords with a memory-hard adaptive KDF (argon2id/scrypt/bcrypt) + a random "
+                          "per-credential salt — never a fast unsalted digest (SHA-256/SHA-1/MD5). Move any "
+                          "committed credential material to a secret store and rotate it.",
+    "jwt-verify-options": "Pass an explicit `algorithms` allowlist (e.g. `['HS256']`) plus issuer/audience to every "
+                          "verify call, so the symmetric-only guarantee is in the code, not an implicit property of "
+                          "the key type — pre-empting alg-confusion if the key ever becomes asymmetric.",
+    "predictable-principal": "Use an opaque server-assigned random id as the tenant/user principal, or HMAC the "
+                             "identity→id mapping under a server secret; always verify the resolved row owns the "
+                             "session before honoring a client-supplied id.",
+    "timing-unsafe-compare": "Compare request-supplied secrets/tokens/signatures with `crypto.timingSafeEqual` "
+                             "(equal-length buffers) or `compare_digest`, never `===`/`!==`, to remove the timing "
+                             "side-channel.",
 }
 _DEFAULT_REM = "Review and remediate per the cited standard."
 
@@ -367,6 +419,16 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                         "validated, so a 302 to 169.254.169.254 / RFC-1918 is followed (#1). Allow-list the host on "
                         "EVERY hop; run the ssrf-probes redirect matrix to confirm."}]))
 
+    # ---- 3c. Reverse-proxy prefix-escape (confined-deputy via `..` in a catch-all path) ----
+    for rel in (facts.get("surface", {}).get("proxy_prefix_escape", []) or []):
+        out.append(_f(f"Reverse-proxy prefix-escape: {rel}", "attack-surface", "proxy-escape",
+                      "HIGH", "MEDIUM", rel,
+                      [{"layer": "recon", "detail": "user-controlled catch-all path segments are joined into a "
+                        "fixed-prefix upstream URL with no `..`/encoded-slash rejection — WHATWG URL normalizes "
+                        "`/prefix/../../admin` PAST the prefix, and the proxy forwards a server-minted token, so the "
+                        "caller reaches any upstream route with valid creds (confused deputy). Reject `.`/`..`/`%2e` "
+                        "segments or assert the normalized pathname still starts with the prefix."}]))
+
     # ---- 4. Client-side secret exposure (HIGH — ships to browser) ----
     # Name-based + value-shape (rename-proof) + CDK build-injection (#3) all land here.
     _cx = facts.get("client_exposure", {})
@@ -375,11 +437,20 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         out.append(_f(f"Secret exposed to client: {leak}", "client-exposure", "client-exposure",
                       "HIGH", "HIGH", leak, [{"layer": "recon", "detail": "a secret (by name, value-shape, or CDK "
                        "build-injection) reaches the browser bundle"}]))
+    # intended-public analytics ingest tokens (PostHog/Usertour/…) — INFO, designed to ship; surfaced
+    # for completeness so they're acknowledged-and-cleared, not silently treated as a HIGH leak.
+    for tok in _cx.get("intended_public_analytics", []):
+        out.append(_f(f"Intended-public analytics token: {tok}", "client-exposure", "client-exposure",
+                      "INFO", "LOW", tok, [{"layer": "recon", "detail": "a write-only analytics/telemetry "
+                       "ingest token that is DESIGNED to ship to the browser (PostHog/Usertour/Segment/…) — "
+                       "not a secret leak; confirm it's a publishable key, not a server API key reusing the name"}]))
 
     # ---- 5. IaC / CI-CD (AppSync API_KEY default → anonymous/missing-auth, retest-corrected from CSWSH) ----
     for fnd in (facts.get("iac_ci", {}).get("findings", []) or []):
         kind = fnd.get("kind", "")
-        cls = "missing-auth" if kind.startswith("appsync-apikey") else "iac"
+        # a finding may name its own attack_class (e.g. suppressed-secret-leak → secret); else
+        # appsync default-API_KEY is anonymous auth, everything else is generic IaC misconfig.
+        cls = fnd.get("attack_class") or ("missing-auth" if kind.startswith("appsync-apikey") else "iac")
         out.append(_f(f"{kind}: {fnd.get('detail','')[:80]}", "iac-ci", cls,
                       fnd.get("severity", "MEDIUM"), "MEDIUM", fnd.get("file", ""),
                       [{"layer": "recon", "detail": fnd.get("detail", "")}]))
@@ -458,6 +529,22 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
     # ---- 11. PII output-boundary — unmasked customer data + dead masking controls (#8) ----
     for fnd in (facts.get("pii_exposure", {}) or {}).get("findings", []):
         out.append(_f(f"{fnd.get('kind')}: {fnd.get('file')}", "pii", "pii-exposure",
+                      fnd.get("severity", "MEDIUM"), "MEDIUM", fnd.get("file", ""),
+                      [{"layer": "recon", "detail": fnd.get("detail", "")}]))
+
+    # ---- 12. LLM / AI-agent surface — OWASP LLM Top 10 (prompt injection, insecure output,
+    # excessive agency, unbounded generation, guardrail fail-open). New class for AI apps. ----
+    for fnd in (facts.get("llm_security", {}) or {}).get("findings", []):
+        out.append(_f(f"{fnd.get('kind')}: {fnd.get('file')}", "llm-security",
+                      fnd.get("attack_class", "llm-prompt-injection"),
+                      fnd.get("severity", "MEDIUM"), "LOW", fnd.get("file", ""),
+                      [{"layer": "recon", "detail": fnd.get("detail", "")}]))
+
+    # ---- 13. Crypto-usage — algorithm choice + verify-option correctness (weak password hash,
+    # jwtVerify without an algorithms allowlist, predictable principal). ----
+    for fnd in (facts.get("crypto_usage", {}) or {}).get("findings", []):
+        out.append(_f(f"{fnd.get('kind')}: {fnd.get('file')}", "crypto",
+                      fnd.get("attack_class", "weak-password-hash"),
                       fnd.get("severity", "MEDIUM"), "MEDIUM", fnd.get("file", ""),
                       [{"layer": "recon", "detail": fnd.get("detail", "")}]))
 

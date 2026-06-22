@@ -77,7 +77,7 @@ Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and 
 
 > That's the whole user surface: **`run`** (plus the optional, advanced **`dynamic`** live-probing step below). `recon`/`proof`/`calibrate` exist for developing the tool itself and are hidden from `--help` — you never need them.
 
-## What it extracts (16 deterministic extractors, no LLM)
+## What it extracts (18 deterministic extractors, no LLM)
 
 | | Dimension | Notable output |
 |---|---|---|
@@ -90,13 +90,15 @@ Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and 
 | surface | 15 sink classes **+ redirect-SSRF** | user-input-gated sinks (incl. **mass-assignment via object spread**) + var-arg SSRF + error-disclosure **+ follows-redirects-without-per-hop-guard** |
 | **upload_security** | unrestricted upload + unsafe serve | deny-list-only, stored-name-from-filename, trust-client-MIME, accept-SVG, **serve without `nosniff`** |
 | schemas | data models + **privileged fields** | Pydantic/SQLAlchemy/Django/Prisma/Mongoose/TypeORM/Zod → `role`/`isAdmin`/`groupId` for mass-assignment targeting |
-| iac_ci | IaC + CI/CD | GHA injection, unpinned actions, tfstate, **CDK AppSync `API_KEY` anonymous-default-auth + WAF-as-control smell** |
+| iac_ci | IaC + CI/CD | GHA injection (**run:-position-aware**), unpinned actions, tfstate, CDK AppSync `API_KEY` anonymous-default-auth, **docker-compose host-takeover (docker.sock / pid:host / privileged) + `.gitleaksignore` secret-suppression audit** |
 | client_exposure | browser leakage | public-var secrets by **name + value-shape (`da2-…`) + CDK build-injection**, server-secret-in-client, source maps |
 | **client_integrity** | tamperable display (client trust boundary) + **WS auth model** | any security-critical sink value (address/IBAN/2FA-seed/API-key/webhook) the user reads or copies, without strict CSP / out-of-band anchor **+ client-tamper-vector, grindable-fingerprint, over-claimed-control, the CSWSH determinant** |
 | **transport_security** | CSP + HSTS header baseline | missing/weak CSP, inline event handlers, **partial HSTS (set on /api but not the HTML page)** |
 | **pii_exposure** | unmasked PII at the output boundary | `res.json(rawEntity)` with PII + **a masking control defined but with zero live call sites** (value-shape, not field-name) |
 | graphql | GraphQL surface | introspection (**AppSync `introspectionConfig: DISABLED`-aware**) / playground / depth-limit **+ AppSync subscription-authz (cross-group BOLA)** |
 | integrations | third-party + webhooks **+ outbound-action endpoints** | unsigned webhooks **+ email/SMS/push handlers with no auth or IP-only rate-limit + redundant secret-fetch** |
+| **llm_security** | LLM / AI-agent surface (**OWASP LLM Top 10**) | indirect **prompt injection** (untrusted RAG/tool content → prompt) · **insecure output handling** (model text → tool dispatch) · **excessive agency** · **unbounded generation** (no maxTokens/timeout) · **guardrail fail-open** |
+| **crypto_usage** | crypto-API correctness | **weak password hash** (fast/unsalted SHA-256/MD5) · `jwtVerify` without an `algorithms` allowlist · **predictable principal** (id = hash of email) · non-constant-time secret compare |
 
 Plus **derived targeting** — IDOR / SSRF / open-redirect / upload / write / auth-endpoint
 candidates — so probes get pointed at the *exact* endpoints, not fired blindly.
@@ -204,15 +206,20 @@ publisher** with project `websec-validator`, owner `raccioly`, repo `websec-vali
 
 ## Status / roadmap
 
-**Done:** 15-extractor recon (incl. schema/entity → mass-assignment targeting, the **AWS-CDK /
+**Done:** 18-extractor recon (incl. schema/entity → mass-assignment targeting, the **AWS-CDK /
 managed-AppSync / VTL boundary**, **upload-security** + **PII-output-boundary** + **redirect-SSRF**
-+ **password-reuse** classes, and a **man-in-the-browser / tamperable-display** class), cross-tool
-de-dup + **bundled Semgrep rules**, tailored probe staging, agent briefing, traceable findings ledger
-with **calibrated confidence (CJE — Wilson CIs)**, proof harness, test suite, **Docker bundle** (all
++ **password-reuse** classes, a **man-in-the-browser / tamperable-display** class, an **LLM / AI-agent
+extractor** (OWASP LLM Top 10 — prompt injection / insecure output / excessive agency / unbounded
+generation / guardrail fail-open), a **crypto-usage extractor** (weak password hash / jwtVerify-without-
+algorithms / predictable principal), **docker-compose host-takeover** + **`.gitleaksignore`
+secret-suppression** audits, and a **reverse-proxy prefix-escape** detector), cross-tool de-dup +
+**bundled Semgrep rules**, **router-mount-auth modeling** (cuts the dominant Express-monorepo
+missing-auth false positive), tailored probe staging, agent briefing, traceable findings ledger with
+**calibrated confidence (CJE — Wilson CIs)**, proof harness, test suite (181), **Docker bundle** (all
 scanners + Noir, arch-aware), **dynamic phase v1** (authenticated read-only cross-tenant BOLA —
 validated live, reproduced a hand-pentest's 14/14). Validated against the **REF-PENTEST pen test +
-retest** (incl. correcting two findings the retest disproved: AppSync introspection *is* disablable
-engine-level, and API_KEY-default is anonymous-auth, not CSWSH).
+retest** and re-validated on a large real-world LLM-agent monorepo (HIGH-finding noise 178 → 15, AI +
+crypto surfaces newly covered).
 **Next:** dynamic write-verb BOLA + JWT/auth probes + ZAP/Nuclei two-role diff (gated, they mutate),
 calibration on hand-labeled real repos (more representative base rate), ASVS index lookup, optional
 model-SDK adapters for no-agent fallback.

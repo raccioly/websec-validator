@@ -11,17 +11,24 @@ from __future__ import annotations
 
 import re
 
-from .base import Extractor, RepoContext
+from .base import Extractor, RepoContext, is_client_file, is_script_file, is_test_file
 
 # user-controlled markers (kept loose on purpose)
 _U = r"(?:req\.|request\.|\+|`[^`]*\$\{|f['\"]|%\s*[\(%]|\.format\s*\(|searchParams|nextUrl|params\[)"
+
+# SSRF is narrower than _U: it requires a REQUEST-DERIVED url, not any template literal. A hardcoded
+# host with only an env/secret/config var interpolated (`api.telegram.org/bot${token}`), a loopback
+# self-call, or a same-origin RELATIVE path (`/api/...`) is NOT SSRF. Validated on a real LLM-agent monorepo:
+# the old `\bfetch\(\s*${anything}` matched browser fetches, build scripts, and adapters — ~95% FP.
+_REQ_SRC = (r"(?:req\.(?:query|params|body|headers|originalUrl)|request\.(?:query|params|body|headers|json|args|GET|POST)"
+            r"|searchParams|nextUrl|\.params\[|\.query\[|\.body\.|ctx\.(?:query|params|request|req)|\bbody\.\w|userInput|userProvided)")
 
 # class -> (probe it feeds, gating, compiled regex)
 #   gating: None | "sql" | "nosql"  (datastore-dependent classes)
 SINKS = {
     "ssrf": ("ssrf-probes", None, re.compile(
-        r"(?:axios|got|node-fetch|superagent|needle|httpx|urllib\.request)\b.*\b" + _U
-        + r"|\bfetch\s*\(\s*" + _U + r"|requests\.(?:get|post|put|request)\s*\(\s*" + _U)),
+        r"(?:\bfetch|axios(?:\.\w+)?|got|node-fetch|superagent|needle|undici|requests\.\w+|httpx\.\w+|urllib\.request\.\w+)"
+        r"\s*\(\s*[^)\n;]{0,160}?" + _REQ_SRC)),
     "command-injection": ("ssrf-probes", None, re.compile(
         r"(?:child_process\.exec|\bexecSync|\bexec|\bspawn|os\.system|subprocess\.(?:run|call|check_output|Popen))\s*\([^)]*"
         + _U + r"|shell\s*=\s*True")),
@@ -52,8 +59,10 @@ SINKS = {
         r"\{\s*\.\.\.[\w.$]+\s*,\s*\.\.\.(?:(?:req\w*|request|ctx|c)\.(?:body|json|payload|data|params|query)"
         r"|body|reqBody|requestBody|userInput|updates|patch)\b"
         r"|Object\.assign\s*\(\s*[\w.$]+\s*,\s*(?:req|request|ctx|c)\.(?:body|json|payload|data)\b"
+        # NB: `scope`/`scopes` intentionally dropped from the SHORTHAND arm — too common as a benign
+        # internal field (`{...row, scope}`) to flag on the bare-identifier form (FP on a real LLM-agent monorepo).
         r"|\{\s*\.\.\.[\w.$]+[^{}]{0,80}?,\s*(?:role|roles|tier|plan|isAdmin|is_admin|admin|permissions?"
-        r"|scopes?|balance|credits|owner|ownerId|isOwner|isSuperuser|superuser)\s*[,}]")),
+        r"|balance|credits|isOwner|isSuperuser|superuser)\s*[,}]")),
     "redos": ("ssrf-probes", None, re.compile(
         r"new\s+RegExp\s*\([^)]*(?:req\.|request\.|\+)|re\.(?:compile|match|search|fullmatch)\s*\([^,)]*(?:request\.|f['\"])")),
     "eval-injection": ("bola-write-verbs", None, re.compile(
@@ -84,6 +93,21 @@ SINKS = {
 REDIRECT_GUARD = re.compile(r"beforeRedirect|maxRedirects\s*:\s*0\b|allow_redirects\s*=\s*False"
                             r"|validateRedirect|isAllowed\w*Url|on[_-]?redirect|checkRedirect", re.I)
 
+# Reverse-proxy PREFIX-ESCAPE (confused deputy, CWE-22/CWE-441): a Next.js-style proxy builds the
+# upstream URL by joining USER-CONTROLLED catch-all segments after a fixed prefix —
+# `fetch(`${base}/api/x/${endpoint.join('/')}`)` — and forwards a server-minted token. WHATWG URL
+# normalizes `../`, so `/api/x/%2e%2e/%2e%2e/admin` resolves PAST the prefix to any upstream route
+# with valid creds. The host is literal (not SSRF) but the per-prefix isolation is defeated.
+# The join often lands on its own line (`const path = endpoint.join('/')`) then the fetch
+# interpolates it — so detect FILE-LEVEL: catch-all segments joined with '/' AND an outbound call
+# whose template URL interpolates a path segment after a slash.
+PROXY_JOIN = re.compile(r"\.join\s*\(\s*['\"]/['\"]\s*\)")
+PROXY_FETCH = re.compile(r"(?:fetch|axios(?:\.\w+)?|got|ky|undici|request)\s*\(\s*`[^`]*/\$\{", re.I)
+# an explicit dot-segment / encoded-slash rejection or post-normalize prefix assertion = guarded
+DOTSEG_GUARD = re.compile(
+    r"includes\s*\(\s*['\"]\.\.|===\s*['\"]\.\.['\"]|['\"]\.\.['\"]\s*\)|%2e|%2f|decodeURIComponent"
+    r"|\bnormalize\b|startsWith\s*\(\s*['\"]/[\w]|sanitiz|assertPath|safeJoin|\bresolve\b[^;]{0,40}startsWith", re.I)
+
 
 class SurfaceExtractor(Extractor):
     name = "surface"
@@ -97,19 +121,38 @@ class SurfaceExtractor(Extractor):
         found: dict = {k: [] for k in SINKS}
         counts: dict = {k: 0 for k in SINKS}
         ssrf_redirect: list = []    # SSRF sink in a file with NO per-hop redirect guard (#1)
+        proxy_escape: list = []     # reverse-proxy prefix-escape (confined-deputy)
         for _p, rel, text in ctx.iter_code():
+            # Test fixtures are never a runtime sink; SSRF + outbound-HTTP are SERVER-ONLY classes,
+            # so client (.tsx/'use client') and build/CLI scripts can't host them (validated: these
+            # were the entire ssrf false-positive set on a real LLM-agent monorepo).
+            if is_test_file(rel):
+                continue
+            nonserver = is_client_file(rel, text) or is_script_file(rel)
             for cls, (_probe, gate, rx) in SINKS.items():
                 if gate == "sql" and not has_sql:
                     continue
                 if gate == "nosql" and not has_nosql:
                     continue
+                if cls.startswith("ssrf") and nonserver:
+                    continue
                 if rx.search(text):
+                    # command-injection precision: an argv-list subprocess with shell=False is safe —
+                    # the dangerous form is shell=True or a concatenated command string.
+                    if (cls == "command-injection" and re.search(r"shell\s*=\s*False", text)
+                            and not re.search(r"shell\s*=\s*True", text)):
+                        continue
                     counts[cls] += 1
                     if len(found[cls]) < 60:
                         found[cls].append(rel)
-            if (len(ssrf_redirect) < 40 and not REDIRECT_GUARD.search(text)
+            if (len(ssrf_redirect) < 40 and not nonserver and not REDIRECT_GUARD.search(text)
                     and (SINKS["ssrf-outbound-http"][2].search(text) or SINKS["ssrf"][2].search(text))):
                 ssrf_redirect.append(rel)
+            # reverse-proxy prefix-escape: catch-all segments joined into a fixed-prefix upstream URL
+            # with no dot-segment rejection (client .tsx excluded — the proxy is the server handler)
+            if (len(proxy_escape) < 30 and not nonserver and PROXY_JOIN.search(text)
+                    and PROXY_FETCH.search(text) and not DOTSEG_GUARD.search(text)):
+                proxy_escape.append(rel)
 
         sinks = {k: {"probe": SINKS[k][0], "count": counts[k], "files": found[k]}
                  for k in SINKS if counts[k]}
@@ -117,6 +160,7 @@ class SurfaceExtractor(Extractor):
             "sinks": sinks,
             "sink_counts": {k: counts[k] for k in SINKS if counts[k]},
             "ssrf_redirect_unguarded": ssrf_redirect,   # validate EVERY hop, not just the input URL (#1)
+            "proxy_prefix_escape": proxy_escape,        # confined-deputy via `..` in catch-all path
             "datastore_class": ("sql" if has_sql else ("nosql" if has_nosql else "unknown")),
             "note": "Each sink hit is user-input-gated (req./request./concat/interp), so these are "
                     "higher-confidence leads. Cross-reference the files with routes.targeting to pick "

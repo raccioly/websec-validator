@@ -14,9 +14,11 @@ from .authz import AuthzExtractor
 from .base import MAX_FILES, Extractor, RepoContext
 from .client_exposure import ClientExposureExtractor
 from .client_integrity import ClientIntegrityExtractor
+from .crypto_usage import CryptoUsageExtractor
 from .graphql import GraphQLExtractor
 from .iac_ci import IacCiExtractor
 from .integrations import IntegrationsExtractor
+from .llm_security import LlmSecurityExtractor
 from .pii_exposure import PiiExposureExtractor
 from .policy_consistency import PolicyConsistencyExtractor
 from .routes import RoutesExtractor
@@ -46,6 +48,8 @@ REGISTRY: list[Extractor] = [
     PiiExposureExtractor(),
     GraphQLExtractor(),
     IntegrationsExtractor(),
+    LlmSecurityExtractor(),
+    CryptoUsageExtractor(),
 ]
 
 

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import re
 
-from .base import Extractor, RepoContext
+from .base import Extractor, RepoContext, is_test_file
 
 # helper/permission DEFINITIONS (function/arrow/def) — not variable assignments to a call result
 MASK_DEF = re.compile(
@@ -33,6 +33,12 @@ RES_RAW = re.compile(r"res\.(?:json|send)\s*\(\s*(?:await\s+)?[A-Za-z_$][\w$]*\s
                      r"|res\.(?:json|send)\s*\(\s*await\s+[\w.]+\.(?:find|findOne|findById|findAll|get|query)\s*\(")
 MASK_CALL_NEAR = re.compile(r"mask\w+\(|redact\w+\(|toPublic\w+\(|canViewFull\w+\(|\.serialize\(|toDto\(|\bDTO\b|pick\(", re.I)
 TESTFILE = re.compile(r"(?:^|/)(?:tests?|__tests__|spec)/|\.(?:test|spec)\.", re.I)
+# A helper that masks a SECRET (connection string / password / token), not customer PII — wrong
+# category, and "defined but unused" on it is at most a lint nit. Excluded from the PII dead-control.
+SECRET_MASKER = re.compile(r"(?:mask|redact|scrub)\w*(?:Url|Uri|Dsn|Database|Conn|Connection|Secret|Password|Passwd|Token|Key|Cred)\w*", re.I)
+# inline object-projection (`.map(x => ({...}))` / a returned object literal) IS a serializer — a
+# raw-entity finding on a file that projects fields before responding is a false positive.
+PROJECTION = re.compile(r"=>\s*\(\s*\{|\.map\s*\(\s*[\w$]*\s*=>|\bselect\s*:\s*\{|\binterface\s+\w+|\btype\s+\w+\s*=\s*\{", re.I)
 
 
 class PiiExposureExtractor(Extractor):
@@ -51,25 +57,33 @@ class PiiExposureExtractor(Extractor):
 
         findings = []
 
-        # 1. dead masking/permission control — defined but no LIVE (non-test) call site
+        # 1. dead masking/permission control — defined but no reference ANYWHERE (incl. its own file).
+        # The old check excluded the definition file, so a masker wired into a singleton/formatter/CLI
+        # or pipeline stage WITHIN its own module always read as dead (≈100% FP on real code). Now: a
+        # reference beyond the definition (a call OR a value-pass like `log: redactX`) means wired.
         dead = []
         for nm, deffile in helpers.items():
-            callrx = re.compile(r"\b" + re.escape(nm) + r"\s*\(")
-            live = sum(1 for rel, text in texts
-                       if rel != deffile and not TESTFILE.search(rel) and callrx.search(text))
-            if live == 0:
+            if SECRET_MASKER.search(nm):      # masks a secret, not PII — wrong category
+                continue
+            ref_rx = re.compile(r"\b" + re.escape(nm) + r"\b")
+            refs = sum(len(ref_rx.findall(text)) for rel, text in texts if not is_test_file(rel))
+            if refs <= 1:                     # only the definition itself → genuinely unused
                 dead.append(nm)
-                findings.append({"severity": "HIGH", "kind": "dead-pii-control", "file": deffile,
-                                 "detail": f"`{nm}` (a masking/PII-permission control) is defined but has NO live "
-                                           "call site outside its own file/tests — a security control that exists but "
-                                           "isn't wired into the request handlers (it was likely only on export/report "
-                                           "paths). Apply it at the live API output boundary, or remove the false "
-                                           "sense of safety (REF-PENTEST #8)."})
+                findings.append({"severity": "LOW", "kind": "dead-pii-control", "file": deffile,
+                                 "detail": f"`{nm}` (a masking/PII-permission control) appears to have NO reference "
+                                           "beyond its definition — possibly a security control that exists but isn't "
+                                           "wired into the request handlers (REF-PENTEST #8). LOW: a same-module or "
+                                           "value-passed wiring can read as unused — confirm it's actually dead before "
+                                           "acting; if dead, apply it at the live output boundary or delete it."})
 
         # 2. raw entity with PII to the client, no masker/DTO in the handler
         raw_leaks = []
         for rel, text in texts:
-            if TESTFILE.search(rel):
+            if is_test_file(rel):
+                continue
+            # an admin/auth-gated route is not reachable by a "non-privileged caller"; an inline field
+            # projection IS a serializer — both were the raw-entity false positives.
+            if "/admin/" in rel.replace("\\", "/") or PROJECTION.search(text):
                 continue
             if PII_FIELD.search(text) and RES_RAW.search(text) and not MASK_CALL_NEAR.search(text):
                 if len(raw_leaks) < 30:

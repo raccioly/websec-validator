@@ -45,7 +45,13 @@ FRONTEND_FW = {"react", "next", "nextjs", "vue", "nuxt", "svelte", "sveltekit", 
 # assertion) and flag the gap. Flags are matched per cookie-setting file (lenient — a positive lead).
 SET_COOKIE = re.compile(r"set-?cookie|res\.cookie\(|cookies\.set\(|\.setCookie\(|c\.cookie\(", re.I)
 CK_HTTPONLY = re.compile(r"httponly", re.I)
-CK_SECURE = re.compile(r";\s*secure\b|\bsecure\s*[:=]\s*true|\bsecure\s*:\s*!", re.I)
+# `secure` set literally OR via the idiomatic conditional (`secure: isProduction()`, `secure: !dev`,
+# `secure: process.env.NODE_ENV === 'production'`, `secure: config.secureCookies`) — the conditional
+# forms were read as "Secure missing" before (the conditional `secure: isProduction()` FP).
+CK_SECURE = re.compile(
+    r";\s*secure\b|\bsecure\s*[:=]\s*true|\bsecure\s*:\s*!|"
+    r"\bsecure\s*:\s*(?:is[A-Z]\w*|process\.env|config\.|env\.|ctx\.|opts?\.|options\.|settings\.|"
+    r"[A-Za-z_$][\w$.]*\s*[=!]==|[A-Za-z_$][\w$.]*\s*\?|[A-Za-z_$][\w$.]*\([^)]*\))", re.I)
 CK_SAMESITE = re.compile(r"samesite", re.I)
 
 

@@ -15,23 +15,30 @@ from __future__ import annotations
 
 import re
 
-from .base import Extractor, RepoContext
+from .base import Extractor, RepoContext, is_test_file
 
 UPLOAD_MARK = re.compile(r"\bmulter\b|req\.files?\b|multipart/form-data|formidable|busboy|fileFilter"
                          r"|uploadMedia|presignedPost|\.upload\s*\(", re.I)
 DENY_LIST = re.compile(r"isExecutableMimeType|blockedMimeTypes|blacklist|deny[_-]?list|forbidden(?:Ext|Mime)|isBlocked", re.I)
-# positive allow-list, ideally by sniffed bytes (file-type / magic detection), not by declared type
+# positive allow-list, ideally by sniffed bytes (file-type / magic detection), not by declared type.
+# `ACCEPTED_*` / `acceptedMimeTypes` is the same intent under a different name (was missed → FP).
 ALLOW_LIST = re.compile(r"isAllowedMediaType|allowedMimeTypes|allow[_-]?list|whitelist|ALLOWED_(?:MIME|TYPES|EXT)"
+                        r"|ACCEPTED_(?:MIME|TYPES?|EXT)|accepted(?:Mime|File|Content)?(?:Types?|Extensions?)"
                         r"|\bfile-type\b|fileTypeFrom|magic[_-]?byte|detectContentType|\.fromBuffer\b|sniff", re.I)
 KEY_FROM_NAME = re.compile(r"(?:Key|key|path|filename|filepath|destination|filename\s*\()\s*[:=(][^;\n]{0,90}"
                            r"\b(?:originalname|originalName|file\.name)\b"
                            r"|`[^`]*\$\{[^}]*\boriginalname\b[^}]*\}[^`]*`", re.I)
 TRUST_CLIENT_MIME = re.compile(r"(?:req\.files?\.[\w$.]*\.|\bfile\.)mimetype\b|headers\[['\"]content-type['\"]\]", re.I)
 ACCEPT_SVG = re.compile(r"image/svg\+xml|['\"]svg['\"]", re.I)
-# file-serving: streaming a stored/proxied object back to the client
-SERVE_FILE = re.compile(r"res\.sendFile|\.sendFile\(|getObject|createReadStream|proxyMedia|streamObject"
-                        r"|res\.(?:set|setHeader)\([^)]*[Cc]ontent-?[Tt]ype[^)]*(?:metadata|contentType|mimetype)", re.I)
+# file-serving: streaming a STORED/PROXIED object back to the client. Tightened to genuine
+# file-bytes sinks — the old rule matched a bare `getObject` token (a local coercion helper) and a
+# Prometheus `res.set('Content-Type', registry.contentType)` (the /metrics endpoint), both FPs.
+SERVE_FILE = re.compile(r"res\.sendFile|\.sendFile\s*\(|\.getObject\s*\(|createReadStream|proxyMedia"
+                        r"|streamObject|\.pipe\s*\(\s*res\b|fs\.createReadStream", re.I)
 NOSNIFF = re.compile(r"nosniff", re.I)
+# `Content-Disposition: attachment` fully defeats the MIME-sniff→stored-XSS vector (the browser
+# downloads instead of rendering), so a serve site that sets it is SAFE even without nosniff.
+ATTACHMENT = re.compile(r"attachment\s*;|disposition[^,;]{0,30}attachment|['\"]attachment['\"]|buildContentDisposition", re.I)
 
 
 class UploadSecurityExtractor(Extractor):
@@ -42,6 +49,8 @@ class UploadSecurityExtractor(Extractor):
         findings = []
         upload_files, serve_files = [], []
         for _p, rel, text in ctx.iter_code():
+            if is_test_file(rel):       # test fixtures/mocks aren't a deployed upload/serve surface
+                continue
             is_upload = bool(UPLOAD_MARK.search(text))
             if is_upload:
                 upload_files.append(rel)
@@ -64,7 +73,7 @@ class UploadSecurityExtractor(Extractor):
                     findings.append({"severity": "MEDIUM", "kind": "upload-accepts-svg", "file": rel,
                                      "detail": "`image/svg+xml` is accepted — SVG can carry inline <script> and renders "
                                                "as HTML. Drop SVG from the allow-list, or sanitize + serve as attachment."})
-            if SERVE_FILE.search(text) and not NOSNIFF.search(text):
+            if SERVE_FILE.search(text) and not NOSNIFF.search(text) and not ATTACHMENT.search(text):
                 serve_files.append(rel)
                 findings.append({"severity": "HIGH", "kind": "serve-no-nosniff", "file": rel,
                                  "detail": "A stored/proxied file is served with no `X-Content-Type-Options: nosniff` "

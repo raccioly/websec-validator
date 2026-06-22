@@ -15,6 +15,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Removed
 
+## [0.7.0] — 2026-06-22
+
+Self-improvement release driven by dogfooding on a large real-world LLM-agent monorepo: a 15-agent
+verification pass adversarially confirmed every finding, then the verdicts were encoded back as
+extractor fixes + two new detector families. The dominant false-positive clusters are gone (HIGH
+178 → 15 on the validation target) and the previously-uncovered AI-agent + crypto surfaces are now
+detected. **Two new extractors** (`llm_security`, `crypto_usage`); 40 new stdlib unit tests (181 total).
+
+### Added
+- **NEW LLM / AI-agent security extractor** (`extractors/llm_security.py`) — the OWASP LLM Top 10
+  surface that was entirely uncovered: indirect **prompt injection** (untrusted RAG/tool/web content
+  into a prompt with no sanitizer/fence, esp. "render this URL verbatim"), **insecure output
+  handling** (model text → `JSON.parse`/tool-call dispatch), **excessive agency** (a state-changing
+  agent tool with no human gate), **unbounded generation** (no `maxTokens`/timeout → cost DoS), and
+  **guardrail fail-open**. Server-side, test/script-excluded, gated on a real LLM call site for
+  precision. Surfaced in the briefing + ledger with LLM01/02/06/10 + CWE citations.
+- **docker-compose host-exposure detector** (`extractors/iac_ci.py`): flags `docker.sock` mounts,
+  `pid: host` / host-root bind mounts, `privileged: true`, host networking / dangerous `cap_add`, and
+  plaintext secret env when a `secrets:` block exists — a whole compose class that had no parser.
+- **Secret-suppression audit** (`extractors/iac_ci.py`): flags `.gitleaksignore`/`.trivyignore`/
+  `.semgrepignore` entries that SILENCE a leak in a real `.env`/secrets/key file (a true positive
+  being hidden, not rotated/purged) — the committed-`.env.prod` CRITICAL class.
+- **Reverse-proxy prefix-escape detector** (`extractors/surface.py`): flags a confined-deputy proxy
+  that joins user-controlled catch-all path segments after a fixed prefix and forwards a server-minted
+  token with no `..`/encoded-slash rejection (`/api/x/%2e%2e/admin` normalizes past the prefix → any
+  upstream route with valid creds). CWE-441/CWE-22.
+- **NEW crypto-usage extractor** (`extractors/crypto_usage.py`): weak password hashing (fast/unsalted
+  SHA-256/MD5 instead of argon2/scrypt/bcrypt — CWE-916/759, HIGH), `jwtVerify` without an
+  `algorithms` allowlist (CWE-347, latent alg-confusion), and predictable principals (a tenant/user
+  id derived as a public hash of an identity field — CWE-330).
+- **Shared file-class helpers** (`extractors/base.py`): `is_test_file` / `is_script_file` /
+  `is_client_file`, so sink/exposure extractors stop scanning test fixtures, build/CLI scripts, and
+  browser code as if they were deployed server handlers (the dominant cross-cutting FP driver).
+- `client_exposure`: an `intended_public_analytics` bucket (PostHog/Usertour/Segment/… write-only
+  ingest tokens) reported at **INFO**, separated from real browser-secret leaks.
+
+### Changed
+- **Router-mount auth modeling** (`extractors/authz.py`): recognize Express
+  `app.use('/prefix', authMiddleware(...), createXRouter())` mount-level auth and propagate it to the
+  mounted router's files via a local-import-graph BFS (TS `.js`→`.ts` ESM resolution, inner
+  `router.use` inheritance, test-harness mounts ignored). Also recognize custom auth helpers
+  (`getRequestSessionAuth`-style) and one-hop delegated guards in thin Next.js route handlers.
+- `surface` SSRF: require a **request-derived** URL (not any template literal), gate to server-side
+  files, and skip same-origin relative / hardcoded-host+token fetches.
+- `client_exposure`: gate name-based `NEXT_PUBLIC_*`/`VITE_*` leaks to packages that actually have a
+  frontend bundler; `PUBLIC_*` is SvelteKit-gated.
+- `iac_ci` GHA script-injection: position-aware — only flag untrusted context inside a `run:` step
+  body (not `if:`/`env:`/`with:`); SHA/ref-typed contexts drop to LOW.
+- `transport_security`: recognize the cookie `Secure` flag set conditionally (`secure: isProduction()`).
+- `upload_security`: credit `Content-Disposition: attachment`; tighten the file-serve sink (no bare
+  `getObject` / metrics `res.set` FP); broaden the allow-list to `ACCEPTED_*`.
+- `pii_exposure`: count same-file call sites (a masker wired in its own module is not "dead");
+  exclude secret-maskers from the PII category; dead-control downgraded HIGH→LOW.
+- `routes`: exclude `postman_collection.json` from app routes (it's an API spec, not a handler).
+
+### Fixed
+- The dominant false-positive clusters, validated end-to-end against a real production LLM-agent
+  monorepo: the FP-removal alone took the ledger **403 → 72** and **HIGH 178 → 8** (missing-auth
+  292→30, ssrf 41→0, pii 8→0) with **no loss of the genuine findings**. With the new LLM /
+  docker-compose / secret-suppression / proxy-escape / crypto detectors then adding real,
+  previously-invisible findings, the end state is **128 findings / 15 HIGH** (CRITICAL 1) — noise
+  gone, true coverage up. 181 stdlib unit tests pass.
+
+### Removed
+
 ## [0.6.3] — 2026-06-19
 
 Framing-only release: lead every agent-facing surface with a defensive scope-and-authorization

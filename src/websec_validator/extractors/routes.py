@@ -60,7 +60,7 @@ SPEC_PATH = re.compile(
     r"\.(?:ya?ml|graphql|gql|raml)$"                                  # spec file formats
     r"|(?:^|/)(?:node_modules|vendor|vendored|third[_-]?party|examples?|schemas?"
     r"|(?:docs?|documentation)[\w-]*)/"                               # vendor/docs/schema dirs
-    r"|swagger|openapi", re.I)
+    r"|swagger|openapi|postman", re.I)         # postman_collection.json = an API spec, not a handler
 
 
 def _is_spec_derived(code_path: str) -> bool:

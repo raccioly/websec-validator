@@ -10,6 +10,7 @@ still say something useful.
 from __future__ import annotations
 
 import fnmatch
+import re
 from pathlib import Path
 
 SKIP_DIRS = {".git", "node_modules", "dist", "build", ".next", ".nuxt", "venv",
@@ -55,6 +56,42 @@ def path_in_skip_dir(path: str, root: "Path | str | None" = None) -> bool:
                 return False  # absolute but outside the root → don't risk a false drop
             # else: already a root-relative path → check its segments as-is below
     return any(part in SKIP_DIRS for part in p.split("/"))
+
+
+# --- file-class helpers -------------------------------------------------------------------------
+# Many sink/exposure extractors over-report because iter_code() walks the WHOLE tree — tests,
+# build/CI scripts, and browser code get scanned as if they were deployed server request handlers.
+# A test fixture's fake secret, an `e2e/*.spec.ts` relative fetch, a `scripts/deploy.mjs` outbound
+# call — none are a runtime attack surface. These centralize the classification so every extractor
+# decides the same way (validated against a real LLM-agent monorepo: the dominant client-exposure / ssrf /
+# pii false-positive driver). Each extractor opts in to whichever classes it should skip.
+_TEST_FILE = re.compile(
+    r"(?:^|/)(?:tests?|__tests__|__mocks__|spec|specs|e2e|cypress|fixtures?|mocks?|stories|testdata|testing)/"
+    r"|\.(?:test|spec|stories|e2e|cy)\.[cm]?[jt]sx?$"
+    r"|(?:^|/)[\w.-]*\.config\.[cm]?[jt]sx?$"          # vite/vitest/jest/playwright/next/... .config.*
+    r"|(?:^|/)(?:playwright|vitest|jest|cypress)\.[\w.]*$", re.I)
+# build / ops / CLI scripts run by an operator or CI, not reachable from an inbound HTTP request.
+_SCRIPT_FILE = re.compile(r"(?:^|/)(?:scripts?|bin|\.bin|ops|operations|migrations?|seeds?)/", re.I)
+# browser / client-side code. SSRF and server-secret-exposure are server-only classes; a `.tsx`
+# React component, a hook, or a `'use client'` module runs in the visitor's browser to the app's OWN
+# origin, so an outbound fetch there is same-origin, not an SSRF/exfil sink.
+_CLIENT_FILE = re.compile(r"\.(?:tsx|jsx)$|(?:^|/)(?:components?|hooks?|contexts?|widgets?|ui)/", re.I)
+
+
+def is_test_file(rel: str) -> bool:
+    return bool(_TEST_FILE.search((rel or "").replace("\\", "/")))
+
+
+def is_script_file(rel: str) -> bool:
+    return bool(_SCRIPT_FILE.search((rel or "").replace("\\", "/")))
+
+
+def is_client_file(rel: str, text: str = "") -> bool:
+    rel = (rel or "").replace("\\", "/")
+    if _CLIENT_FILE.search(rel):
+        return True
+    head = text[:300]
+    return "'use client'" in head or '"use client"' in head
 
 
 class RepoContext:

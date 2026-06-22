@@ -25,6 +25,13 @@ from websec_validator.extractors.schemas import SchemasExtractor       # noqa: E
 from websec_validator.extractors.integrations import IntegrationsExtractor  # noqa: E402
 from websec_validator.extractors.surface import SINKS, SurfaceExtractor  # noqa: E402
 from websec_validator.extractors.tenant import TenantExtractor         # noqa: E402
+from websec_validator.extractors.client_exposure import ClientExposureExtractor  # noqa: E402
+from websec_validator.extractors.pii_exposure import PiiExposureExtractor  # noqa: E402
+from websec_validator.extractors.upload_security import UploadSecurityExtractor  # noqa: E402
+from websec_validator.extractors.iac_ci import IacCiExtractor          # noqa: E402
+from websec_validator.extractors.transport_security import TransportSecurityExtractor  # noqa: E402
+from websec_validator.extractors.llm_security import LlmSecurityExtractor  # noqa: E402
+from websec_validator.extractors.crypto_usage import CryptoUsageExtractor  # noqa: E402
 
 FIX = Path(__file__).resolve().parent / "fixtures"
 
@@ -511,6 +518,334 @@ class LedgerTests(unittest.TestCase):
         # back-compat: a caller passing only `top` still works
         led2 = findings.build_ledger({}, {"top": allf[:15]}, None, [])
         self.assertEqual(len([f for f in led2["findings"] if f["attack_class"] == "cve"]), 15)
+
+
+class Wave1FalsePositiveTests(unittest.TestCase):
+    """Regressions for the FP-killer wave validated on a real LLM-agent monorepo (mount-auth, ssrf, client
+    exposure, pii dead-control, upload-serve, gha-injection, cookie-secure)."""
+
+    # --- router-mount auth (the 292→~30 missing-auth fix) ---
+    def _mount_repo(self, server_body, route_files):
+        d = Path(tempfile.mkdtemp())
+        (d / "server.ts").write_text(server_body)
+        (d / "routes").mkdir()
+        for name, body in route_files.items():
+            (d / "routes" / name).write_text(body)
+        return d
+
+    def _authz(self, d, code_path, method="DELETE", path="/:id"):
+        eps = [{"method": method, "path": path, "code_path": str(d / "routes" / code_path)}]
+        return AuthzExtractor().extract(RepoContext(d), {"routes": {"endpoints": eps}})
+
+    def test_router_mount_auth_covers_subrouter(self):
+        d = self._mount_repo(
+            "import { createXRouter } from './routes/x.js';\n"
+            "app.use('/api/x', authMiddleware({ secret }), createXRouter(db));\n",
+            {"x.ts": "export function createXRouter(){ const router=Router();"
+                     " router.delete('/:id', h); return router; }"})
+        out = self._authz(d, "x.ts")
+        self.assertTrue(out["mount_auth_detected"])
+        self.assertEqual(out["guard_summary"]["no_visible_guard"], 0)   # covered at the mount
+
+    def test_unauthed_app_mount_not_covered(self):
+        d = self._mount_repo(
+            "import { createPubRouter } from './routes/pub.js';\n"
+            "app.use('/public', createPubRouter());\n",                  # no auth middleware
+            {"pub.ts": "export function createPubRouter(){ const router=Router();"
+                       " router.delete('/:id', h); return router; }"})
+        out = self._authz(d, "pub.ts")
+        self.assertEqual(out["guard_summary"]["no_visible_guard"], 1)    # genuinely unguarded
+
+    def test_inner_subrouter_inherits_parent_auth(self):
+        # auth at /api/x mount; x.ts mounts y via inner `router.use` WITHOUT re-stating auth (inherits)
+        d = self._mount_repo(
+            "import { createXRouter } from './routes/x.js';\n"
+            "app.use('/api/x', authMiddleware(), createXRouter(db));\n",
+            {"x.ts": "import { createYRouter } from './y.js';\n"
+                     "export function createXRouter(){ const router=Router();"
+                     " router.use('/y', createYRouter()); return router; }",
+             "y.ts": "export function createYRouter(){ const router=Router();"
+                     " router.post('/:id', h); return router; }"})
+        out = self._authz(d, "y.ts", method="POST", path="/:id")
+        self.assertEqual(out["guard_summary"]["no_visible_guard"], 0)    # inherited from parent mount
+
+    def test_test_harness_mount_does_not_mark_unauthed(self):
+        # a *.test.ts harness mounts the router unauthed; the real app mounts it WITH auth → covered
+        d = self._mount_repo(
+            "import { createXRouter } from './routes/x.js';\n"
+            "app.use('/api/x', authMiddleware(), createXRouter(db));\n",
+            {"x.ts": "export function createXRouter(){ const router=Router();"
+                     " router.delete('/:id', h); return router; }",
+             "x.test.ts": "import { createXRouter } from './x.js';\n"
+                          "app.use(createXRouter());  // unauth harness\n"})
+        out = self._authz(d, "x.ts")
+        self.assertEqual(out["guard_summary"]["no_visible_guard"], 0)
+
+    def test_custom_auth_helper_recognized(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "route.ts").write_text(
+            "export async function GET(req){ const a = await getRequestSessionAuth(req);"
+            " if (a.status !== 'ready') return createSessionAuthFailureResponse(); return Response.json({}); }")
+        eps = [{"method": "GET", "path": "/api/x", "code_path": str(d / "route.ts")}]
+        out = AuthzExtractor().extract(RepoContext(d), {"routes": {"endpoints": eps}})
+        self.assertEqual(out["guard_summary"]["no_visible_guard"], 0)
+
+    # --- SSRF gating (41 ssrf FPs → 0) ---
+    def _surface(self, files):
+        d = Path(tempfile.mkdtemp())
+        for name, body in files.items():
+            (d / name).write_text(body)
+        return SurfaceExtractor().extract(RepoContext(d), {"stack": {"datastores": []}})
+
+    def test_ssrf_requires_request_source(self):
+        s = self._surface({"h.ts": "app.get('/x', async (req,res)=>{ await fetch(`${req.query.url}`); });"})
+        self.assertIn("ssrf", s["sinks"])
+
+    def test_ssrf_skips_client_relative_fetch(self):
+        s = self._surface({"comp.tsx": "export function C(){ return fetch(`/api/x/${id}`); }"})
+        self.assertNotIn("ssrf", s["sinks"])
+
+    def test_ssrf_skips_hardcoded_host_with_token(self):
+        s = self._surface({"adapter.ts": "export function send(){ return fetch(`https://api.telegram.org/bot${this.token}/send`); }"})
+        self.assertNotIn("ssrf", s["sinks"])
+
+    def test_command_injection_argv_shell_false_is_safe(self):
+        s = self._surface({"r.py": "subprocess.run(cmd, capture_output=True, shell=False, timeout=t)"})
+        self.assertNotIn("command-injection", s["sinks"])
+
+    # --- client exposure: per-package frontend gating + analytics allowlist ---
+    def _client(self, deps, files):
+        d = Path(tempfile.mkdtemp())
+        (d / "package.json").write_text('{"dependencies": {%s}}' % deps)
+        for name, body in files.items():
+            (d / name).write_text(body)
+        return ClientExposureExtractor().extract(RepoContext(d), {})
+
+    def test_backend_public_var_not_flagged(self):
+        out = self._client('"express": "4"', {"config.ts": "const k = process.env.NEXT_PUBLIC_API_KEY;"})
+        self.assertEqual(out["public_secret_leaks"], [])
+
+    def test_frontend_public_var_flagged(self):
+        out = self._client('"next": "15"', {"config.ts": "const k = process.env.NEXT_PUBLIC_API_KEY;"})
+        self.assertTrue(out["public_secret_leaks"])
+
+    def test_analytics_token_is_info_not_leak(self):
+        out = self._client('"next": "15"', {"a.ts": "const k = process.env.NEXT_PUBLIC_POSTHOG_TOKEN;"})
+        self.assertEqual(out["public_secret_leaks"], [])
+        self.assertTrue(out["intended_public_analytics"])
+
+    def test_client_exposure_skips_test_files(self):
+        out = self._client('"next": "15"', {"a.test.ts": "process.env.NEXT_PUBLIC_API_KEY = 'x';"})
+        self.assertEqual(out["public_secret_leaks"], [])
+
+    # --- PII dead-control: same-file wiring is not "dead" ---
+    def test_masker_called_same_file_not_dead(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "log.ts").write_text("function maskEmail(e){ return e; }\nconst x = maskEmail('a@b.com');")
+        out = PiiExposureExtractor().extract(RepoContext(d), {})
+        self.assertNotIn("maskEmail", out["dead_controls"])
+
+    def test_unused_masker_is_dead_low(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "m.ts").write_text("export function maskEmail(e){ return e; }")
+        out = PiiExposureExtractor().extract(RepoContext(d), {})
+        self.assertIn("maskEmail", out["dead_controls"])
+        sev = {f["kind"]: f["severity"] for f in out["findings"]}
+        self.assertEqual(sev.get("dead-pii-control"), "LOW")
+
+    def test_secret_masker_excluded_from_pii(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "m.ts").write_text("export function maskDatabaseUrl(u){ return u; }")
+        out = PiiExposureExtractor().extract(RepoContext(d), {})
+        self.assertNotIn("maskDatabaseUrl", out["dead_controls"])
+
+    # --- upload serve: Content-Disposition: attachment is safe ---
+    def test_serve_with_attachment_is_safe(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "s.ts").write_text("res.sendFile(p, { headers: { 'Content-Disposition': 'attachment; filename=x' } });")
+        out = UploadSecurityExtractor().extract(RepoContext(d), {})
+        self.assertFalse([f for f in out["findings"] if f["kind"] == "serve-no-nosniff"])
+
+    def test_serve_without_nosniff_or_attachment_flagged(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "s.ts").write_text("res.sendFile(absolutePath);")
+        out = UploadSecurityExtractor().extract(RepoContext(d), {})
+        self.assertTrue([f for f in out["findings"] if f["kind"] == "serve-no-nosniff"])
+
+    # --- GHA script-injection: position-aware (run: body only) ---
+    def _gha(self, wf_body):
+        d = Path(tempfile.mkdtemp())
+        (d / ".github" / "workflows").mkdir(parents=True)
+        (d / ".github" / "workflows" / "ci.yml").write_text(wf_body)
+        return IacCiExtractor().extract(RepoContext(d), {})
+
+    def test_gha_injection_in_run_flagged(self):
+        out = self._gha("jobs:\n  b:\n    steps:\n      - run: echo ${{ github.event.pull_request.title }}\n")
+        k = [f for f in out["findings"] if f["kind"] == "gha-script-injection"]
+        self.assertTrue(k)
+        self.assertEqual(k[0]["severity"], "HIGH")
+
+    def test_gha_context_in_if_not_flagged(self):
+        out = self._gha("jobs:\n  b:\n    if: ${{ github.event.pull_request.title == 'x' }}\n"
+                        "    steps:\n      - run: echo hi\n")
+        self.assertFalse([f for f in out["findings"] if f["kind"] == "gha-script-injection"])
+
+    # --- cookie Secure recognized when set conditionally ---
+    def test_cookie_secure_conditional_recognized(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "s.ts").write_text("res.cookie('t', v, { httpOnly: true, secure: isProduction(), sameSite: 'lax' });")
+        out = TransportSecurityExtractor().extract(
+            RepoContext(d), {"stack": {"frameworks": []}, "routes": {"endpoints": [{"method": "GET", "path": "/x"}]}})
+        self.assertTrue(out["cookie_security"]["secure"])
+        self.assertFalse([f for f in out["findings"] if f["kind"] == "cookie-flags"])
+
+
+class Wave2DetectorTests(unittest.TestCase):
+    """New-capability detectors: LLM/AI-agent security, docker-compose, secret-suppression."""
+
+    def _llm(self, files):
+        d = Path(tempfile.mkdtemp())
+        for name, body in files.items():
+            p = d / name
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(body)
+        return LlmSecurityExtractor().extract(RepoContext(d), {})
+
+    def _kinds(self, out):
+        return {f["kind"] for f in out["findings"]}
+
+    def test_unbounded_generation_flagged(self):
+        out = self._llm({"svc.ts": "export async function run(p){ return await generateText({ model, prompt: p }); }"})
+        self.assertIn("llm-unbounded-generation", self._kinds(out))
+        self.assertTrue(out["is_ai_app"])
+
+    def test_bounded_generation_not_flagged(self):
+        out = self._llm({"svc.ts": "await generateText({ model, prompt: p, maxOutputTokens: 512, abortSignal: s });"})
+        self.assertNotIn("llm-unbounded-generation", self._kinds(out))
+
+    def test_insecure_output_handling_flagged(self):
+        out = self._llm({"loop.ts": "await generateText({model,prompt});\n"
+                                    "if (text.includes('\"tool_use\"')) dispatch(JSON.parse(completion));"})
+        self.assertIn("llm-insecure-output-handling", self._kinds(out))
+
+    def test_indirect_prompt_injection_flagged(self):
+        out = self._llm({"rag.ts": "await generateText({ model, prompt: `Context: ${excerptText}` });"})
+        self.assertIn("llm-indirect-prompt-injection", self._kinds(out))
+
+    def test_sanitized_prompt_not_flagged(self):
+        out = self._llm({"rag.ts": "const c = sanitizePromptString(excerptText);\n"
+                                   "await generateText({ model, prompt: `Context: ${c}` });"})
+        self.assertNotIn("llm-indirect-prompt-injection", self._kinds(out))
+
+    def test_llm_skips_scripts(self):
+        out = self._llm({"scripts/migrate.ts": "await generateText({ model, prompt: p });"})
+        self.assertEqual(out["findings"], [])
+
+    def test_guardrail_fail_open_flagged(self):
+        out = self._llm({"guard.ts": "export async function scanInput(t){ try { return await check(t); } "
+                                     "catch (e) { return { allowed: true }; } }"})
+        self.assertIn("llm-guardrail-fail-open", self._kinds(out))
+
+    # --- docker-compose host exposure ---
+    def _compose(self, body):
+        d = Path(tempfile.mkdtemp())
+        (d / "docker-compose.yml").write_text(body)
+        return IacCiExtractor().extract(RepoContext(d), {})
+
+    def test_compose_docker_sock_flagged(self):
+        out = self._compose("services:\n  p:\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock:ro\n")
+        kinds = {f["kind"] for f in out["findings"]}
+        self.assertIn("compose-docker-sock-mount", kinds)
+
+    def test_compose_privileged_flagged(self):
+        out = self._compose("services:\n  x:\n    privileged: true\n")
+        self.assertIn("compose-privileged", {f["kind"] for f in out["findings"]})
+
+    def test_compose_clean_not_flagged(self):
+        out = self._compose("services:\n  web:\n    image: app:1\n    ports:\n      - '3000:3000'\n")
+        comp = [f for f in out["findings"] if f["kind"].startswith("compose-")]
+        self.assertEqual(comp, [])
+
+    # --- secret-suppression audit ---
+    def test_suppressed_real_secret_flagged(self):
+        d = Path(tempfile.mkdtemp())
+        (d / ".gitleaksignore").write_text("abc123:.env.prod:generic-api-key:3\n")
+        out = IacCiExtractor().extract(RepoContext(d), {})
+        sup = [f for f in out["findings"] if f["kind"] == "suppressed-secret-leak"]
+        self.assertTrue(sup)
+        self.assertEqual(sup[0]["severity"], "HIGH")
+        self.assertEqual(sup[0]["attack_class"], "secret")
+
+    def test_suppressed_example_file_not_flagged(self):
+        d = Path(tempfile.mkdtemp())
+        (d / ".gitleaksignore").write_text("abc123:.env.example:generic-api-key:3\n# a comment\n")
+        out = IacCiExtractor().extract(RepoContext(d), {})
+        self.assertEqual([f for f in out["findings"] if f["kind"] == "suppressed-secret-leak"], [])
+
+
+class Wave2bDetectorTests(unittest.TestCase):
+    """Reverse-proxy prefix-escape + crypto-usage detectors."""
+
+    def _surface(self, files):
+        d = Path(tempfile.mkdtemp())
+        for name, body in files.items():
+            p = d / name
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(body)
+        return SurfaceExtractor().extract(RepoContext(d), {"stack": {"datastores": ["postgres"]}})
+
+    def test_proxy_prefix_escape_flagged(self):
+        out = self._surface({"route.ts": "const p = endpoint.join('/');\n"
+                                         "await fetch(`${config.upstream}/api/x/${p}`, { headers });"})
+        self.assertEqual(len(out.get("proxy_prefix_escape", [])), 1)
+
+    def test_proxy_with_dotseg_guard_not_flagged(self):
+        out = self._surface({"route.ts": "if (endpoint.includes('..')) return bad();\n"
+                                         "const p = endpoint.join('/');\n"
+                                         "await fetch(`${config.upstream}/api/x/${p}`);"})
+        self.assertEqual(out.get("proxy_prefix_escape", []), [])
+
+    def _crypto(self, files):
+        d = Path(tempfile.mkdtemp())
+        for name, body in files.items():
+            d.joinpath(name).write_text(body)
+        return CryptoUsageExtractor().extract(RepoContext(d), {})
+
+    def _kinds(self, out):
+        return {f["kind"] for f in out["findings"]}
+
+    def test_weak_password_hash_flagged(self):
+        out = self._crypto({"auth.ts": "export function verifyPassword(input){ "
+                                       "return createHash('sha256').update(input).digest('hex'); }"})
+        k = [f for f in out["findings"] if f["kind"] == "weak-password-hash"]
+        self.assertTrue(k)
+        self.assertEqual(k[0]["severity"], "HIGH")
+
+    def test_bcrypt_password_not_flagged(self):
+        out = self._crypto({"auth.ts": "export async function verifyPassword(p, h){ return bcrypt.compare(p, h); }"})
+        self.assertNotIn("weak-password-hash", self._kinds(out))
+
+    def test_jwt_verify_without_algorithms_flagged(self):
+        out = self._crypto({"mw.ts": "const { payload } = await jwtVerify(token, key);"})
+        self.assertIn("jwt-verify-no-algorithms", self._kinds(out))
+
+    def test_jwt_verify_with_algorithms_not_flagged(self):
+        out = self._crypto({"mw.ts": "const { payload } = await jwtVerify(token, key, { algorithms: ['HS256'] });"})
+        self.assertNotIn("jwt-verify-no-algorithms", self._kinds(out))
+
+    def test_predictable_principal_flagged(self):
+        out = self._crypto({"id.ts": "export function toId(email){ const h = createHash('sha256').update(email)"
+                                     ".digest('hex'); return formatUuid(h) as tenantId; }"})
+        self.assertIn("predictable-principal", self._kinds(out))
+
+    def test_timing_unsafe_compare_flagged(self):
+        out = self._crypto({"m.ts": "if ((req.header('authorization') ?? '') !== expected) return deny();"})
+        self.assertIn("timing-unsafe-compare", self._kinds(out))
+
+    def test_timing_safe_compare_not_flagged(self):
+        out = self._crypto({"m.ts": "if (!crypto.timingSafeEqual(Buffer.from(req.header('authorization')||''), "
+                                    "Buffer.from(expected))) return deny();"})
+        self.assertNotIn("timing-unsafe-compare", self._kinds(out))
 
 
 if __name__ == "__main__":

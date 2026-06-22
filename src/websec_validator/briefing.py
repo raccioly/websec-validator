@@ -82,6 +82,16 @@ def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list
     pii_findings = pii.get("findings", [])
     pii_section = ("\n".join(f"- **{f.get('severity')}** {f.get('kind')} — `{f.get('file')}`" for f in pii_findings[:20])
                    if pii_findings else "_no obvious raw-PII responses / dead masking controls_")
+    llm = facts.get("llm_security", {})
+    llm_findings = llm.get("findings", [])
+    if llm.get("is_ai_app"):
+        llm_section = ("\n".join(f"- **{f.get('severity')}** {f.get('kind')} — `{f.get('file')}`" for f in llm_findings[:25])
+                       if llm_findings else "_LLM call sites present; no obvious prompt-injection / unbounded / "
+                       "insecure-output tells — verify the agentic surface by hand_")
+        if len(llm_findings) > 25:
+            llm_section += f"\n- _…and {len(llm_findings) - 25} more (see FACTS.json)_"
+    else:
+        llm_section = "_no direct LLM SDK call sites detected_"
     ws_line = (facts.get("client_integrity", {}) or {}).get("websocket_auth", "no websocket detected")
     _cs = (facts.get("transport_security", {}) or {}).get("cookie_security")
     if _cs:
@@ -230,6 +240,9 @@ Production source maps exposed: {client.get("production_source_maps", False)}
 
 **Third-party integrations:** {integ_line}
 {wh_line}
+
+**LLM / AI-agent surface (OWASP LLM Top 10 — prompt injection, insecure output, excessive agency, unbounded):**
+{llm_section}
 
 ## 4. Static findings (no running app needed)
 

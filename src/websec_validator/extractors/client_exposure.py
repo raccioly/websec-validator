@@ -7,12 +7,26 @@ to every visitor. Cheap static scan, high signal.
 
 from __future__ import annotations
 
+import posixpath
 import re
 
-from .base import Extractor, RepoContext
+from .base import Extractor, RepoContext, is_test_file
 
-PUBLIC_ENV = re.compile(r"\b(NEXT_PUBLIC_\w+|VITE_\w+|REACT_APP_\w+|GATSBY_\w+|EXPO_PUBLIC_\w+|PUBLIC_\w{2,})\b")
+# Browser-inlined env prefixes. `PUBLIC_*` is SvelteKit-only, so it is gated to svelte packages
+# (handled below) — without that gate it matched a non-frontend Fastify backend service's
+# `PUBLIC_*_SESSION_SECRET` (a real server secret correctly kept server-side) → false positive.
+PUBLIC_ENV = re.compile(r"\b(NEXT_PUBLIC_\w+|VITE_\w+|REACT_APP_\w+|GATSBY_\w+|EXPO_PUBLIC_\w+)\b")
+SVELTE_PUBLIC = re.compile(r"\b(PUBLIC_\w{2,})\b")
 SECRETISH = re.compile(r"SECRET|PRIVATE|TOKEN|PASSWORD|PASSWD|API_?KEY|ACCESS_?KEY|CLIENT_SECRET|CREDENTIAL", re.I)
+# Tokens DESIGNED to ship to the browser (write-only analytics/error/feature-flag ingest keys). They
+# match SECRETISH via "TOKEN"/"KEY" but are intended-public — report at INFO, never HIGH.
+ANALYTICS_PUBLIC = re.compile(
+    r"POSTHOG|USERTOUR|AMPLITUDE|MIXPANEL|SEGMENT|HEAP|HOTJAR|FULLSTORY|INTERCOM|"
+    r"GOOGLE_ANALYTICS|\bGA_|\bGTM|GADS|SENTRY_DSN|DATADOG_(?:CLIENT|RUM|APPLICATION)|"
+    r"LAUNCHDARKLY_CLIENT|STATSIG_CLIENT|_PUBLISHABLE_KEY|STRIPE_PUBLISHABLE", re.I)
+# package.json that declares a frontend bundler ⇒ NEXT_PUBLIC_/VITE_/... names there really do ship.
+FRONTEND_DEPS = re.compile(r'"(?:next|vite|react|react-dom|@sveltejs/kit|svelte|@angular/core|gatsby|nuxt|expo|@remix-run/\w+|astro|solid-js|@builder\.io/qwik)"')
+SVELTE_DEPS = re.compile(r'"(?:svelte|@sveltejs/kit)"')
 SERVER_SECRET = re.compile(r"process\.env\.([A-Z0-9_]*(?:SECRET|PRIVATE|TOKEN|PASSWORD|API_?KEY|ACCESS_?KEY)[A-Z0-9_]*)")
 
 # VALUE-aware leak detection — hardens the name-based scan above so it survives a benign rename
@@ -53,16 +67,46 @@ class ClientExposureExtractor(Extractor):
     category = "exposure"
 
     def extract(self, ctx: RepoContext, facts: dict) -> dict:
+        # Per-package frontend evidence: a `NEXT_PUBLIC_*` NAME only ships to a browser if its owning
+        # package actually has a frontend bundler. In a monorepo the backend services reference these
+        # names as server-side fallback keys — flagging them is the dominant client-exposure FP.
+        pkg_frontend: dict = {}
+        pkg_svelte: dict = {}
+        for pj in ctx.glob("**/package.json"):
+            d = posixpath.dirname(ctx.rel(pj).replace("\\", "/"))
+            t = ctx.text(pj)
+            pkg_frontend[d] = bool(FRONTEND_DEPS.search(t))
+            pkg_svelte[d] = bool(SVELTE_DEPS.search(t))
+
+        def _pkg_flag(rel: str, table: dict, default: bool) -> bool:
+            parts = rel.replace("\\", "/").split("/")
+            for i in range(len(parts) - 1, -1, -1):
+                d = "/".join(parts[:i])
+                if d in table:
+                    return table[d]
+            return default
+
         public_vars: set = set()
-        public_secret_leaks = []      # public-prefixed AND secret-named → ships to client
+        public_secret_leaks = []      # public-prefixed AND secret-named, in a FRONTEND package → ships
+        intended_public = []          # analytics/telemetry ingest tokens — INFO, designed to ship
         server_secret_in_client = []  # server secret referenced from a 'use client' file
         public_value_leaks = []       # secret-SHAPE literal in client-reachable code (rename-proof, #3)
         public_var_from_cfn = []      # CDK output/secret injected into a public build var (#3)
 
         for _p, rel, text in ctx.iter_code():
-            for v in PUBLIC_ENV.findall(text):
+            if is_test_file(rel):     # fixtures / stubbed env / negative-tests are not leaks
+                continue
+            frontend = _pkg_flag(rel, pkg_frontend, True)   # unknown package → don't suppress
+            names = list(PUBLIC_ENV.findall(text))
+            if _pkg_flag(rel, pkg_svelte, False):
+                names += SVELTE_PUBLIC.findall(text)
+            for v in names:
                 public_vars.add(v)
-                if SECRETISH.search(v):
+                if not SECRETISH.search(v):
+                    continue
+                if ANALYTICS_PUBLIC.search(v):
+                    intended_public.append(f"{v}  ({rel})")
+                elif frontend:
                     public_secret_leaks.append(f"{v}  ({rel})")
             if "use client" in text[:200] or "'use client'" in text[:200] or '"use client"' in text[:200]:
                 for s in SERVER_SECRET.findall(text):
@@ -81,12 +125,15 @@ class ClientExposureExtractor(Extractor):
         return {
             "public_env_vars": sorted(public_vars)[:40],
             "public_secret_leaks": sorted(set(public_secret_leaks)),     # HIGH if non-empty
+            "intended_public_analytics": sorted(set(intended_public))[:40],  # INFO — designed to ship
             "server_secret_in_client_component": sorted(set(server_secret_in_client)),  # HIGH if non-empty
             "public_secret_value_leaks": sorted(set(public_value_leaks)),   # HIGH — value-detected, rename-proof
             "public_var_from_cfn_output": sorted(set(public_var_from_cfn)),  # HIGH — CDK build-injected to client
             "production_source_maps": sourcemaps,
             "note": "public_secret_leaks / server_secret_in_client_component / public_secret_value_leaks / "
                     "public_var_from_cfn_output ship secrets to the browser — treat as HIGH and confirm. "
-                    "Value/CFN-injection detection survives a benign var rename (the #3 gap). Plain "
-                    "NEXT_PUBLIC_* without a secret name/value/CFN-wire are usually fine.",
+                    "Name-based leaks are gated to packages with a frontend bundler (a backend service's "
+                    "NEXT_PUBLIC_*/PUBLIC_* fallback-key reference is not a browser leak); analytics ingest "
+                    "tokens (PostHog/Usertour/…) are reported separately at INFO (designed to ship). "
+                    "Value/CFN-injection detection survives a benign var rename (the #3 gap).",
         }
