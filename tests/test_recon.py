@@ -32,6 +32,7 @@ from websec_validator.extractors.iac_ci import IacCiExtractor          # noqa: E
 from websec_validator.extractors.transport_security import TransportSecurityExtractor  # noqa: E402
 from websec_validator.extractors.llm_security import LlmSecurityExtractor  # noqa: E402
 from websec_validator.extractors.crypto_usage import CryptoUsageExtractor  # noqa: E402
+from websec_validator.extractors.authz_dataflow import AuthzDataflowExtractor  # noqa: E402
 
 FIX = Path(__file__).resolve().parent / "fixtures"
 
@@ -846,6 +847,119 @@ class Wave2bDetectorTests(unittest.TestCase):
         out = self._crypto({"m.ts": "if (!crypto.timingSafeEqual(Buffer.from(req.header('authorization')||''), "
                                     "Buffer.from(expected))) return deny();"})
         self.assertNotIn("timing-unsafe-compare", self._kinds(out))
+
+
+class Wave3DeferredDetectorTests(unittest.TestCase):
+    """0.8.0 deferred-backlog detectors: CORS, Next-config headers, SRI, host-redirect,
+    follows-redirect, unsigned-cookie authz, claim-authz, transaction-local RLS."""
+
+    # --- transport: CORS / SRI / next-config ---
+    def _transport(self, files, frameworks=("next", "express")):
+        d = Path(tempfile.mkdtemp())
+        for name, body in files.items():
+            p = d / name
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(body)
+        return TransportSecurityExtractor().extract(
+            RepoContext(d), {"stack": {"frameworks": list(frameworks)}, "routes": {"endpoints": [{"method": "GET", "path": "/x"}]}})
+
+    def _tkinds(self, out):
+        return {f["kind"] for f in out["findings"]}
+
+    def test_cors_reflect_with_credentials_high(self):
+        out = self._transport({"srv.ts": "res.setHeader('Access-Control-Allow-Origin', req.headers.origin);\n"
+                                          "res.setHeader('Access-Control-Allow-Credentials', 'true');"})
+        hi = [f for f in out["findings"] if f["kind"] == "cors-credentials-any-origin"]
+        self.assertTrue(hi)
+        self.assertEqual(hi[0]["severity"], "HIGH")
+
+    def test_cors_allowlist_not_flagged(self):
+        out = self._transport({"srv.ts": "app.use(cors({ origin: ['https://app.example.com'], credentials: true }));"})
+        self.assertNotIn("cors-credentials-any-origin", self._tkinds(out))
+
+    def test_external_script_without_sri_flagged(self):
+        out = self._transport({"docs.ts": "res.send(`<html><script src=\"https://cdn.jsdelivr.net/npm/x/y.js\"></script></html>`);"})
+        self.assertIn("external-script-no-sri", self._tkinds(out))
+
+    def test_external_script_with_sri_not_flagged(self):
+        out = self._transport({"docs.ts": "res.send(`<html><script src=\"https://cdn/x.js\" integrity=\"sha384-abc\"></script></html>`);"})
+        self.assertNotIn("external-script-no-sri", self._tkinds(out))
+
+    def test_nextjs_config_no_headers_flagged(self):
+        out = self._transport({"packages/web/next.config.ts": "export default { reactStrictMode: true };"})
+        self.assertIn("nextjs-no-security-headers", self._tkinds(out))
+
+    def test_nextjs_config_with_headers_not_flagged(self):
+        out = self._transport({"packages/web/next.config.ts":
+                               "export default { async headers(){ return [{ source:'/(.*)', headers:["
+                               "{key:'Content-Security-Policy',value:\"default-src 'self'\"},"
+                               "{key:'X-Frame-Options',value:'DENY'}]}]; } };"})
+        ks = self._tkinds(out)
+        self.assertNotIn("nextjs-no-security-headers", ks)
+        self.assertNotIn("nextjs-partial-security-headers", ks)
+
+    # --- surface: host-redirect / follows-redirect ---
+    def _surface(self, files, ds=("postgres",)):
+        d = Path(tempfile.mkdtemp())
+        for name, body in files.items():
+            p = d / name
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(body)
+        return SurfaceExtractor().extract(RepoContext(d), {"stack": {"datastores": list(ds)}})
+
+    def test_host_header_redirect_flagged(self):
+        out = self._surface({"h.ts": "const host = req.headers['x-forwarded-host'];\n"
+                                     "return res.redirect(`https://${host}/next`);"})
+        self.assertEqual(len(out["host_header_redirect"]), 1)
+
+    def test_host_header_redirect_with_allowlist_not_flagged(self):
+        out = self._surface({"h.ts": "const host = req.headers['x-forwarded-host'];\n"
+                                     "const base = allowedHosts.includes(host) ? host : publicWebOrigin;\n"
+                                     "return res.redirect(`https://${base}/next`);"})
+        self.assertEqual(out["host_header_redirect"], [])
+
+    def test_follows_redirects_no_allowlist_flagged(self):
+        out = self._surface({"job.py": "r = httpx.get(url, follow_redirects=True)"})
+        self.assertEqual(len(out["follows_redirect_no_allowlist"]), 1)
+
+    def test_follows_redirects_disabled_not_flagged(self):
+        out = self._surface({"job.py": "r = httpx.get(url, follow_redirects=False)"})
+        self.assertEqual(out["follows_redirect_no_allowlist"], [])
+
+    # --- authz_dataflow: cookie-authz / claim-authz / rls-context ---
+    def _adf(self, files):
+        d = Path(tempfile.mkdtemp())
+        for name, body in files.items():
+            d.joinpath(name).write_text(body)
+        return AuthzDataflowExtractor().extract(RepoContext(d), {})
+
+    def _akinds(self, out):
+        return {f["kind"] for f in out["findings"]}
+
+    def test_unsigned_cookie_authz_flagged(self):
+        out = self._adf({"mw.ts": "const lvl = req.cookies.get('twin-access-level');\n"
+                                  "if (lvl !== 'full') return new Response('forbidden', { status: 403 });"})
+        self.assertIn("unsigned-cookie-authz", self._akinds(out))
+
+    def test_cookie_authz_with_jwt_verify_not_flagged(self):
+        out = self._adf({"mw.ts": "const lvl = req.cookies.get('twin-access-level');\n"
+                                  "const ok = await jwtVerify(req.cookies.get('twin-token'), key);\n"
+                                  "if (lvl !== 'full') return new Response('forbidden', { status: 403 });"})
+        self.assertNotIn("unsigned-cookie-authz", self._akinds(out))
+
+    def test_claim_based_authz_flagged(self):
+        out = self._adf({"acl.ts": "export function canAccessDocument(ctx, doc){ "
+                                   "return ctx.tenantOffice === doc.authorOffice; }"})
+        self.assertIn("claim-based-authz", self._akinds(out))
+
+    def test_rls_context_no_transaction_flagged(self):
+        out = self._adf({"rls.ts": "await db.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);"})
+        self.assertIn("rls-context-no-transaction", self._akinds(out))
+
+    def test_rls_context_in_transaction_not_flagged(self):
+        out = self._adf({"rls.ts": "await db.transaction(async (tx) => { "
+                                   "await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`); });"})
+        self.assertNotIn("rls-context-no-transaction", self._akinds(out))
 
 
 if __name__ == "__main__":

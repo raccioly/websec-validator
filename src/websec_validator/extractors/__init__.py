@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .auth import AuthExtractor
 from .authz import AuthzExtractor
+from .authz_dataflow import AuthzDataflowExtractor
 from .base import MAX_FILES, Extractor, RepoContext
 from .client_exposure import ClientExposureExtractor
 from .client_integrity import ClientIntegrityExtractor
@@ -50,6 +51,7 @@ REGISTRY: list[Extractor] = [
     IntegrationsExtractor(),
     LlmSecurityExtractor(),
     CryptoUsageExtractor(),
+    AuthzDataflowExtractor(),
 ]
 
 

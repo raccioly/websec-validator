@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import re
 
-from .base import Extractor, RepoContext
+from .base import Extractor, RepoContext, is_script_file, is_test_file
 
 CSP_ANY = re.compile(r"Content-Security-Policy|contentSecurityPolicy|helmet[\s\S]{0,40}?\bcsp\b"
                      r"|useCspNonce|cspDirectives", re.I)
@@ -54,6 +54,22 @@ CK_SECURE = re.compile(
     r"[A-Za-z_$][\w$.]*\s*[=!]==|[A-Za-z_$][\w$.]*\s*\?|[A-Za-z_$][\w$.]*\([^)]*\))", re.I)
 CK_SAMESITE = re.compile(r"samesite", re.I)
 
+# CORS misconfiguration — the high-impact form is an Allow-Origin that REFLECTS the request Origin (or
+# `*`) TOGETHER with Allow-Credentials:true, which lets any site read authenticated responses.
+CORS_REFLECT = re.compile(
+    r"Access-Control-Allow-Origin['\"]?\s*[,:][^,\n)]{0,60}(?:req\.|request\.|headers?\.origin|get\s*\(\s*['\"]origin|\borigin\b)"
+    r"|cors\s*\(\s*\{[^}]*origin\s*:\s*true|origin\s*:\s*(?:true|function|\(origin)|reflectOrigin|originReflect", re.I)
+CORS_WILDCARD = re.compile(r"Access-Control-Allow-Origin['\"]?\s*[,:]\s*['\"]\*['\"]|\borigin\s*:\s*['\"]\*['\"]", re.I)
+CORS_CREDS = re.compile(r"Access-Control-Allow-Credentials['\"]?\s*[,:]\s*['\"]?true|credentials\s*:\s*true", re.I)
+# an external <script src="https://…"> with no Subresource-Integrity (supply-chain: a CDN compromise
+# runs arbitrary JS in your origin). Only meaningful in code that emits HTML.
+EXT_SCRIPT = re.compile(r"<script\b[^>]*\ssrc\s*=\s*['\"]https?://[^'\"]+['\"][^>]*>", re.I)
+SRI_OK = re.compile(r"\bintegrity\s*=", re.I)
+# a Next.js config that defines security headers via headers()
+NEXT_HEADERS_FN = re.compile(r"async\s+headers\s*\(|\bheaders\s*\(\s*\)\s*\{|key\s*:\s*['\"](?:Content-Security-Policy|X-Frame-Options|Strict-Transport-Security|X-Content-Type-Options)['\"]", re.I)
+NEXT_CSP = re.compile(r"Content-Security-Policy", re.I)
+NEXT_XFO = re.compile(r"X-Frame-Options|frame-ancestors", re.I)
+
 
 class TransportSecurityExtractor(Extractor):
     name = "transport_security"
@@ -69,6 +85,7 @@ class TransportSecurityExtractor(Extractor):
         inline_handlers = []
         sets_cookie = ck_httponly = ck_secure = ck_samesite = False
         hsts_files, hsts_api_only, hsts_html = [], True, False
+        extra_findings: list = []     # CORS / SRI / next-config — emitted alongside the CSP/HSTS set
 
         # config manifests carry headers too (next.config, vercel.json, netlify.toml, _headers)
         manifests = "\n".join(ctx.manifest(n) for n in
@@ -76,9 +93,37 @@ class TransportSecurityExtractor(Extractor):
                                "netlify.toml", "public/_headers", "static/_headers", "nginx.conf"))
 
         for _p, rel, text in ctx.iter_code():
+            if is_test_file(rel) or is_script_file(rel):
+                continue
             if HTML_SURFACE.search(rel) or HTML_CONTENT.search(text):
                 html_surface = True
             blob = text
+            # CORS misconfig — reflected/wildcard Allow-Origin together with credentials = any site
+            # reads authed responses (CWE-942). Server-side only.
+            if CORS_CREDS.search(blob) and (CORS_REFLECT.search(blob) or CORS_WILDCARD.search(blob)):
+                extra_findings.append({"severity": "HIGH", "kind": "cors-credentials-any-origin",
+                                       "attack_class": "cors-misconfig", "file": rel,
+                                       "detail": "CORS reflects the request Origin (or uses `*`) AND sets "
+                                       "Allow-Credentials:true — any website can make credentialed cross-origin "
+                                       "requests and READ the authenticated responses (CWE-942). Allow-list exact "
+                                       "trusted origins; never reflect Origin or use `*` when credentials are on."})
+            elif CORS_REFLECT.search(blob):
+                extra_findings.append({"severity": "MEDIUM", "kind": "cors-reflects-origin",
+                                       "attack_class": "cors-misconfig", "file": rel,
+                                       "detail": "CORS appears to reflect the request Origin (echo-back / `origin:true`) "
+                                       "rather than allow-listing exact origins. Safe only without credentials and with a "
+                                       "strict allow-list — verify it can't be turned into a credentialed cross-origin read."})
+            # external script with no SRI, in code that emits HTML
+            if (HTML_CONTENT.search(blob) or HTML_SURFACE.search(rel)):
+                for m in EXT_SCRIPT.finditer(blob):
+                    if not SRI_OK.search(m.group(0)):
+                        extra_findings.append({"severity": "MEDIUM", "kind": "external-script-no-sri",
+                                               "attack_class": "subresource-integrity", "file": rel,
+                                               "detail": "An external <script src=\"https://…\"> is loaded with no "
+                                               "Subresource-Integrity (`integrity=`) hash / version pin — a CDN or "
+                                               "package compromise runs arbitrary JS in this origin (CWE-829). Pin the "
+                                               "version + add an SRI hash + `crossorigin`, or self-host the bundle."})
+                        break
             if CSP_ANY.search(blob):
                 csp_present = True
                 if CSP_SCRIPT_SELF.search(blob):
@@ -121,9 +166,30 @@ class TransportSecurityExtractor(Extractor):
             if HSTS_PRELOAD.search(manifests):
                 hsts_preload = True
 
+        # Monorepo-aware Next.js config header gap — `transport_security` previously only read the
+        # ROOT next.config via manifests, so a `packages/web/next.config.ts` was invisible. Glob every
+        # next.config.* and flag one with no security-header block (CSP + X-Frame-Options).
+        for nc in (ctx.glob("**/next.config.js") + ctx.glob("**/next.config.mjs")
+                   + ctx.glob("**/next.config.ts")):
+            rel, txt = ctx.rel(nc), ctx.text(nc)
+            if not NEXT_HEADERS_FN.search(txt):
+                extra_findings.append({"severity": "MEDIUM", "kind": "nextjs-no-security-headers",
+                                       "attack_class": "missing-csp", "file": rel,
+                                       "detail": "This Next.js config defines no security-header block (`headers()`) — "
+                                       "so no app-wide Content-Security-Policy, X-Frame-Options/frame-ancestors, HSTS, "
+                                       "X-Content-Type-Options, or Referrer-Policy unless an upstream edge sets them. Add "
+                                       "a `headers()` matcher (start CSP report-only) or document that nginx/CDN owns them."})
+            elif not (NEXT_CSP.search(txt) and NEXT_XFO.search(txt)):
+                miss = ", ".join(n for n, ok in (("CSP", NEXT_CSP.search(txt)),
+                                                 ("X-Frame-Options/frame-ancestors", NEXT_XFO.search(txt))) if not ok)
+                extra_findings.append({"severity": "LOW", "kind": "nextjs-partial-security-headers",
+                                       "attack_class": "missing-csp", "file": rel,
+                                       "detail": f"Next.js config has a headers() block but is missing {miss}. Add the "
+                                       "clickjacking/XSS-defense headers (verify against the live response if the edge sets some)."})
+
         strict_csp = bool(csp_present and csp_self and csp_nonce and not csp_unsafe)
         web_surface = html_surface or has_routes
-        findings = []
+        findings = list(extra_findings)
 
         if html_surface:
             if not csp_present:

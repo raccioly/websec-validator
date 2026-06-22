@@ -15,6 +15,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Removed
 
+## [0.8.0] — 2026-06-22
+
+Coverage release closing the deferred backlog from the 0.7.0 dogfooding pass — three new
+broken-access-control / transport classes plus a `authz_dataflow` extractor, each gated tightly to
+hold the line on precision (no ledger blow-up on the validation target). 15 new unit tests (196 total).
+
+### Added
+- **CORS misconfiguration** (`transport_security`) — flags an `Access-Control-Allow-Origin` that
+  reflects the request `Origin` (or `*`) **together with** `Allow-Credentials: true` (HIGH — any site
+  reads authenticated responses, CWE-942); reflect-without-allowlist alone is MEDIUM.
+- **Next.js security-header gap, monorepo-aware** (`transport_security`) — globs every
+  `**/next.config.{js,mjs,ts}` (not just the repo root) and flags a config with no `headers()` security
+  block (missing CSP / X-Frame-Options / HSTS / nosniff).
+- **External script without Subresource-Integrity** (`transport_security`) — an external
+  `<script src="https://…">` in server-emitted HTML with no `integrity=` hash / version pin (CWE-829
+  supply-chain).
+- **Host-header → redirect** (`surface`) — a redirect `Location`/origin built from the
+  attacker-controllable `Host`/`X-Forwarded-Host` header with no host allow-list (CWE-601).
+- **SSRF-hardening: follows redirects with no allow-list** (`surface`) — an outbound client that
+  deliberately follows redirects (`follow_redirects=True` / `maxRedirects>0`) with no host allow-list /
+  private-range deny, **incl. Python worker/job scripts** the route scan never reached (CWE-918).
+- **NEW `authz_dataflow` extractor** — authorization *correctness*, not just presence: **unsigned-cookie
+  authorization** (an access decision keyed on a client-settable cookie with no signature check —
+  CWE-565/602), **claim-keyed authorization** (an authz check comparing a user-influenceable JWT body
+  claim — CWE-639/807), and **transaction-local RLS context** (`set_config('app.*', …, true)` emitted
+  outside a transaction, so the RLS principal resets before the query — CWE-1188).
+
+### Changed
+- `findings` ledger cites the new CWE/OWASP classes (cors-misconfig, subresource-integrity,
+  open-redirect via host header, cookie-authz, claim-authz, rls-context) with remediations.
+
 ## [0.7.0] — 2026-06-22
 
 Self-improvement release driven by dogfooding on a large real-world LLM-agent monorepo: a 15-agent

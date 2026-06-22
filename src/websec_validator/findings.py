@@ -111,6 +111,16 @@ STANDARDS = {
     "predictable-principal": (["CWE-330 Use of Insufficiently Random Values", "CWE-340 Predictable from Observable State"],
                               "ASVS V6.3.1", ["API1:2023 BOLA"]),
     "timing-unsafe-compare": (["CWE-208 Observable Timing Discrepancy"], "ASVS V6.2.3", ["API2:2023 Broken Authentication"]),
+    # --- transport / access-control-dataflow classes (0.8.0) ---
+    "cors-misconfig": (["CWE-942 Permissive Cross-domain Policy with Untrusted Domains"], "ASVS V14.5.3",
+                       ["API8:2023 Misconfiguration"]),
+    "subresource-integrity": (["CWE-829 Inclusion of Functionality from Untrusted Control Sphere"], "ASVS V14.2.3",
+                              ["API8:2023 Misconfiguration"]),
+    "cookie-authz": (["CWE-565 Reliance on Cookies Without Validation", "CWE-602 Client-Side Enforcement of Server-Side Security"],
+                     "ASVS V3.4", ["API1:2023 BOLA", "API5:2023 BFLA"]),
+    "claim-authz": (["CWE-639 Authorization Bypass Through User-Controlled Key", "CWE-807 Reliance on Untrusted Inputs in a Security Decision"],
+                    "ASVS V4.2.1", ["API1:2023 BOLA"]),
+    "rls-context": (["CWE-1188 Insecure Default Initialization of Resource"], "ASVS V4.1.3", ["API1:2023 BOLA"]),
 }
 REMEDIATION = {
     "missing-auth": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a "
@@ -208,6 +218,21 @@ REMEDIATION = {
     "timing-unsafe-compare": "Compare request-supplied secrets/tokens/signatures with `crypto.timingSafeEqual` "
                              "(equal-length buffers) or `compare_digest`, never `===`/`!==`, to remove the timing "
                              "side-channel.",
+    "cors-misconfig": "Allow-list exact trusted origins; never reflect the request Origin or use `*` when "
+                      "`Allow-Credentials: true`. If credentials aren't needed, drop them so a strict allow-list "
+                      "isn't load-bearing.",
+    "subresource-integrity": "Pin the external resource to an exact version and add a Subresource-Integrity "
+                             "`integrity=` hash + `crossorigin`, or self-host it, and constrain it with a CSP so a "
+                             "CDN/package compromise can't run arbitrary JS in your origin.",
+    "cookie-authz": "Never make an authorization decision on an unsigned/unverified cookie — bind access to a "
+                    "signed value (read it from the verified session JWT, or HMAC the cookie) and re-derive on the "
+                    "server; treat client cookies as untrusted hints only.",
+    "claim-authz": "Resolve the fields used for authorization (office/role/tenant) from the authenticated record "
+                   "server-side, not from the JWT body claim; never write a client-asserted claim back as the record "
+                   "of truth. Verify the resolved row owns the resource.",
+    "rls-context": "Set the RLS context (`set_config('app.*', x, true)`) INSIDE the transaction that runs the "
+                   "tenant-scoped query, on the SAME connection the handler uses — a transaction-local setting "
+                   "emitted at autocommit resets before the query, so RLS evaluates with an empty context.",
 }
 _DEFAULT_REM = "Review and remediate per the cited standard."
 
@@ -429,6 +454,25 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                         "caller reaches any upstream route with valid creds (confused deputy). Reject `.`/`..`/`%2e` "
                         "segments or assert the normalized pathname still starts with the prefix."}]))
 
+    # ---- 3d. Host-header → redirect (open redirect / cache poisoning) ----
+    for rel in (facts.get("surface", {}).get("host_header_redirect", []) or []):
+        out.append(_f(f"Host-header open-redirect: {rel}", "attack-surface", "open-redirect",
+                      "MEDIUM", "LOW", rel,
+                      [{"layer": "recon", "detail": "a redirect Location/origin is built from the attacker-controllable "
+                        "Host / X-Forwarded-Host header with no host allow-list — an on-path or cache-poisoning attacker "
+                        "can send the user to an arbitrary host (CWE-601). Pin the redirect base to a server-configured "
+                        "origin allow-list, never request headers."}]))
+
+    # ---- 3e. SSRF-hardening: outbound client follows redirects with no allow-list ----
+    for rel in (facts.get("surface", {}).get("follows_redirect_no_allowlist", []) or []):
+        out.append(_f(f"Follows redirects with no allow-list: {rel}", "attack-surface", "ssrf",
+                      "MEDIUM", "LOW", rel,
+                      [{"layer": "recon", "detail": "an outbound HTTP client deliberately follows redirects "
+                        "(follow_redirects/allow_redirects=True, maxRedirects>0) with no host allow-list or private-range "
+                        "deny — a 30x to 169.254.169.254 / an RFC1918 host is fetched server-side regardless of whether "
+                        "the initial URL is user-tainted (CWE-918). Re-validate every hop against an allow-list; deny "
+                        "loopback/link-local/private ranges."}]))
+
     # ---- 4. Client-side secret exposure (HIGH — ships to browser) ----
     # Name-based + value-shape (rename-proof) + CDK build-injection (#3) all land here.
     _cx = facts.get("client_exposure", {})
@@ -495,9 +539,14 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
 
     # ---- 8b. Transport / browser-hardening header baseline (CSP #3, HSTS #4) ----
     for fnd in (facts.get("transport_security", {}) or {}).get("findings", []):
-        out.append(_f(f"{fnd.get('kind')}: browser/transport hardening header", "transport",
-                      fnd.get("attack_class", "missing-csp"), fnd.get("severity", "LOW"), "LOW",
-                      "(response headers)", [{"layer": "recon", "detail": fnd.get("detail", "")}]))
+        # header-baseline findings have no file (they're about response headers); CORS/SRI/next-config
+        # findings carry a real file — use it so the location is actionable.
+        loc = fnd.get("file") or "(response headers)"
+        title = f"{fnd.get('kind')}: {fnd.get('file')}" if fnd.get("file") else \
+            f"{fnd.get('kind')}: browser/transport hardening header"
+        out.append(_f(title, "transport", fnd.get("attack_class", "missing-csp"),
+                      fnd.get("severity", "LOW"), "LOW", loc,
+                      [{"layer": "recon", "detail": fnd.get("detail", "")}]))
 
     # ---- 9. Inbound webhooks with no signature verification (forgery / replay) ----
     # Recon found webhook handlers with no HMAC/signature check. This was surfaced in the briefing
@@ -546,6 +595,14 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         out.append(_f(f"{fnd.get('kind')}: {fnd.get('file')}", "crypto",
                       fnd.get("attack_class", "weak-password-hash"),
                       fnd.get("severity", "MEDIUM"), "MEDIUM", fnd.get("file", ""),
+                      [{"layer": "recon", "detail": fnd.get("detail", "")}]))
+
+    # ---- 14. Authz data-flow — does the guard trust the right thing? (unsigned-cookie authz,
+    # claim-keyed authz, transaction-local RLS context). ----
+    for fnd in (facts.get("authz_dataflow", {}) or {}).get("findings", []):
+        out.append(_f(f"{fnd.get('kind')}: {fnd.get('file')}", "access-control",
+                      fnd.get("attack_class", "cookie-authz"),
+                      fnd.get("severity", "MEDIUM"), "LOW", fnd.get("file", ""),
                       [{"layer": "recon", "detail": fnd.get("detail", "")}]))
 
     # ---- suppress + rank ----

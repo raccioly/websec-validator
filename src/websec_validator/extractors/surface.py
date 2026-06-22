@@ -108,6 +108,24 @@ DOTSEG_GUARD = re.compile(
     r"includes\s*\(\s*['\"]\.\.|===\s*['\"]\.\.['\"]|['\"]\.\.['\"]\s*\)|%2e|%2f|decodeURIComponent"
     r"|\bnormalize\b|startsWith\s*\(\s*['\"]/[\w]|sanitiz|assertPath|safeJoin|\bresolve\b[^;]{0,40}startsWith", re.I)
 
+# Host-header → redirect (open redirect / cache poisoning, CWE-601): a redirect Location/origin built
+# from the attacker-controllable Host / X-Forwarded-Host header with no host allow-list comparison.
+HOST_HEADER_READ = re.compile(
+    r"(?:req|request|ctx)\.(?:headers?\s*[\[.]|get\s*\(\s*)['\"]?(?:x-forwarded-host|forwarded|host)\b"
+    r"|headers\.get\s*\(\s*['\"](?:x-forwarded-host|host|forwarded)", re.I)
+REDIRECT_SINK = re.compile(
+    r"\.redirect\s*\(|NextResponse\.redirect|res\.setHeader\s*\(\s*['\"]Location|['\"]Location['\"]\s*[:,]|sendRedirect", re.I)
+HOST_ALLOWLIST = re.compile(
+    r"allowedHosts?|allow[_-]?list|publicOrigin|publicWebOrigin|trustedHosts?|isAllowedHost|whitelist|brandfolderHostnames", re.I)
+# SSRF-hardening: an outbound client DELIBERATELY following redirects with no host allow-list /
+# private-range deny — a 30x to an internal/metadata host is then fetched server-side (CWE-918),
+# independent of whether the INITIAL url is user-tainted. Reaches worker/job scripts the route scan misses.
+FOLLOW_REDIR = re.compile(r"follow_redirects\s*=\s*True|allow_redirects\s*=\s*True|maxRedirects\s*:\s*[1-9]", re.I)
+OUTBOUND_CLIENT = re.compile(r"\b(?:requests\.\w+|httpx\.\w+|\bfetch\s*\(|axios|got\s*\(|node-fetch|urllib\.request)", re.I)
+SSRF_PRIVATE_GUARD = re.compile(
+    r"allow_redirects\s*=\s*False|follow_redirects\s*=\s*False|maxRedirects\s*:\s*0|169\.254|RFC1918|is_private|"
+    r"ip_address|private_?range|block.?(?:internal|private)|allowedHosts?|allow[_-]?list", re.I)
+
 
 class SurfaceExtractor(Extractor):
     name = "surface"
@@ -122,6 +140,8 @@ class SurfaceExtractor(Extractor):
         counts: dict = {k: 0 for k in SINKS}
         ssrf_redirect: list = []    # SSRF sink in a file with NO per-hop redirect guard (#1)
         proxy_escape: list = []     # reverse-proxy prefix-escape (confined-deputy)
+        host_redirect: list = []    # redirect built from the Host/X-Forwarded-Host header (open redirect)
+        follows_redirect: list = []  # outbound client follows redirects with no allow-list (SSRF-hardening)
         for _p, rel, text in ctx.iter_code():
             # Test fixtures are never a runtime sink; SSRF + outbound-HTTP are SERVER-ONLY classes,
             # so client (.tsx/'use client') and build/CLI scripts can't host them (validated: these
@@ -153,6 +173,17 @@ class SurfaceExtractor(Extractor):
             if (len(proxy_escape) < 30 and not nonserver and PROXY_JOIN.search(text)
                     and PROXY_FETCH.search(text) and not DOTSEG_GUARD.search(text)):
                 proxy_escape.append(rel)
+            # host-header → redirect (open redirect via Host/X-Forwarded-Host). Server-only; needs a
+            # redirect sink + a host-header read + no host allow-list in the file.
+            if (len(host_redirect) < 30 and not nonserver and HOST_HEADER_READ.search(text)
+                    and REDIRECT_SINK.search(text) and not HOST_ALLOWLIST.search(text)):
+                host_redirect.append(rel)
+            # SSRF-hardening: follows redirects with no allow-list / private-range deny. Worker/job
+            # SCRIPTS are in scope here (they fetch server-side), so only client + tests are excluded.
+            if (len(follows_redirect) < 30 and not is_client_file(rel, text)
+                    and FOLLOW_REDIR.search(text) and OUTBOUND_CLIENT.search(text)
+                    and not SSRF_PRIVATE_GUARD.search(text)):
+                follows_redirect.append(rel)
 
         sinks = {k: {"probe": SINKS[k][0], "count": counts[k], "files": found[k]}
                  for k in SINKS if counts[k]}
@@ -161,6 +192,8 @@ class SurfaceExtractor(Extractor):
             "sink_counts": {k: counts[k] for k in SINKS if counts[k]},
             "ssrf_redirect_unguarded": ssrf_redirect,   # validate EVERY hop, not just the input URL (#1)
             "proxy_prefix_escape": proxy_escape,        # confined-deputy via `..` in catch-all path
+            "host_header_redirect": host_redirect,      # open redirect via Host/X-Forwarded-Host
+            "follows_redirect_no_allowlist": follows_redirect,  # SSRF-hardening (redirect-to-internal)
             "datastore_class": ("sql" if has_sql else ("nosql" if has_nosql else "unknown")),
             "note": "Each sink hit is user-input-gated (req./request./concat/interp), so these are "
                     "higher-confidence leads. Cross-reference the files with routes.targeting to pick "

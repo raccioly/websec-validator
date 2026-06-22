@@ -77,23 +77,24 @@ Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and 
 
 > That's the whole user surface: **`run`** (plus the optional, advanced **`dynamic`** live-probing step below). `recon`/`proof`/`calibrate` exist for developing the tool itself and are hidden from `--help` — you never need them.
 
-## What it extracts (18 deterministic extractors, no LLM)
+## What it extracts (19 deterministic extractors, no LLM)
 
 | | Dimension | Notable output |
 |---|---|---|
 | stack | languages, frameworks, datastores | monorepo-aware (aggregates every manifest) |
 | routes | every endpoint via **OWASP Noir** | method · path · typed params · code path |
 | auth | scheme + login surface + **insecure-default signing secrets** | multi-scheme; flags a hard-coded `JWT_SECRET \|\| 'dev-secret'` fallback (forgeable JWT) |
-| **authz** | access-control map | guard coverage + **write endpoints with no visible guard** + roles |
+| **authz** | access-control map | guard coverage (incl. **router-mount auth**) + **write endpoints with no visible guard** + roles |
+| **authz_dataflow** | authz *correctness* (does the guard trust the right thing?) | **unsigned-cookie authorization** · **claim-keyed authz** (user-influenceable JWT claim) · **transaction-local RLS context** (resets before the query) |
 | tenant | multi-tenancy key candidates | the BOLA boundary, by frequency |
 | **password_policy** | cross-route consistency **+ reuse/history** | complexity drift across routes **+ a set-password path that hashes without a reuse check** |
-| surface | 15 sink classes **+ redirect-SSRF** | user-input-gated sinks (incl. **mass-assignment via object spread**) + var-arg SSRF + error-disclosure **+ follows-redirects-without-per-hop-guard** |
+| surface | 15 sink classes **+ redirect-SSRF** | user-input-gated sinks (incl. **mass-assignment via object spread**) + var-arg SSRF + error-disclosure + follows-redirects-without-per-hop-guard **+ reverse-proxy prefix-escape + host-header open-redirect + SSRF-redirect-hardening** |
 | **upload_security** | unrestricted upload + unsafe serve | deny-list-only, stored-name-from-filename, trust-client-MIME, accept-SVG, **serve without `nosniff`** |
 | schemas | data models + **privileged fields** | Pydantic/SQLAlchemy/Django/Prisma/Mongoose/TypeORM/Zod → `role`/`isAdmin`/`groupId` for mass-assignment targeting |
 | iac_ci | IaC + CI/CD | GHA injection (**run:-position-aware**), unpinned actions, tfstate, CDK AppSync `API_KEY` anonymous-default-auth, **docker-compose host-takeover (docker.sock / pid:host / privileged) + `.gitleaksignore` secret-suppression audit** |
 | client_exposure | browser leakage | public-var secrets by **name + value-shape (`da2-…`) + CDK build-injection**, server-secret-in-client, source maps |
 | **client_integrity** | tamperable display (client trust boundary) + **WS auth model** | any security-critical sink value (address/IBAN/2FA-seed/API-key/webhook) the user reads or copies, without strict CSP / out-of-band anchor **+ client-tamper-vector, grindable-fingerprint, over-claimed-control, the CSWSH determinant** |
-| **transport_security** | CSP + HSTS header baseline | missing/weak CSP, inline event handlers, **partial HSTS (set on /api but not the HTML page)** |
+| **transport_security** | CSP + HSTS + **CORS** + **SRI** baseline | missing/weak CSP, inline event handlers, partial HSTS, **CORS reflect-origin+credentials, external script without SRI, monorepo `next.config` header gap** |
 | **pii_exposure** | unmasked PII at the output boundary | `res.json(rawEntity)` with PII + **a masking control defined but with zero live call sites** (value-shape, not field-name) |
 | graphql | GraphQL surface | introspection (**AppSync `introspectionConfig: DISABLED`-aware**) / playground / depth-limit **+ AppSync subscription-authz (cross-group BOLA)** |
 | integrations | third-party + webhooks **+ outbound-action endpoints** | unsigned webhooks **+ email/SMS/push handlers with no auth or IP-only rate-limit + redundant secret-fetch** |
@@ -206,7 +207,9 @@ publisher** with project `websec-validator`, owner `raccioly`, repo `websec-vali
 
 ## Status / roadmap
 
-**Done:** 18-extractor recon (incl. schema/entity → mass-assignment targeting, the **AWS-CDK /
+**Done:** 19-extractor recon (incl. an **authz-correctness data-flow extractor** — unsigned-cookie /
+claim-keyed authz / transaction-local RLS — plus **CORS-misconfig**, **SRI**, **host-header
+open-redirect** and **SSRF-redirect-hardening** classes, schema/entity → mass-assignment targeting, the **AWS-CDK /
 managed-AppSync / VTL boundary**, **upload-security** + **PII-output-boundary** + **redirect-SSRF**
 + **password-reuse** classes, a **man-in-the-browser / tamperable-display** class, an **LLM / AI-agent
 extractor** (OWASP LLM Top 10 — prompt injection / insecure output / excessive agency / unbounded
