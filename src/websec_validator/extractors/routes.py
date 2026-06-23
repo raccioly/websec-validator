@@ -211,7 +211,11 @@ def _fallback_next_app_router(ctx: RepoContext) -> list:
 
 def _fallback_regex(ctx: RepoContext) -> list:
     rows = []
-    flask = re.compile(r"@\w+\.route\s*\(\s*['\"]([^'\"]+)['\"](?:.*methods\s*=\s*\[([^\]]*)\])?", re.S)
+    # `[^)]*?` (not `.*` with re.S) keeps the optional methods= group INSIDE this one route() call:
+    # a greedy DOTALL `.*` reaches across the file to the LAST methods=[...], mis-assigning it to the
+    # first route and silently swallowing every route in between (only routes after the final
+    # methods=[...] survived). Staying within the call parens fixes both the mislabel and the drop.
+    flask = re.compile(r"@\w+\.route\s*\(\s*['\"]([^'\"]+)['\"](?:[^)]*?methods\s*=\s*\[([^\]]*)\])?")
     fastapi = re.compile(r"@\w+\.(get|post|put|patch|delete)\s*\(\s*['\"]([^'\"]+)")
     for _p, rel, text in ctx.iter_code():
         for verb, path in fastapi.findall(text):

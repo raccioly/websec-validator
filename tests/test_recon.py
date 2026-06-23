@@ -381,6 +381,18 @@ class RouteUnitTests(unittest.TestCase):
         self.assertIn(("GET", "/api/users/{id}"), paths)
         self.assertIn(("POST", "/api/groups/{groupId}/items"), paths)
 
+    def test_fallback_flask_multiroute_no_route_dropped(self):
+        # Regression: a greedy DOTALL methods= group used to reach across the file, mis-assigning
+        # the LAST methods=[...] to the FIRST route and swallowing every route in between. Each
+        # @route must be parsed independently — /b must survive and keep ITS own POST.
+        d = Path(tempfile.mkdtemp())
+        (d / "app.py").write_text(
+            '@app.route("/a")\ndef a(): ...\n'
+            '@app.route("/b", methods=["POST"])\ndef b(): ...\n'
+            '@app.route("/c")\ndef c(): ...\n')
+        got = {(r["method"], r["path"]) for r in routes._fallback_regex(RepoContext(d))}
+        self.assertEqual(got, {("GET", "/a"), ("POST", "/b"), ("GET", "/c")})
+
     def test_router_heuristic_catches_modern_routers_and_guards_fps(self):
         # P1: generic router-call heuristic — hand-rolled / itty / Hono / Workers, ANY object name.
         d = Path(tempfile.mkdtemp())
@@ -685,6 +697,9 @@ class Wave1FalsePositiveTests(unittest.TestCase):
         k = [f for f in out["findings"] if f["kind"] == "gha-script-injection"]
         self.assertTrue(k)
         self.assertEqual(k[0]["severity"], "HIGH")
+        # the matched context is already a full `${{ github.… }}` string — don't re-prefix `github.`
+        self.assertNotIn("github.${{", k[0]["detail"])
+        self.assertIn("${{ github.event.pull_request.title }}", k[0]["detail"])
 
     def test_gha_context_in_if_not_flagged(self):
         out = self._gha("jobs:\n  b:\n    if: ${{ github.event.pull_request.title == 'x' }}\n"
