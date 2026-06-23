@@ -14,6 +14,7 @@ here — that is the dynamic phase, which v1 leaves to the agent + human.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -160,6 +161,13 @@ def run_available(target: Path, outdir: Path, stack_languages: list | None = Non
         try:
             proc = subprocess.run(s.argv(target, out_file, excludes), capture_output=True,
                                   text=True, timeout=timeout)
+            # Checkov ignores the filename and writes `results_json.json` into the dir passed to
+            # `--output-file-path` — so the recorded <key>.json never existed and 100% of its findings
+            # were silently dropped. Normalize the produced file to the expected path.
+            if s.key == "checkov" and not out_file.exists():
+                produced = scan_dir / "results_json.json"
+                if produced.exists():
+                    produced.replace(out_file)
             results.append({"key": s.key, "name": s.name, "category": s.category,
                             "exit_code": proc.returncode, "output": str(out_file),
                             "findings": _count_findings(s.key, out_file)})
@@ -187,6 +195,9 @@ def _count_findings(key: str, out_file: Path) -> int:
         return len(data) if isinstance(data, list) else 0
     if key == "semgrep":
         return len(data.get("results", []) or [])
+    if key == "checkov":
+        return sum(len((b.get("results") or {}).get("failed_checks", []) or [])
+                   for b in (data if isinstance(data, list) else [data]) if isinstance(b, dict))
     return 0
 
 
@@ -309,7 +320,10 @@ def _norm_trivy(data: dict) -> list:
             title = f"secret: {s.get('Title') or rid}" + (f" — {note}" if note else "")
             out.append({"tool": "trivy", "category": "secret", "severity": sev or _sev(s.get("Severity") or "HIGH"),
                         "key": rid, "file": tgt, "line": s.get("StartLine", 0),
-                        "title": title, "fingerprint": f"secret|{tgt}|{rid}"})
+                        # include the line: two DISTINCT secrets matched by the same rule in one file
+                        # must not collapse to one row (hiding the second is the worst FN for a secret
+                        # scanner). Safe direction — at worst a rare cross-tool duplicate, never a hidden secret.
+                        "title": title, "fingerprint": f"secret|{tgt}|{rid}|{s.get('StartLine', 0)}"})
         for m in (res.get("Misconfigurations") or []):
             out.append({"tool": "trivy", "category": "iac", "severity": _sev(m.get("Severity")),
                         "key": m.get("ID", ""), "file": tgt, "line": 0, "title": (m.get("Title") or "")[:90],
@@ -332,7 +346,7 @@ def _norm_gitleaks(data) -> list:
         title = f"secret: {(x.get('Description') or rule)[:80]}" + (f" — {note}" if note else "")
         out.append({"tool": "gitleaks", "category": "secret", "severity": sev or "HIGH",
                     "key": rule, "file": f, "line": x.get("StartLine", 0),
-                    "title": title, "fingerprint": f"secret|{f}|{rule}"})
+                    "title": title, "fingerprint": f"secret|{f}|{rule}|{x.get('StartLine', 0)}"})
     return out
 
 
@@ -351,7 +365,30 @@ def _norm_semgrep(data: dict) -> list:
     return out
 
 
-_PARSERS = {"trivy": _norm_trivy, "gitleaks": _norm_gitleaks, "semgrep": _norm_semgrep}
+def _norm_checkov(data) -> list:
+    """Checkov `failed_checks` → normalized IaC findings. Checkov emits either ONE object or a LIST
+    of objects (one per framework: terraform / dockerfile / github_actions …), so handle both.
+    Severity is frequently null off the paid platform → default MEDIUM. Fingerprint keys on the
+    Checkov check id (CKV_*), which is distinct from Trivy's AVD ids, so the two IaC scanners COEXIST
+    (more coverage) rather than silently merging — accept some overlap; never drop a real misconfig."""
+    out = []
+    for block in (data if isinstance(data, list) else [data]):
+        if not isinstance(block, dict):
+            continue
+        for c in ((block.get("results") or {}).get("failed_checks") or []):
+            cid = c.get("check_id", "")
+            f = c.get("file_path", "") or c.get("repo_file_path", "")
+            rng = c.get("file_line_range") or [0]
+            out.append({"tool": "checkov", "category": "iac",
+                        "severity": _sev(c.get("severity") or "MEDIUM"),
+                        "key": cid, "file": f, "line": (rng[0] if rng else 0),
+                        "title": (c.get("check_name") or cid)[:90],
+                        "fingerprint": f"iac|{f}|{cid}"})
+    return out
+
+
+_PARSERS = {"trivy": _norm_trivy, "gitleaks": _norm_gitleaks, "semgrep": _norm_semgrep,
+            "checkov": _norm_checkov}
 
 
 def _gitignored(target: Path | None, paths) -> set:
@@ -363,10 +400,22 @@ def _gitignored(target: Path | None, paths) -> set:
     paths = sorted({p for p in paths if p})
     if not target or not paths or not shutil.which("git"):
         return set()
+    # `git check-ignore` wants paths RELATIVE to the repo and echoes the EXACT input back. Trivy fs
+    # typically emits absolute / root-prefixed paths, so a raw query matched nothing and the downgrade
+    # was a silent no-op. Normalize to repo-relative for the query, then map the ignored results back
+    # to the ORIGINAL strings the caller still holds (so its `file in ignored` test works).
+    rel_to_orig: dict = {}
+    for p in paths:
+        try:
+            rel = os.path.relpath(p, str(target)) if os.path.isabs(p) else p
+        except Exception:
+            rel = p
+        rel_to_orig.setdefault(rel, p)
     try:
         proc = subprocess.run(["git", "-C", str(target), "check-ignore", "--stdin"],
-                              input="\n".join(paths), capture_output=True, text=True, timeout=30)
-        return {ln.strip() for ln in proc.stdout.splitlines() if ln.strip()}
+                              input="\n".join(rel_to_orig), capture_output=True, text=True, timeout=30)
+        ignored_rel = {ln.strip() for ln in proc.stdout.splitlines() if ln.strip()}
+        return {rel_to_orig[r] for r in ignored_rel if r in rel_to_orig}
     except Exception:
         return set()
 

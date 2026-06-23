@@ -15,6 +15,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Removed
 
+## [0.8.1] — 2026-06-23
+
+Correctness/robustness patch. Merges the PR #8 review (3 reproduced regex/logic bugs on the always-on
+run path — Flask route-fallback drop/mislabel, password-policy `re.I` lowercase false-negative, GHA
+detail double-`github.`), then clears that PR's deferred backlog. 203 unit tests; no behavior change
+beyond fixing the bugs.
+
+### Fixed
+- **Checkov findings were 100% discarded** (`scanners.py`) — Checkov writes `results_json.json` (not
+  the `<key>.json` the tool recorded), had no `_count_findings` branch, and no parser. Added
+  `_norm_checkov` (handles the single-object and per-framework-list shapes; null severity → MEDIUM),
+  registered it, fixed the output path, and added a count branch. Verified live: 3 findings now flow
+  through where 0 did.
+- **Secret de-dup could hide a second real secret** (`scanners.py`) — the secret fingerprint omitted
+  the line, so two distinct secrets matched by the same rule in one file collapsed to one row. Added
+  `StartLine` to the trivy + gitleaks secret fingerprints (the safe direction: never hide a distinct
+  secret; accept rare cross-tool duplicates).
+- **gitignored-secret downgrade was a silent no-op** (`scanners.py`) — `git check-ignore` wants
+  repo-relative paths and echoes the exact input, but `trivy fs` emits absolute paths, so nothing
+  matched. `_gitignored` now normalizes to repo-relative and maps results back to the original strings.
+- **`websec dynamic` robustness** (`dynamic.py`) — `mint()` crashed (`5[0]` `TypeError`) on a singular
+  scalar tenant field and produced a single-char tenant for a scalar string (`_first_tenant` coerces to
+  a list); and the cross-tenant LEAK verdict string-matched a 3-element empty-body allowlist that
+  misclassified common empty wrappers (`{"items":[]}`, whitespace, paginated) as leaks (`_no_records`
+  now tests JSON emptiness structurally, conservatively — never masks a real leak).
+
+### Changed
+- Docs test count synced to **203** (TEST-SPEC service-to-test map, ENVIRONMENT, README).
+
 ## [0.8.0] — 2026-06-22
 
 Coverage release closing the deferred backlog from the 0.7.0 dogfooding pass — three new

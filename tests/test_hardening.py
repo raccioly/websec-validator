@@ -381,5 +381,61 @@ class StaticAtRiskRouteTests(unittest.TestCase):
         self.assertIn("GET /api/x", out["unverified_signature_routes"])
 
 
+class DeferredFixTests(unittest.TestCase):
+    """0.8.1 deferred findings from the PR #8 review: Checkov wired up, secret-dedup line,
+    gitignored path-normalization, dynamic-phase scalar-tenant + structural-empty verdict."""
+
+    # P1 — Checkov output is parsed (was 100% discarded)
+    def test_checkov_parser_and_count(self):
+        data = [{"check_type": "terraform", "results": {"failed_checks": [
+            {"check_id": "CKV_AWS_20", "check_name": "S3 bucket is public",
+             "file_path": "/main.tf", "file_line_range": [10, 12], "severity": None}]}}]
+        rows = scanners._norm_checkov(data)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["tool"], "checkov")
+        self.assertEqual(rows[0]["category"], "iac")
+        self.assertEqual(rows[0]["severity"], "MEDIUM")        # null checkov severity → MEDIUM default
+        self.assertIn("checkov", scanners._PARSERS)
+        p = Path(tempfile.mkdtemp()) / "checkov.json"
+        p.write_text(json.dumps(data))
+        self.assertEqual(scanners._count_findings("checkov", p), 1)
+
+    # P2 — two distinct secrets (same rule+file, different lines) must not collapse
+    def test_secret_dedup_keeps_distinct_secrets_same_rule(self):
+        trivy = {"Results": [{"Target": ".env", "Secrets": [
+            {"RuleID": "generic-api-key", "StartLine": 3, "Match": "AAA", "Title": "s1"},
+            {"RuleID": "generic-api-key", "StartLine": 9, "Match": "BBB", "Title": "s2"}]}]}
+        rows = scanners._norm_trivy(trivy)
+        self.assertEqual(len({r["fingerprint"] for r in rows}), 2)   # distinct → second not hidden
+
+    # P3 — git check-ignore wants repo-relative paths; trivy emits absolute
+    def test_gitignored_normalizes_absolute_paths(self):
+        if not shutil.which("git"):
+            self.skipTest("git not available")
+        d = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "-C", str(d), "init", "-q"], check=True)
+        (d / ".gitignore").write_text(".env.local\n")
+        (d / ".env.local").write_text("SECRET=x")
+        abs_path = str(d / ".env.local")              # absolute, as `trivy fs <abs>` emits
+        self.assertIn(abs_path, scanners._gitignored(d, [abs_path]))
+
+    # P4a — mint() no longer crashes on a scalar tenant id
+    def test_first_tenant_scalar_and_list(self):
+        self.assertEqual(dynamic._first_tenant([5, 6]), 5)
+        self.assertEqual(dynamic._first_tenant(5), 5)             # was `5[0]` → TypeError
+        self.assertEqual(dynamic._first_tenant("acme"), "acme")   # not a single char
+        self.assertIsNone(dynamic._first_tenant(None))
+        self.assertIsNone(dynamic._first_tenant([]))
+
+    # P4b — LEAK verdict is structural, not a string allowlist
+    def test_no_records_structural_emptiness(self):
+        for empty in ("[]", "{}", '{"data":[]}', '{ "data": [] }', '{"items":[],"total":0}',
+                      '{"data":[],"total":0,"page":1}', "   "):
+            self.assertTrue(dynamic._no_records(empty), f"should read empty: {empty}")
+        for has_data in ('[{"id":1}]', '{"data":[{"id":1}]}', '{"items":[{"x":1}]}'):
+            self.assertFalse(dynamic._no_records(has_data), f"should read data: {has_data}")
+        self.assertFalse(dynamic._no_records("not-json"))         # opaque → treat as a lead, don't mask
+
+
 if __name__ == "__main__":
     unittest.main()

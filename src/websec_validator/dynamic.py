@@ -73,9 +73,46 @@ def mint(cfg: dict, role: str) -> dict:
         return {"error": f"{type(e).__name__}: {e}"}
     token = _dig(d, cfg.get("token_json_path", "tokens.accessToken"))
     user = _dig(d, cfg.get("user_json_path", "user")) or {}
-    tenants = user.get(cfg.get("tenant_field", "groupIds")) or []
-    return {"token": token, "tenant": tenants[0] if tenants else None,
+    return {"token": token, "tenant": _first_tenant(user.get(cfg.get("tenant_field", "groupIds"))),
             "email": user.get("email"), "role": user.get("role")}
+
+
+def _first_tenant(raw):
+    """The first tenant id from a field that may be a list (`groupIds: [5]`) OR a singular scalar
+    (`groupId: 5` / "acme"). Coerce to a list before indexing — else a scalar int crashes (`5[0]`
+    TypeError, uncaught) and a scalar string silently yields a single-CHARACTER tenant."""
+    tenants = raw if isinstance(raw, list) else ([raw] if raw is not None else [])
+    return tenants[0] if tenants else None
+
+
+def _no_records(body: str) -> bool:
+    """True if a 200/206 response carries NO records (so a cross-tenant read is NOT a leak).
+
+    Parses JSON and tests emptiness STRUCTURALLY instead of string-matching a tiny allowlist
+    (`[]`/`{}`/`{"data":[]}`) — that allowlist misclassified common empty wrappers (`{"items":[]}`,
+    whitespace-formatted `{ "data": [] }`, paginated `{"data":[],"total":0}`) as LEAKs. Conservative:
+    anything that isn't provably empty is treated as DATA, so a real leak is never masked."""
+    if not body or not body.strip():
+        return True
+
+    def empty(x) -> bool:
+        if x is None or x == "" or x == []:
+            return True
+        if isinstance(x, list):
+            return len(x) == 0
+        if isinstance(x, dict):
+            if not x:
+                return True
+            cols = [v for v in x.values() if isinstance(v, (list, dict))]
+            # empty only when there's at least one data container and ALL of them are empty
+            # (scalar siblings like total/page/count are treated as pagination meta).
+            return bool(cols) and all(empty(c) for c in cols)
+        return False   # a bare scalar payload → treat as data, not empty
+
+    try:
+        return empty(json.loads(body))
+    except Exception:
+        return False   # opaque / non-JSON 200 content → can't prove empty; surface it as a lead
 
 
 def _tenant_only_get_endpoints(facts: dict, param: str) -> list:
@@ -112,10 +149,8 @@ def cross_tenant_bola(cfg: dict, facts: dict) -> dict:
             code, body = _request("GET", url, atk["token"])
             if code in (401, 403, 404):
                 verdict = "blocked"
-            elif code in (200, 206) and body and body.strip() not in ("[]", "{}", '{"data":[]}'):
-                verdict = "LEAK"
             elif code in (200, 206):
-                verdict = "blocked-empty"   # 200 but no cross-tenant data returned
+                verdict = "blocked-empty" if _no_records(body) else "LEAK"  # structural, not string-match
             else:
                 verdict = "investigate"
             results.append({"path": path, "direction": direction, "status": code, "verdict": verdict})
