@@ -15,7 +15,8 @@
       "docs-canonical/ARCHITECTURE.md",
       "docs-canonical/SECURITY.md",
       "docs-canonical/TEST-SPEC.md",
-      "docs-canonical/ENVIRONMENT.md"
+      "docs-canonical/ENVIRONMENT.md",
+      "docs/METHODOLOGY.md"
     ]
   },
   "validators": {
