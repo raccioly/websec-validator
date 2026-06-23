@@ -102,7 +102,7 @@ class IacCiExtractor(Extractor):
                          "free-text injectable); verify, low exploitability" if sha_only else "")
                 findings.append({"severity": sev, "kind": "gha-script-injection", "file": rel,
                                  "detail": "untrusted context interpolated into a run: step — "
-                                           + ", ".join("github." + c for c in contexts[:4]) + extra})
+                                           + ", ".join(contexts[:4]) + extra})
             unpinned = sorted({f"{a}@{r}" for a, r in USES.findall(text)
                                if not SHA40.match(r) and not a.startswith("./")})
             if unpinned:

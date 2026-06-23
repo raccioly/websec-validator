@@ -33,8 +33,12 @@ VALIDATION_SIGNAL = re.compile(
 _LA = r"\(\?=[^)]{0,40}"
 _RE_MIN = re.compile(r"\.min\(\s*(\d{1,3})|minLength\s*[:=]\s*(\d{1,3})|@MinLength\(\s*(\d{1,3})"
                      r"|\.length\s*>=?\s*(\d{1,3})|\{\s*(\d{1,3})\s*,")
-_RE_UPPER = re.compile(_LA + r"\[[^\]]*A-Z|minUppercase\s*:\s*[1-9]|requireUppercase\s*[:=]\s*true", re.I)
-_RE_LOWER = re.compile(_LA + r"\[[^\]]*a-z|minLowercase\s*:\s*[1-9]|requireLowercase\s*[:=]\s*true", re.I)
+# The char-class branch must be case-SENSITIVE: under re.I a literal `A-Z` also matches `a-z`, so a
+# lowercase-only rule `(?=.*[a-z])` was mis-counted as ALSO requiring uppercase — inflating the class
+# set and masking real drift (a lower-only sibling looked equal to an upper+lower policy). `(?-i:...)`
+# locally disables re.I for just the range token; the keyword branches keep re.I for casing tolerance.
+_RE_UPPER = re.compile(_LA + r"\[[^\]]*(?-i:A-Z)|minUppercase\s*:\s*[1-9]|requireUppercase\s*[:=]\s*true", re.I)
+_RE_LOWER = re.compile(_LA + r"\[[^\]]*(?-i:a-z)|minLowercase\s*:\s*[1-9]|requireLowercase\s*[:=]\s*true", re.I)
 _RE_DIGIT = re.compile(_LA + r"(?:\\d|\[[^\]]*0-9)|minNumbers\s*:\s*[1-9]|requireDigit\s*[:=]\s*true", re.I)
 _RE_SPECIAL = re.compile(_LA + r"(?:\\W|\[\^[A-Za-z0-9\\w]|\[[^\]]*[!@#$%^&*])|minSymbols\s*:\s*[1-9]"
                          r"|require[_]?Symbol", re.I)
