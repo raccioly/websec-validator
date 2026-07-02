@@ -151,7 +151,30 @@ ROUTER_ON = re.compile(r"\b\w+\.on\s*\(\s*['\"]([A-Za-z]+)['\"]\s*,\s*['\"`](/[^
 HANDLER_SIG = re.compile(
     r"\(\s*req\s*,\s*res\b|\(\s*request\s*,\s*(?:res|reply|env|ctx|context)\b|\(\s*c\s*\)\s*=>"
     r"|async\s*\(\s*c\s*\)|\(\s*ctx\s*\)\s*=>|export\s+default\s*\{[^}]*\bfetch\b"
-    r"|addEventListener\(\s*['\"]fetch['\"]", re.I)
+    r"|addEventListener\(\s*['\"]fetch['\"]|Deno\.serve\s*\(", re.I)
+
+# Supabase Edge Functions: a supabase/functions/<name>/index.ts with a Deno.serve (or deno-std serve)
+# handler is an HTTP endpoint at /functions/v1/<name>. Noir + the regex frameworks don't model
+# Deno.serve, so without this every edge function is INVISIBLE (0 routes → no authz/tenant/probes).
+_EDGE_INDEX = re.compile(r"supabase/functions/([^/]+)/index\.[tj]s$", re.I)
+_DENO_METHOD = re.compile(r"req\.method\s*(?:!==?|===?)\s*['\"]([A-Za-z]+)['\"]")
+
+
+def _supabase_edge_routes(ctx: RepoContext) -> list:
+    rows = []
+    for p in ctx.glob("supabase/functions/**/index.ts", 200) + ctx.glob("supabase/functions/**/index.js", 200):
+        text = ctx.text(p)
+        has_serve = "Deno.serve" in text or ("deno.land/std" in text and re.search(r"\bserve\s*\(", text))
+        if not has_serve:
+            continue
+        m = _EDGE_INDEX.search(ctx.rel(p).replace("\\", "/"))
+        if not m or m.group(1).startswith("_"):        # supabase/functions/_shared → helper, not a route
+            continue
+        methods = {mm.upper() for mm in _DENO_METHOD.findall(text)} - {"OPTIONS", "HEAD"}
+        for method in (sorted(methods) or ["POST"]):    # Supabase invokes edge functions via POST
+            rows.append({"method": method, "path": f"/functions/v1/{m.group(1)}", "params": [],
+                         "technology": "supabase-edge", "code_path": ctx.rel(p), "source": "supabase-edge"})
+    return rows
 
 
 def _router_calls(ctx: RepoContext) -> list:
@@ -295,6 +318,19 @@ class RoutesExtractor(Extractor):
                 if k not in existing:
                     existing.add(k)
                     routes.append(r)
+
+        # Supabase Edge Functions (Deno.serve) — synthesize /functions/v1/<name> routes in EVERY
+        # engine path (noir-found, noir-zero, noir-absent), since none of them model Deno.serve.
+        edge_existing = {(r["method"], r["path"]) for r in routes}
+        for r in _supabase_edge_routes(ctx):
+            if getattr(ctx, "excludes", None) and ctx._excluded(r.get("code_path", "")):
+                continue
+            k = (r["method"], r["path"])
+            if k not in edge_existing:
+                edge_existing.add(k)
+                routes.append(r)
+                if engine.startswith("noir (0 routes)"):
+                    engine = "noir (0 routes) → supabase-edge"
 
         by_method: dict = {}
         by_tech: dict = {}

@@ -114,6 +114,23 @@ def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list
     wh_unverified = integ.get("webhooks_without_sig_verification", [])
     wh_line = (_section("⚠ Webhooks with NO signature-verification in their handler (verify)", wh_unverified)
                if wh_unverified else f"_{len(integ.get('webhook_endpoints', []))} webhook endpoint(s); signature code present or none found_")
+    # licensing / entitlement verification-trust gaps (revocation bypass + no per-license seat cap)
+    ent_finds = [f for f in integ.get("findings", [])
+                 if f.get("attack_class") in ("entitlement-revocation-bypass", "missing-usage-cap")]
+    ent_line = (_section("⚠ License/entitlement verification gaps (verify + fix)",
+                         [f"{f['severity']} {f['attack_class']}: {f['file']}" for f in ent_finds])
+                if ent_finds else "_no license/entitlement verification-trust gaps detected_")
+    # WebExtension client-trust surface (chrome.storage entitlement gate / host perms / world:MAIN)
+    wx = facts.get("webext", {})
+    if wx.get("is_extension"):
+        wx_finds = [f"{f['severity']} {f['attack_class']}: {f['file']}" for f in wx.get("findings", [])]
+        webext_line = (f"MV{wx.get('manifest_version')} extension · entitlement gates: "
+                       f"{', '.join(wx.get('client_entitlement_gates', [])) or 'none'}\n"
+                       + (_section("⚠ Extension client-trust (client storage is USER-EDITABLE — enforce paid "
+                                   "features server-side)", wx_finds)
+                          if wx_finds else "_no extension client-trust findings_"))
+    else:
+        webext_line = "_no WebExtension manifest detected_"
 
     avail = ", ".join(s["name"] for s in scanners.get("available", [])) or "none on PATH"
     missing = "\n".join(f"- **{s['name']}** ({s['category']}) — `{s.get('install','')}`"
@@ -240,6 +257,11 @@ Production source maps exposed: {client.get("production_source_maps", False)}
 
 **Third-party integrations:** {integ_line}
 {wh_line}
+
+**License / entitlement verification (revocation + seat-cap trust):** {ent_line}
+
+**Browser-extension client-trust (chrome.storage entitlement gate / host perms / world:MAIN):**
+{webext_line}
 
 **LLM / AI-agent surface (OWASP LLM Top 10 — prompt injection, insecure output, excessive agency, unbounded):**
 {llm_section}

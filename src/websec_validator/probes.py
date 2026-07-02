@@ -63,6 +63,8 @@ PROBES = {
                         "a TEST instance + a LOW-priv token (TOKEN_A); optional priv TOKEN_B to diff"),
     "password-reuse": ("password-reuse.sh", "Password reuse / history on every set-password path (#6)",
                        "a TEST account token + CURRENT_PW + the set-password path(s)"),
+    "entitlement-abuse": ("entitlement-abuse.sh", "License seat/device-cap replay + revocation bypass",
+                          "a TEST instance + a valid license key YOU own (KEY=…); the device-id field name"),
 }
 
 # Truly universal probes — cheapest, exercise the #1 lead class (missing authentication) + rate
@@ -152,6 +154,10 @@ def applicable(facts: dict) -> list:
         chosen += ["pii-output-diff"]
     if ((facts.get("password_policy") or {}).get("password_reuse") or {}).get("gap"):
         chosen += ["password-reuse"]
+    # licensing / entitlement gaps (revocation bypass + no seat cap) → replay-and-refund probe
+    if any(f.get("attack_class") in ("entitlement-revocation-bypass", "missing-usage-cap")
+           for f in (facts.get("integrations") or {}).get("findings", [])):
+        chosen += ["entitlement-abuse"]
 
     seen, ordered = set(), []
     for k in chosen:

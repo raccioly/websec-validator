@@ -1,8 +1,8 @@
 # How websec-validator works — the methodology, and the reasoning behind every test
 
-<!-- docguard:version 0.8.0 -->
+<!-- docguard:version 0.9.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-06-22 -->
+<!-- docguard:last-reviewed 2026-07-02 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — this tool is defined by what it deliberately omits (no LLM, no server, no running app, no runtime deps); the negations describe real architectural properties, not phrasing defects. -->
 
@@ -48,7 +48,7 @@ it safe to run anywhere.
 ```
                  ┌─────────────────────────── deterministic, no LLM, no running app ──────────────────────────┐
   your repo ──▶  1. RECON          2. STATIC SCANNERS      3. FINDINGS LEDGER        4. BRIEFING + REPORT
-                 (19 extractors)   (Trivy/Gitleaks/…,      (evidence chain +         (marching orders for
+                 (20 extractors)   (Trivy/Gitleaks/…,      (evidence chain +         (marching orders for
                  walk once         de-duplicated)          standards + calibrated     your agent) + immutable
                                                            confidence)                run record
                                                                   │
@@ -61,9 +61,9 @@ Every `run` is written to an **immutable, timestamped directory** (`websec-out/r
 
 ---
 
-## Layer 1 — Recon: the 19 extractors
+## Layer 1 — Recon: the 20 extractors
 
-Recon walks the repository **once** into a shared `RepoContext`, then runs nineteen focused
+Recon walks the repository **once** into a shared `RepoContext`, then runs twenty focused
 extractors over it. Each answers one question a pentester asks first. The output is `FACTS.json`.
 
 | # | Extractor | What it asks | Why it matters (the security reasoning) |

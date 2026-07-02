@@ -1,8 +1,8 @@
 # Security
 
-<!-- docguard:version 0.8.0 -->
+<!-- docguard:version 0.9.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-06-22 -->
+<!-- docguard:last-reviewed 2026-07-02 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — a security model is correctly stated as invariants (MUST NOT, never, read-only, out-of-scope); negation is the right register for safety guarantees. -->
 

@@ -96,6 +96,59 @@ class StackExtractor(Extractor):
         if ctx.manifest("serverless.yml") + ctx.manifest("serverless.yaml"):
             frameworks.add("serverless")
 
+        # --- Manifest-LESS stacks a package.json/requirements scan misses entirely.
+        # A browser extension + Deno/Supabase edge functions ship NO package.json, so without this
+        # the whole app reads as `languages: ?` — which zeroes out every downstream extractor.
+        # File-extension fallback + Deno/Supabase/WebExtension/SQL-schema detection restore a real
+        # stack model for these manifest-less stacks. ---
+        code_exts = {p.suffix.lower() for p in ctx.code_files}
+        if not langs:                                   # nothing from manifests → infer from source
+            if code_exts & {".ts", ".tsx", ".mts", ".cts"}:
+                langs.update({"node", "typescript"})
+            elif code_exts & {".js", ".jsx", ".mjs", ".cjs"}:
+                langs.add("node")
+            if ".py" in code_exts:
+                langs.add("python")
+            if ".go" in code_exts:
+                langs.add("go")
+            if ".rb" in code_exts:
+                langs.add("ruby")
+
+        # Deno + Supabase edge functions — `Deno.serve` handlers are HTTP endpoints (routes.py maps them).
+        deno_sig = bool(ctx.glob("**/deno.json", 1) or ctx.glob("**/deno.jsonc", 1))
+        supabase_fns = bool(ctx.glob("supabase/functions/**/index.ts", 1)
+                            or ctx.glob("supabase/functions/**/index.js", 1))
+        supabase_cfg = ctx.exists("supabase/config.toml") or bool(ctx.glob("supabase/**/*.sql", 1))
+        if not deno_sig:
+            for _p, _rel, text in ctx.iter_code():
+                if "Deno.serve" in text or "Deno.env" in text:
+                    deno_sig = True
+                    break
+        if deno_sig:
+            langs.update({"node", "typescript"})
+            frameworks.add("deno")
+        if supabase_fns:
+            frameworks.add("supabase-edge")
+        if supabase_fns or supabase_cfg or "@supabase/supabase-js" in node_text:
+            frameworks.add("supabase")
+            datastores.add("postgres")                  # Supabase is Postgres-backed
+
+        # WebExtension / Chrome extension (MV2/MV3): a manifest.json declaring manifest_version.
+        for mf in ctx.glob("**/manifest.json", 40):
+            if '"manifest_version"' in ctx.text(mf):
+                frameworks.add("webextension")
+                langs.add("node")                       # extension code is JS
+                break
+
+        # SQL schema / migration files imply a SQL datastore even with no ORM dependency.
+        for sf in ctx.glob("**/*.sql", 60):
+            stext = ctx.text(sf)
+            if re.search(r"\bCREATE\s+TABLE\b", stext, re.I):
+                datastores.add("postgres" if re.search(
+                    r"gen_random_uuid|timestamptz|\bjsonb\b|ROW LEVEL SECURITY|CREATE POLICY", stext, re.I)
+                    else "sql")
+                break
+
         result = {
             "languages": sorted(langs),
             "frameworks": sorted(frameworks),

@@ -77,7 +77,7 @@ Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and 
 
 > That's the whole user surface: **`run`** (plus the optional, advanced **`dynamic`** live-probing step below). `recon`/`proof`/`calibrate` exist for developing the tool itself and are hidden from `--help` — you never need them.
 
-## What it extracts (19 deterministic extractors, no LLM)
+## What it extracts (20 deterministic extractors, no LLM)
 
 | | Dimension | Notable output |
 |---|---|---|
@@ -181,7 +181,7 @@ upload, cross-tenant BOLA, role/authz gaps).
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 203 tests
+python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 232 tests
 ```
 
 ## Releasing (maintainer)
@@ -207,7 +207,10 @@ publisher** with project `websec-validator`, owner `raccioly`, repo `websec-vali
 
 ## Status / roadmap
 
-**Done:** 19-extractor recon (incl. an **authz-correctness data-flow extractor** — unsigned-cookie /
+**Done:** 20-extractor recon (incl. a **WebExtension client-trust extractor** — client-side entitlement
+gate / over-broad host permissions / `world:"MAIN"` / unvalidated external messages — a
+**license/entitlement verification-trust** pass — revocation-bypass + no per-license usage cap, provider-
+agnostic — **Deno/Supabase-edge + Chrome-extension** stack & route modeling, an **authz-correctness data-flow extractor** — unsigned-cookie /
 claim-keyed authz / transaction-local RLS — plus **CORS-misconfig**, **SRI**, **host-header
 open-redirect** and **SSRF-redirect-hardening** classes, schema/entity → mass-assignment targeting, the **AWS-CDK /
 managed-AppSync / VTL boundary**, **upload-security** + **PII-output-boundary** + **redirect-SSRF**
@@ -218,7 +221,7 @@ algorithms / predictable principal), **docker-compose host-takeover** + **`.gitl
 secret-suppression** audits, and a **reverse-proxy prefix-escape** detector), cross-tool de-dup +
 **bundled Semgrep rules**, **router-mount-auth modeling** (cuts the dominant Express-monorepo
 missing-auth false positive), tailored probe staging, agent briefing, traceable findings ledger with
-**calibrated confidence (CJE — Wilson CIs)**, proof harness, test suite (181), **Docker bundle** (all
+**calibrated confidence (CJE — Wilson CIs)**, proof harness, test suite (232), **Docker bundle** (all
 scanners + Noir, arch-aware), **dynamic phase v1** (authenticated read-only cross-tenant BOLA —
 validated live, reproduced a hand-pentest's 14/14). Validated against the **REF-PENTEST pen test +
 retest** and re-validated on a large real-world LLM-agent monorepo (HIGH-finding noise 178 → 15, AI +

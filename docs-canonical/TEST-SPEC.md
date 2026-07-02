@@ -1,8 +1,8 @@
 # Test Specification
 
-<!-- docguard:version 0.8.0 -->
+<!-- docguard:version 0.9.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-06-22 -->
+<!-- docguard:last-reviewed 2026-07-02 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — the suite deliberately uses no third-party runner, no network, and no running app; the negations describe real, intentional test constraints. -->
 
@@ -10,11 +10,11 @@
 > Last updated: 2026-06-22
 
 The suite is **stdlib `unittest` only** — no third-party test runner, no network, no Noir, no running
-app. **203 tests** across three files run in ~1s and gate every release (the `publish.yml` workflow
+app. **232 tests** across four files run in ~1s and gate every release (the `publish.yml` workflow
 also installs the built wheel and smoke-runs `websec run`).
 
 ```bash
-python3 -m unittest discover -s tests    # 203 tests, stdlib only
+python3 -m unittest discover -s tests    # 232 tests, stdlib only
 ```
 
 ---
@@ -36,6 +36,7 @@ python3 -m unittest discover -s tests    # 203 tests, stdlib only
 | `src/websec_validator/extractors/*.py` | a recon/extractor assertion in `tests/test_recon.py` | Unit |
 | `src/websec_validator/{findings,calibration,scanners,probes}.py` | exercised in `tests/test_recon.py` | Unit |
 | a fixed bug / disproven pen-test finding | a dedicated case in `tests/test_pentest_regressions.py` | Regression |
+| entitlement / licensing + WebExtension client-trust classes (`integrations`, `webext`) | a case in `tests/test_entitlement_webext.py` (incl. cross-provider genericity) | Unit / Regression |
 | `src/websec_validator/{cli,dynamic}.py` + safety invariants | a case in `tests/test_hardening.py` | Hardening |
 
 ## Service-to-Test Map

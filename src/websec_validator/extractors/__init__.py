@@ -29,6 +29,7 @@ from .surface import SurfaceExtractor
 from .tenant import TenantExtractor
 from .transport_security import TransportSecurityExtractor
 from .upload_security import UploadSecurityExtractor
+from .webext import WebExtExtractor
 
 # Order matters: stack first (others read facts['stack']); authz after routes
 # (reads facts['routes']).
@@ -52,6 +53,7 @@ REGISTRY: list[Extractor] = [
     LlmSecurityExtractor(),
     CryptoUsageExtractor(),
     AuthzDataflowExtractor(),
+    WebExtExtractor(),
 ]
 
 

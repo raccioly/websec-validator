@@ -15,6 +15,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Removed
 
+## [0.9.0] — 2026-07-02
+
+Licensed-app & browser-extension coverage. Recon now models manifest-less stacks (Deno/Supabase edge
+functions + Chrome/WebExtension MV3 + `.sql` schemas) that a `package.json`-only scan saw as `stack: ?`,
+and adds a 20th extractor plus three provider-agnostic finding classes for licensing/entitlement and
+client-trust flaws. 232 unit tests.
+
+### Added
+- **WebExtension extractor** (`extractors/webext.py`, the 20th) — flags a **client-side entitlement gate**
+  (a paid tier/level read from `chrome.storage.local`/`localStorage` and used as the only enforcement),
+  **over-broad `host_permissions`** (`<all_urls>` / `*://*/*`), `world:"MAIN"` content scripts, and
+  `onMessageExternal` handlers with no sender validation.
+- **License/entitlement verification-trust findings** (`integrations.py`) — `entitlement-revocation-bypass`
+  (HIGH: grants on a truthy `success`/`valid` alone, never inspecting refund/chargeback/dispute/cancel/
+  status) and `missing-usage-cap` (no per-license seat/device/activation cap or rate limit). License/
+  subscription providers (Gumroad/Stripe/Paddle/Lemon Squeezy/Keygen/…) are detected by API host even
+  when called via a raw `fetch` (no npm SDK). Detection is provider-agnostic — matched on generic
+  refund/cancel/seat/device/quota concepts as code, not any one provider's field names.
+- **`entitlement-abuse` probe** — a seat/device-cap replay + revocation-bypass draft (`templates/probes/`).
+- New attack classes with CWE/OWASP citations + remediations: `entitlement-revocation-bypass`,
+  `missing-usage-cap`, `client-side-entitlement`, `excessive-permissions`, `extension-message-trust`.
+
+### Changed
+- **Stack detection** (`stack.py`) — file-extension fallback (a `.ts`/`.js`/`.py` repo with no manifest
+  now reports a language) + detects **Deno**, **Supabase edge functions**, **WebExtension**
+  (`manifest_version`), and a `.sql` schema → `postgres`, so `stack`/`datastores` are no longer `?`.
+- **Route discovery** (`routes.py`) — synthesizes `POST /functions/v1/<name>` routes from `Deno.serve`
+  handlers (Noir/the regex frameworks don't parse Deno), and counts `Deno.serve` as a handler signal.
+- **Schema extractor** (`schemas.py`) — parses `CREATE TABLE` from `.sql` files (entities + ownership
+  fields like `license_hash`), which were previously never read (`.sql` isn't in `CODE_EXT`).
+- **Tenant candidates** (`tenant.py`) — adds per-license/per-device ownership keys (`license_hash`,
+  `licenseKey`, `visitorId`, …) as BOLA-isolation candidates.
+
 ## [0.8.1] — 2026-06-23
 
 Correctness/robustness patch. Merges the PR #8 review (3 reproduced regex/logic bugs on the always-on

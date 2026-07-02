@@ -7,10 +7,10 @@
 
 ## Active Drift
 
-_None._ The canonical docs in `docs-canonical/` were re-synced to the shipped **v0.8.0** tree
-(2026-06-22) — extractor inventory (19), test count (196), and version markers updated to match code,
-so code and canonical intent are currently aligned. When code must deviate, add a `# DRIFT: reason`
-comment at the site and a row here.
+_None._ The canonical docs in `docs-canonical/` were re-synced to the shipped **v0.9.0** tree
+(2026-07-02) — extractor inventory (20, adds `webext`), test count (232), and version markers updated
+to match code, so code and canonical intent are currently aligned. When code must deviate, add a
+`# DRIFT: reason` comment at the site and a row here.
 
 | ID | File | Line | Canonical Doc | Deviation | Reason | Date |
 |----|------|------|---------------|-----------|--------|------|

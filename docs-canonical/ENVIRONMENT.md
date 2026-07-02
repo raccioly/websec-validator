@@ -1,8 +1,8 @@
 # Environment & Configuration
 
-<!-- docguard:version 0.8.0 -->
+<!-- docguard:version 0.9.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-06-22 -->
+<!-- docguard:last-reviewed 2026-07-02 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — the tool's defining property is needing almost nothing (no runtime deps, no required env vars, no running app); the negations accurately describe optional-everything setup. -->
 
@@ -96,6 +96,6 @@ Never point the dynamic phase at production.
 ```bash
 git clone https://github.com/raccioly/websec-validator && cd websec-validator
 pipx install --editable .                # or: pip install -e . in a 3.11+ venv
-python3 -m unittest discover -s tests    # 203 tests, stdlib only
+python3 -m unittest discover -s tests    # 232 tests, stdlib only
 docguard guard                           # validate the documentation (CDD)
 ```

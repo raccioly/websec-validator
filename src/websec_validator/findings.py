@@ -121,6 +121,24 @@ STANDARDS = {
     "claim-authz": (["CWE-639 Authorization Bypass Through User-Controlled Key", "CWE-807 Reliance on Untrusted Inputs in a Security Decision"],
                     "ASVS V4.2.1", ["API1:2023 BOLA"]),
     "rls-context": (["CWE-1188 Insecure Default Initialization of Resource"], "ASVS V4.1.3", ["API1:2023 BOLA"]),
+    # --- entitlement / licensing + browser-extension client-trust classes ---
+    "entitlement-revocation-bypass": (["CWE-863 Incorrect Authorization",
+                                       "CWE-672 Operation on a Resource after Expiration or Release"],
+                                      "ASVS V4.1.3", ["API6:2023 Unrestricted Access to Sensitive Business Flows",
+                                                      "API2:2023 Broken Authentication"]),
+    "missing-usage-cap": (["CWE-770 Allocation of Resources Without Limits or Throttling",
+                           "CWE-799 Improper Control of Interaction Frequency"],
+                          "ASVS V11.1.4", ["API4:2023 Unrestricted Resource Consumption",
+                                           "API6:2023 Unrestricted Access to Sensitive Business Flows"]),
+    "client-side-entitlement": (["CWE-602 Client-Side Enforcement of Server-Side Security",
+                                 "CWE-603 Use of Client-Side Authentication"],
+                                "ASVS V1.1", ["API6:2023 Unrestricted Access to Sensitive Business Flows"]),
+    "excessive-permissions": (["CWE-272 Least Privilege Violation",
+                               "CWE-250 Execution with Unnecessary Privileges"],
+                              "ASVS V1.1", ["API8:2023 Misconfiguration"]),
+    "extension-message-trust": (["CWE-346 Origin Validation Error",
+                                 "CWE-940 Improper Verification of Source of a Communication Channel"],
+                                "ASVS V13.2", ["API8:2023 Misconfiguration"]),
 }
 REMEDIATION = {
     "missing-auth": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a "
@@ -233,6 +251,25 @@ REMEDIATION = {
     "rls-context": "Set the RLS context (`set_config('app.*', x, true)`) INSIDE the transaction that runs the "
                    "tenant-scoped query, on the SAME connection the handler uses — a transaction-local setting "
                    "emitted at autocommit resets before the query, so RLS evaluates with an empty context.",
+    "entitlement-revocation-bypass": "Don't grant on a truthy verify result alone — inspect the purchase/"
+                                     "subscription object and reject refunded/chargebacked/disputed/cancelled/"
+                                     "ended/expired states before granting. Cache the verified status and flip it "
+                                     "from the provider's refund/dispute webhook so revocation is near-instant.",
+    "missing-usage-cap": "Enforce a per-principal usage cap: track distinct devices/seats/activations per license "
+                        "and reject beyond the limit, and/or rate-limit per license — never per IP alone (IP limits "
+                        "are bypassed via proxy pools / IPv6 rotation). Key every limit on the license/principal.",
+    "client-side-entitlement": "Client storage (chrome.storage.local / localStorage) is user-editable, so a "
+                              "tier/level/plan read from it is a UI hint, not an enforcement boundary. Enforce every "
+                              "paid capability on the server (verify the license per request); if a feature can only "
+                              "run in the browser, tie its value to a server-controlled benefit or accept it as "
+                              "honor-system — don't sink time into client-side obfuscation.",
+    "excessive-permissions": "Request the narrowest host_permissions/permissions the extension needs (specific "
+                            "origins, never <all_urls> / *://*/*); prefer activeTab + optional_permissions with "
+                            "runtime prompts over broad static grants.",
+    "extension-message-trust": "Validate the sender/origin on every runtime.onMessage / window 'message' handler "
+                              "(check sender.id / event.origin against an allowlist), set an explicit target origin "
+                              "on postMessage (never '*'), and minimise `world:\"MAIN\"` content scripts that expose "
+                              "privileged page-world APIs.",
 }
 _DEFAULT_REM = "Review and remediate per the cited standard."
 
@@ -535,6 +572,15 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                       fnd.get("attack_class", "tamperable-display"),
                       fnd.get("severity", "LOW"), fnd.get("confidence", "LOW"),
                       fnd.get("file") or (_ci.get("sensitive_display") or ["client"])[0],
+                      [{"layer": "recon", "detail": fnd.get("detail", "")}]))
+
+    # ---- 8a2. WebExtension client-trust — client-side entitlement gate, over-broad host permissions,
+    # world:MAIN content scripts, unvalidated external message handlers. ----
+    for fnd in (facts.get("webext", {}) or {}).get("findings", []):
+        out.append(_f(f"{fnd.get('kind')}: {fnd.get('file')}", "client-trust",
+                      fnd.get("attack_class", "client-side-entitlement"),
+                      fnd.get("severity", "LOW"), fnd.get("confidence", "LOW"),
+                      fnd.get("file", ""),
                       [{"layer": "recon", "detail": fnd.get("detail", "")}]))
 
     # ---- 8b. Transport / browser-hardening header baseline (CSP #3, HSTS #4) ----

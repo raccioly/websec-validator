@@ -26,6 +26,58 @@ SIG_VERIFY = re.compile(
     r"\bsvix\b|constant_time_compare|compare_digest|verifyWebhook|webhookSecret|"
     r"(?:verif|check|validate|assert|compute|expected|valid)\w*[_-]?[Ss]ignature", re.I)
 
+# --- License / subscription / payment providers called via a RAW fetch (not an npm SDK), so the
+# SDK-name scan below misses them. Detected by API host so an entitlement check surfaces as a
+# third-party trust boundary regardless of provider or naming. Add hosts freely — nothing here is
+# specific to any one app. ---
+VERIFY_PROVIDERS = {
+    "api.gumroad.com": "Gumroad", "api.lemonsqueezy.com": "Lemon Squeezy",
+    "api.paddle.com": "Paddle", "vendors.paddle.com": "Paddle", "checkout.paddle.com": "Paddle",
+    "sandbox-api.paddle.com": "Paddle", "api.stripe.com": "Stripe", "api.keygen.sh": "Keygen",
+    "api.paypal.com": "PayPal", "api-m.paypal.com": "PayPal", "api.chargebee.com": "Chargebee",
+    "api.fastspring.com": "FastSpring", "api.polar.sh": "Polar", "api.creem.io": "Creem",
+}
+# A handler that checks a paid entitlement — a license OR a subscription. Broad on purpose (any
+# provider, any naming); the findings below additionally require a truthy-grant tell.
+ENTITLEMENT_VERIFY = re.compile(
+    r"licen[sc]es?/(?:verify|validate|activate)|/v\d+/validate|verify_?licen[sc]e|verify_?key"
+    r"|activate_?licen[sc]e|licen[sc]e_?key|\bentitlement|subscriptions?/|/customers?/"
+    r"|checkout/sessions|has_?active_?subscription|is_?subscribed|verify_?subscription", re.I)
+# The grant keys on a truthy success/valid/activated flag …
+GRANT_ON_SUCCESS = re.compile(r"\.success\b|\.valid\b|\.activated\b|\.meta\.valid\b|['\"]valid['\"]\s*:", re.I)
+# … but a SOUND check ALSO inspects revocation/validity state. PROVIDER-AGNOSTIC concept vocabulary
+# (refund / chargeback / dispute / cancel / expire / revoke / suspend / a status compared to
+# active|paid), matched as CODE — a property access, a quoted key/value, or a *_at/status field —
+# never a bare prose word, so a comment ("no revocation check", "we still need refund handling") can't
+# SUPPRESS the finding (the comment-suppression FN trap the SIG_VERIFY note above learned the hard
+# way). This is intentionally not tied to any single provider's field spellings.
+_REVOKE = (r"refunded|chargebacked|charged_back|disputed|revoked|revocation|suspended|voided"
+           r"|cancell?ed|canceled|cancel_at_period_end|inactive|past_due|unpaid")
+# NOTE: expiry (`expires_at`/`ended_at`) is DELIBERATELY excluded from the bare-field match — it
+# collides with a row's OWN expiry data column (a real false negative: it would mark an uncapped app
+# safe). Expiry only counts when subscription-scoped (`subscription_ended_at`) or a property/quoted
+# revocation value, so a plain `row.expires_at` select can't suppress the finding.
+REVOCATION_CHECK = re.compile(
+    r"\.\s*(?:" + _REVOKE + r"|active|valid_?until|current_period_end)\b"
+    r"|['\"](?:" + _REVOKE + r"|active|paused|trialing)['\"]"
+    r"|\bsubscription_(?:cancell?ed|canceled|ended|failed|expires?)(?:_(?:at|on|date))?\b"
+    r"|\b(?:sub(?:scription)?_?)?status\b\s*[=!]==", re.I)
+# A per-principal usage cap — seat / device / machine / activation / quota / concurrency — OR a real
+# server-side use-count, named HOWEVER the app names it (provider-agnostic). Its ABSENCE (with no
+# rate-limiter) is finding #1. Matched as CODE idioms — compound identifiers, a table, a comparison —
+# never a bare word, so a comment ("no seat cap") can't suppress it. `uses` is excluded from the
+# compound (it collides with `increment_uses_count`); server-side use-counting is caught only by the
+# explicit `increment_uses_count: true` (the `"false"` opt-OUT must not read as a cap).
+USAGE_CAP = re.compile(
+    r"(?:max|per|distinct|active|registered|allowed|remaining|current|total)[_-]?"
+    r"(?:seats?|devices?|machines?|activations?|installs?|sessions?)"
+    r"|(?:seats?|devices?|machines?|activations?|installs?|sessions?|usage)[_-]?"
+    r"(?:count|counts?|limit|limits?|cap|caps?|max|quota|used|remaining|left)"
+    r"|\b\w+[_-](?:seats?|devices?|machines?|activations?)\b"
+    r"|\bseats?\b\s*(?:\.\s*(?:length|count|size)|[<>]=?)"
+    r"|\bquota\b|\bconcurren\w*|\bsimultaneous\b"
+    r"|increment_uses_count['\"]?\s*[:=]\s*['\"]?true", re.I)
+
 SDKS = {"stripe": "Stripe", "twilio": "Twilio", "@sendgrid": "SendGrid", "messagebird": "MessageBird/Bird",
         "@slack": "Slack", "openai": "OpenAI", "@anthropic": "Anthropic", "octokit": "GitHub",
         "plaid": "Plaid", "@aws-sdk": "AWS", "aws-sdk": "AWS", "firebase": "Firebase",
@@ -84,9 +136,45 @@ class IntegrationsExtractor(Extractor):
             if not (text and SIG_VERIFY.search(text)):
                 unverified.append(f"{e['method']} {e['path']}  ({ctx.rel(Path(cp)) if cp else '?'})")
 
-        # #5 outbound-action endpoints + #6 redundant secret fetches (one shared code walk)
+        # #5 outbound-action endpoints + #6 redundant secret fetches + entitlement-trust (one code walk)
         findings = []
+        providers: set = set()
         for _p, rel, text in ctx.iter_code():
+            hit_provider = False
+            for host, label in VERIFY_PROVIDERS.items():
+                if host in text:
+                    providers.add(label)
+                    hit_provider = True
+
+            # --- License / subscription entitlement verification trust (provider-agnostic) ---
+            if ((hit_provider or ENTITLEMENT_VERIFY.search(text)) and not SKIP_ACTION_FILE.search(rel)
+                    and (HANDLER_CTX.search(text) or HANDLER_DIR.search(rel))):
+                # #2 — grants on success alone, never inspecting revocation state (HIGH confidence:
+                # a concrete dataflow tell). /verify returns success:true after a refund.
+                if GRANT_ON_SUCCESS.search(text) and not REVOCATION_CHECK.search(text):
+                    findings.append({"severity": "HIGH", "confidence": "HIGH",
+                                     "kind": "entitlement-revocation-not-checked",
+                                     "attack_class": "entitlement-revocation-bypass", "file": rel,
+                                     "detail": f"{rel} grants access on a truthy license/subscription result "
+                                               "(success/valid/activated) but never inspects REVOCATION state "
+                                               "(refunded / chargebacked / disputed / cancelled / expired / a "
+                                               "status compared to active). Most providers still report the "
+                                               "license as valid after a refund or chargeback, so buy → use → "
+                                               "refund/chargeback → keep access works indefinitely. Inspect the "
+                                               "purchase/subscription object and reject revoked states before granting."})
+                # #1 — entitlement-gated feature with NO per-license seat/device cap, rate limit, or
+                # server-side use-count (LOW confidence: verify the control isn't in middleware).
+                if not RATE_LIMIT.search(text) and not USAGE_CAP.search(text):
+                    findings.append({"severity": "MEDIUM", "confidence": "LOW",
+                                     "kind": "no-per-license-usage-cap",
+                                     "attack_class": "missing-usage-cap", "file": rel,
+                                     "detail": f"{rel} gates a server-backed feature on a valid entitlement with NO "
+                                               "per-principal seat/device/activation cap, rate limit, or server-side "
+                                               "use-count — one shared or leaked credential works from unlimited "
+                                               "devices indefinitely. Track distinct devices/seats/activations per "
+                                               "license and reject beyond the limit, or rate-limit per license "
+                                               "(never per IP alone). Verify the cap isn't applied in middleware."})
+
             if (SEND_CALL.search(text) and not SKIP_ACTION_FILE.search(rel)
                     and (HANDLER_CTX.search(text) or HANDLER_DIR.search(rel))):
                 has_auth = bool(AUTH_GUARD.search(text))
@@ -116,7 +204,7 @@ class IntegrationsExtractor(Extractor):
 
         blob = " ".join(ctx.text(p) for p in ctx.glob("**/package.json", 80)).lower()
         blob += " ".join(ctx.text(p) for p in (ctx.glob("**/requirements*.txt", 40) + ctx.glob("**/pyproject.toml", 40))).lower()
-        detected = sorted({label for dep, label in SDKS.items() if dep.lower() in blob})
+        detected = sorted({label for dep, label in SDKS.items() if dep.lower() in blob} | providers)
 
         return {
             "webhook_endpoints": [f"{e['method']} {e['path']}" for e in webhook_eps],

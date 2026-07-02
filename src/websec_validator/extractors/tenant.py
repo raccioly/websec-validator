@@ -11,7 +11,13 @@ from .base import Extractor, RepoContext
 TENANT_KEYS = ["groupId", "group_id", "orgId", "org_id", "organizationId",
                "tenantId", "tenant_id", "workspaceId", "workspace_id",
                "accountId", "account_id", "companyId", "company_id",
-               "teamId", "team_id", "projectId", "project_id"]
+               "teamId", "team_id", "projectId", "project_id",
+               # per-license / per-device ownership keys — the isolation boundary for licensed and
+               # browser-extension apps (Gumroad/Stripe/Paddle). license_hash keying a per-user row
+               # (e.g. alert_configs) IS the BOLA boundary here, even though it isn't classic SaaS tenancy.
+               "licenseHash", "license_hash", "licenseKey", "license_key",
+               "visitorId", "visitor_id", "deviceId", "device_id",
+               "subscriptionId", "subscription_id", "customerId", "customer_id"]
 
 
 class TenantExtractor(Extractor):
