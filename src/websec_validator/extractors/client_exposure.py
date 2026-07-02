@@ -7,6 +7,8 @@ to every visitor. Cheap static scan, high signal.
 
 from __future__ import annotations
 
+import base64
+import json
 import posixpath
 import re
 
@@ -52,6 +54,47 @@ SECRET_SHAPES = [
     (re.compile(r"\bsk_live_[0-9A-Za-z]{16,}\b"), "Stripe live secret key (sk_live_…)", False),
     (re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\b"), "JWT (eyJ…)", False),
 ]
+# --- Supabase (and Supabase-style) keys carry their trust tier IN the key. The **anon / publishable**
+# key is DESIGNED to ship to the browser and is protected by Row-Level Security → intended-public (the
+# generic-secret scanners flag it as a "JWT" false positive). The **service_role** key bypasses RLS and
+# must NEVER be exposed → a real leak. We decode the JWT `role` claim (or read the `sb_publishable_` /
+# `sb_secret_` prefix of the newer key format) to tell them apart — by VALUE, provider-agnostic. ---
+_JWT_LITERAL = re.compile(r"eyJ[A-Za-z0-9_-]{6,}\.eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{4,}")
+_SB_PUBLISHABLE = re.compile(r"\bsb_publishable_[A-Za-z0-9]{10,}\b")
+_SB_SECRET = re.compile(r"\bsb_secret_[A-Za-z0-9]{10,}\b")
+
+
+def _jwt_payload(tok: str) -> dict | None:
+    try:
+        seg = tok.split(".")[1]
+        seg += "=" * (-len(seg) % 4)
+        d = json.loads(base64.urlsafe_b64decode(seg))
+        return d if isinstance(d, dict) else None
+    except Exception:
+        return None
+
+
+def _supabase_key_tiers(text: str) -> tuple[bool, bool]:
+    """(anon_present, service_role_present) for Supabase-style keys in `text`. anon/publishable ⇒
+    intended-public; service_role ⇒ must never ship. Only a JWT whose payload is clearly a Supabase
+    key (role∈{anon,service_role} and iss mentions supabase or a project `ref` is present) counts —
+    an arbitrary third-party JWT is left to the generic value-leak path."""
+    anon = service = False
+    for tok in _JWT_LITERAL.findall(text):
+        d = _jwt_payload(tok)
+        if not d:
+            continue
+        role = str(d.get("role", "")).lower()
+        if role in ("anon", "service_role") and ("supabase" in str(d.get("iss", "")).lower() or d.get("ref")):
+            anon = anon or role == "anon"
+            service = service or role == "service_role"
+    if _SB_PUBLISHABLE.search(text):
+        anon = True
+    if _SB_SECRET.search(text):
+        service = True
+    return anon, service
+
+
 # CDK build-time injection: a CloudFormation output / SSM param / Secret wired INTO a public build
 # var — e.g. CodeBuild `envFromCfnOutputs: { VITE_APPSYNC_API_KEY: appsyncApiKeyOutput }`. Invisible
 # to every secret scanner because the value isn't in source; it's injected at build time (the exact
@@ -92,10 +135,17 @@ class ClientExposureExtractor(Extractor):
         server_secret_in_client = []  # server secret referenced from a 'use client' file
         public_value_leaks = []       # secret-SHAPE literal in client-reachable code (rename-proof, #3)
         public_var_from_cfn = []      # CDK output/secret injected into a public build var (#3)
+        supabase_anon = []            # Supabase anon/publishable key — INFO, intended-public (RLS-protected)
+        supabase_service = []         # Supabase service_role key literal — HIGH, must never ship
 
         for _p, rel, text in ctx.iter_code():
             if is_test_file(rel):     # fixtures / stubbed env / negative-tests are not leaks
                 continue
+            sb_anon, sb_service = _supabase_key_tiers(text)
+            if sb_anon:
+                supabase_anon.append(rel)
+            if sb_service:
+                supabase_service.append(rel)
             frontend = _pkg_flag(rel, pkg_frontend, True)   # unknown package → don't suppress
             names = list(PUBLIC_ENV.findall(text))
             if _pkg_flag(rel, pkg_svelte, False):
@@ -114,6 +164,10 @@ class ClientExposureExtractor(Extractor):
             client_reachable = bool(PUBLIC_ENV.search(text)) or "use client" in text[:400]
             for rx, label, always in SECRET_SHAPES:
                 if (always or client_reachable) and rx.search(text):
+                    # a Supabase anon/publishable key is a JWT by shape but intended-public — don't
+                    # double-report it here as a value leak (it's surfaced at INFO below instead).
+                    if label.startswith("JWT") and sb_anon and not sb_service:
+                        continue
                     public_value_leaks.append(f"{label}  ({rel})")
             for m in CFN_TO_PUBLIC.finditer(text):
                 public_var_from_cfn.append(f"{m.group(1)} ← {m.group(2)}  ({rel})")
@@ -129,6 +183,8 @@ class ClientExposureExtractor(Extractor):
             "server_secret_in_client_component": sorted(set(server_secret_in_client)),  # HIGH if non-empty
             "public_secret_value_leaks": sorted(set(public_value_leaks)),   # HIGH — value-detected, rename-proof
             "public_var_from_cfn_output": sorted(set(public_var_from_cfn)),  # HIGH — CDK build-injected to client
+            "intended_public_supabase": sorted(set(supabase_anon)),  # INFO — anon/publishable key, RLS-protected
+            "supabase_service_role_in_client": sorted(set(supabase_service)),  # HIGH — service_role key must never ship
             "production_source_maps": sourcemaps,
             "note": "public_secret_leaks / server_secret_in_client_component / public_secret_value_leaks / "
                     "public_var_from_cfn_output ship secrets to the browser — treat as HIGH and confirm. "

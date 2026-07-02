@@ -15,6 +15,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Removed
 
+## [0.9.1] — 2026-07-02
+
+Patch: recognise a Supabase **anon/publishable** key (a JWT with `role: anon`, or an `sb_publishable_`
+key) as **intended-public** — it's designed to ship to the browser and is protected by Row-Level
+Security — so the generic secret scanners' "JWT token" hit on it is downgraded to INFO instead of
+ranking as a HIGH secret above the real findings. A **service_role** key (bypasses RLS) is still
+surfaced as a CRITICAL leak. 238 unit tests.
+
+### Fixed
+- **Supabase anon-key false positive** (`client_exposure.py`, `findings.py`) — decode the JWT `role`
+  claim (or read the `sb_publishable_` / `sb_secret_` prefix) to classify the key by trust tier. Any
+  scanner JWT finding (gitleaks/trivy/semgrep) on a file whose key is the anon/publishable key is
+  reclassified to INFO; the anon key is listed at INFO (acknowledged-and-cleared) and a `service_role`
+  key literal is raised to CRITICAL (`supabase_service_role_in_client`). Provider-agnostic by value —
+  an arbitrary third-party JWT is left to the generic value-leak path.
+
 ## [0.9.0] — 2026-07-02
 
 Licensed-app & browser-extension coverage. Recon now models manifest-less stacks (Deno/Supabase edge

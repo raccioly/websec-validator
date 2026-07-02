@@ -23,8 +23,17 @@ from websec_validator.extractors.schemas import SchemasExtractor                
 from websec_validator.extractors.tenant import TenantExtractor                  # noqa: E402
 from websec_validator.extractors.integrations import IntegrationsExtractor      # noqa: E402
 from websec_validator.extractors.webext import WebExtExtractor                  # noqa: E402
+from websec_validator.extractors.client_exposure import ClientExposureExtractor  # noqa: E402
 
 FIX = Path(__file__).resolve().parent / "fixtures"
+
+
+def _sb_jwt(role: str) -> str:
+    """A Supabase-style JWT literal (header.payload.sig) with the given role claim."""
+    import base64
+    import json
+    b64 = lambda o: base64.urlsafe_b64encode(json.dumps(o).encode()).rstrip(b"=").decode()
+    return f"{b64({'alg': 'HS256', 'typ': 'JWT'})}.{b64({'iss': 'supabase', 'ref': 'proj', 'role': role})}.{'s' * 32}"
 
 
 def ctx(name):
@@ -253,6 +262,59 @@ class ProviderAgnosticTests(unittest.TestCase):
             'const r = await (await fetch("https://api.paddle.com/2.0/licenses/validate")).json();\n'
             'if (r.success && r.subscription.status === "active") return grant();')}  # revocation ok, but no cap
         self.assertTrue(self._has(c, "missing-usage-cap"))
+
+
+class SupabaseKeyTierTests(unittest.TestCase):
+    """A Supabase anon/publishable key is intended-public (RLS-protected); a service_role key is a
+    real leak. The generic secret scanners flag both as a JWT — the ledger must tell them apart."""
+
+    def _cx(self, files):
+        return ClientExposureExtractor().extract(tmp_ctx(files), {})
+
+    def test_anon_key_is_intended_public_not_a_value_leak(self):
+        cx = self._cx({"extension/bg.js": f'const KEY = "{_sb_jwt("anon")}";\n'})
+        self.assertTrue(cx["intended_public_supabase"])
+        self.assertFalse(cx["supabase_service_role_in_client"])
+        self.assertFalse([l for l in cx["public_secret_value_leaks"] if l.startswith("JWT")])
+
+    def test_service_role_key_is_flagged(self):
+        cx = self._cx({"extension/bg.js": f'const KEY = "{_sb_jwt("service_role")}";\n'})
+        self.assertTrue(cx["supabase_service_role_in_client"])
+
+    def test_new_publishable_and_secret_prefixes(self):
+        cx = self._cx({"a.ts": 'const k = "sb_publishable_abcdefghij1234567890";\n'
+                               'const s = "sb_secret_abcdefghij1234567890";\n'})
+        self.assertTrue(cx["intended_public_supabase"])
+        self.assertTrue(cx["supabase_service_role_in_client"])
+
+    def test_scanner_jwt_finding_on_anon_key_downgraded_to_info(self):
+        facts = {"client_exposure": {"intended_public_supabase": ["ext/bg.js"],
+                                     "supabase_service_role_in_client": []},
+                 "stack": {"datastores": []}}
+        unified = {"all": [{"category": "secret", "title": "Uncovered a JSON Web Token",
+                            "file": "ext/bg.js", "severity": "HIGH", "tools": ["gitleaks"]}]}
+        led = findings.build_ledger(facts, unified, None, [])
+        jwt = [f for f in led["findings"] if "web token" in f["title"].lower()]
+        self.assertTrue(jwt)
+        self.assertEqual(jwt[0]["severity"], "INFO")
+
+    def test_service_role_reaches_ledger_as_critical(self):
+        facts = {"client_exposure": {"intended_public_supabase": [],
+                                     "supabase_service_role_in_client": ["api/db.ts"]},
+                 "stack": {"datastores": []}}
+        led = findings.build_ledger(facts, None, None, [])
+        svc = [f for f in led["findings"] if "service_role" in f["title"].lower()]
+        self.assertTrue(svc)
+        self.assertEqual(svc[0]["severity"], "CRITICAL")
+
+    def test_arbitrary_jwt_not_downgraded(self):
+        # a non-Supabase JWT (no supabase iss / role) is NOT reclassified as intended-public
+        import base64
+        import json
+        b64 = lambda o: base64.urlsafe_b64encode(json.dumps(o).encode()).rstrip(b"=").decode()
+        tok = f"{b64({'alg': 'HS256'})}.{b64({'sub': 'user', 'name': 'x'})}.{'s' * 20}"
+        cx = self._cx({"api/x.ts": f'const t = "{tok}"; // use client\n'})
+        self.assertFalse(cx["intended_public_supabase"])
 
 
 class LedgerAndProbeWiringTests(unittest.TestCase):

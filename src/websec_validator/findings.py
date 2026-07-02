@@ -423,6 +423,12 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
     # HIGH/CRITICAL CVE/secret ranked #16+ never reaches the ledger/REPORT/calibration. Falls
     # back to `top` for older callers/tests that only pass that key.
     cat_to_class = {"sca": "cve", "secret": "secret", "iac": "iac", "sast": "sast"}
+    # Supabase key tiers (from client_exposure): a "JWT"/secret scanner hit that is actually the
+    # anon/publishable key is intended-public (RLS-protected) → downgrade to INFO so it stops ranking
+    # above real findings; a service_role key stays a real leak (surfaced separately below).
+    _cx0 = facts.get("client_exposure", {}) or {}
+    _sb_anon = {a.replace("\\", "/") for a in _cx0.get("intended_public_supabase", [])}
+    _sb_svc = {a.replace("\\", "/") for a in _cx0.get("supabase_service_role_in_client", [])}
     for t in ((unified or {}).get("all") or (unified or {}).get("top", [])):
         cat = t.get("category", "")
         cls = cat_to_class.get(cat, "sast")
@@ -430,7 +436,20 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         # Confidence follows severity for secrets/CVEs: a generic-api-key tiered down to MEDIUM
         # (low-precision rule, bug-072) should NOT be stamped HIGH-confidence — keep P(real) honest.
         conf = "HIGH" if (cat in ("secret", "sca") and sev in ("HIGH", "CRITICAL")) else "MEDIUM"
-        out.append(_f(t.get("title", cat), f"static-{cat}", cls, sev, conf, t.get("file", ""),
+        _tfile = (t.get("file", "") or "").replace("\\", "/")
+        _title = t.get("title", cat)
+        # any scanner JWT hit (gitleaks/trivy → `secret`, semgrep → `sast`) on an anon-key file is the
+        # intended-public Supabase key — downgrade regardless of the tool's category.
+        if (cat in ("secret", "sast") and ("jwt" in _title.lower() or "web token" in _title.lower())
+                and any(_tfile.endswith(a) for a in _sb_anon)
+                and not any(_tfile.endswith(a) for a in _sb_svc)):
+            out.append(_f(_title, f"static-{cat}", "client-exposure", "INFO", "LOW", t.get("file", ""),
+                          [{"layer": "static", "detail": f"{'+'.join(t.get('tools', []))}: {_title}"},
+                           {"layer": "recon", "detail": "decoded → a Supabase ANON/publishable key (role:anon) "
+                            "— DESIGNED to ship to the browser and protected by Row-Level Security, not a secret "
+                            "leak. (A service_role key would be CRITICAL; none detected in this file.)"}]))
+            continue
+        out.append(_f(_title, f"static-{cat}", cls, sev, conf, t.get("file", ""),
                       [{"layer": "static", "detail": f"{'+'.join(t.get('tools', []))}: {t.get('title','')}"}]))
 
     # ---- 3. Attack-surface sinks (recon hypotheses) ----
@@ -525,6 +544,20 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                       "INFO", "LOW", tok, [{"layer": "recon", "detail": "a write-only analytics/telemetry "
                        "ingest token that is DESIGNED to ship to the browser (PostHog/Usertour/Segment/…) — "
                        "not a secret leak; confirm it's a publishable key, not a server API key reusing the name"}]))
+    # Supabase key tiers: a service_role key literal BYPASSES RLS → CRITICAL leak; the anon/publishable
+    # key is intended-public → INFO (surfaced so a scanner "JWT" hit on it is acknowledged-and-cleared).
+    for f in _cx.get("supabase_service_role_in_client", []):
+        out.append(_f(f"Supabase service_role key in client-reachable code: {f}", "client-exposure",
+                      "client-exposure", "CRITICAL", "HIGH", f,
+                      [{"layer": "recon", "detail": "a Supabase SERVICE_ROLE key (role:service_role) — it "
+                        "BYPASSES Row-Level Security (full DB read/write) and must NEVER ship to a client or be "
+                        "committed. Rotate it now in the Supabase dashboard and load it from a server-only secret."}]))
+    for f in _cx.get("intended_public_supabase", []):
+        out.append(_f(f"Supabase anon/publishable key (intended-public): {f}", "client-exposure",
+                      "client-exposure", "INFO", "LOW", f,
+                      [{"layer": "recon", "detail": "a Supabase ANON/publishable key (role:anon) — designed to "
+                        "ship to the browser and protected by Row-Level Security. Not a leak; listed so a scanner "
+                        "'JWT' hit on it is acknowledged-and-cleared. Confirm RLS is actually enabled on every table."}]))
 
     # ---- 5. IaC / CI-CD (AppSync API_KEY default → anonymous/missing-auth, retest-corrected from CSWSH) ----
     for fnd in (facts.get("iac_ci", {}).get("findings", []) or []):

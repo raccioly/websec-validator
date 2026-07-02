@@ -10,11 +10,11 @@
 > Last updated: 2026-06-22
 
 The suite is **stdlib `unittest` only** — no third-party test runner, no network, no Noir, no running
-app. **232 tests** across four files run in ~1s and gate every release (the `publish.yml` workflow
+app. **238 tests** across four files run in ~1s and gate every release (the `publish.yml` workflow
 also installs the built wheel and smoke-runs `websec run`).
 
 ```bash
-python3 -m unittest discover -s tests    # 232 tests, stdlib only
+python3 -m unittest discover -s tests    # 238 tests, stdlib only
 ```
 
 ---
