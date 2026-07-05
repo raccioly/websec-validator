@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability (private)
+    url: https://github.com/raccioly/websec-validator/security/advisories/new
+    about: Please report vulnerabilities in the tool itself privately — do not open a public issue.

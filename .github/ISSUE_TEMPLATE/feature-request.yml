@@ -1,0 +1,22 @@
+name: Feature request
+description: Propose a new detector, extractor, integration, or workflow improvement.
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The gap
+      description: What vulnerability class, stack, or workflow isn't covered today?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: For detectors — the evidence to key on
+      description: What deterministic signal in the code would the detector look for? (Remember — no LLM in the tool; extractors must be deterministic.) Include a sanitized example of the vulnerable pattern if you have one.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Could an existing scanner (Semgrep rule, Trivy, etc.) cover this instead of new code?
