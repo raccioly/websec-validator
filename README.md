@@ -171,7 +171,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: raccioly/websec-validator@v1
+      - uses: raccioly/websec-validator@v0.10.0   # pin to a release tag
         with:
           path: .
           fail-on: high         # block the PR on a new HIGH+ (omit for report-only)
