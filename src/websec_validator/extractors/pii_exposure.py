@@ -26,6 +26,14 @@ MASK_DEF = re.compile(
     r"(?:function\s+|export\s+(?:async\s+)?function\s+|def\s+)"
     r"(mask\w+|redact\w+|canViewFull\w+|scrub\w+|anonymi[sz]e\w+|toPublic\w+|sanitize\w*Pii)\b"
     r"|(?:const|let|export\s+const)\s+(mask\w+|redact\w+|canViewFull\w+|toPublic\w+)\s*=\s*(?:async\s*)?\(", re.I)
+# PII field mentions that are NOT a customer-PII value in the response — a schema validator, a type
+# declaration, or the CALLER's own audit identity. Blanked before the raw-entity check (value-shape,
+# not field-name — the tool's own stated discipline, applied to its detection).
+PII_NONCARRIER = re.compile(
+    r"z\.string\(\)(?:\.\w+\([^)]*\))*\.email|\.email\(\)|email:\s*z\.|(?:joi|yup|zod)\b[^;\n]*email"
+    r"|actor[_-]?email|performed[_-]?by[_-]?email|(?:req|request|ctx|session|token|payload)\.(?:user|auth|claims)\s*\??\.\s*email"
+    r"|currentUser\s*\.\s*email|createdBy[_-]?email|updatedBy[_-]?email"
+    r"|\bemail\s*:\s*(?:z|Joi|yup|t)\.|@IsEmail|IsEmail\(|email\(\)\.(?:optional|required|min|max)", re.I)
 PII_FIELD = re.compile(r"\b(?:phone|phoneNumber|msisdn|mobile|email|emailAddress|ssn|socialSecurity"
                        r"|dob|dateOfBirth|birthDate|creditCard|cardNumber|taxId|nationalId)\b", re.I)
 # returning a raw variable / a fresh ORM read straight to the client
@@ -85,7 +93,13 @@ class PiiExposureExtractor(Extractor):
             # projection IS a serializer — both were the raw-entity false positives.
             if "/admin/" in rel.replace("\\", "/") or PROJECTION.search(text):
                 continue
-            if PII_FIELD.search(text) and RES_RAW.search(text) and not MASK_CALL_NEAR.search(text):
+            # A `phone`/`email` mention that is NOT customer-PII-in-a-response: a Zod/Joi/Yup validator,
+            # a type/interface field decl, or the CALLER's own identity in audit metadata (actorEmail /
+            # req.user.email / createdBy). Blank those out first, then require a REMAINING PII field — so a
+            # Tag/Role/config entity that merely logs the actor's email no longer false-fires (the 76%
+            # a real monorepo outlier: 5 non-PII entities flagged raw-entity-pii).
+            scrubbed = PII_NONCARRIER.sub("  ", text)
+            if PII_FIELD.search(scrubbed) and RES_RAW.search(text) and not MASK_CALL_NEAR.search(text):
                 if len(raw_leaks) < 30:
                     raw_leaks.append(rel)
                     findings.append({"severity": "MEDIUM", "kind": "raw-entity-pii-response", "file": rel,

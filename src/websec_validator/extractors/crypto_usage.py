@@ -36,6 +36,10 @@ PW_CONTEXT = re.compile(r"verify\w*[Pp]assword|hash\w*[Pp]assword|compare\w*[Pp]
                         r"[Pp]asswordHash|checkPassword|passwordDigest|set\w*[Pp]assword", re.I)
 FAST_HASH = re.compile(r"createHash\s*\(\s*['\"](?:md5|sha1|sha256|sha224)['\"]|hashlib\.(?:md5|sha1|sha256|sha224)\b", re.I)
 STRONG_KDF = re.compile(r"\bbcrypt\b|\bargon2|\bscrypt\b|\bpbkdf2\b", re.I)
+# PKCE (RFC 7636) MANDATES a SHA-256 digest over the code_verifier to build the code_challenge. That's a
+# createHash('sha256') sitting in an auth file, but its input is a VERIFIER, not a password — flagging it
+# weak-password-hash is a false positive (real repos: a real Next.js app, a real app OAuth adapters).
+PKCE_CONTEXT = re.compile(r"code_challenge|code_verifier|codeVerifier|codeChallenge|\bS256\b|\bPKCE\b", re.I)
 JWT_VERIFY = re.compile(r"\bjwtVerify\s*\(|\bjwt\.verify\s*\(|\bjwtv2\.verify\s*\(|verifyJwt\s*\(", re.I)
 JWT_ALGS = re.compile(r"algorithms?\s*[:=]|['\"]alg['\"]\s*:", re.I)
 # a public hash of an identity field, used as a security principal / tenant key
@@ -70,8 +74,9 @@ class CryptoUsageExtractor(Extractor):
         for _p, rel, text in ctx.iter_code():
             if is_test_file(rel):
                 continue
-            if WEAK_PW_HASH.search(text) or (PW_CONTEXT.search(text) and FAST_HASH.search(text)
-                                             and not STRONG_KDF.search(text)):
+            if ((WEAK_PW_HASH.search(text) or (PW_CONTEXT.search(text) and FAST_HASH.search(text)
+                                               and not STRONG_KDF.search(text)))
+                    and not PKCE_CONTEXT.search(text)):     # PKCE S256 over the verifier ≠ password hash
                 add("HIGH", "weak-password-hash", "weak-password-hash", rel,
                     "A password appears to be hashed/verified with a FAST, unsalted digest "
                     "(SHA-256/SHA-1/MD5). These are GPU-crackable at billions/sec and rainbow-tableable "

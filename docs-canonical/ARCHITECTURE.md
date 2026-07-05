@@ -36,7 +36,7 @@ scanner runs, a calibrated findings ledger, staged probes, and the briefing/repo
 
 | Component | Responsibility | Location | Tests |
 |-----------|---------------|----------|-------|
-| CLI entry point | Arg parsing + the `run` / `doctor` / `dynamic` commands (and hidden `recon` / `proof` / `calibrate`) | `src/websec_validator/cli.py` | `tests/test_recon.py`, `tests/test_hardening.py` |
+| CLI entry point | Arg parsing + the `run` (with `--format`/`--fail-on`/`--baseline`) / `doctor` / `dynamic` / `mcp` commands (and hidden `recon` / `proof` / `calibrate`) | `src/websec_validator/cli.py` | `tests/test_recon.py`, `tests/test_hardening.py` |
 | Recon driver | Thin wrapper that runs the extractor registry over one repo walk | `src/websec_validator/recon.py` | `tests/test_recon.py` |
 | Extractors (20) | One focused question each → the merged `FACTS.json` (stack, routes, auth, authz, **authz_dataflow**, tenant, password_policy, surface, schemas, iac_ci, client_exposure, client_integrity, transport_security, graphql, upload_security, pii_exposure, integrations, **llm_security**, **crypto_usage**, **webext**) | `src/websec_validator/extractors/` | `tests/test_recon.py`, `tests/test_pentest_regressions.py`, `tests/test_entitlement_webext.py` |
 | Static scanners | Detect + (with `--scan`) shell out to Trivy/Gitleaks/Semgrep/Checkov/Prowler and de-duplicate across tools | `src/websec_validator/scanners.py` | `tests/test_recon.py` |
@@ -44,6 +44,10 @@ scanner runs, a calibrated findings ledger, staged probes, and the briefing/repo
 | Calibration (CJE) | Wilson-interval `P(real)` per `(attack-class, confidence)` bucket; self-improving local overlay | `src/websec_validator/calibration.py` | `tests/test_recon.py` |
 | Probe staging | Choose + stage the probe templates that match the extracted surface | `src/websec_validator/probes.py` | `tests/test_recon.py` |
 | Briefing / Report | Render `AGENT-BRIEFING.md` (marching orders) and `REPORT.md` (immutable run record) | `src/websec_validator/briefing.py`, `report.py` | `tests/test_recon.py` |
+| Machine formats | Render the ledger as **SARIF 2.1.0** (`results.sarif`, for GitHub Code Scanning) and a versioned JSON envelope; carries `schema_version` | `src/websec_validator/formats.py` | `tests/test_formats.py` |
+| Baseline / diff | Stable per-finding fingerprint + `new`/`unchanged`/`fixed` diff vs a prior ledger, so `--fail-on` gates only on NEW findings | `src/websec_validator/baseline.py` | `tests/test_formats.py` |
+| MCP server | Expose recon as typed MCP tools over stdio (raw JSON-RPC 2.0, stdlib) for any MCP client — `websec mcp` | `src/websec_validator/mcp_server.py` | `tests/test_formats.py` |
+| Output schemas | Published JSON Schemas for FACTS + ledger, versioned in lockstep with `formats.SCHEMA_VERSION` | `src/websec_validator/schemas/` | — |
 | Constitution | Derive Given/When/Then security invariants → `CONSTITUTION.md` | `src/websec_validator/constitution.py` | `tests/test_recon.py` |
 | Dynamic phase | Optional, gated live probing against a TEST instance (read-only BOLA, unauth reachability, localhost write-verb) | `src/websec_validator/dynamic.py` | `tests/test_hardening.py` |
 | Proof harness | Score recon coverage against the labeled vuln-app corpus (VAmPI/NodeGoat/DVGA) | `src/websec_validator/proof.py` | `tests/test_recon.py` |

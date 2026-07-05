@@ -15,6 +15,12 @@ from pathlib import Path
 from .base import Extractor, RepoContext
 
 WEBHOOK_PATH = re.compile(r"webhook|/hook|/callback|/inbound", re.I)
+# A STRONG webhook path (explicit /webhook(s) or a provider webhook route) is unambiguous — flag it on
+# no-sig even without deep body-read evidence. A WEAK path (/callback, /inbound, /hook alone) overlaps
+# with OAuth callbacks and misc handlers, so it additionally REQUIRES receiver evidence before flagging.
+WEBHOOK_STRONG = re.compile(
+    r"/webhooks?\b|/wh/|/hooks/|(?:stripe|github|gitlab|slack|shopify|twilio|sendgrid|paypal|square|"
+    r"plaid|clerk|svix|mailgun|postmark|linear|calendly|lemonsqueezy|paddle)[-_/]?(?:hook|webhook|event)", re.I)
 # Signals that a handler ACTUALLY verifies an inbound signature. The bare word `signature` used to
 # be here and was over-broad: a comment like "no signature verification" — or any stray mention —
 # SUPPRESSED the finding (a false negative, the worst failure for a security tool). Keep crypto
@@ -25,6 +31,29 @@ SIG_VERIFY = re.compile(
     r"createHmac|\bhmac\b|timingSafeEqual|X-Hub-Signature|X-Signature|Stripe-Signature|"
     r"\bsvix\b|constant_time_compare|compare_digest|verifyWebhook|webhookSecret|"
     r"(?:verif|check|validate|assert|compute|expected|valid)\w*[_-]?[Ss]ignature", re.I)
+
+# A real inbound-webhook RECEIVER reads the raw body and/or dispatches on an event type or a provider
+# signature header. Without this evidence a GET health-check, an OAuth authorization-code callback, or
+# webhook-SUBSCRIPTION management CRUD sitting at a webhook-ish path (WEBHOOK_PATH includes /callback)
+# is wrongly flagged unsigned — the dominant webhook-forgery FP across several real repos.
+WEBHOOK_RECEIVER = re.compile(
+    r"\brawBody\b|raw_body|req(?:uest)?\.body\b|await\s+req(?:uest)?\.(?:text|json|blob|buffer|arrayBuffer)\s*\("
+    r"|bodyParser\.raw|express\.raw|request\.data\b|await\s+request\.body"
+    r"|\bevent\.type\b|payload\.type|\.type\s*===|switch\s*\(\s*(?:event|payload|type|body)"
+    r"|x-hub-signature|stripe-signature|x-signature|x-webhook-signature|x-slack-signature|x-line-signature|svix-id", re.I)
+# An OAuth authorization-code callback — authenticated by state/PKCE, has no HMAC to verify → not a webhook.
+OAUTH_CALLBACK = re.compile(
+    r"searchParams\.get\s*\(\s*['\"](?:code|state)['\"]|\?code=|grant_type|authorization_code"
+    r"|exchange\w*[Cc]ode|/oauth/|openid|passport\.authenticate|getToken\s*\(", re.I)
+# Webhook-SUBSCRIPTION management CRUD (create/list/delete a subscription at a provider) — receives no
+# signed event; an unsigned finding is wrong (if it's unguarded that's a missing-auth, handled elsewhere).
+WEBHOOK_MGMT = re.compile(
+    r"createWebhook|deleteWebhook|listWebhooks|updateWebhook|registerWebhook|pingWebhook|testWebhook|triggerWebhook|sendWebhook"
+    r"|webhooks?\.(?:create|list|delete|update|ping|test|trigger|send)|['\"][^'\"]*/webhook[- ]?(?:subscriptions?|endpoints?|configs?)"
+    r"|/webhooks?/[^'\"]*/(?:ping|test|trigger|send|retry)\b", re.I)
+# a CALL to a signature-verification helper (its impl may live in another file) — verification intent.
+VERIFY_HELPER_CALL = re.compile(
+    r"\b(?:verify|validate|check|assert)\w*(?:Signature|Webhook|Hmac|Sig|Event)\s*\(|constructEvent\s*\(", re.I)
 
 # --- License / subscription / payment providers called via a RAW fetch (not an npm SDK), so the
 # SDK-name scan below misses them. Detected by API host so an entitlement check surfaces as a
@@ -77,6 +106,13 @@ USAGE_CAP = re.compile(
     r"|\bseats?\b\s*(?:\.\s*(?:length|count|size)|[<>]=?)"
     r"|\bquota\b|\bconcurren\w*|\bsimultaneous\b"
     r"|increment_uses_count['\"]?\s*[:=]\s*['\"]?true", re.I)
+# The seat/device-cap risk is a LICENSED-APP concept — a license KEY reused across devices. An ordinary
+# per-user WEB SaaS (Stripe subscription, session-authed) has no shared-credential-across-devices problem,
+# so the usage-cap finding must be gated to a real license/activation/device vocabulary (real-repo FP:
+# a real Workers app's Stripe subscription/checkout flagged no-per-license-usage-cap).
+LICENSED_APP = re.compile(
+    r"licen[sc]e|\bactivation|machine[_-]?id|device[_-]?id|\bseat|\bhwid\b|fingerprint"
+    r"|keygen|gumroad|lemonsqueezy|per[_-]?device|per[_-]?seat|\bactivations?\b|device[_-]?limit", re.I)
 
 SDKS = {"stripe": "Stripe", "twilio": "Twilio", "@sendgrid": "SendGrid", "messagebird": "MessageBird/Bird",
         "@slack": "Slack", "openai": "OpenAI", "@anthropic": "Anthropic", "octokit": "GitHub",
@@ -131,10 +167,19 @@ class IntegrationsExtractor(Extractor):
 
         unverified = []
         for e in webhook_eps:
+            if str(e.get("method", "")).upper() in ("GET", "HEAD"):
+                continue                                     # an inbound webhook receiver is POST/PUT, not GET
             cp = e.get("code_path", "")
             text = ctx.text(Path(cp)) if cp else ""
-            if not (text and SIG_VERIFY.search(text)):
-                unverified.append(f"{e['method']} {e['path']}  ({ctx.rel(Path(cp)) if cp else '?'})")
+            if not text:
+                continue                                     # unanalyzable — don't guess it's unsigned
+            if OAUTH_CALLBACK.search(text) or WEBHOOK_MGMT.search(text):
+                continue                                     # OAuth callback / mgmt CRUD — not a signed receiver
+            if not WEBHOOK_STRONG.search(e.get("path", "")) and not WEBHOOK_RECEIVER.search(text):
+                continue                                     # WEAK webhook path + no receiver evidence → not a webhook
+            if SIG_VERIFY.search(text) or VERIFY_HELPER_CALL.search(text):
+                continue                                     # verifies inline OR via an imported helper
+            unverified.append(f"{e['method']} {e['path']}  ({ctx.rel(Path(cp)) if cp else '?'})")
 
         # #5 outbound-action endpoints + #6 redundant secret fetches + entitlement-trust (one code walk)
         findings = []
@@ -164,7 +209,8 @@ class IntegrationsExtractor(Extractor):
                                                "purchase/subscription object and reject revoked states before granting."})
                 # #1 — entitlement-gated feature with NO per-license seat/device cap, rate limit, or
                 # server-side use-count (LOW confidence: verify the control isn't in middleware).
-                if not RATE_LIMIT.search(text) and not USAGE_CAP.search(text):
+                if (not RATE_LIMIT.search(text) and not USAGE_CAP.search(text)
+                        and LICENSED_APP.search(text)):     # only a licensed-app (key-across-devices), not web SaaS
                     findings.append({"severity": "MEDIUM", "confidence": "LOW",
                                      "kind": "no-per-license-usage-cap",
                                      "attack_class": "missing-usage-cap", "file": rel,

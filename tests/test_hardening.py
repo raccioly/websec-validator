@@ -300,12 +300,12 @@ class CookieCoverageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
             (d / "auth.ts").write_text(
-                "const s = request.cookies.get('agent_wallet_session');\n"
+                "const s = request.cookies.get('myapp_session');\n"
                 "const p = req.cookies['ping_id_token'];\n"
                 "const x = getCookie('dynamic_authentication_token');\n")
             out = AuthExtractor().extract(RepoContext(d), {"stack": {"frameworks": []}, "routes": {}})
         names = set(out["cookie_names"])
-        self.assertIn("agent_wallet_session", names)
+        self.assertIn("myapp_session", names)
         self.assertIn("ping_id_token", names)
         self.assertIn("dynamic_authentication_token", names)
         self.assertNotIn("get", names)  # reserved method name filtered

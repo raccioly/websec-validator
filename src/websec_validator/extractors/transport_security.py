@@ -40,6 +40,13 @@ HTML_SURFACE = re.compile(r"\.(?:html|tsx|jsx|vue|svelte|astro)$|_document|app/l
 # HTML built/served in CODE (a Worker / server-rendered app emitting template-literal HTML) — so CSP
 # applies even with no frontend framework. This is the gap that missed a Cloudflare Worker's CSP.
 HTML_CONTENT = re.compile(r"<!DOCTYPE\s+html|<html[\s>]|text/html|res\.send\(\s*[`'\"]\s*<|c\.html\(", re.I)
+# A construct that SERVES bytes over HTTP (vs merely building an HTML string and writing it to a file).
+# This is what separates a real browser-facing surface from a Python/CLI report generator — the latter
+# emits `<!DOCTYPE html>` into a file with no serving verb, so it must NOT trigger CSP/clickjacking leads.
+SERVE_VERB = re.compile(
+    r"new\s+Response\s*\(|res\.(?:send|write|end|render|type)\b|reply\.(?:send|type|code|header)"
+    r"|HttpResponse\s*\(|make_response\s*\(|self\.wfile\.write|start_response|sendFile|context\.res\b"
+    r"|addEventListener\(\s*['\"]fetch|export\s+default\s*\{[^}]*\bfetch\b", re.I)
 FRONTEND_FW = {"react", "next", "nextjs", "vue", "nuxt", "svelte", "sveltekit", "angular", "astro", "remix", "solid"}
 # Cookie hardening — "report the PASS" (HttpOnly+Secure+SameSite ✓ builds trust + is a regression
 # assertion) and flag the gap. Flags are matched per cookie-setting file (lenient — a positive lead).
@@ -70,6 +77,16 @@ NEXT_HEADERS_FN = re.compile(r"async\s+headers\s*\(|\bheaders\s*\(\s*\)\s*\{|key
 NEXT_CSP = re.compile(r"Content-Security-Policy", re.I)
 NEXT_XFO = re.compile(r"X-Frame-Options|frame-ancestors", re.I)
 
+# Clickjacking defence — X-Frame-Options OR a CSP `frame-ancestors` directive OR helmet's frameguard.
+# Framework-agnostic baseline (parallels CSP/HSTS): if a web surface sets NEITHER, the app is framable
+# and vulnerable to UI-redress. `frame-ancestors` is the modern control, XFO the legacy fallback.
+CLICKJACK_GUARD = re.compile(r"X-Frame-Options|frame-ancestors|frameguard\b|frameGuard\b|xFrameOptions", re.I)
+# Anti-CSRF plumbing — a token library / middleware / the token field itself. Presence (anywhere in the
+# repo) says the team is handling CSRF; absence on a COOKIE-auth app with no SameSite is the lead.
+CSRF_LIB = re.compile(
+    r"\bcsurf\b|csrf-csrf|@fastify/csrf|\blusca\b|edge-csrf|next-csrf|\bcsrf_?token\b|csrfToken|xsrf|"
+    r"CsrfViewMiddleware|csrf_protect|protect_from_forgery|X-CSRF-Token|X-XSRF-TOKEN|SameSite\s*=\s*Strict", re.I)
+
 
 class TransportSecurityExtractor(Extractor):
     name = "transport_security"
@@ -81,7 +98,11 @@ class TransportSecurityExtractor(Extractor):
 
         csp_present = csp_self = csp_nonce = csp_unsafe = False
         hsts_present = hsts_sub = hsts_preload = False
+        clickjack_guard = False        # X-Frame-Options / CSP frame-ancestors / helmet frameguard anywhere
+        csrf_plumbing = False          # a CSRF token lib / middleware / field present anywhere in the repo
+        server_actions = False         # Next.js `'use server'` — Server Actions carry a built-in Origin CSRF check
         html_surface = bool(frameworks & FRONTEND_FW)
+        serves_html = bool(frameworks & FRONTEND_FW)   # HTML actually SERVED over HTTP (vs an HTML string written to a file)
         inline_handlers = []
         sets_cookie = ck_httponly = ck_secure = ck_samesite = False
         hsts_files, hsts_api_only, hsts_html = [], True, False
@@ -97,6 +118,10 @@ class TransportSecurityExtractor(Extractor):
                 continue
             if HTML_SURFACE.search(rel) or HTML_CONTENT.search(text):
                 html_surface = True
+                # a frontend file (.tsx/.vue/.html) IS the served shell; HTML in code counts only if a
+                # serving verb (new Response / res.send / HttpResponse …) actually returns it over HTTP.
+                if HTML_SURFACE.search(rel) or SERVE_VERB.search(text):
+                    serves_html = True
             blob = text
             # CORS misconfig — reflected/wildcard Allow-Origin together with credentials = any site
             # reads authed responses (CWE-942). Server-side only.
@@ -150,6 +175,12 @@ class TransportSecurityExtractor(Extractor):
                 ck_httponly = ck_httponly or bool(CK_HTTPONLY.search(blob))
                 ck_secure = ck_secure or bool(CK_SECURE.search(blob))
                 ck_samesite = ck_samesite or bool(CK_SAMESITE.search(blob))
+            if not clickjack_guard and CLICKJACK_GUARD.search(blob):
+                clickjack_guard = True
+            if not csrf_plumbing and CSRF_LIB.search(blob):
+                csrf_plumbing = True
+            if not server_actions and ("'use server'" in blob or '"use server"' in blob):
+                server_actions = True
 
         if CSP_ANY.search(manifests):
             csp_present = True
@@ -165,6 +196,8 @@ class TransportSecurityExtractor(Extractor):
                 hsts_sub = True
             if HSTS_PRELOAD.search(manifests):
                 hsts_preload = True
+        if CLICKJACK_GUARD.search(manifests):
+            clickjack_guard = True      # edge/CDN header config (next.config/vercel.json/_headers/nginx)
 
         # Monorepo-aware Next.js config header gap — `transport_security` previously only read the
         # ROOT next.config via manifests, so a `packages/web/next.config.ts` was invisible. Glob every
@@ -188,7 +221,14 @@ class TransportSecurityExtractor(Extractor):
                                        "clickjacking/XSS-defense headers (verify against the live response if the edge sets some)."})
 
         strict_csp = bool(csp_present and csp_self and csp_nonce and not csp_unsafe)
-        web_surface = html_surface or has_routes
+        # A SERVED web app has HTTP routes OR a recognized web/frontend framework. Without either, a
+        # repo that merely emits an HTML string (a Python CLI / data tool writing a report) is NOT a
+        # browser-facing surface — flagging CSP/HSTS/clickjacking on it is noise (real-repo FP:
+        # a real CLI, a real repo). We accept a rare FN (a framework-less, route-less static
+        # site) to kill the dominant non-web FP; the edge/CDN owns those headers anyway.
+        served_web = has_routes or bool(frameworks) or serves_html
+        html_surface = html_surface and served_web
+        web_surface = served_web and (html_surface or has_routes)
         findings = list(extra_findings)
 
         if html_surface:
@@ -239,6 +279,39 @@ class TransportSecurityExtractor(Extractor):
                                      "detail": f"HSTS is present but missing {', '.join(gaps)} — add where the domain "
                                                "model allows (don't preload a domain whose subdomains aren't all HTTPS)."})
 
+        # Clickjacking baseline (framework-agnostic, parallels CSP) — an HTML surface that sets NEITHER
+        # X-Frame-Options NOR a CSP frame-ancestors directive is framable (UI-redress). Gated on
+        # html_surface (like no-csp), NOT web_surface: a pure JSON API has no framable page. The
+        # Next.js-config check above is stricter/per-config; this catches Express/Flask/Django/etc.
+        if html_surface and not clickjack_guard:
+            findings.append({"severity": "LOW", "kind": "no-clickjacking-protection", "attack_class": "clickjacking",
+                             "detail": "No clickjacking defence found (no X-Frame-Options and no CSP `frame-ancestors`). "
+                             "The app can be framed by any origin and used for UI-redress / clickjacking. Send "
+                             "`X-Frame-Options: DENY` (or SAMEORIGIN) AND `frame-ancestors 'none'`/`'self'` in the CSP on "
+                             "every HTML response at the edge. VERIFY against the live document response (a static scan "
+                             "can't see the CDN layer)."})
+
+        # CSRF baseline — a COOKIE/session-authenticated app whose state-changing routes rely on the
+        # ambient cookie is CSRF-exposed unless it (a) uses an anti-CSRF token OR (b) sets SameSite.
+        # Bearer-token-only APIs are exempt (no ambient credential to ride). Derives the auth model from
+        # the auth extractor (runs earlier), so this stays a low-FP lead, not a blanket flag.
+        auth = facts.get("auth") or {}
+        cookie_auth = (str(auth.get("scheme", "")).startswith(("nextauth", "session", "hmac"))
+                       or auth.get("token_location") == "cookie"
+                       or bool(auth.get("cookie_names")))
+        # NextAuth/Auth.js default the session cookie to SameSite=Lax (a source grep can't see the
+        # framework default), and Next.js Server Actions carry a built-in Origin==Host CSRF check — so
+        # neither is the classic ambient-cookie CSRF this flags (real-repo FPs: a real Next.js app, a real repo).
+        nextauth_default = ("nextauth" in frameworks or str(auth.get("scheme", "")).startswith("nextauth"))
+        if (web_surface and has_routes and cookie_auth and not csrf_plumbing and not ck_samesite
+                and not nextauth_default and not server_actions):
+            findings.append({"severity": "LOW", "kind": "no-csrf-protection", "attack_class": "csrf",
+                             "detail": "This looks like a cookie/session-authenticated app with HTTP routes, but no "
+                             "anti-CSRF token library/middleware (csurf/csrf-csrf/@fastify/csrf/Django/Rails) and no "
+                             "`SameSite` cookie attribute were found — state-changing routes may be forgeable "
+                             "cross-site (CSRF). Add an anti-CSRF token to write routes AND set session cookies "
+                             "`SameSite=Lax`/`Strict`. VERIFY the auth model first: a Bearer-token-only API is exempt."})
+
         # 0.6.2: report the cookie-hardening PASS (✓ builds trust + is a regression assertion), or flag the gap.
         passes, cookie_security = [], None
         if sets_cookie:
@@ -258,6 +331,7 @@ class TransportSecurityExtractor(Extractor):
             "csp_present": csp_present, "strict_csp": strict_csp, "csp_has_unsafe": csp_unsafe,
             "hsts_present": hsts_present, "hsts_includes_subdomains": hsts_sub, "hsts_preload": hsts_preload,
             "hsts_files": sorted(set(hsts_files))[:20],
+            "clickjacking_protected": clickjack_guard, "csrf_plumbing_present": csrf_plumbing,
             "inline_event_handlers": sorted(set(inline_handlers)),
             "cookie_security": cookie_security,
             "passes": passes,

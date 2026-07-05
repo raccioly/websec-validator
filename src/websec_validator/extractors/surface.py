@@ -83,7 +83,31 @@ SINKS = {
         r"res\.(?:json|send)\s*\([^;]{0,200}\b(?:err|error|e|ex|exc)\.(?:stack|message)\b"
         r"|res\.status\(\s*\d+\s*\)\.(?:json|send)\s*\([^;]{0,200}\b(?:err|error|e)\.(?:stack|message)\b"
         r"|NODE_ENV\s*[!=]==?\s*['\"]production['\"][^;{}]{0,160}\b(?:stack|message)\b")),
+    # Reflected / DOM / template XSS — a user-influenced value reaching an HTML sink with no output
+    # encoding. CLIENT DOM sinks (innerHTML/outerHTML/insertAdjacentHTML/document.write/jQuery .html /
+    # React dangerouslySetInnerHTML / Vue v-html) + SERVER template-escape-off (Jinja `|safe`,
+    # mark_safe, Markup(), `{% autoescape false %}`, res.send of an interpolated HTML string). The
+    # per-file sanitizer guard (_XSS_SANITIZER, applied in the loop) suppresses a file that runs
+    # DOMPurify/sanitize-html/bleach/escape — so a sanitized render doesn't false-fire. Kept
+    # LOW-confidence like every surface lead: "verify this value is escaped/sanitized before the sink."
+    "xss": ("xss-verify", None, re.compile(
+        r"\.(?:inner|outer)HTML\s*=\s*[^;=][^;]{0,140}?(?:\$\{|`|\+|req\.|request\.|props\.|params\b|state\.|location\.|searchParams|\.value\b)"
+        r"|\.insertAdjacentHTML\s*\([^)]*(?:\$\{|`|\+|req\.|props\.|params\b|state\.|location\.)"
+        r"|document\.write(?:ln)?\s*\([^)]*(?:\$\{|`|\+|req\.|location\.|params\b|search)"
+        # dangerouslySetInnerHTML / v-html require a USER-INFLUENCED __html expr — a static string literal
+        # (a service-worker registration snippet, an inline <style>) is not XSS (real-repo FP: a real app).
+        r"|dangerouslySetInnerHTML\s*=\s*\{\{\s*__html\s*:\s*(?![^}]*(?:DOMPurify|sanitiz))[^}]*(?:\$\{|`|\+|req\.|props\.|params|state\.|data\.|content|body|markdown|html\b|value)"
+        r"|\bv-html\s*=\s*['\"]?(?:[\w.$]+|\{)"
+        r"|\{%\s*autoescape\s+(?:false|off)|\|\s*safe\b|\bmark_safe\s*\(|\bMarkup\s*\("
+        r"|res\.(?:send|write)\s*\(\s*[`'\"][^`'\"]*<[a-z][^`'\"]*\$\{[^}]*(?:req|request|params|query|body)\b")),
 }
+
+# A file that neutralizes HTML before rendering — DOMPurify / sanitize-html / the `xss` lib / Python
+# bleach / an explicit HTML-escape. Presence suppresses the file's xss lead (file-level, like the
+# other surface FP guards): a sanitized render is the safe pattern, not the vulnerability.
+_XSS_SANITIZER = re.compile(
+    r"DOMPurify|sanitize-?html|sanitizeHtml|\bxss\s*\(|\bbleach\.|escapeHtml|escapeHTML|encodeHTML"
+    r"|\bhtmlspecialchars\b|\bhe\.encode\b|\bxss-clean\b", re.I)
 
 
 # SSRF-via-redirect (REF-PENTEST #1): axios/requests FOLLOW redirects by DEFAULT, so an outbound
@@ -126,6 +150,19 @@ SSRF_PRIVATE_GUARD = re.compile(
     r"allow_redirects\s*=\s*False|follow_redirects\s*=\s*False|maxRedirects\s*:\s*0|169\.254|RFC1918|is_private|"
     r"ip_address|private_?range|block.?(?:internal|private)|allowedHosts?|allow[_-]?list", re.I)
 
+# server-request sink classes — they assume the "user input" is an attacker over an HTTP request. On a
+# repo with NO HTTP listener (a CLI / library / data tool: 0 routes AND no web framework), the input is
+# an operator's argv/config, not an attacker, so they don't apply (real-repo FP: a real repo,
+# several real repos). redirect/error-disclosure are likewise server-response classes.
+_SERVER_REQUEST_CLASSES = {"ssrf", "ssrf-outbound-http", "command-injection", "path-traversal",
+                           "open-redirect", "sql-injection", "nosql-injection", "ssti",
+                           "eval-injection", "xxe", "redos", "error-disclosure"}
+# a Python module that is an operator CLI (has an __main__ entrypoint / argparse / click) and imports NO
+# web framework — its input is argv/stdin, not an HTTP request, so server-only sinks don't apply.
+_PY_CLI = re.compile(r"if\s+__name__\s*==\s*['\"]__main__['\"]|\bargparse\.|click\.command|\btyper\.|sys\.argv", re.I)
+_PY_WEB_FW = re.compile(r"\bfrom\s+flask|\bimport\s+flask|\bfrom\s+fastapi|\bimport\s+fastapi|\bfrom\s+django|"
+                        r"\bfrom\s+aiohttp|\bfrom\s+starlette|\bfrom\s+sanic|\bfrom\s+tornado|Flask\s*\(|FastAPI\s*\(", re.I)
+
 
 class SurfaceExtractor(Extractor):
     name = "surface"
@@ -135,6 +172,14 @@ class SurfaceExtractor(Extractor):
         datastores = set((facts.get("stack") or {}).get("datastores", []))
         has_sql = any("sql" in d or d in ("postgres", "mysql", "sqlite") for d in datastores)
         has_nosql = any(d in ("mongo", "dynamodb") for d in datastores)
+
+        stack = (facts.get("stack") or {})
+        frameworks = stack.get("frameworks") or []
+        has_routes = bool((facts.get("routes") or {}).get("endpoints"))
+        # No HTTP listener anywhere → the request-driven sink classes have no attacker in the loop.
+        # Gated on `languages` being populated so it only fires on a REAL run (StackExtractor always
+        # sets languages); a minimal fact dict without it isn't treated as "non-web".
+        no_web_surface = bool(stack.get("languages")) and not has_routes and not frameworks
 
         found: dict = {k: [] for k in SINKS}
         counts: dict = {k: 0 for k in SINKS}
@@ -149,12 +194,17 @@ class SurfaceExtractor(Extractor):
             if is_test_file(rel):
                 continue
             nonserver = is_client_file(rel, text) or is_script_file(rel)
+            # a Python operator-CLI module (argv/click, no web framework) is not an HTTP handler
+            if not nonserver and rel.endswith(".py") and _PY_CLI.search(text) and not _PY_WEB_FW.search(text):
+                nonserver = True
             for cls, (_probe, gate, rx) in SINKS.items():
                 if gate == "sql" and not has_sql:
                     continue
                 if gate == "nosql" and not has_nosql:
                     continue
-                if cls.startswith("ssrf") and nonserver:
+                # request-driven sink classes need an HTTP attacker: skip in client/script/CLI files,
+                # and skip entirely on a repo with no web surface (no routes + no web framework).
+                if cls in _SERVER_REQUEST_CLASSES and (nonserver or no_web_surface):
                     continue
                 if rx.search(text):
                     # command-injection precision: an argv-list subprocess with shell=False is safe —
@@ -162,25 +212,29 @@ class SurfaceExtractor(Extractor):
                     if (cls == "command-injection" and re.search(r"shell\s*=\s*False", text)
                             and not re.search(r"shell\s*=\s*True", text)):
                         continue
+                    # xss precision: a file that sanitizes/encodes HTML (DOMPurify/bleach/escape) before
+                    # the sink is the safe pattern — suppress its xss lead (file-level FP guard).
+                    if cls == "xss" and _XSS_SANITIZER.search(text):
+                        continue
                     counts[cls] += 1
                     if len(found[cls]) < 60:
                         found[cls].append(rel)
-            if (len(ssrf_redirect) < 40 and not nonserver and not REDIRECT_GUARD.search(text)
+            if (len(ssrf_redirect) < 40 and not nonserver and not no_web_surface and not REDIRECT_GUARD.search(text)
                     and (SINKS["ssrf-outbound-http"][2].search(text) or SINKS["ssrf"][2].search(text))):
                 ssrf_redirect.append(rel)
             # reverse-proxy prefix-escape: catch-all segments joined into a fixed-prefix upstream URL
             # with no dot-segment rejection (client .tsx excluded — the proxy is the server handler)
-            if (len(proxy_escape) < 30 and not nonserver and PROXY_JOIN.search(text)
+            if (len(proxy_escape) < 30 and not nonserver and not no_web_surface and PROXY_JOIN.search(text)
                     and PROXY_FETCH.search(text) and not DOTSEG_GUARD.search(text)):
                 proxy_escape.append(rel)
             # host-header → redirect (open redirect via Host/X-Forwarded-Host). Server-only; needs a
             # redirect sink + a host-header read + no host allow-list in the file.
-            if (len(host_redirect) < 30 and not nonserver and HOST_HEADER_READ.search(text)
+            if (len(host_redirect) < 30 and not nonserver and not no_web_surface and HOST_HEADER_READ.search(text)
                     and REDIRECT_SINK.search(text) and not HOST_ALLOWLIST.search(text)):
                 host_redirect.append(rel)
             # SSRF-hardening: follows redirects with no allow-list / private-range deny. Worker/job
             # SCRIPTS are in scope here (they fetch server-side), so only client + tests are excluded.
-            if (len(follows_redirect) < 30 and not is_client_file(rel, text)
+            if (len(follows_redirect) < 30 and not is_client_file(rel, text) and not no_web_surface
                     and FOLLOW_REDIR.search(text) and OUTBOUND_CLIENT.search(text)
                     and not SSRF_PRIVATE_GUARD.search(text)):
                 follows_redirect.append(rel)

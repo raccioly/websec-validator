@@ -37,6 +37,10 @@ _RE_MIN = re.compile(r"\.min\(\s*(\d{1,3})|minLength\s*[:=]\s*(\d{1,3})|@MinLeng
 # lowercase-only rule `(?=.*[a-z])` was mis-counted as ALSO requiring uppercase — inflating the class
 # set and masking real drift (a lower-only sibling looked equal to an upper+lower policy). `(?-i:...)`
 # locally disables re.I for just the range token; the keyword branches keep re.I for casing tolerance.
+# Char-class REQUIREMENT signals — a lookahead `(?=.*[A-Z])` or an express-validator/zod option.
+# NB: a BARE regex-literal `/[A-Z]/` was tried (to parse imperative `[...].filter(re=>re.test(pw))`
+# refinements) but reverted — those literals appear in non-password validation everywhere and inflated
+# the class set, manufacturing false cross-route DRIFT (a real Next.js app password-policy 2→10). Not worth ~2 FPs.
 _RE_UPPER = re.compile(_LA + r"\[[^\]]*(?-i:A-Z)|minUppercase\s*:\s*[1-9]|requireUppercase\s*[:=]\s*true", re.I)
 _RE_LOWER = re.compile(_LA + r"\[[^\]]*(?-i:a-z)|minLowercase\s*:\s*[1-9]|requireLowercase\s*[:=]\s*true", re.I)
 _RE_DIGIT = re.compile(_LA + r"(?:\\d|\[[^\]]*0-9)|minNumbers\s*:\s*[1-9]|requireDigit\s*[:=]\s*true", re.I)
