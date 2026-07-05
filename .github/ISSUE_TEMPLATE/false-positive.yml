@@ -1,0 +1,47 @@
+name: False positive report
+description: A finding fired on code that is actually safe. FP reports directly improve detector precision and the calibration table.
+title: "[FP] "
+labels: ["false-positive"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks — false-positive reports are the single most valuable input this project gets.
+        Please sanitize any code you paste (rename identifiers, strip secrets/domains).
+  - type: input
+    id: version
+    attributes:
+      label: websec-validator version
+      description: "`websec --version`"
+      placeholder: "0.10.0"
+    validations:
+      required: true
+  - type: input
+    id: finding
+    attributes:
+      label: Finding / attack class
+      description: The finding title or attack_class from the ledger (e.g. `missing-auth-write`, `ssrf-var-arg`).
+      placeholder: "unsigned-cookie-authorization"
+    validations:
+      required: true
+  - type: textarea
+    id: pattern
+    attributes:
+      label: The (sanitized) code pattern it fired on
+      description: A minimal snippet reproducing the pattern — enough for us to build a negative test fixture.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: why-safe
+    attributes:
+      label: Why it's actually safe
+      description: What makes this a false positive? (e.g. "the guard is applied at the router mount two files up", "this value never reaches the sink")
+    validations:
+      required: true
+  - type: textarea
+    id: ledger
+    attributes:
+      label: Ledger entry (optional)
+      description: The relevant entry from `findings-ledger.json` — includes the evidence chain and confidence bucket.
+      render: json

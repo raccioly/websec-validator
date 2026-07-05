@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Open-source hygiene surface: root `SECURITY.md` (GitHub-recognized security policy with
+  private-reporting flow), `CONTRIBUTING.md` (ground rules + dev setup + PR checklist),
+  `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), issue templates (bug / **false positive** /
+  feature) + PR template, and Dependabot config (GitHub Actions + Docker base image).
+- README status badges (CI, PyPI, Python, zero-deps, SARIF, license).
+- PyPI metadata: trove classifiers and `[project.urls]` (homepage, docs, changelog, issues) —
+  populates the sidebar on the PyPI project page from the next release.
+
 ### Changed
 
 ### Fixed

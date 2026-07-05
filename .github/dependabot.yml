@@ -1,0 +1,12 @@
+# Runtime dependencies are deliberately zero (stdlib only), so the only supply-chain
+# surfaces to keep fresh are the SHA-pinned GitHub Actions and the Docker base image.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

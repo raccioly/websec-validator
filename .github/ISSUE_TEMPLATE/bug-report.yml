@@ -1,0 +1,41 @@
+name: Bug report
+description: The tool crashed, produced malformed output, or misbehaved (for a finding that's wrong-but-safe, use the False positive template).
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: websec-validator version
+      description: "`websec --version`"
+      placeholder: "0.10.0"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS + Python version (+ Docker, if used)
+      placeholder: "macOS 15 / Python 3.12 / pipx"
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command that failed
+      placeholder: "websec run ./my-app --scan --format sarif"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Error output / traceback, and what you expected instead. Sanitize anything sensitive.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: target-shape
+    attributes:
+      label: Target repo shape (optional)
+      description: Rough stack of the scanned repo (e.g. "Next.js monorepo with Supabase edge functions") — extractor bugs are usually stack-specific.
