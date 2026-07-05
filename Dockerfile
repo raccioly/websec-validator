@@ -5,7 +5,7 @@
 #
 #   docker build -t websec-validator .
 #   docker run --rm -v "$PWD:/scan" websec-validator run /scan --out /scan/websec-out
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # TARGETARCH is auto-populated by BuildKit (arm64/amd64) — do NOT give it a
 # default, or it shadows the real build arch and pulls the wrong-arch packages.
