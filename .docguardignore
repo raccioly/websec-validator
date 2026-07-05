@@ -39,6 +39,11 @@ poetry.lock
 # web app with AWS/DynamoDB integrations and HTTP endpoints (none of which it has).
 tests/fixtures/**
 
+# base-research/ — private, gitignored prior-engagement reference material (probe scripts with
+# placeholder "adjust this to your API" text that DocGuard reads as TODOs). Not this project's
+# source, and never committed — exclude it from doc validation too.
+base-research/**
+
 # Probe TEMPLATES are scaffolding emitted to the END USER (placeholders like
 # <PROJECT_NAME> they fill in for their own app). The "fill this in" instructional
 # comments are not project TODOs, so exclude them from TODO/surface validation.

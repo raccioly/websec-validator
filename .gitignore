@@ -6,7 +6,7 @@ dynamic-config.json
 # self-improving calibration overlay — your private confirmed labels (normally lives in ~/.cache; never commit)
 calibration-local.json
 
-# private reference material (prior WU pentest — large + contains real secrets/findings)
+# private reference material (prior client engagement — large + contains real secrets/findings)
 base-research/
 
 # local agent tooling (OpenWolf brain + Claude config + daemon state) — machine-local, not the product
