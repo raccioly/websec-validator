@@ -1,5 +1,6 @@
 name: "websec-validator"
-description: "Local-first security recon that briefs your AI agent — emits SARIF for GitHub Code Scanning + can gate a PR on newly-introduced findings."
+# Marketplace requires < 125 chars
+description: "Local-first security recon that briefs your AI coding agent — SARIF for Code Scanning, can gate PRs on new findings."
 branding:
   icon: shield
   color: purple
