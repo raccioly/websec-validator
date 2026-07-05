@@ -67,10 +67,13 @@ artifacts land in `/scan/websec-out`.
 ## Usage
 
 ```bash
-websec run ./my-app           # ← the one command: recon + stage tailored probes + emit the briefing
-websec ./my-app               # same thing — a bare path defaults to `run`
-websec run ./my-app --scan    # …and also execute the available static scanners
-websec doctor ./my-app        # (optional) which scanners are installed?
+websec run ./my-app                    # ← the one command: recon + stage tailored probes + emit the briefing
+websec ./my-app                        # same thing — a bare path defaults to `run`
+websec run ./my-app --scan             # …and also execute the available static scanners
+websec run ./my-app --format sarif     # SARIF 2.1.0 to stdout (for piping into CI); also always written to the run dir
+websec run ./my-app --fail-on high     # exit 1 if any HIGH+ finding remains (a CI gate)
+websec doctor ./my-app                 # (optional) which scanners are installed?
+websec mcp                             # run as an MCP server over stdio (typed recon tools for any MCP client)
 ```
 
 Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and follow it."**
@@ -82,19 +85,19 @@ Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and 
 | | Dimension | Notable output |
 |---|---|---|
 | stack | languages, frameworks, datastores | monorepo-aware (aggregates every manifest) |
-| routes | every endpoint via **OWASP Noir** | method · path · typed params · code path |
-| auth | scheme + login surface + **insecure-default signing secrets** | multi-scheme; flags a hard-coded `JWT_SECRET \|\| 'dev-secret'` fallback (forgeable JWT) |
+| routes | every endpoint via **OWASP Noir** (+ Supabase-edge, **AWS SAM / Function-URL**) | method · path · typed params · code path · **AuthType:NONE public endpoints** |
+| auth | scheme + login surface + **insecure-default signing secrets** + **broken-auth backdoors** | multi-scheme; flags a hard-coded `JWT_SECRET \|\| 'dev-secret'` fallback (forgeable JWT), a **`dev-`token / accept-any-password backdoor** (total bypass, CRITICAL), and a **fail-open** `if(env.SECRET)` signature check |
 | **authz** | access-control map | guard coverage (incl. **router-mount auth**) + **write endpoints with no visible guard** + roles |
 | **authz_dataflow** | authz *correctness* (does the guard trust the right thing?) | **unsigned-cookie authorization** · **claim-keyed authz** (user-influenceable JWT claim) · **transaction-local RLS context** (resets before the query) |
 | tenant | multi-tenancy key candidates | the BOLA boundary, by frequency |
 | **password_policy** | cross-route consistency **+ reuse/history** | complexity drift across routes **+ a set-password path that hashes without a reuse check** |
-| surface | 15 sink classes **+ redirect-SSRF** | user-input-gated sinks (incl. **mass-assignment via object spread**) + var-arg SSRF + error-disclosure + follows-redirects-without-per-hop-guard **+ reverse-proxy prefix-escape + host-header open-redirect + SSRF-redirect-hardening** |
+| surface | 16 sink classes **+ redirect-SSRF** | user-input-gated sinks (incl. **mass-assignment via object spread** and **reflected/DOM/template XSS** — `innerHTML`/`dangerouslySetInnerHTML`/`v-html`/`\|safe`, sanitizer-gated) + var-arg SSRF + error-disclosure + follows-redirects-without-per-hop-guard **+ reverse-proxy prefix-escape + host-header open-redirect + SSRF-redirect-hardening** |
 | **upload_security** | unrestricted upload + unsafe serve | deny-list-only, stored-name-from-filename, trust-client-MIME, accept-SVG, **serve without `nosniff`** |
 | schemas | data models + **privileged fields** | Pydantic/SQLAlchemy/Django/Prisma/Mongoose/TypeORM/Zod → `role`/`isAdmin`/`groupId` for mass-assignment targeting |
 | iac_ci | IaC + CI/CD | GHA injection (**run:-position-aware**), unpinned actions, tfstate, CDK AppSync `API_KEY` anonymous-default-auth, **docker-compose host-takeover (docker.sock / pid:host / privileged) + `.gitleaksignore` secret-suppression audit** |
 | client_exposure | browser leakage | public-var secrets by **name + value-shape (`da2-…`) + CDK build-injection**, server-secret-in-client, source maps |
 | **client_integrity** | tamperable display (client trust boundary) + **WS auth model** | any security-critical sink value (address/IBAN/2FA-seed/API-key/webhook) the user reads or copies, without strict CSP / out-of-band anchor **+ client-tamper-vector, grindable-fingerprint, over-claimed-control, the CSWSH determinant** |
-| **transport_security** | CSP + HSTS + **CORS** + **SRI** baseline | missing/weak CSP, inline event handlers, partial HSTS, **CORS reflect-origin+credentials, external script without SRI, monorepo `next.config` header gap** |
+| **transport_security** | CSP + HSTS + **CORS** + **SRI** + **clickjacking** + **CSRF** baseline | missing/weak CSP, inline event handlers, partial HSTS, **CORS reflect-origin+credentials, external script without SRI, monorepo `next.config` header gap, framework-agnostic clickjacking (no X-Frame-Options / `frame-ancestors`), CSRF (cookie-auth + no token lib + no SameSite)** |
 | **pii_exposure** | unmasked PII at the output boundary | `res.json(rawEntity)` with PII + **a masking control defined but with zero live call sites** (value-shape, not field-name) |
 | graphql | GraphQL surface | introspection (**AppSync `introspectionConfig: DISABLED`-aware**) / playground / depth-limit **+ AppSync subscription-authz (cross-group BOLA)** |
 | integrations | third-party + webhooks **+ outbound-action endpoints** | unsigned webhooks **+ email/SMS/push handlers with no auth or IP-only rate-limit + redundant secret-fetch** |
@@ -112,6 +115,8 @@ candidates — so probes get pointed at the *exact* endpoints, not fired blindly
 | `FACTS.json` | The full structured recon. |
 | `findings.json` | Static scanner results, **de-duplicated across tools** and severity-ranked (with `--scan`). |
 | `findings-ledger.json` / `REPORT.md` | The traceable ledger: each finding with an evidence chain, CWE/ASVS/OWASP-API citation, remediation, and a **calibrated `P(real)`** (measured real-vuln rate + 95% CI + sample size). |
+| `results.sarif` | **SARIF 2.1.0** — always written. Drop it into **GitHub Code Scanning** (inline PR-diff annotations + the Security tab), GitLab, Azure DevOps, VS Code's SARIF viewer, DefectDojo. |
+| `findings.envelope.json` | A **versioned, self-describing** JSON envelope (`schema_version`) around the ledger — for non-GitHub CI / dashboards that shouldn't reverse-engineer the internal shape. |
 | `probes/` | The probe scripts selected + staged for *this* app (BOLA, JWT, SSRF, mass-assignment…). |
 
 ## The flow
@@ -127,6 +132,57 @@ candidates — so probes get pointed at the *exact* endpoints, not fired blindly
 
 Static recon + briefing need **only the code**. *Running* the probes needs a live test instance +
 test credentials (the human supplies them) — the tool itself never touches a running app.
+
+## CI / enterprise integration
+
+The recon is the same either way — these just make the output consumable by pipelines, dashboards, and
+non-Claude agents. All stdlib, no new dependency.
+
+**SARIF → GitHub Code Scanning.** Every `run` writes `results.sarif` (SARIF 2.1.0). Upload it and each
+finding lands **inline on the PR diff** and in the **Security tab**, ranked by a security-severity band,
+with its CWE/ASVS/OWASP citation and remediation.
+
+**Gate the build.** `--fail-on {critical,high,medium,low}` exits non-zero when a finding at or above that
+severity remains — a real CI gate, report-only by default.
+
+**Only fail on what the PR introduced.** `--baseline <prior findings-ledger.json>` marks every finding
+`new` / `unchanged` / `fixed` (a stable per-finding fingerprint, surfaced as SARIF `baselineState`), and
+`--fail-on` then counts **only the new ones** — so a legacy backlog doesn't block every PR, but a newly
+introduced SSRF does.
+
+**Drop-in GitHub Action** ([`action.yml`](action.yml)):
+
+```yaml
+# .github/workflows/security.yml
+name: security
+on: [pull_request]
+permissions:
+  contents: read
+  security-events: write        # required to upload SARIF to Code Scanning
+jobs:
+  websec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: raccioly/websec-validator@v1
+        with:
+          path: .
+          fail-on: high         # block the PR on a new HIGH+ (omit for report-only)
+          # baseline: .websec/baseline-ledger.json   # optional: gate only on NEW findings
+```
+
+**MCP server (any agent, not just Claude Code).** `websec mcp` speaks the Model Context Protocol over
+stdio, exposing typed tools — `websec_recon`, `websec_findings`, `websec_sarif`, `websec_briefing` — so
+Cursor / Cline / Windsurf / Zed can call recon directly instead of shelling out and parsing stdout.
+Register it in your MCP client:
+
+```json
+{ "mcpServers": { "websec": { "command": "websec", "args": ["mcp"] } } }
+```
+
+**Versioned contract.** `FACTS.json`, `findings-ledger.json`, and `findings.envelope.json` all carry a
+`schema_version`; the JSON Schemas ship in the package (`schemas/facts.schema.json`,
+`schemas/ledger.schema.json`) so downstream tooling can validate against a stable shape.
 
 ## Proof harness
 
@@ -181,7 +237,7 @@ upload, cross-tenant BOLA, role/authz gaps).
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 238 tests
+python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 285 tests
 ```
 
 ## Releasing (maintainer)
@@ -221,7 +277,7 @@ algorithms / predictable principal), **docker-compose host-takeover** + **`.gitl
 secret-suppression** audits, and a **reverse-proxy prefix-escape** detector), cross-tool de-dup +
 **bundled Semgrep rules**, **router-mount-auth modeling** (cuts the dominant Express-monorepo
 missing-auth false positive), tailored probe staging, agent briefing, traceable findings ledger with
-**calibrated confidence (CJE — Wilson CIs)**, proof harness, test suite (238), **Docker bundle** (all
+**calibrated confidence (CJE — Wilson CIs)**, proof harness, test suite (285), **Docker bundle** (all
 scanners + Noir, arch-aware), **dynamic phase v1** (authenticated read-only cross-tenant BOLA —
 validated live, reproduced a hand-pentest's 14/14). Validated against the **REF-PENTEST pen test +
 retest** and re-validated on a large real-world LLM-agent monorepo (HIGH-finding noise 178 → 15, AI +

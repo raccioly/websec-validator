@@ -70,6 +70,63 @@ class AuthTests(unittest.TestCase):
         self.assertIn("jwt", a["scheme"])
 
 
+class TamperableDisplayGateTests(unittest.TestCase):
+    """Consequence gate — a money sink needs an act-on-it signal (copy/QR/href or a real value-SHAPE),
+    not just a matching field NAME; an intended one-time secret reveal is not a MitB defect."""
+    def _td(self, files):
+        from websec_validator.extractors.client_integrity import ClientIntegrityExtractor
+        d = Path(tempfile.mkdtemp())
+        for name, body in files.items():
+            (d / name).write_text(body)
+        f = ClientIntegrityExtractor().extract(RepoContext(d), {})
+        return [x for x in f["findings"] if x["attack_class"] == "tamperable-display"]
+
+    def test_name_only_money_label_not_flagged(self):
+        # a client file that references walletAddress but never copies/QRs/links it or shows a real value
+        td = self._td({"Nav.tsx": "export const Nav=()=> <div>{account_number_label}</div>;\n"})
+        self.assertEqual(td, [])
+
+    def test_copied_address_flagged(self):
+        td = self._td({"Recv.tsx": "'use client'\nexport const R=({walletAddress})=> <button "
+                                   "onClick={()=>navigator.clipboard.writeText(walletAddress)}>copy</button>;\n"})
+        self.assertTrue(td)
+
+    def test_one_time_reveal_not_flagged(self):
+        td = self._td({"Key.tsx": "'use client'\nexport const K=({apiKey})=> <div>Save this key now — it "
+                                  "cannot be retrieved again.<button onClick={()=>navigator.clipboard.writeText(apiKey)}>copy</button></div>;\n"})
+        self.assertEqual(td, [])
+
+
+class BrokenAuthTests(unittest.TestCase):
+    """Broken-auth backdoors — the CRITICAL total-bypass bugs the route/guard model can't see (the
+    endpoint IS 'guarded', just by something forgeable). Found via the real-repo FN audit."""
+    def _ba(self, files):
+        d = Path(tempfile.mkdtemp())
+        for name, body in files.items():
+            (d / name).write_text(body)
+        return AuthExtractor().extract(RepoContext(d), {"stack": {}, "routes": {}})["broken_auth"]
+
+    def test_dev_token_backdoor_critical(self):
+        ba = self._ba({"auth.ts": "if (token.startsWith('dev-')) { const role='dev-admin'; return {role}; }\n"})
+        self.assertTrue(any(b["kind"] == "dev-token-backdoor" and b["severity"] == "CRITICAL" for b in ba))
+
+    def test_accept_any_credential_critical(self):
+        ba = self._ba({"auth.ts": "async authorize(credentials){\n// For MVP, accept any email/password\n"
+                                  "if(credentials.password.length>=8) return {id:'user-1'};\n}\n"})
+        self.assertTrue(any(b["kind"] == "accept-any-credential" and b["severity"] == "CRITICAL" for b in ba))
+
+    def test_fail_open_signature_verify(self):
+        ba = self._ba({"billing.ts": "if (env.STRIPE_WEBHOOK_SECRET) {\n"
+                                     "  const valid = await verifyStripeSignature(rawBody, sig, env.STRIPE_WEBHOOK_SECRET);\n"
+                                     "  if(!valid) return new Response('bad',{status:400});\n}\n"})
+        self.assertTrue(any(b["kind"] == "fail-open-verification" for b in ba))
+
+    def test_real_login_with_bcrypt_not_flagged(self):
+        ba = self._ba({"auth.ts": "async authorize(c){ const u=await db.user(c.email);\n"
+                                  "if(await bcrypt.compare(c.password,u.passwordHash)) return u; }\n"})
+        self.assertEqual(ba, [])
+
+
 class TenantTests(unittest.TestCase):
     def test_node_groupid(self):
         t = TenantExtractor().extract(ctx("node_app"), {})
@@ -85,6 +142,250 @@ class SurfaceTests(unittest.TestCase):
         rx = SINKS["command-injection"][2]
         self.assertTrue(rx.search("child_process.exec(req.body.cmd)"))
         self.assertFalse(rx.search("child_process.exec('ls -la')"))
+
+    def test_xss_sink_regex_detects_dom_and_template(self):
+        rx = SINKS["xss"][2]
+        self.assertTrue(rx.search("el.innerHTML = req.query.q"))
+        self.assertTrue(rx.search("<div dangerouslySetInnerHTML={{__html: props.body}} />"))
+        self.assertTrue(rx.search('<div v-html="comment"></div>'))
+        self.assertTrue(rx.search("{{ user_bio | safe }}"))
+        # a static string assignment is not user-influenced → no match
+        self.assertFalse(rx.search("el.innerHTML = '<b>hi</b>'"))
+
+    def test_xss_suppressed_when_file_sanitizes(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "render.js").write_text(
+            "import DOMPurify from 'dompurify';\n"
+            "el.innerHTML = DOMPurify.sanitize(req.query.q);\n")
+        s = SurfaceExtractor().extract(RepoContext(d), {"stack": {}})
+        self.assertNotIn("xss", s["sinks"])
+
+    def test_xss_flagged_without_sanitizer(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "render.js").write_text("el.innerHTML = req.query.q + '<hr>'\n")
+        s = SurfaceExtractor().extract(RepoContext(d), {"stack": {}})
+        self.assertIn("xss", s["sinks"])
+
+    def test_request_sinks_suppressed_on_non_web_repo(self):
+        # a Python CLI (analyzed: languages set) with NO routes + NO web framework → SSRF has no HTTP
+        # attacker in the loop; suppress it. A real web app (frameworks set) still fires (control).
+        d = Path(tempfile.mkdtemp())
+        (d / "risk.py").write_text("import requests\ndef gate(u):\n    return requests.get(u)\n")
+        cli = SurfaceExtractor().extract(RepoContext(d), {"stack": {"languages": ["python"], "frameworks": []}})
+        self.assertNotIn("ssrf-outbound-http", cli["sinks"])
+        web = SurfaceExtractor().extract(RepoContext(d), {"stack": {"languages": ["python"], "frameworks": ["flask"]}})
+        self.assertIn("ssrf-outbound-http", web["sinks"])
+
+
+class TransportSecurityTests(unittest.TestCase):
+    def _run(self, files, facts=None):
+        d = Path(tempfile.mkdtemp())
+        for name, body in files.items():
+            p = d / name
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(body)
+        base = {"stack": {"frameworks": ["express"]},
+                "routes": {"endpoints": [{"method": "POST", "path": "/x"}]}}
+        base.update(facts or {})
+        return TransportSecurityExtractor().extract(RepoContext(d), base)
+
+    def test_clickjacking_flagged_when_no_xfo(self):
+        out = self._run({"server.js": "app.get('/', (req,res)=>res.send('<html>hi</html>'))\n"})
+        self.assertIn("no-clickjacking-protection", [f["kind"] for f in out["findings"]])
+        self.assertFalse(out["clickjacking_protected"])
+
+    def test_clickjacking_not_flagged_with_frame_ancestors(self):
+        out = self._run({"server.js": "res.setHeader('Content-Security-Policy', \"frame-ancestors 'none'\")\n"
+                                       "res.send('<html>hi</html>')\n"})
+        self.assertNotIn("no-clickjacking-protection", [f["kind"] for f in out["findings"]])
+        self.assertTrue(out["clickjacking_protected"])
+
+    def test_csrf_flagged_on_cookie_auth_without_token_or_samesite(self):
+        facts = {"auth": {"scheme": "session-cookie", "token_location": "cookie", "cookie_names": ["sid"]}}
+        out = self._run({"app.js": "app.post('/pay',(req,res)=>{res.cookie('sid',t,{httpOnly:true})})\n"}, facts)
+        self.assertIn("no-csrf-protection", [f["kind"] for f in out["findings"]])
+
+    def test_csrf_not_flagged_with_csrf_lib(self):
+        facts = {"auth": {"scheme": "session-cookie", "token_location": "cookie", "cookie_names": ["sid"]}}
+        out = self._run({"app.js": "const csurf=require('csurf'); app.use(csurf());\napp.post('/pay',h)\n"}, facts)
+        self.assertNotIn("no-csrf-protection", [f["kind"] for f in out["findings"]])
+
+    def test_csrf_not_flagged_for_bearer_api(self):
+        facts = {"auth": {"scheme": "jwt (bearer)", "token_location": "bearer"}}
+        out = self._run({"app.js": "app.post('/pay', requireAuth, h)\n"}, facts)
+        self.assertNotIn("no-csrf-protection", [f["kind"] for f in out["findings"]])
+
+    def test_no_transport_findings_on_non_web_tool(self):
+        # A Python CLI that emits an HTML report string but has no web framework and no routes is NOT
+        # a served browser surface — CSP/HSTS/clickjacking must not fire (real-repo FP: a real CLI).
+        out = self._run(
+            {"report.py": "html='<!DOCTYPE html><html><body>hi</body></html>'\nopen('r.html','w').write(html)\n"},
+            {"stack": {"frameworks": []}, "routes": {"endpoints": []}})
+        kinds = [f["kind"] for f in out["findings"]]
+        self.assertNotIn("no-clickjacking-protection", kinds)
+        self.assertNotIn("no-csp", kinds)
+        self.assertFalse(out["web_surface"])
+
+
+class FileClassTests(unittest.TestCase):
+    def test_python_test_files_recognized(self):
+        from websec_validator.extractors.base import is_test_file
+        for p in ("test_curl.py", "tests/x.py", "app/foo_test.py", "conftest.py", "pkg/test_helpers.py"):
+            self.assertTrue(is_test_file(p), p)
+        for p in ("src/api.py", "testimonials.py", "latest_data.py", "contest.py"):
+            self.assertFalse(is_test_file(p), p)
+
+
+class PathScopedGuardMountTests(unittest.TestCase):
+    """Real-repo FP (a real monorepo backends, 116+36 guarded routes flagged): `app.use('/api', requireAuth)`
+    on its own line, routers mounted on /api in LATER statements. Express applies middleware in order."""
+    def test_guard_mount_covers_routers_mounted_after_it(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "server.ts").write_text(
+            "import authRoutes from './routes/authRoutes';\n"
+            "import conversationRoutes from './routes/conversationRoutes';\n"
+            "app.use('/api/auth', authRoutes);\n"        # BEFORE the guard → public (login)
+            "app.use('/api', requireAuth);\n"            # standalone path-scoped guard mount
+            "app.use('/api', conversationRoutes);\n")    # AFTER the guard → protected
+        (d / "routes").mkdir()
+        (d / "routes" / "conversationRoutes.ts").write_text(
+            "const router = Router();\nrouter.post('/groups/:id/messages', h);\nexport default router;\n")
+        (d / "routes" / "authRoutes.ts").write_text(
+            "const router = Router();\nrouter.post('/login', h);\nexport default router;\n")
+        facts = {"routes": {"endpoints": [
+            {"method": "POST", "path": "/groups/:id/messages",
+             "code_path": str(d / "routes" / "conversationRoutes.ts")},
+            {"method": "POST", "path": "/login", "code_path": str(d / "routes" / "authRoutes.ts")}]}}
+        out = AuthzExtractor().extract(RepoContext(d), facts)
+        guards = {e["path"]: e["guarded"] for e in out["endpoint_guards"]}
+        self.assertTrue(guards["/groups/:id/messages"])   # covered by app.use('/api', requireAuth)
+
+
+class GuardAliasTests(unittest.TestCase):
+    """Real-repo FP (a real Next.js app, 92 handlers): app-specific HOF wrappers that compose a known guard
+    (withDealAuth = withAuth(...)), called with a TS generic (`withDealAuth<{dealId}>(...)`), + a
+    secret-bearer cron guard (`Bearer ${CRON_SECRET}`) — all now credited as guarded."""
+    def test_hof_wrapper_generic_and_secret_bearer_credited(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "lib").mkdir()
+        (d / "lib" / "mw.ts").write_text(
+            "export function withAuth(h){ return async(req)=>{ const s=await getServerSession();"
+            " if(!s) return new Response('',{status:401}); return h(req);} }\n"
+            "export function withDealAuth(h){ return withAuth(async(req)=>h(req)); }\n")
+        (d / "api").mkdir()
+        (d / "api" / "deal.ts").write_text(
+            "import { withDealAuth } from '../lib/mw';\n"
+            "export const GET = withDealAuth<{dealId:string}>(async(req)=>{ return Response.json({}); });\n")
+        (d / "api" / "cron.ts").write_text(
+            "export async function GET(req){ const a=req.headers.get('authorization');"
+            " if(a!==`Bearer ${process.env.CRON_SECRET}`) return new Response('',{status:401}); }\n")
+        facts = {"routes": {"endpoints": [
+            {"method": "GET", "path": "/api/deals/:dealId", "code_path": str(d / "api" / "deal.ts")},
+            {"method": "GET", "path": "/api/cron", "code_path": str(d / "api" / "cron.ts")}]}}
+        out = AuthzExtractor().extract(RepoContext(d), facts)
+        g = {e["path"]: e["guarded"] for e in out["endpoint_guards"]}
+        self.assertTrue(g["/api/deals/:dealId"], "withDealAuth<...>( generic wrapper should be credited")
+        self.assertTrue(g["/api/cron"], "Bearer ${CRON_SECRET} secret-bearer guard should be credited")
+
+    def test_outbound_bearer_does_not_credit_but_inline_auth_does(self):
+        # REGRESSION: an OUTBOUND `Bearer ${apiKey}` header a handler BUILDS must NOT be read as an inbound
+        # guard (this hid a real Next.js app's unauth /api/auth/seed backdoor). Inline `await auth()`+401 DOES credit.
+        d = Path(tempfile.mkdtemp())
+        (d / "api").mkdir()
+        (d / "api" / "seed.ts").write_text(
+            "import { hashPassword } from '@/lib/auth';\n"
+            "export async function POST(req){ const h={Authorization:`Bearer ${apiKey}`};"
+            " await createUser({password: process.env.SEED_DEFAULT_PASSWORD||'x'}); return Response.json({}); }\n")
+        (d / "api" / "chat.ts").write_text(
+            "export async function POST(req){ const session=await auth(); "
+            "if(!session?.user?.id) return NextResponse.json({e:1},{status:401}); return Response.json({}); }\n")
+        facts = {"routes": {"endpoints": [
+            {"method": "POST", "path": "/api/auth/seed", "code_path": str(d / "api" / "seed.ts")},
+            {"method": "POST", "path": "/api/deals/:id/chat", "code_path": str(d / "api" / "chat.ts")}]}}
+        g = {e["path"]: e["guarded"] for e in AuthzExtractor().extract(RepoContext(d), facts)["endpoint_guards"]}
+        self.assertFalse(g["/api/auth/seed"], "outbound Bearer + util import must NOT credit an unauth handler")
+        self.assertTrue(g["/api/deals/:id/chat"], "inline await auth() + 401 should be credited")
+
+
+class SamRoutesTests(unittest.TestCase):
+    """AWS SAM / serverless route modeling — real-repo FN (several real repos backends were
+    0-routes/unprobed). Api events + Function URLs → routes; AuthType:NONE → a public-endpoint signal."""
+    def _rows(self):
+        from websec_validator.extractors.routes import _sam_routes
+        d = Path(tempfile.mkdtemp())
+        (d / "src" / "handlers").mkdir(parents=True)
+        (d / "src" / "handlers" / "auth.ts").write_text("export const login = async(e)=>({statusCode:200});\n")
+        (d / "live").mkdir()
+        (d / "live" / "lambda_handlers.py").write_text("def handler_dashboard(event, ctx):\n    return {}\n")
+        (d / "template.yaml").write_text(
+            "Resources:\n"
+            "  LoginFn:\n    Type: AWS::Serverless::Function\n    Properties:\n"
+            "      Handler: dist/handlers/auth.login\n"
+            "      Events:\n        ApiEv:\n          Type: Api\n          Properties:\n"
+            "            Path: /api/auth/login\n            Method: post\n"
+            "  DashFn:\n    Type: AWS::Serverless::Function\n    Properties:\n"
+            "      Handler: live.lambda_handlers.handler_dashboard\n"
+            "      FunctionUrlConfig:\n        AuthType: NONE\n")
+        return _sam_routes(RepoContext(d))
+
+    def test_api_event_and_function_url_detected(self):
+        rows = self._rows()
+        paths = {(r["method"], r["path"]) for r in rows}
+        self.assertIn(("POST", "/api/auth/login"), paths)          # Api event
+        self.assertIn(("GET", "/"), paths)                          # Function URL (HTTP root)
+        self.assertTrue(any(r.get("sam_auth_type") == "NONE" for r in rows))
+
+    def test_handler_resolved_dist_to_src(self):
+        login = [r for r in self._rows() if r["path"] == "/api/auth/login"][0]
+        self.assertTrue(login["code_path"].endswith("src/handlers/auth.ts"), login["code_path"])
+
+    def test_nextjs_destructured_factory_route_detected(self):
+        # a Next App Router route.ts that exports handlers via a destructured factory
+        # (`export const { GET, POST } = makeRouteHandler(...)`, Keystatic/Auth.js) — real-repo recall gap (a real Next.js app)
+        from websec_validator.extractors.routes import _fallback_next_app_router
+        d = Path(tempfile.mkdtemp())
+        rd = d / "app" / "src" / "app" / "api" / "keystatic" / "[...params]"   # monorepo-nested app dir
+        rd.mkdir(parents=True)
+        (rd / "route.ts").write_text("import { makeRouteHandler } from '@keystatic/next/route-handler';\n"
+                                     "export const { POST, GET } = makeRouteHandler({config});\n")
+        paths = {(r["method"], r["path"]) for r in _fallback_next_app_router(RepoContext(d))}
+        self.assertIn(("GET", "/api/keystatic/{params}"), paths)      # detected + path not '/src/app/...'
+        self.assertIn(("POST", "/api/keystatic/{params}"), paths)
+
+    def test_own_openapi_spec_promotable_vendored_not(self):
+        # VAmPI-style: an app's OWN openapi3.yml is spec-derived (SPEC_PATH) but NOT under a vendor dir,
+        # so it's promotable to the route list; a node_modules swagger stays vendored. (proof: VAmPI 19→0→19)
+        from websec_validator.extractors.routes import _is_spec_derived, _VENDOR_DIR
+        self.assertTrue(_is_spec_derived("openapi_specs/openapi3.yml"))
+        self.assertFalse(bool(_VENDOR_DIR.search("openapi_specs/openapi3.yml")))       # promotable
+        self.assertTrue(bool(_VENDOR_DIR.search("node_modules/swagger-ui/openapi.yaml")))  # vendored, stays out
+
+
+class RoutesClientFilterTests(unittest.TestCase):
+    """Real-repo FP (combined frontend+backend monorepo): Noir parsed the React axios API-client files
+    as server routes → every one flagged missing-auth. A client CALLS; it doesn't SERVE."""
+    def _f(self, code_path, ctx):
+        from websec_validator.extractors.routes import _looks_nonserver_route
+        return _looks_nonserver_route(code_path, ctx)
+
+    def test_frontend_api_client_excluded_serverless_and_server_kept(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "api").mkdir()
+        (d / "api" / "conversations.ts").write_text(
+            "import { api } from './client';\nexport const getConvos = () => api.get('/groups/1/conversations');\n")
+        (d / "fn.js").write_text(                          # Cloudflare Pages Function that calls axios
+            "import axios from 'axios';\nexport async function onRequestPost({request}){ return axios.get('http://w'); }\n")
+        (d / "server.ts").write_text("const router = Router();\nrouter.get('/y', h);\n")
+        ctx = RepoContext(d)
+        self.assertTrue(self._f(str(d / "api" / "conversations.ts"), ctx))   # frontend client → excluded
+        self.assertFalse(self._f(str(d / "fn.js"), ctx))                     # serverless handler → kept
+        self.assertFalse(self._f(str(d / "server.ts"), ctx))                 # express router → kept
+
+    def test_netlify_redirects_excluded(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "public").mkdir()
+        (d / "public" / "_redirects").write_text("/* /index.html 200\n")
+        self.assertTrue(self._f(str(d / "public" / "_redirects"), RepoContext(d)))
 
 
 class SchemasTests(unittest.TestCase):
@@ -134,6 +435,51 @@ class IntegrationsTests(unittest.TestCase):
                         "  const h=crypto.createHmac('sha256',k).update(req.body).digest('hex');\n"
                         "  if(h!==req.headers['stripe-signature']) return res.status(401).end();\n});\n")
         self.assertEqual(out["webhooks_without_sig_verification"], [])
+
+    def _run_path(self, method, path, handler_src):
+        d = Path(tempfile.mkdtemp())
+        (d / "h.js").write_text(handler_src)
+        facts = {"routes": {"endpoints": [{"method": method, "path": path, "code_path": str(d / "h.js")}]}}
+        return IntegrationsExtractor().extract(RepoContext(d), facts)
+
+    def test_oauth_callback_not_flagged_as_webhook(self):
+        # /callback matches WEBHOOK_PATH but is an OAuth authz-code callback (state/PKCE) — not a webhook.
+        out = self._run_path("GET", "/auth/callback",
+                             "router.get('/auth/callback',(req,res)=>{const code=req.query.code; exchangeCode(code);});\n")
+        self.assertEqual(out["webhooks_without_sig_verification"], [])
+
+    def test_webhook_mgmt_crud_not_flagged(self):
+        out = self._run_path("POST", "/settings/webhooks",
+                             "router.post('/settings/webhooks',(req,res)=>{ return createWebhook(req.body.url); });\n")
+        self.assertEqual(out["webhooks_without_sig_verification"], [])
+
+    def test_get_webhook_stub_not_flagged(self):
+        out = self._run_path("GET", "/webhooks/health", "router.get('/webhooks/health',(req,res)=>res.json({ok:1}));\n")
+        self.assertEqual(out["webhooks_without_sig_verification"], [])
+
+
+class CsrfBaselineTests(unittest.TestCase):
+    def _run(self, frameworks, files):
+        d = Path(tempfile.mkdtemp())
+        for name, body in files.items():
+            (d / name).write_text(body)
+        facts = {"stack": {"frameworks": frameworks},
+                 "routes": {"endpoints": [{"method": "POST", "path": "/x"}]},
+                 "auth": {"scheme": "session-cookie", "token_location": "cookie", "cookie_names": ["sid"]}}
+        return TransportSecurityExtractor().extract(RepoContext(d), facts)
+
+    def test_plain_session_app_flagged(self):
+        out = self._run(["express"], {"app.js": "app.post('/x',(req,res)=>{res.cookie('sid',t)});\n"})
+        self.assertIn("no-csrf-protection", [f["kind"] for f in out["findings"]])
+
+    def test_nextauth_default_not_flagged(self):
+        # NextAuth defaults SameSite=Lax — the classic ambient-cookie CSRF doesn't apply
+        out = self._run(["next", "nextauth"], {"app.js": "app.post('/x',(req,res)=>{res.cookie('sid',t)});\n"})
+        self.assertNotIn("no-csrf-protection", [f["kind"] for f in out["findings"]])
+
+    def test_server_actions_not_flagged(self):
+        out = self._run(["next"], {"actions.ts": "'use server'\nexport async function save(fd){ /* mutate */ }\n"})
+        self.assertNotIn("no-csrf-protection", [f["kind"] for f in out["findings"]])
 
 
 class CalibrationTests(unittest.TestCase):

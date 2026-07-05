@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 
-from .base import Extractor, RepoContext, is_test_file
+from .base import Extractor, RepoContext, is_client_file, is_test_file
 
 UPLOAD_MARK = re.compile(r"\bmulter\b|req\.files?\b|multipart/form-data|formidable|busboy|fileFilter"
                          r"|uploadMedia|presignedPost|\.upload\s*\(", re.I)
@@ -49,7 +49,10 @@ class UploadSecurityExtractor(Extractor):
         findings = []
         upload_files, serve_files = [], []
         for _p, rel, text in ctx.iter_code():
-            if is_test_file(rel):       # test fixtures/mocks aren't a deployed upload/serve surface
+            # test fixtures/mocks aren't a deployed surface; a React CLIENT component (.tsx / 'use client')
+            # renders <img src> and calls uploadMedia(file) but can NOT set HTTP response headers or build
+            # an S3 key — flagging serve-nosniff/upload-from-filename on it is a category error (real-repo FP).
+            if is_test_file(rel) or is_client_file(rel, text):
                 continue
             is_upload = bool(UPLOAD_MARK.search(text))
             if is_upload:

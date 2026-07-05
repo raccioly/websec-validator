@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/raccioly/websec-validator/schemas/facts.schema.json",
+  "title": "websec-validator FACTS.json",
+  "description": "Structured recon output. Each extractor contributes one top-level key; the set grows as extractors are added, so additionalProperties is permitted. Versioned in lockstep with formats.SCHEMA_VERSION.",
+  "type": "object",
+  "required": ["tool", "version", "target", "stack"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {"type": "string"},
+    "tool": {"const": "websec-validator"},
+    "version": {"type": "string"},
+    "target": {"type": "string", "description": "Absolute path of the scanned repo."},
+    "files_scanned": {"type": "integer"},
+    "files_truncated": {"type": "boolean", "description": "True if the MAX_FILES cap was hit — recon is PARTIAL."},
+    "file_cap": {"type": "integer"},
+    "stack": {"type": "object", "properties": {"languages": {"type": "array"}, "frameworks": {"type": "array"}, "datastores": {"type": "array"}}},
+    "routes": {"type": "object", "properties": {"count": {"type": "integer"}, "endpoints": {"type": "array"}, "targeting": {"type": "object"}}},
+    "auth": {"type": "object"},
+    "authz": {"type": "object"},
+    "tenant": {"type": "object"},
+    "surface": {"type": "object"},
+    "transport_security": {"type": "object"}
+  }
+}

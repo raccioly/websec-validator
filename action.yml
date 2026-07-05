@@ -1,0 +1,59 @@
+name: "websec-validator"
+description: "Local-first security recon that briefs your AI agent — emits SARIF for GitHub Code Scanning + can gate a PR on newly-introduced findings."
+branding:
+  icon: shield
+  color: purple
+
+inputs:
+  path:
+    description: "Path to the repo/subdir to scan."
+    required: false
+    default: "."
+  scan:
+    description: "Also execute the available static scanners (Trivy/Gitleaks/Semgrep/…) if present."
+    required: false
+    default: "false"
+  fail-on:
+    description: "Fail the job if any finding at/above this severity remains (critical|high|medium|low). Empty = never fail (report-only)."
+    required: false
+    default: ""
+  baseline:
+    description: "Optional prior findings-ledger.json — gate only on findings NEW since this baseline."
+    required: false
+    default: ""
+  upload-sarif:
+    description: "Upload results.sarif to the GitHub Security tab (Code Scanning)."
+    required: false
+    default: "true"
+  out:
+    description: "Output directory."
+    required: false
+    default: "websec-out"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install websec-validator
+      shell: bash
+      run: pipx install websec-validator || pip install --user websec-validator
+
+    - name: Run websec-validator
+      shell: bash
+      run: |
+        args=()
+        [ "${{ inputs.scan }}" = "true" ] && args+=(--scan)
+        [ -n "${{ inputs.fail-on }}" ] && args+=(--fail-on "${{ inputs.fail-on }}")
+        [ -n "${{ inputs.baseline }}" ] && args+=(--baseline "${{ inputs.baseline }}")
+        websec run "${{ inputs.path }}" --out "${{ inputs.out }}" "${args[@]}"
+
+    - name: Upload SARIF to Code Scanning
+      if: ${{ always() && inputs.upload-sarif == 'true' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.out }}/latest/results.sarif
+        category: websec-validator

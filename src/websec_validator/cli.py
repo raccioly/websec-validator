@@ -16,8 +16,8 @@ import json
 import sys
 from pathlib import Path
 
-from . import (__version__, briefing, calibration, constitution, dynamic, findings, probes, proof,
-               recon, report, scanners)
+from . import (__version__, baseline, briefing, calibration, constitution, dynamic, findings, formats,
+               probes, proof, recon, report, scanners)
 
 
 def _resolve_target(raw: str) -> Path:
@@ -84,67 +84,104 @@ def cmd_run(args) -> int:
     target = _resolve_target(args.target)
     out, ts = _new_run_dir(args.out)
 
-    print(f"websec-validator v{__version__}  ·  target: {target}  ·  run {ts}\n")
+    # In a machine-output mode (sarif/json) keep STDOUT pure for piping — route human progress to
+    # stderr. `websec run app --format sarif > results.sarif` then Just Works in a pipeline.
+    fmt = getattr(args, "format", "briefing")
+    log = (lambda *a, **k: print(*a, file=sys.stderr, **k)) if fmt != "briefing" else print
+
+    log(f"websec-validator v{__version__}  ·  target: {target}  ·  run {ts}\n")
 
     # 1. recon
     facts = recon.build_facts(target, __version__, args.exclude)
     recon.write_facts(facts, out / "FACTS.json")
     langs = facts["stack"]["languages"]
-    _print_facts_summary(facts)
+    _print_facts_summary(facts, log)
 
     # 2. scanners: detect, optionally run
     det = scanners.detect(langs)
     scan_results = []
     unified = None
     if args.scan:
-        print("\n  running available static scanners (read-only)…")
+        log("\n  running available static scanners (read-only)…")
         only = args.scanners.split(",") if args.scanners else None
         scan_results = scanners.run_available(target, out, langs, excludes=args.exclude, only=only)
         for r in scan_results:
             tag = r.get("findings", r.get("status", "?"))
-            print(f"    {r['name']}: {tag}")
+            log(f"    {r['name']}: {tag}")
         unified = scanners.normalize_findings(scan_results, out, target=target)
-        print(f"  → {unified['total']} de-duplicated findings "
-              f"({unified['cross_tool_or_dup_merged']} merged) · {unified['by_severity']}")
+        log(f"  → {unified['total']} de-duplicated findings "
+            f"({unified['cross_tool_or_dup_merged']} merged) · {unified['by_severity']}")
         _hyg = []
         if unified.get('contamination_dropped'):
             _hyg.append(f"{unified['contamination_dropped']} dropped (skip-dir contamination)")
         if unified.get('local_only_downgraded'):
             _hyg.append(f"{unified['local_only_downgraded']} downgraded (gitignored/local-only secret)")
         if _hyg:
-            print(f"    hygiene: {' · '.join(_hyg)}")
+            log(f"    hygiene: {' · '.join(_hyg)}")
     else:
-        print(f"\n  scanners available: {', '.join(s['name'] for s in det['available']) or 'none'}"
-              "  (add --scan to execute them)")
+        log(f"\n  scanners available: {', '.join(s['name'] for s in det['available']) or 'none'}"
+            "  (add --scan to execute them)")
 
     # 3. probes: choose + stage
     chosen = probes.applicable(facts)
     manifest = probes.stage(chosen, out, facts)
-    print(f"\n  staged {len([m for m in manifest if 'attack_class' in m])} tailored probe template(s) → {out / 'probes'}")
+    log(f"\n  staged {len([m for m in manifest if 'attack_class' in m])} tailored probe template(s) → {out / 'probes'}")
 
     # 4. traceable findings ledger (recon + static; dynamic merges in via `websec dynamic`)
     suppressions = findings.load_suppressions(target)
     ledger = findings.build_ledger(facts, unified, None, suppressions)
+    baseline.annotate(ledger)          # stable per-finding fingerprints (baseline + SARIF tracking)
+
+    # 4b. baseline / diff — only NEW findings gate CI when a baseline is supplied
+    diff = None
+    if getattr(args, "baseline", None):
+        base_fps = baseline.load_baseline(Path(args.baseline).expanduser())
+        diff = baseline.diff(ledger, base_fps)
+        log(f"\n  baseline: {diff['new_count']} new · {diff['unchanged_count']} unchanged · "
+            f"{diff['fixed_count']} fixed (vs {args.baseline})")
+
     (out / "findings-ledger.json").write_text(json.dumps(ledger, indent=2))
     (out / "CONSTITUTION.md").write_text(constitution.render(constitution.build(facts, ledger)))
     if ledger["total"]:
-        print(f"\n  ledger: {ledger['total']} finding(s) · {ledger['by_severity']} · confidence {ledger['by_confidence']}"
-              + (f" · {ledger['suppressed']} suppressed" if ledger["suppressed"] else ""))
+        log(f"\n  ledger: {ledger['total']} finding(s) · {ledger['by_severity']} · confidence {ledger['by_confidence']}"
+            + (f" · {ledger['suppressed']} suppressed" if ledger["suppressed"] else ""))
 
-    # 5. briefing + comprehensive REPORT.md (immutable run record)
+    # 5. briefing + comprehensive REPORT.md (immutable run record) + machine artifacts
     (out / "AGENT-BRIEFING.md").write_text(briefing.render(facts, det, scan_results, manifest, unified))
     (out / "REPORT.md").write_text(report.render(facts, det, scan_results, unified, manifest, ts, ledger))
+    # SARIF is ALWAYS written — it's the enterprise/CI interchange artifact (GitHub Code Scanning etc.)
+    sarif = formats.to_sarif(ledger, facts, __version__)
+    (out / "results.sarif").write_text(json.dumps(sarif, indent=2))
+    (out / "findings.envelope.json").write_text(json.dumps(formats.to_json(ledger, facts, __version__, ts), indent=2))
     # drop the full `all` finding list from the manifest — it's a duplicate of findings.json
     manifest_summary = {k: v for k, v in unified.items() if k != "all"} if unified else None
     (out / "manifest.json").write_text(json.dumps(
         {"facts": "FACTS.json", "scanners": det, "scan_results": scan_results,
          "findings_summary": manifest_summary, "ledger": {"total": ledger["total"], "by_severity": ledger["by_severity"]},
-         "probes": manifest, "timestamp": ts}, indent=2))
+         "sarif": "results.sarif", "probes": manifest, "timestamp": ts}, indent=2))
 
-    print(f"\n✓ run {ts} saved (immutable — nothing overwritten):\n    {out}")
-    print("    REPORT.md          — full historical record")
-    print("    AGENT-BRIEFING.md  — hand this to your AI coding agent")
-    print(f"  latest → {out.parent.parent / 'latest'}    ·    add `websec-out/` to .gitignore")
+    log(f"\n✓ run {ts} saved (immutable — nothing overwritten):\n    {out}")
+    log("    REPORT.md          — full historical record")
+    log("    AGENT-BRIEFING.md  — hand this to your AI coding agent")
+    log("    results.sarif      — SARIF 2.1.0 for CI / GitHub Code Scanning")
+    log(f"  latest → {out.parent.parent / 'latest'}    ·    add `websec-out/` to .gitignore")
+
+    # emit the requested machine format on STDOUT (for piping); default 'briefing' emits nothing extra
+    if fmt == "sarif":
+        print(json.dumps(sarif, indent=2))
+    elif fmt == "json":
+        print(json.dumps(formats.to_json(ledger, facts, __version__, ts), indent=2))
+
+    # 6. CI gate — exit non-zero if findings at/above --fail-on remain (only NEW ones when a baseline
+    # is supplied). Default (no --fail-on) never fails the build.
+    if getattr(args, "fail_on", None):
+        n = baseline.gate_count(ledger, args.fail_on, new_only=bool(diff))
+        if n:
+            log(f"\n✗ --fail-on {args.fail_on}: {n} finding(s) at or above threshold"
+                + (" (new since baseline)" if diff else "") + " — failing the build.")
+            return 1
+        log(f"\n✓ --fail-on {args.fail_on}: no findings at or above threshold"
+            + (" (new since baseline)" if diff else "") + ".")
     return 0
 
 
@@ -224,6 +261,11 @@ def cmd_dynamic(args) -> int:
 
     print(f"  ✓ run {ts} saved (immutable): {out}")
     return 1 if ledger["by_severity"].get("CRITICAL") else 0
+
+
+def cmd_mcp(args) -> int:
+    from . import mcp_server
+    return mcp_server.serve()
 
 
 def cmd_proof(args) -> int:
@@ -328,25 +370,25 @@ def _which(b):
     return shutil.which(b)
 
 
-def _print_facts_summary(facts: dict) -> None:
+def _print_facts_summary(facts: dict, log=print) -> None:
     if facts.get("files_truncated"):
-        print(f"  ⚠ PARTIAL SCAN — hit the {facts.get('file_cap', '?')}-file cap; recon may be incomplete. "
-              "Narrow with --exclude or scan a subdirectory.")
+        log(f"  ⚠ PARTIAL SCAN — hit the {facts.get('file_cap', '?')}-file cap; recon may be incomplete. "
+            "Narrow with --exclude or scan a subdirectory.")
     st = facts.get("stack", {})
     rt = facts.get("routes", {})
     tg = rt.get("targeting", {})
-    print(f"  stack:    {', '.join(st.get('languages', [])) or '?'}  ·  "
-          f"frameworks: {', '.join(st.get('frameworks', [])) or '?'}  ·  "
-          f"datastores: {', '.join(st.get('datastores', [])) or '?'}")
-    print(f"  auth:     {facts.get('auth', {}).get('scheme', '?')}")
+    log(f"  stack:    {', '.join(st.get('languages', [])) or '?'}  ·  "
+        f"frameworks: {', '.join(st.get('frameworks', [])) or '?'}  ·  "
+        f"datastores: {', '.join(st.get('datastores', [])) or '?'}")
+    log(f"  auth:     {facts.get('auth', {}).get('scheme', '?')}")
     tc = facts.get("tenant", {}).get("candidates", [])
-    print(f"  tenant?:  {', '.join(t['key'] for t in tc) or 'none detected'}"
-          + ("   ← confirm THE boundary" if tc else ""))
-    print(f"  routes:   {rt.get('count', 0)} endpoints via {rt.get('engine', '?').split(' ')[0]}")
-    print(f"  targets:  IDOR={len(tg.get('idor_candidates', []))} "
-          f"SSRF={len(tg.get('ssrf_candidates', []))} "
-          f"upload={len(tg.get('upload_candidates', []))} "
-          f"writes={len(tg.get('write_endpoints', []))}")
+    log(f"  tenant?:  {', '.join(t['key'] for t in tc) or 'none detected'}"
+        + ("   ← confirm THE boundary" if tc else ""))
+    log(f"  routes:   {rt.get('count', 0)} endpoints via {rt.get('engine', '?').split(' ')[0]}")
+    log(f"  targets:  IDOR={len(tg.get('idor_candidates', []))} "
+        f"SSRF={len(tg.get('ssrf_candidates', []))} "
+        f"upload={len(tg.get('upload_candidates', []))} "
+        f"writes={len(tg.get('write_endpoints', []))}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -357,7 +399,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=f"websec-validator {__version__}")
     # metavar lists only the user-facing commands; recon/proof/calibrate still work but are
     # omitted (they get no `help=`, so argparse leaves them out of the listing entirely).
-    sub = p.add_subparsers(dest="cmd", required=True, metavar="{run,doctor,dynamic}")
+    sub = p.add_subparsers(dest="cmd", required=True, metavar="{run,doctor,dynamic,mcp}")
 
     r = sub.add_parser("run", help="full pipeline → briefing + tailored probes")
     r.add_argument("target")
@@ -367,6 +409,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="exclude a path/glob from recon + scanners (repeatable; e.g. --exclude 'docs/**')")
     r.add_argument("--scanners", metavar="A,B",
                    help="comma-separated subset of scanners to run with --scan (e.g. gitleaks,semgrep)")
+    r.add_argument("--format", choices=["briefing", "sarif", "json"], default="briefing",
+                   help="stdout format: briefing (human, default) | sarif (SARIF 2.1.0) | json (envelope). "
+                        "results.sarif is ALWAYS written to the run dir regardless.")
+    r.add_argument("--fail-on", choices=["critical", "high", "medium", "low"], dest="fail_on",
+                   help="exit 1 if any finding at/above this severity remains (CI gate). With --baseline, "
+                        "only NEW findings count.")
+    r.add_argument("--baseline", metavar="LEDGER.json",
+                   help="a prior findings-ledger.json — mark findings new/unchanged/fixed and gate only on NEW")
     r.set_defaults(func=cmd_run)
 
     # recon/proof/calibrate are hidden from the main --help (argparse.SUPPRESS): recon is a
@@ -401,10 +451,13 @@ def build_parser() -> argparse.ArgumentParser:
     dyn.add_argument("--facts", help="FACTS.json from a prior run (default: ./websec-out/FACTS.json)")
     dyn.add_argument("--out", help="output dir (default: ./websec-out)")
     dyn.set_defaults(func=cmd_dynamic)
+
+    mc = sub.add_parser("mcp", help="run as an MCP server over stdio (typed recon tools for any MCP client)")
+    mc.set_defaults(func=cmd_mcp)
     return p
 
 
-_COMMANDS = {"run", "recon", "doctor", "proof", "dynamic", "calibrate"}
+_COMMANDS = {"run", "recon", "doctor", "proof", "dynamic", "calibrate", "mcp"}
 
 
 def main(argv=None) -> int:

@@ -25,7 +25,14 @@ SECRETISH = re.compile(r"SECRET|PRIVATE|TOKEN|PASSWORD|PASSWD|API_?KEY|ACCESS_?K
 ANALYTICS_PUBLIC = re.compile(
     r"POSTHOG|USERTOUR|AMPLITUDE|MIXPANEL|SEGMENT|HEAP|HOTJAR|FULLSTORY|INTERCOM|"
     r"GOOGLE_ANALYTICS|\bGA_|\bGTM|GADS|SENTRY_DSN|DATADOG_(?:CLIENT|RUM|APPLICATION)|"
-    r"LAUNCHDARKLY_CLIENT|STATSIG_CLIENT|_PUBLISHABLE_KEY|STRIPE_PUBLISHABLE", re.I)
+    r"LAUNCHDARKLY_CLIENT|STATSIG_CLIENT|_PUBLISHABLE_KEY|STRIPE_PUBLISHABLE|"
+    # client-side SDK keys DESIGNED to ship to the browser (a publishable/site/client key, never the
+    # secret sibling): Crossmint ck_, Stripe/Clerk pk_, Mapbox, Google Maps, reCAPTCHA/Turnstile site
+    # keys, WalletConnect project id, Algolia SEARCH key, Ably/Pusher client. Real-repo FP: a real Next.js app
+    # NEXT_PUBLIC_CROSSMINT_API_KEY (a @crossmint/client-sdk key) flagged HIGH.
+    r"CROSSMINT|\bck_(?:test|prod|staging|live)_|\bpk_(?:test|live|prod)_|CLERK_PUBLISHABLE|"
+    r"PUBLISHABLE|MAPBOX|GOOGLE_MAPS|MAPS_API|RECAPTCHA|TURNSTILE|HCAPTCHA|WALLETCONNECT|"
+    r"ALGOLIA_SEARCH|ALGOLIA_APP|PUSHER_(?:KEY|CLUSTER)|ABLY_CLIENT|SITE_KEY|_SITE_KEY", re.I)
 # package.json that declares a frontend bundler ⇒ NEXT_PUBLIC_/VITE_/... names there really do ship.
 FRONTEND_DEPS = re.compile(r'"(?:next|vite|react|react-dom|@sveltejs/kit|svelte|@angular/core|gatsby|nuxt|expo|@remix-run/\w+|astro|solid-js|@builder\.io/qwik)"')
 SVELTE_DEPS = re.compile(r'"(?:svelte|@sveltejs/kit)"')
@@ -160,6 +167,11 @@ class ClientExposureExtractor(Extractor):
                     public_secret_leaks.append(f"{v}  ({rel})")
             if "use client" in text[:200] or "'use client'" in text[:200] or '"use client"' in text[:200]:
                 for s in SERVER_SECRET.findall(text):
+                    # a public-prefixed (NEXT_PUBLIC_/VITE_) or known client-SDK key is intended-public — it
+                    # matched SERVER_SECRET only via "API_KEY"; skip so it isn't ALSO flagged HIGH (a real-repo
+                    # dual HIGH+INFO on NEXT_PUBLIC_CROSSMINT_API_KEY — a ck_ client SDK key).
+                    if ANALYTICS_PUBLIC.search(s) or re.match(r"(?:NEXT_PUBLIC_|VITE_|REACT_APP_|GATSBY_|EXPO_PUBLIC_)", s):
+                        continue
                     server_secret_in_client.append(f"{s}  ({rel})")
             client_reachable = bool(PUBLIC_ENV.search(text)) or "use client" in text[:400]
             for rx, label, always in SECRET_SHAPES:
@@ -170,6 +182,11 @@ class ClientExposureExtractor(Extractor):
                         continue
                     public_value_leaks.append(f"{label}  ({rel})")
             for m in CFN_TO_PUBLIC.finditer(text):
+                # a CFN output wired into a public build var is only a LEAK when the var is secret-named
+                # (or the source is a Secret) — a backend URL/endpoint/host (`VITE_API_URL ← backendUrlOutput`)
+                # is the NORMAL way to pass an API base to a frontend, not a secret (real-repo FP).
+                if not (SECRETISH.search(m.group(1)) or re.search(r"\bSecret\b", m.group(2))):
+                    continue
                 public_var_from_cfn.append(f"{m.group(1)} ← {m.group(2)}  ({rel})")
 
         nextcfg = (ctx.manifest("next.config.js") + ctx.manifest("next.config.mjs")

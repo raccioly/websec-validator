@@ -68,10 +68,19 @@ def path_in_skip_dir(path: str, root: "Path | str | None" = None) -> bool:
 _TEST_FILE = re.compile(
     r"(?:^|/)(?:tests?|__tests__|__mocks__|spec|specs|e2e|cypress|fixtures?|mocks?|stories|testdata|testing)/"
     r"|\.(?:test|spec|stories|e2e|cy)\.[cm]?[jt]sx?$"
+    # Python test conventions (pytest / unittest): test_*.py, *_test.py, conftest.py — anywhere in the
+    # tree, NOT just under a tests/ dir. Without this, root-level `test_curl.py` doing requests.get()
+    # false-fires SSRF as if it were a production handler (real-repo FP: a real repo).
+    r"|(?:^|/)test_[^/]*\.py$|(?:^|/)[^/]*_test\.py$|(?:^|/)conftest\.py$"
     r"|(?:^|/)[\w.-]*\.config\.[cm]?[jt]sx?$"          # vite/vitest/jest/playwright/next/... .config.*
     r"|(?:^|/)(?:playwright|vitest|jest|cypress)\.[\w.]*$", re.I)
 # build / ops / CLI scripts run by an operator or CI, not reachable from an inbound HTTP request.
-_SCRIPT_FILE = re.compile(r"(?:^|/)(?:scripts?|bin|\.bin|ops|operations|migrations?|seeds?)/", re.I)
+# Broadened from real-repo FPs (a real app research/, a real repo live/, a real repo) — a doc/data
+# generator, a research notebook, a local backtest, or a CLI updater is operated by a human, so its
+# "user input" (argv/config/a file it reads) is not an attacker over HTTP: server-only sinks don't apply.
+_SCRIPT_FILE = re.compile(
+    r"(?:^|/)(?:scripts?|bin|\.bin|ops|operations|migrations?|seeds?|tools?|tooling|research|"
+    r"examples?|samples?|benchmarks?|notebooks?|codemods?|generators?|datagen|[\w-]*backtests?)/", re.I)
 # browser / client-side code. SSRF and server-secret-exposure are server-only classes; a `.tsx`
 # React component, a hook, or a `'use client'` module runs in the visitor's browser to the app's OWN
 # origin, so an outbound fetch there is same-origin, not an SSRF/exfil sink.

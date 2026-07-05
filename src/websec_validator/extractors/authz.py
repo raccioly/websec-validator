@@ -39,12 +39,73 @@ GUARD = re.compile(
     r"withAuth|getServerSession|getToken\s*\(|verifyToken|authMiddleware|@UseGuards|"
     r"@Roles\b|Depends\s*\(\s*(?:get_current_user|oauth2_scheme|require_)|Security\s*\(|"
     r"PermissionRequired|LoginRequired|passport\.authenticate|"
-    r"\.use\s*\(\s*[\w.]*(?:[Aa]uth|[Vv]erifyToken|[Rr]equire|[Gg]uard|jwt)\w*", re.I)
+    # `.use(authMw)` OR `.use('/prefix', authMw)` — the path-first form (Express-5 `router.use('/Users',
+    # scimAuth)`) was uncredited, a real-repo FP on SCIM routes.
+    r"\.use\s*\(\s*(?:['\"][^'\"]*['\"]\s*,\s*)?[\w.]*(?:[Aa]uth|[Vv]erifyToken|[Rr]equire|[Gg]uard|jwt)\w*", re.I)
+
+# Inline/manual authn idioms a handler runs at its CALL-SITE (not a wrapper) — credited only when the
+# auth call is paired with a REJECT (401/redirect), so importing an auth util without checking it does
+# NOT credit (that over-credit hid a real Next.js app's unauthenticated /api/auth/seed backdoor).
+INLINE_AUTHN = re.compile(
+    r"await\s+auth\s*\(\s*\)|getServerSession\s*\(|getToken\s*\(|\bauth\s*\(\)\s*;|"
+    r"currentUser\s*\(|requireSession\s*\(|await\s+getSession\s*\(", re.I)
+AUTHN_REJECT = re.compile(
+    r"\b401\b|Unauthorized|status:\s*40[13]\b|\.status\(\s*40[13]|redirect\([^)]*(?:login|signin|auth)"
+    r"|throw\s+new\s+\w*(?:Auth|Unauthorized|Forbidden)|NextResponse\.redirect", re.I)
 
 # a global, path-less auth middleware → everything downstream is protected by default
 GLOBAL_AUTH = re.compile(
     r"app\.use\s*\(\s*[\w.]*(?:authenticate|requireAuth|authMiddleware|verifyToken|"
     r"isAuthenticated|jwtMiddleware|ensureAuth)\w*\s*\)", re.I)
+
+# App-specific HOF guard WRAPPERS — an export that COMPOSES a known guard (withDealAuth = withAuth(...),
+# withSuperAdmin, requireUserRecord) is itself a guard. Real-repo FP: a real Next.js app flagged 92 handlers
+# wrapped in withSuperAdmin/withDealAuth (both `return withAuth(...)`) as missing-auth, because only the
+# literal `withAuth` was in GUARD. We collect guard-ish-NAMED definitions whose FILE carries a real auth
+# signal, then credit any handler that CALLS one of them.
+_GUARDISH_NAME = re.compile(
+    r"^(?:with|require|ensure|assert|protect|authorize)[A-Za-z]*"
+    r"(?:Auth|Admin|Role|Guard|Session|Access|Owner|Member|Tenant|User|Login|Permission|Protected)", re.I)
+_DEF_NAME = re.compile(r"(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\s+|const\s+|let\s+|var\s+)([A-Za-z_$][\w$]*)")
+# a file that establishes auth (so a guard-ish name defined there is really a guard, not a benign util)
+GUARD_BODY = re.compile(
+    r"withAuth\b|requireAuth\b|getServerSession\b|getToken\s*\(|\bauth\s*\(\)|verifyToken\b|jwt\.verify"
+    r"|getRequest\w*(?:Auth|Session)|status:\s*40[13]\b|\.status\(\s*40[13]\s*\)|Unauthorized|Forbidden", re.I)
+# Fastify guards: a global `addHook('onRequest', authenticate)`, or the hook with the auth call INSIDE
+# an inline arrow body (`addHook('onRequest', async (req,reply)=>{ await verifyJwt(req) })`), or a
+# per-route `{ preHandler: authFn }`.
+FASTIFY_HOOK_AUTH = re.compile(
+    r"addHook\s*\(\s*['\"](?:onRequest|preHandler|preValidation)['\"]\s*,\s*(?:async\s*)?"
+    r"(?:[\w.]*(?:auth|verify|require|guard|jwt|session|token)\w*"                       # named fn ref
+    r"|\([^)]*\)\s*=>\s*\{[\s\S]{0,300}?(?:auth|verify|require|jwt|session|token|401|unauthor)\w*)", re.I)
+PREHANDLER_AUTH = re.compile(
+    r"preHandler\s*:\s*(?:\[[^\]]*)?[\w.]*(?:auth|verify|require|guard|jwt|token|session)\w*", re.I)
+# Secret-bearer guard — a handler that VERIFIES an INBOUND auth header/token against a server secret
+# (`authHeader !== `Bearer ${process.env.CRON_SECRET}``) IS authenticated. Must be inbound: an incoming
+# header READ + a COMPARISON against a secret. Deliberately NOT a bare `Bearer ${x}` (that also matches
+# an OUTBOUND header the handler BUILDS to call a downstream service — the real-repo FN where
+# a real Next.js app's unauthenticated /api/auth/seed backdoor was wrongly credited by `Bearer ${apiKey}`).
+SECRET_BEARER_GUARD = re.compile(
+    r"(?:req(?:uest)?\.headers?|headers?\.get\s*\(|get\s*\(\s*['\"]authorization|\bauthHeader\b|"
+    r"['\"](?:authorization|x-api-key|x-webhook-secret|x-cron-secret)['\"])"
+    r"[\s\S]{0,140}?(?:===|!==|==|!=|\.startsWith\s*\(|compare|timingSafeEqual)"
+    r"[\s\S]{0,80}?(?:process\.env\.\w*(?:SECRET|CRON|WEBHOOK|REVALIDATE)|`?Bearer\s+\$\{[^}]*(?:SECRET|CRON|TOKEN))"
+    r"|\bCRON_SECRET\b\s*[\s\S]{0,40}?(?:===|!==|headers)|(?:===|!==)\s*process\.env\.CRON_SECRET", re.I)
+
+
+def _collect_guard_aliases(ctx: RepoContext) -> set:
+    """Names of app-specific HOF/middleware guards that compose a known guard (or return 401), so a
+    handler wrapped in them is credited. Conservative: the name must READ as a guard AND its defining
+    file must carry a real auth signal — a benign `withRetry`/`requireEnv` never qualifies."""
+    names: set = set()
+    for _p, rel, text in ctx.iter_code():
+        if is_test_file(rel) or not GUARD_BODY.search(text):
+            continue
+        for m in _DEF_NAME.finditer(text):
+            nm = m.group(1)
+            if nm and nm != "withAuth" and _GUARDISH_NAME.search(nm):
+                names.add(nm)
+    return names
 
 # Does a Next.js middleware/proxy file actually enforce AUTH (vs. i18n/headers only)?
 # `auth((req)=>…)` / `withAuth` / `req.auth` / getToken / getServerSession / redirect-to-login /
@@ -56,7 +117,10 @@ MW_AUTH = re.compile(
 
 PUBLIC_HINT = re.compile(
     r"/(login|logout|register|signup|signin|health|healthz|ping|status|webhooks?|"
-    r"public|\.well-known|robots|favicon|sitemap|callback|refresh|csrf|metrics)\b", re.I)
+    r"public|\.well-known|robots|favicon|sitemap|callback|refresh|csrf|metrics|"
+    # intended-public by convention (real-repo FP audit): waitlist/newsletter signup, OAuth
+    # authorization-INITIATION (must be unauthenticated), and SCIM 2.0 discovery (spec-mandated no-auth)
+    r"waitlist|newsletter|subscribe|authorize|oauth|ServiceProviderConfig|ResourceTypes|forgot[_-]?password|reset[_-]?password|verify[_-]?email)\b", re.I)
 
 ROLE = re.compile(
     r"@Roles\s*\(([^)]*)\)|allowedRoles\s*=\s*\[([^\]]*)\]|"
@@ -110,6 +174,55 @@ CUSTOM_GUARD = re.compile(
     r"|[A-Za-z]\w*Auth(?:Failure|Required)Response\b", re.I)
 _IMPORT_EXTS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
 NEXT_ROUTE = re.compile(r"(?:^|/)route\.[cm]?[jt]sx?$|(?:^|/)api/.*\.[cm]?[jt]sx?$", re.I)
+
+# --- Path-scoped STANDALONE guard mount (the other dominant Express pattern, real-repo FP: the WU
+# real backends flagged 116 + 36 guarded routes as missing-auth). Auth is applied to a PREFIX on
+# its OWN statement, and routers are mounted on that prefix in LATER statements:
+#     app.use('/api', requireAuth);          // guard mount — no router factory
+#     app.use('/api', conversationRoutes);   // router INSTANCE — no auth arg
+# Express runs middleware in SOURCE ORDER, so a router instance mounted AFTER a covering guard mount is
+# protected (and one mounted BEFORE it — e.g. public /api/auth/login — is not). The factory logic above
+# misses this because neither call carries BOTH a path+auth and a factory-call.
+_PATH_ARG = re.compile(r"^\s*['\"](/[^'\"]*)['\"]\s*,(.*)$", re.S)      # `'/prefix', <rest>`
+_BARE_IDENT = re.compile(r"^\s*([A-Za-z_]\w*)\s*$")                     # a lone identifier arg
+_ROUTER_IDENT = re.compile(r"(?:Routes?|Router)$")                     # names a router instance
+_NAMED_IMPORTS = re.compile(r"""import\s+(?:(\w+)\s*,?\s*)?(?:\{([^}]*)\})?\s*from\s*['"](\.[^'"]+)['"]""")
+_REQUIRE_IMPORTS = re.compile(r"""(?:const|let|var)\s+(?:(\w+)|\{([^}]*)\})\s*=\s*require\s*\(\s*['"](\.[^'"]+)['"]""")
+
+
+def _import_name_map(importer_rel: str, text: str, rel_set: set) -> dict:
+    """Map each imported name → its resolved target file, for a mounting file's RELATIVE imports —
+    so a router instance (`app.use('/api', conversationRoutes)`) resolves to routes/conversationRoutes.*"""
+    out: dict = {}
+    for dflt, named, spec in _NAMED_IMPORTS.findall(text):
+        tgt = _resolve_import(importer_rel, spec, rel_set)
+        if not tgt:
+            continue
+        if dflt:
+            out.setdefault(dflt, tgt)
+        for nm in named.split(","):
+            nm = nm.strip().split(" as ")[-1].strip()
+            if nm:
+                out.setdefault(nm, tgt)
+    for dflt, named, spec in _REQUIRE_IMPORTS.findall(text):
+        tgt = _resolve_import(importer_rel, spec, rel_set)
+        if not tgt:
+            continue
+        if dflt:
+            out.setdefault(dflt, tgt)
+        for nm in named.split(","):
+            nm = nm.strip()
+            if nm:
+                out.setdefault(nm, tgt)
+    return out
+
+
+def _under_prefix(prefix: str, guard_prefix: str) -> bool:
+    """True if a mount at `prefix` is covered by a guard applied to `guard_prefix`."""
+    if guard_prefix == "/":
+        return True
+    gp = guard_prefix.rstrip("/")
+    return prefix == gp or prefix.startswith(gp + "/")
 
 
 def _call_args(text: str, paren_idx: int) -> str:
@@ -167,6 +280,8 @@ def _mount_auth_coverage(ctx: RepoContext) -> dict:
 
     authed_factories: set = set()
     unauthed_factories: set = set()
+    guard_mounts: dict = {}          # rel -> [(offset, prefix)] for `app.use('/api', requireAuth)`
+    instance_mounts: list = []       # (rel, offset, prefix, ident) for `app.use('/api', xRouter)`
     for rel, p in rel_map.items():
         # Test harnesses wire `app.use(createXRouter())` WITHOUT auth to exercise a router in
         # isolation — that is test scaffolding, not the production mount, and counting it wrongly
@@ -178,6 +293,16 @@ def _mount_auth_coverage(ctx: RepoContext) -> dict:
             continue
         for m in USE_CALL.finditer(text):
             args = _call_args(text, m.end() - 1)
+            # Path-scoped guard mount + router-instance mount (separate statements, source-ordered).
+            pm = _PATH_ARG.match(args)
+            if pm and APP_RECEIVER.search(m.group(1)):
+                prefix, rest = pm.group(1), pm.group(2)
+                if MOUNT_AUTH.search(rest) and not FACTORY_CALL.search(rest):
+                    guard_mounts.setdefault(rel, []).append((m.start(), prefix))
+                else:
+                    bm = _BARE_IDENT.match(rest)
+                    if bm and _ROUTER_IDENT.search(bm.group(1)):
+                        instance_mounts.append((rel, m.start(), prefix, bm.group(1)))
             facs = set(FACTORY_CALL.findall(args))
             if not facs:
                 continue
@@ -187,6 +312,17 @@ def _mount_auth_coverage(ctx: RepoContext) -> dict:
                 unauthed_factories.update(facs)
             # else: inner `router.use(...)` with no auth → inherits the parent mount's auth; ignore
     unauthed_factories -= authed_factories          # an authed mount anywhere wins
+
+    # Resolve router-INSTANCE mounts protected by a preceding path-scoped guard mount in the SAME file
+    # (Express applies middleware in source order). Each becomes an authed route FILE, joined into the
+    # BFS below so its sub-routers are covered too.
+    prefix_authed_files: set = set()
+    for rel, off, prefix, ident in instance_mounts:
+        gms = guard_mounts.get(rel, [])
+        if any(g_off < off and _under_prefix(prefix, gp) for g_off, gp in gms):
+            tgt = _import_name_map(rel, ctx.text(rel_map[rel]), rel_set).get(ident)
+            if tgt and not is_test_file(tgt):
+                prefix_authed_files.add(tgt)
 
     factory_file: dict = {}                          # factory name -> defining file
     for rel, p in rel_map.items():
@@ -200,7 +336,7 @@ def _mount_auth_coverage(ctx: RepoContext) -> dict:
             if nm and nm not in factory_file:
                 factory_file[nm] = rel
 
-    authed_files = {factory_file[n] for n in authed_factories if n in factory_file}
+    authed_files = {factory_file[n] for n in authed_factories if n in factory_file} | prefix_authed_files
     unauthed_files = {factory_file[n] for n in unauthed_factories if n in factory_file} - authed_files
 
     # BFS the local-import graph from each authed factory file; mark every route-bearing file
@@ -296,9 +432,19 @@ class AuthzExtractor(Extractor):
                         return True
             return False
 
+        # App-specific guard wrappers (withDealAuth/withSuperAdmin/requireUserRecord) → a handler that
+        # CALLS one is guarded. This is the single biggest missing-auth FP source on real Next/HOF apps.
+        guard_aliases = _collect_guard_aliases(ctx)
+        # a CALL to the wrapper — `withDealAuth(` OR `withDealAuth<{dealId}>(` (a TS generic sits between
+        # the name and the paren), but NOT a bare `import { withDealAuth }` (name followed by , or }).
+        alias_call = (re.compile(r"\b(?:" + "|".join(re.escape(n) for n in sorted(guard_aliases)) + r")\s*[(<]")
+                      if guard_aliases else None)
+        # A Fastify GLOBAL onRequest/preHandler auth hook guards every route registered after it.
+        fastify_global_auth = any(FASTIFY_HOOK_AUTH.search(t) for _p, _r, t in ctx.iter_code())
+
         # global auth = an Express path-less auth middleware OR a Next auth middleware/proxy OR a
         # detected router-mount-auth pattern (routes are protected centrally, at the mount).
-        global_auth = (mw_auth or mount_detected
+        global_auth = (mw_auth or mount_detected or fastify_global_auth
                        or any(GLOBAL_AUTH.search(t) for _p, _r, t in ctx.iter_code()))
         roles: set = set(mw.get("role_checks", []))
         protected = no_guard = unknown = 0
@@ -312,7 +458,11 @@ class AuthzExtractor(Extractor):
             # a matcher only counts as a guard when the middleware actually does auth — a
             # non-auth middleware.ts (i18n/headers) must NOT mark routes protected. Mount coverage,
             # the project's custom auth helper, and a one-hop delegated guard also count.
-            guarded = (bool(text and (GUARD.search(text) or CUSTOM_GUARD.search(text)))
+            guarded = (bool(text and (GUARD.search(text) or CUSTOM_GUARD.search(text)
+                                      or PREHANDLER_AUTH.search(text) or SECRET_BEARER_GUARD.search(text)
+                                      or (INLINE_AUTHN.search(text) and AUTHN_REJECT.search(text))))
+                       or (alias_call is not None and bool(text) and bool(alias_call.search(text)))
+                       or fastify_global_auth
                        or (relcp and relcp in mount_covered)
                        or (mw_auth and _matcher_covers(e.get("path", ""), mw.get("matchers", [])))
                        or _imported_guard(relcp, text))

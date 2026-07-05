@@ -60,6 +60,17 @@ CLIPBOARD = re.compile(r"navigator\.clipboard|clipboard\.writeText|copyToClipboa
                        r"|writeText\(|execCommand\(\s*['\"]copy")
 HREF_SINK = re.compile(r"href=\{|href=['\"](?:tel:|mailto:|bitcoin:|ethereum:|lightning:)"
                        r"|\b(?:to|toAddress|recipient|amount|payee)\s*=\s*\{")
+# A concrete security-critical VALUE (not just a matching field NAME) — an eth address, IBAN, TOTP URI,
+# PEM key, xpub. Lets a money sink require an act-on-it signal (copy/QR/href OR a real value) so a nav
+# label / boolean `*Configured` prop / progress number that merely shares a keyword doesn't false-fire.
+VALUE_SHAPE = re.compile(
+    r"\b0x[0-9a-fA-F]{40}\b|\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b|otpauth://|-----BEGIN|\bxpub[0-9A-Za-z]{20}", re.I)
+# An INTENDED one-time secret reveal (create-an-API-key / OAuth-client-secret dialog shown once) — a
+# designed pattern, not a man-in-the-browser defect; don't flag it as tamperable-display.
+ONE_TIME_REVEAL = re.compile(
+    r"shown?\s+(?:only\s+)?once|only\s+be\s+shown\s+once|cannot\s+be\s+(?:retrieved|shown|recovered)\s+again"
+    r"|won'?t\s+be\s+(?:shown|able\s+to\s+see)\s+(?:it\s+)?again|save\s+(?:this|it|your\s+[\w-]+)\s+(?:now|somewhere)"
+    r"|copy\s+(?:it|this|your)\s+[\w-]+\s+now|store\s+(?:it|this)\s+securely", re.I)
 # #2 — the sink value arrives over a client-side round-trip the browser (and a MitB) can intercept,
 # rather than being server-rendered. A newly-added client fetch for a once-server-rendered value is a
 # regression in itself (manufactures a tamper vector).
@@ -89,8 +100,10 @@ WEAK_FINGERPRINT = re.compile(
 # #8 — dishonest control framing: a CLIENT-side check asserted to be unbeatable. Genuine finding.
 OVERCLAIM = re.compile(
     r"tamper[\s_-]?proof|tamper[\s_-]?resistant|mitb[\s_-]?proof|man-in-the-browser[\s_-]?proof"
-    r"|impossible to (?:tamper|forge|fake|modify|intercept)|cryptographically (?:guaranteed|proven|secure)"
-    r"|can(?:'|no)?t be (?:tampered|forged|faked|modified|intercepted)|unhackable|100% (?:secure|safe)", re.I)
+    r"|impossible to (?:tamper|forge|fake|intercept)|cryptographically (?:guaranteed|proven|secure)"
+    # 'modified'/'intercepted' dropped — they match benign UI copy ('🔒 System roles cannot be modified',
+    # a disabled-field hint that makes no cryptographic tamper-proof claim). Keep genuine over-claim verbs.
+    r"|can(?:'|no)?t be (?:tampered|forged|faked)|unhackable|100% (?:secure|safe)", re.I)
 
 # WebSocket / realtime auth model — the CSWSH determinant (REF-PENTEST #4). CSWSH is only
 # exploitable when the socket authenticates via an AMBIENT COOKIE the browser auto-attaches
@@ -123,10 +136,14 @@ class ClientIntegrityExtractor(Extractor):
             # money sinks are specific on a client surface; the broader credential/config set additionally
             # requires a copy/QR/href signal so a stray `apiKey` reference isn't noise.
             radius = None
-            if client_file and SINK_MONEY.search(text):
+            # CONSEQUENCE gate: a money sink now needs an act-on-it signal too (the value is copied /
+            # QR'd / linked OR a real value-SHAPE is present) — not just a matching field NAME, so a nav
+            # label / `*Configured` prop / progress number sharing the keyword no longer fires.
+            if client_file and SINK_MONEY.search(text) and (has_copy or VALUE_SHAPE.search(text)):
                 radius = "money"
             elif client_file and has_copy and SINK_CREDENTIAL.search(text):
-                radius = "credential"
+                # an intended one-time secret reveal (shown once) is a designed pattern, not a MitB defect
+                radius = None if ONE_TIME_REVEAL.search(text) else "credential"
             elif client_file and has_copy and SINK_CONFIG.search(text):
                 radius = "config"
             if radius:

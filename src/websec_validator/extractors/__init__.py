@@ -62,6 +62,7 @@ def run_all(root: Path, version: str, excludes: list | None = None) -> dict:
     ctx = RepoContext(root, excludes)
     facts: dict = {
         "tool": "websec-validator",
+        "schema_version": "1.0",   # lockstep with formats.SCHEMA_VERSION + schemas/facts.schema.json
         "version": version,
         "target": str(root.resolve()),
         "files_scanned": len(ctx.code_files),

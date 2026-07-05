@@ -67,6 +67,73 @@ def _is_spec_derived(code_path: str) -> bool:
     return bool(code_path) and bool(SPEC_PATH.search(code_path))
 
 
+# A truly VENDORED spec lives under deps/build output; an app's OWN OpenAPI spec (a connexion / spec-first
+# app like VAmPI, whose openapi3.yml IS the route list) sits in the source tree and IS implemented.
+_VENDOR_DIR = re.compile(
+    r"(?:^|/)(?:node_modules|vendor|vendored|third[_-]?party|\.venv|venv|site-packages|dist|build|\.next|out)/", re.I)
+
+
+# --- Frontend API-CLIENT vs server HANDLER (real-repo FP in a combined frontend+backend monorepo,
+# where Noir parsed the React app's axios API-client files (`src/api/*.ts`) and a Netlify
+# `public/_redirects` as if they were SERVER endpoints, then every one flagged missing-auth. A
+# frontend client CALLS the backend; it does not SERVE, so it has no auth guard and is not an endpoint.
+# Server ROUTE DEFINITIONS — unambiguous receivers only. Deliberately NOT `api.`/`route.`/`server.`:
+# `const api = axios.create(); api.get('/x')` is the idiomatic frontend CLIENT call, so `api.get`
+# must NOT read as a server route (that was the bug that let the React api-client files survive).
+SERVER_ROUTE_MARK = re.compile(
+    r"\b(?:router|app|fastify|blueprint|bp)\s*\.\s*(?:get|post|put|patch|delete|use|all|options|route)\s*\("
+    r"|@(?:Get|Post|Put|Patch|Delete|Controller)\("
+    r"|@(?:app|router|bp|blueprint)\.(?:route|get|post|put|patch|delete)\b"
+    r"|Deno\.serve|addEventListener\(\s*['\"]fetch|FastifyInstance"
+    r"|export\s+(?:async\s+)?(?:function\s+)?(?:const\s+)?(?:GET|POST|PUT|PATCH|DELETE)\b"
+    # serverless HANDLER conventions — a real server endpoint that may itself call fetch/axios, so it
+    # must NOT be mistaken for a frontend client: Cloudflare Pages (onRequest*), Lambda/Netlify
+    # (exports.handler / export const handler), Python Lambda (def handler / lambda_handler).
+    r"|export\s+(?:async\s+)?(?:function\s+|const\s+)?onRequest\w*"
+    r"|\bexports\.handler\b|export\s+(?:async\s+)?(?:function\s+|const\s+)?handler\b"
+    r"|def\s+(?:handler|lambda_handler)\s*\(", re.I)
+# A server FRAMEWORK import/construction — its presence means the file IS server-side even if it also
+# calls an axios-ish instance (a route handler that forwards to another service), so don't drop it.
+SERVER_IMPORT = re.compile(
+    r"from\s+['\"](?:express|fastify|koa|@hapi/hapi|@nestjs/[\w-]+)['\"]|require\(\s*['\"](?:express|fastify|koa)['\"]"
+    r"|from\s+(?:flask|fastapi|django|aiohttp|starlette)\b|import\s+(?:flask|fastapi)\b"
+    r"|\bexpress\s*\(\s*\)|\bRouter\s*\(\s*\)|new\s+Hono\(|FastAPI\s*\(|Flask\s*\(", re.I)
+# A frontend API CLIENT — an axios instance (imported or created) called by verb, RTK-Query/react-query,
+# or an import of a local `./client` module. `import { api } from './client'; api.get(...)` is the tell.
+CLIENT_API_MARK = re.compile(
+    r"\bimport\s+axios|\baxios\.(?:create|get|post|put|patch|delete)\b|from\s+['\"]@tanstack"
+    r"|useQuery\s*\(|useMutation\s*\(|createApi\s*\(|fetchBaseQuery|['\"]use client['\"]"
+    r"|\b(?:api|apiClient|http|httpClient|client|axiosInstance|instance)\s*\.\s*(?:get|post|put|patch|delete)\s*\("
+    r"|from\s+['\"][^'\"]*/client['\"]", re.I)
+_NONCODE_ROUTE = re.compile(r"(?:^|/)_(?:redirects|headers)$|\.(?:toml|txt|md)$|(?:^|/)public/", re.I)
+
+
+def _looks_nonserver_route(code_path: str, ctx) -> bool:
+    """True if a Noir 'route' actually lives in a FRONTEND API client / static hosting config, not a
+    server handler — so it must not become an endpoint (nor a missing-auth finding)."""
+    if not code_path:
+        return False
+    from .base import is_client_file
+    from pathlib import Path as _P
+    try:
+        rel = str(_P(code_path).resolve().relative_to(_P(ctx.root).resolve())).replace("\\", "/")
+    except Exception:
+        rel = code_path.replace("\\", "/")
+    if _NONCODE_ROUTE.search(rel):
+        return True                                  # _redirects / public/ / *.toml — hosting config
+    if is_client_file(rel):
+        return True                                  # .tsx/.jsx / components / 'use client'
+    p = _P(code_path)
+    try:
+        text = ctx.text(p) if p.exists() else ""
+    except Exception:
+        text = ""
+    # a file that makes OUTBOUND client calls, defines NO server route, and imports NO server framework
+    # is an API client, not a handler.
+    return bool(text and CLIENT_API_MARK.search(text)
+                and not SERVER_ROUTE_MARK.search(text) and not SERVER_IMPORT.search(text))
+
+
 def _clean_path(p: str) -> str:
     p = re.sub(r":(\w+)", r"{\1}", p)    # Express :id  -> {id}
     p = re.sub(r"\*(\w+)", r"{\1}", p)    # splat *key   -> {key}
@@ -177,6 +244,82 @@ def _supabase_edge_routes(ctx: RepoContext) -> list:
     return rows
 
 
+# AWS SAM / serverless — a template.yaml wires HTTP endpoints (Api/HttpApi events + Function URLs) to
+# Lambda handlers. Noir doesn't model it AND routes.py used to EXCLUDE *.yaml as a "vendored spec", so
+# a whole serverless backend went 0-routes/unprobed — incl. `FunctionUrlConfig: AuthType: NONE` PUBLIC
+# endpoints serving sensitive data (real-repo FN: a real repo's dashboard, a real SAM backend's ~28
+# handlers + AuthType:NONE LLM endpoints). Stdlib only — a bounded line/regex parse, not a YAML lib.
+_SAM_FN = re.compile(r"Type:\s*AWS::Serverless::Function")
+_SAM_HANDLER = re.compile(r"\bHandler:\s*([^\s#]+)")
+_SAM_CODEURI = re.compile(r"\bCodeUri:\s*([^\s#]+)")
+_SAM_GLOBAL_CODEURI = re.compile(r"Globals:[\s\S]{0,1200}?\bFunction:[\s\S]{0,800}?\bCodeUri:\s*([^\s#]+)")
+_SAM_AUTHTYPE = re.compile(r"FunctionUrlConfig:[\s\S]{0,240}?AuthType:\s*([A-Za-z_]+)")
+_SAM_API_EVENT = re.compile(r"Type:\s*(?:Api|HttpApi)\b([\s\S]{0,300}?)(?=Type:\s*\w|\Z)")
+_SAM_PATH = re.compile(r"\bPath:\s*([^\s#]+)")
+_SAM_METHOD = re.compile(r"\bMethod:\s*([^\s#]+)")
+_HANDLER_EXTS = (".py", ".ts", ".js", ".mjs", ".tsx", ".rb", ".go")
+
+
+def _resolve_sam_handler(ctx: RepoContext, tdir: str, codeuri: str, handler: str, relset: set) -> str:
+    """Resolve a SAM Handler (`dir/file.export` or `pkg.module.func`) to a repo file path."""
+    if not handler:
+        return ""
+    h = handler.strip().strip("'\"")
+    mod = h.rsplit(".", 1)[0] if "/" in h else "/".join(h.split(".")[:-1] or [h])  # drop the export/func
+    import posixpath as _pp
+    prefixes = [_pp.join(tdir, codeuri) if codeuri else tdir, tdir, codeuri, ""]
+    for pre in prefixes:
+        for mod2 in (mod, mod.replace("dist/", "src/"), mod.replace("build/", "src/"), mod.replace("dist/", "")):
+            base = _pp.normpath(_pp.join(pre, mod2)).lstrip("./") if pre else _pp.normpath(mod2).lstrip("./")
+            for ext in _HANDLER_EXTS:
+                if base + ext in relset:
+                    return base + ext
+    # fallback: any code file whose rel path ends with the full module + ext (avoids basename collisions)
+    for mod2 in (mod, mod.replace("dist/", "src/"), mod.replace("dist/", "")):
+        for r in relset:
+            if any(r.endswith(mod2 + ext) for ext in _HANDLER_EXTS):
+                return r
+    return ""
+
+
+def _sam_routes(ctx: RepoContext) -> list:
+    import posixpath as _pp
+    rows: list = []
+    relset = {ctx.rel(p) for p in ctx.code_files}
+    templates = ctx.glob("**/template.yaml", 40) + ctx.glob("**/template.yml", 40) + ctx.glob("**/sam.yaml", 20)
+    for tmpl in templates[:40]:
+        text = ctx.text(tmpl)
+        if "AWS::Serverless::Function" not in text:
+            continue
+        tdir = _pp.dirname(ctx.rel(tmpl)).replace("\\", "/")
+        gm = _SAM_GLOBAL_CODEURI.search(text)
+        default_codeuri = gm.group(1).strip().strip("'\"") if gm else ""
+        starts = [m.start() for m in _SAM_FN.finditer(text)]
+        for i, s in enumerate(starts):
+            block = text[s: starts[i + 1] if i + 1 < len(starts) else len(text)][:4000]
+            hm = _SAM_HANDLER.search(block)
+            handler = hm.group(1) if hm else ""
+            cm = _SAM_CODEURI.search(block)
+            codeuri = (cm.group(1).strip().strip("'\"") if cm else default_codeuri)
+            code_path = _resolve_sam_handler(ctx, tdir, codeuri, handler, relset)
+            seen_http = False
+            for em in _SAM_API_EVENT.finditer(block):
+                seg = em.group(1)
+                pm, mm = _SAM_PATH.search(seg), _SAM_METHOD.search(seg)
+                if not pm:
+                    continue
+                method = (mm.group(1).strip().strip("'\"").upper() if mm else "ANY")
+                method = "GET" if method in ("ANY", "*") else method
+                rows.append({"method": method, "path": pm.group(1).strip().strip("'\""), "params": [],
+                             "technology": "aws-sam", "code_path": code_path, "source": "sam"})
+                seen_http = True
+            am = _SAM_AUTHTYPE.search(block)
+            if am and not seen_http:                         # a Function URL (HTTP at /) with an explicit auth type
+                rows.append({"method": "GET", "path": "/", "params": [], "technology": "aws-sam-funcurl",
+                             "code_path": code_path, "source": "sam", "sam_auth_type": am.group(1)})
+    return rows
+
+
 def _router_calls(ctx: RepoContext) -> list:
     rows = []
     for _p, rel, text in ctx.iter_code():
@@ -215,18 +358,33 @@ def _fallback(ctx: RepoContext) -> list:
 
 def _fallback_next_app_router(ctx: RepoContext) -> list:
     rows = []
-    method_rx = re.compile(r"export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b")
+    # Handler exports in ALL Next App Router styles: `export async function GET`, `export const GET =`,
+    # AND `export const { GET, POST } = makeRouteHandler(...)` (destructured factory re-export — Keystatic,
+    # Auth.js, etc.). A route.ts IS a route by Next convention, so if none parse but it wires a route
+    # handler, default to GET+POST rather than missing the endpoint (real-repo recall gap: a real Next.js app keystatic).
+    method_rx = re.compile(r"export\s+(?:async\s+)?(?:function\s+|const\s+|let\s+)(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b")
+    destructured_rx = re.compile(r"export\s+const\s*\{\s*([^}]*)\}\s*=")
+    verb_word = re.compile(r"\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b")
     for p in ctx.glob("**/route.ts") + ctx.glob("**/route.js") + ctx.glob("**/route.tsx"):
         rel = ctx.rel(p)
         m = re.search(r"(?:^|/)(?:src/)?(?:app|pages)/(.*)/route\.[tj]sx?$", rel)
         if not m:
             continue
         seg = m.group(1)
+        # strip a NESTED app/pages dir the outer match left in (a monorepo pkg named 'app' before the
+        # real `src/app/` — e.g. a real Next.js app/app/src/app/api/... yielded '/src/app/api/...'); keep only the URL part
+        seg = re.sub(r"^(?:src/)?(?:app|pages)/", "", seg)
         seg = re.sub(r"\(([^)]+)\)/?", "", seg)            # route groups (group)
         seg = re.sub(r"\[\.\.\.([^\]]+)\]", r"{\1}", seg)    # [...slug]
         seg = re.sub(r"\[([^\]]+)\]", r"{\1}", seg)          # [id]
         path = "/" + seg.strip("/")
-        for verb in method_rx.findall(ctx.text(p)):
+        text = ctx.text(p)
+        verbs = set(method_rx.findall(text))
+        for dm in destructured_rx.finditer(text):
+            verbs.update(verb_word.findall(dm.group(1)))
+        if not verbs and re.search(r"RouteHandler|makeRoute\w*|createHandler|toNextJsHandler|\bhandlers?\b|NextResponse|new\s+Response", text):
+            verbs = {"GET", "POST"}
+        for verb in sorted(verbs):
             rows.append({"method": verb, "path": path, "params": [],
                          "technology": "js_nextjs", "code_path": rel, "source": "fallback"})
     return rows
@@ -285,6 +443,17 @@ class RoutesExtractor(Extractor):
         if eps:                                    # noir ran AND found routes
             routes, spec_derived = _normalize_noir(eps)
             engine = "noir"
+            # An app's OWN implemented OpenAPI spec (connexion / spec-first, e.g. VAmPI) IS its route
+            # list — SPEC_PATH excludes it by the openapi/swagger filename, but when the spec is the ONLY
+            # route source and not under a vendor/deps dir, promote it (else a whole spec-first API is
+            # 0-routes/unprobed — caught by the proof harness: VAmPI 19 endpoints → 0).
+            if not routes and spec_derived:
+                own = [r for r in spec_derived
+                       if not _VENDOR_DIR.search(str(r.get("code_path", "")).replace("\\", "/"))]
+                if own:
+                    routes = own
+                    spec_derived = [r for r in spec_derived if r not in own]
+                    engine = "noir (openapi-first: own spec is the route contract)"
         elif eps is not None:                      # noir ran but found ZERO — back it up with the regex
             fb = _fallback(ctx)                     # pass so a framework noir can't parse doesn't become a
             routes, spec_derived = fb, []           # silent blind spot (0 routes → no authz, no probes)
@@ -301,6 +470,13 @@ class RoutesExtractor(Extractor):
         # SKIP_DIRS is matched RELATIVE to the scan root (a skip-named ANCESTOR must not nuke
         # the whole route list).
         routes = [r for r in routes if not _in_skip_dir(r.get("code_path", ""), ctx.root)]
+        # Drop routes that actually live in FRONTEND API-client code / static hosting config (Noir
+        # can't tell a React axios client from a server handler in a combined frontend+backend repo).
+        _client_routes = [r for r in routes if _looks_nonserver_route(r.get("code_path", ""), ctx)]
+        _client_excluded = len(_client_routes)
+        if _client_routes:
+            _cr = {id(r) for r in _client_routes}
+            routes = [r for r in routes if id(r) not in _cr]
 
         # P1: when NOIR produced the routes, SUPPLEMENT with the generic router-call heuristic — Noir
         # collapses hand-rolled routers (itty/Hono/Workers) to ~1 endpoint, so without this the entire
@@ -332,6 +508,23 @@ class RoutesExtractor(Extractor):
                 if engine.startswith("noir (0 routes)"):
                     engine = "noir (0 routes) → supabase-edge"
 
+        # AWS SAM / serverless — Api/HttpApi events + Function URLs → real HTTP routes (none of the
+        # engines above model template.yaml). Deduped on (method, path); a Function-URL AuthType is kept.
+        sam_existing = {(r["method"], r["path"]) for r in routes}
+        sam_public = 0
+        for r in _sam_routes(ctx):
+            if getattr(ctx, "excludes", None) and ctx._excluded(r.get("code_path", "")):
+                continue
+            k = (r["method"], r["path"])
+            if k in sam_existing:
+                continue
+            sam_existing.add(k)
+            routes.append(r)
+            if str(r.get("sam_auth_type", "")).upper() == "NONE":
+                sam_public += 1
+            if engine.startswith(("noir (0 routes)", "regex-fallback")):
+                engine += " + aws-sam"
+
         by_method: dict = {}
         by_tech: dict = {}
         for r in routes:
@@ -355,6 +548,8 @@ class RoutesExtractor(Extractor):
             "targeting": _derive(routes),
             "handler_signals": handler_sigs,
             "coverage_warning": coverage_warning,
+            "client_routes_excluded": _client_excluded,
+            "serverless_public_endpoints": sam_public,   # Function URLs with AuthType: NONE (unauthenticated)
         }
         if spec_derived:
             from collections import Counter

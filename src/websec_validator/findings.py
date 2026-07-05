@@ -41,6 +41,8 @@ STANDARDS = {
     "proxy-escape": (["CWE-441 Unintended Proxy (Confused Deputy)", "CWE-22 Path Traversal"],
                      "ASVS V12.3", ["API7:2023 SSRF", "API8:2023 Misconfiguration"]),
     "ssti": (["CWE-1336 SSTI"], "ASVS V5.2.5", []),
+    "xss": (["CWE-79 Cross-site Scripting", "CWE-116 Improper Encoding or Escaping of Output"],
+            "ASVS V5.3.3", ["API8:2023 Misconfiguration"]),
     "open-redirect": (["CWE-601 Open Redirect"], "ASVS V5.1.5", []),
     "insecure-deserialization": (["CWE-502 Deserialization"], "ASVS V5.5", []),
     "xxe": (["CWE-611 XXE"], "ASVS V5.5.2", []),
@@ -57,6 +59,10 @@ STANDARDS = {
     # --- REF-PENTEST classes ---
     "insecure-secret-default": (["CWE-798 Hard-coded Credentials", "CWE-1188 Insecure Default Initialization"],
                                 "ASVS V2.10", ["API2:2023 Broken Authentication"]),
+    "auth-backdoor": (["CWE-288 Authentication Bypass Using an Alternate Path", "CWE-798 Hard-coded Credentials",
+                       "CWE-287 Improper Authentication"], "ASVS V2.1.1", ["API2:2023 Broken Authentication"]),
+    "fail-open-auth": (["CWE-636 Not Failing Securely (Fail Open)", "CWE-325 Missing Cryptographic Step"],
+                       "ASVS V1.1", ["API2:2023 Broken Authentication", "API8:2023 Misconfiguration"]),
     "cswsh": (["CWE-1385 Missing Origin Validation in WebSockets", "CWE-346 Origin Validation Error"],
               "ASVS V13.2", ["API2:2023 Broken Authentication"]),
     "error-disclosure": (["CWE-209 Sensitive Information in Error Message", "CWE-200 Information Exposure"],
@@ -114,6 +120,9 @@ STANDARDS = {
     # --- transport / access-control-dataflow classes (0.8.0) ---
     "cors-misconfig": (["CWE-942 Permissive Cross-domain Policy with Untrusted Domains"], "ASVS V14.5.3",
                        ["API8:2023 Misconfiguration"]),
+    "clickjacking": (["CWE-1021 Improper Restriction of Rendered UI Layers", "CWE-451 UI Misrepresentation"],
+                     "ASVS V14.4.7", ["API8:2023 Misconfiguration"]),
+    "csrf": (["CWE-352 Cross-Site Request Forgery"], "ASVS V4.2.2", ["API8:2023 Misconfiguration"]),
     "subresource-integrity": (["CWE-829 Inclusion of Functionality from Untrusted Control Sphere"], "ASVS V14.2.3",
                               ["API8:2023 Misconfiguration"]),
     "cookie-authz": (["CWE-565 Reliance on Cookies Without Validation", "CWE-602 Client-Side Enforcement of Server-Side Security"],
@@ -157,6 +166,11 @@ REMEDIATION = {
              "(RE2) — and never build a pattern from unsanitized user input.",
     "eval-injection": "Remove eval()/new Function()/exec on user input; use a safe parser, a typed dispatch table, "
                       "or an explicit allowlist of operations instead.",
+    "xss": "Never build HTML from an unescaped user-influenced value. Prefer textContent / framework "
+           "auto-escaping; if you must render HTML, sanitize with DOMPurify (browser) or bleach (Python) "
+           "against a strict allow-list, keep server templates auto-escaped (drop `|safe`/`mark_safe`/"
+           "`Markup`/`autoescape false`), and add a nonce-based strict CSP as defence-in-depth so an "
+           "injected script can't execute even if a sink is missed.",
     "proxy-escape": "Reject any catch-all segment that is `.`/`..` or contains an encoded slash/dot before building "
                     "the upstream URL; better, assemble it with `new URL` and assert the normalized pathname still "
                     "startsWith the intended prefix, else 400. The forwarded token makes an escaped path a "
@@ -168,6 +182,14 @@ REMEDIATION = {
     "graphql": "Disable introspection + the playground in production; add query depth/complexity limits.",
     "insecure-secret-default": "Remove the hard-coded fallback; fail closed when the secret env var is unset, "
                                "and ROTATE the leaked value. Load signing keys from a secrets manager.",
+    "auth-backdoor": "Remove the authentication shortcut entirely (a dev-token prefix, an accept-any-credential "
+                     "login, a hard-coded principal). Authenticate every request against a real verified identity "
+                     "(signed session / OIDC / a datastore credential check with argon2id/bcrypt); if a local-dev "
+                     "shortcut is truly needed, gate it behind a build-time flag that cannot be present in a "
+                     "production build, never a runtime env var or header.",
+    "fail-open-auth": "Fail CLOSED: when a required signing secret / verification key is absent, REJECT the request "
+                      "(500 on misconfig, 401 on unverified) — never skip the signature/secret check. Make the secret "
+                      "a hard startup requirement so the app can't boot into an unverified state.",
     "cswsh": "Make the AppSync default authorization USER_POOL/OIDC/IAM/Lambda (not API_KEY); validate the "
              "WebSocket Origin; keep any API key to a scoped, non-default authorization mode only.",
     "error-disclosure": "Return a generic error to the client; log the stack/detail server-side only. Gate "
@@ -239,6 +261,13 @@ REMEDIATION = {
     "cors-misconfig": "Allow-list exact trusted origins; never reflect the request Origin or use `*` when "
                       "`Allow-Credentials: true`. If credentials aren't needed, drop them so a strict allow-list "
                       "isn't load-bearing.",
+    "clickjacking": "Send `X-Frame-Options: DENY` (or `SAMEORIGIN`) AND a CSP `frame-ancestors 'none'`/`'self'` "
+                    "on every HTML response at the edge — frame-ancestors is the modern control, XFO the legacy "
+                    "fallback. Verify against the live document response (a static scan can't see the CDN layer).",
+    "csrf": "For cookie/session-authenticated state-changing routes, require an anti-CSRF token (double-submit or "
+            "synchronizer pattern — csurf/csrf-csrf/@fastify/csrf, Django/Rails built-in) AND set session cookies "
+            "`SameSite=Lax`/`Strict`. SameSite alone is defence-in-depth, not a complete control (older browsers, "
+            "top-level GET side-effects, subdomain attacks) — keep the token. Bearer-token-only APIs are exempt.",
     "subresource-integrity": "Pin the external resource to an exact version and add a Subresource-Integrity "
                              "`integrity=` hash + `crossorigin`, or self-host it, and constrain it with a CSP so a "
                              "CDN/package compromise can't run arbitrary JS in your origin.",
@@ -417,6 +446,24 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                         f"source can forge tokens."
                         + (" The repo signs/verifies JWTs." if _jwt_used else "")
                         + " Confirm reachability with the forged-token / hs256 probe (it seeds this literal)."}]))
+
+    # ---- 1b2. Explicitly-public serverless endpoints (Function URL AuthType: NONE) ----
+    for e in (facts.get("routes", {}).get("endpoints", []) or []):
+        if str(e.get("sam_auth_type", "")).upper() == "NONE":
+            out.append(_f(f"Unauthenticated serverless endpoint: {e.get('method')} {e.get('path')}",
+                          "authn", "missing-auth", "MEDIUM", "LOW", e.get("code_path", "") or "(function URL)",
+                          [{"layer": "recon", "detail": "an AWS Lambda Function URL is configured with "
+                            "`AuthType: NONE` — a fully PUBLIC HTTPS endpoint with no IAM/JWT gate. Confirm the "
+                            "handler does its own authn/authz and returns no sensitive/authenticated data "
+                            "unauthenticated (a public dashboard serving account/P&L/PII data is the risk). If it "
+                            "must be public, scope it to read-only non-sensitive output and rate-limit it."}]))
+
+    # ---- 1c. Broken-auth backdoors (total auth bypass — CRITICAL) ----
+    for ba in (_auth.get("broken_auth", []) or []):
+        out.append(_f(f"{ba.get('kind')}: {ba.get('file')}", "authn",
+                      ba.get("attack_class", "auth-backdoor"),
+                      ba.get("severity", "HIGH"), ba.get("confidence", "MEDIUM"), ba.get("file", ""),
+                      [{"layer": "recon", "detail": ba.get("detail", "")}]))
 
     # ---- 2. Static scanner findings (de-duplicated `unified`) ----
     # Consume the FULL ranked set (`all`), not the briefing's short `top` slice — else a
@@ -697,7 +744,7 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         by_sev[f["severity"]] = by_sev.get(f["severity"], 0) + 1
         by_conf[f["confidence"]] = by_conf.get(f["confidence"], 0) + 1
         by_basis[f["calibrated"]["basis"]] = by_basis.get(f["calibrated"]["basis"], 0) + 1
-    return {"findings": kept, "total": len(kept), "suppressed": suppressed_n,
+    return {"schema_version": "1.0", "findings": kept, "total": len(kept), "suppressed": suppressed_n,
             "by_severity": by_sev, "by_confidence": by_conf,
             "calibration": {"loaded": bool(cal_table), "by_basis": by_basis,
                             "personalized": bool((cal_table or {}).get("meta", {}).get("personalized")),
