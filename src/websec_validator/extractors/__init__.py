@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .agent_config import AgentConfigExtractor
 from .auth import AuthExtractor
 from .authz import AuthzExtractor
 from .authz_dataflow import AuthzDataflowExtractor
@@ -16,6 +17,7 @@ from .base import MAX_FILES, Extractor, RepoContext
 from .client_exposure import ClientExposureExtractor
 from .client_integrity import ClientIntegrityExtractor
 from .crypto_usage import CryptoUsageExtractor
+from .dependencies import DependenciesExtractor
 from .graphql import GraphQLExtractor
 from .iac_ci import IacCiExtractor
 from .integrations import IntegrationsExtractor
@@ -54,6 +56,10 @@ REGISTRY: list[Extractor] = [
     CryptoUsageExtractor(),
     AuthzDataflowExtractor(),
     WebExtExtractor(),
+    # self-contained (reads .claude/.mcp.json directly off the root, no facts[] deps) → safe to run last.
+    AgentConfigExtractor(),
+    # self-contained (globs manifests/lockfiles directly, no facts[] deps) → order-independent.
+    DependenciesExtractor(),
 ]
 
 

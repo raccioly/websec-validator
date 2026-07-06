@@ -339,5 +339,83 @@ class LedgerAndProbeWiringTests(unittest.TestCase):
         self.assertIn("entitlement-abuse", probes.applicable(facts))
 
 
+# ---------------------------------------------------------------------------------------------------
+class MissingRlsTests(unittest.TestCase):
+    """P0 — no-Row-Level-Security-at-all (the Lovable / CVE-2025-48757 class). Owner-scoped tables in
+    committed SQL with ZERO RLS artifacts anywhere. Distinct attack_class 'missing-rls' (never reuses
+    'rls-context', which is the set_config-timing bug). Heavy FP guards: owner-column gate, cross-file
+    corpus aggregation, postgres/supabase stack gate, truncation guard, dashboard caveat + MEDIUM/LOW."""
+
+    def _classes(self, fixture):
+        from websec_validator import recon
+        f = recon.build_facts(FIX / fixture, "test")
+        return f, findings.build_ledger(f, None, None, [])
+
+    def _synthetic(self, *, truncated=False, datastores=None, frameworks=None,
+                   owner_tables=True, policy=0, enabled=0, anon=False):
+        return {
+            "files_truncated": truncated,
+            "stack": {"datastores": datastores if datastores is not None else ["postgres"],
+                      "frameworks": frameworks if frameworks is not None else ["supabase"]},
+            "schemas": {"sql_ddl_present": True,
+                        "owner_scoped_tables": ([{"name": "orders", "file": "s.sql", "columns": ["user_id"]}]
+                                                if owner_tables else []),
+                        "rls_policy_count": policy, "rls_enabled_count": enabled},
+            "client_exposure": {"intended_public_supabase": ["src/db.ts"] if anon else []},
+        }
+
+    def test_schemas_fact_shape(self):
+        f = SchemasExtractor().extract(ctx("rls_missing"), {})
+        self.assertTrue(f["sql_ddl_present"])
+        self.assertEqual(f["rls_policy_count"], 0)
+        self.assertEqual(f["rls_enabled_count"], 0)
+        self.assertEqual({t["name"] for t in f["owner_scoped_tables"]}, {"profiles", "documents"})
+
+    def test_fires_on_owner_scoped_table_without_policy(self):
+        _f, led = self._classes("rls_missing")
+        mr = [x for x in led["findings"] if x["attack_class"] == "missing-rls"]
+        self.assertTrue(mr, "expected a missing-rls finding on the no-RLS fixture")
+        self.assertEqual((mr[0]["severity"], mr[0]["confidence"]), ("MEDIUM", "LOW"))  # no committed anon key
+
+    def test_present_in_separate_migration_suppresses(self):
+        _f, led = self._classes("rls_present")
+        self.assertNotIn("missing-rls", [x["attack_class"] for x in led["findings"]])
+
+    def test_global_lookup_tables_do_not_fire(self):
+        f = SchemasExtractor().extract(ctx("rls_global_only"), {})
+        self.assertEqual(f["owner_scoped_tables"], [])
+        _f, led = self._classes("rls_global_only")
+        self.assertNotIn("missing-rls", [x["attack_class"] for x in led["findings"]])
+
+    def test_webext_licensed_fixture_still_clean(self):
+        # its shipped supabase/schema.sql HAS enable-RLS + create-policy → must not regress to a finding
+        _f, led = self._classes("webext_licensed")
+        self.assertNotIn("missing-rls", [x["attack_class"] for x in led["findings"]])
+
+    def test_mysql_stack_does_not_fire(self):
+        led = findings.build_ledger(self._synthetic(datastores=["mysql"], frameworks=[]), None, None, [])
+        self.assertNotIn("missing-rls", [x["attack_class"] for x in led["findings"]])
+
+    def test_truncated_scan_suppresses(self):
+        led = findings.build_ledger(self._synthetic(truncated=True), None, None, [])
+        self.assertNotIn("missing-rls", [x["attack_class"] for x in led["findings"]])
+
+    def test_anon_key_present_escalates_to_high(self):
+        led = findings.build_ledger(self._synthetic(anon=True), None, None, [])
+        mr = [x for x in led["findings"] if x["attack_class"] == "missing-rls"]
+        self.assertTrue(mr)
+        self.assertEqual((mr[0]["severity"], mr[0]["confidence"]), ("HIGH", "MEDIUM"))
+
+    def test_any_rls_token_in_corpus_suppresses(self):
+        # a single ENABLE ROW LEVEL SECURITY anywhere (enabled=1) flips the finding off — conservative.
+        led = findings.build_ledger(self._synthetic(enabled=1), None, None, [])
+        self.assertNotIn("missing-rls", [x["attack_class"] for x in led["findings"]])
+
+    def test_standards_and_remediation_distinct_from_rls_context(self):
+        self.assertIn("missing-rls", findings.STANDARDS)
+        self.assertIn("missing-rls", findings.REMEDIATION)
+        self.assertNotEqual(findings.REMEDIATION["missing-rls"], findings.REMEDIATION["rls-context"])
+
+
 if __name__ == "__main__":
     unittest.main()

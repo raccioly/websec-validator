@@ -13,6 +13,11 @@ base-research/
 .wolf/
 .claude/
 CLAUDE.md
+# ...EXCEPT the agent_config extractor's test fixtures — a `.claude/`/`CLAUDE.md` under tests/ is
+# deliberate test DATA (a benign + a poisoned config), so it must be tracked or CI's fresh checkout
+# fails the P2 tests. Re-include them past the two rules above.
+!tests/fixtures/**/.claude/
+!tests/fixtures/**/CLAUDE.md
 # DocGuard / Spec Kit agent tooling — auto-installed skills + slash commands + runtime cache.
 # The PRODUCT (committed): .docguard.json, .docguardignore, docs-canonical/, AGENTS.md, CHANGELOG.md, DRIFT-LOG.md
 .docguard/

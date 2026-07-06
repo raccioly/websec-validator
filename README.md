@@ -91,7 +91,7 @@ Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and 
 
 > That's the whole user surface: **`run`** (plus the optional, advanced **`dynamic`** live-probing step below). `recon`/`proof`/`calibrate` exist for developing the tool itself and are hidden from `--help` — you never need them.
 
-## What it extracts (20 deterministic extractors, no LLM)
+## What it extracts (22 deterministic extractors, no LLM)
 
 | | Dimension | Notable output |
 |---|---|---|
@@ -102,7 +102,7 @@ Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and 
 | **authz_dataflow** | authz *correctness* (does the guard trust the right thing?) | **unsigned-cookie authorization** · **claim-keyed authz** (user-influenceable JWT claim) · **transaction-local RLS context** (resets before the query) |
 | tenant | multi-tenancy key candidates | the BOLA boundary, by frequency |
 | **password_policy** | cross-route consistency **+ reuse/history** | complexity drift across routes **+ a set-password path that hashes without a reuse check** |
-| surface | 16 sink classes **+ redirect-SSRF** | user-input-gated sinks (incl. **mass-assignment via object spread** and **reflected/DOM/template XSS** — `innerHTML`/`dangerouslySetInnerHTML`/`v-html`/`\|safe`, sanitizer-gated) + var-arg SSRF + error-disclosure + follows-redirects-without-per-hop-guard **+ reverse-proxy prefix-escape + host-header open-redirect + SSRF-redirect-hardening** |
+| surface | 17 sink classes **+ redirect-SSRF** | user-input-gated sinks (incl. **mass-assignment via object spread**, **reflected/DOM/template XSS** — `innerHTML`/`dangerouslySetInnerHTML`/`v-html`/`\|safe`, sanitizer-gated, and **log-injection** (CWE-117, structured-logging-suppressed)) + var-arg SSRF + error-disclosure + follows-redirects-without-per-hop-guard **+ reverse-proxy prefix-escape + host-header open-redirect + SSRF-redirect-hardening** |
 | **upload_security** | unrestricted upload + unsafe serve | deny-list-only, stored-name-from-filename, trust-client-MIME, accept-SVG, **serve without `nosniff`** |
 | schemas | data models + **privileged fields** | Pydantic/SQLAlchemy/Django/Prisma/Mongoose/TypeORM/Zod → `role`/`isAdmin`/`groupId` for mass-assignment targeting |
 | iac_ci | IaC + CI/CD | GHA injection (**run:-position-aware**), unpinned actions, tfstate, CDK AppSync `API_KEY` anonymous-default-auth, **docker-compose host-takeover (docker.sock / pid:host / privileged) + `.gitleaksignore` secret-suppression audit** |
@@ -114,6 +114,8 @@ Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and 
 | integrations | third-party + webhooks **+ outbound-action endpoints** | unsigned webhooks **+ email/SMS/push handlers with no auth or IP-only rate-limit + redundant secret-fetch** |
 | **llm_security** | LLM / AI-agent surface (**OWASP LLM Top 10**) | indirect **prompt injection** (untrusted RAG/tool content → prompt) · **insecure output handling** (model text → tool dispatch) · **excessive agency** · **unbounded generation** (no maxTokens/timeout) · **guardrail fail-open** |
 | **crypto_usage** | crypto-API correctness | **weak password hash** (fast/unsalted SHA-256/MD5) · `jwtVerify` without an `algorithms` allowlist · **predictable principal** (id = hash of email) · non-constant-time secret compare |
+| **agent_config** | the repo's OWN agent/MCP wiring (**OWASP Agentic Top 10**) | reads `.claude/settings.json` · `.mcp.json` · cursor/copilot rules as untrusted data (never executed): **invisible/bidi Unicode** rules-backdoor · **fetch-and-execute hook** (CVE-2025-59536) · **blanket MCP auto-approve** · **`*_BASE_URL` override** (key-exfil) · **unpinned MCP server** |
+| **dependencies** | offline supply-chain hygiene (AI slopsquat class) | **malicious install/lifecycle script** (fetch-and-exec `postinstall`) · **lockfile drift** (manifest dep absent from the lockfile) · unpinned + dependency-confusion names (advisory-only) · registry/typosquat resolution behind opt-in `--network` |
 
 Plus **derived targeting** — IDOR / SSRF / open-redirect / upload / write / auth-endpoint
 candidates — so probes get pointed at the *exact* endpoints, not fired blindly.
@@ -248,7 +250,7 @@ upload, cross-tenant BOLA, role/authz gaps).
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 285 tests
+python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 324 tests
 ```
 
 ## Releasing (maintainer)

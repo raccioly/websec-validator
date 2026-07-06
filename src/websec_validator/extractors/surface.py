@@ -23,6 +23,22 @@ _U = r"(?:req\.|request\.|\+|`[^`]*\$\{|f['\"]|%\s*[\(%]|\.format\s*\(|searchPar
 _REQ_SRC = (r"(?:req\.(?:query|params|body|headers|originalUrl)|request\.(?:query|params|body|headers|json|args|GET|POST)"
             r"|searchParams|nextUrl|\.params\[|\.query\[|\.body\.|ctx\.(?:query|params|request|req)|\bbody\.\w|userInput|userProvided)")
 
+# Log injection (CWE-117) — Veracode's #2 AI failure class. A user-controlled value CONCATENATED or
+# interpolated into a logging call with no newline neutralization (log forging). LOW severity — not RCE.
+# Server-only (added to _SERVER_REQUEST_CLASSES below). The load-bearing FP guard: no arm may cross a
+# comma / `;` / `)`, so STRUCTURED/parametrized logging — `logger.info('u=%s', x)`, pino's object arg,
+# `extra={...}` — where the value is a SEPARATE argument never matches; only value-in-arg-1 concatenation
+# does. Bare `print()` is deliberately NOT a sink (the tool's own cli.py uses print()).
+_LOG_SINK = (r"(?:console\.(?:log|info|warn|error|debug)|(?:logger|log|winston|pino|logging|_log|LOG)\."
+             r"(?:info|warn|warning|error|debug|log|trace|fatal|verbose|http|exception|critical))")
+_LOG_INJECTION = re.compile(
+    _LOG_SINK + r"\s*\(\s*(?:"
+    r"`[^`,;)]*\$\{[^}]*" + _REQ_SRC +                       # `...${req.query.x}...`  (JS template)
+    r"|f['\"][^'\",;)]*\{[^}]*" + _REQ_SRC +                 # f"...{request.args...}..."  (Python)
+    r"|['\"][^'\",;)]*['\"]\s*\+\s*[^,;)]*" + _REQ_SRC +     # "prefix " + req.query.x  (concat, no comma)
+    r"|" + _REQ_SRC +                                        # log the raw user value as the first arg
+    r")", re.I)
+
 # class -> (probe it feeds, gating, compiled regex)
 #   gating: None | "sql" | "nosql"  (datastore-dependent classes)
 SINKS = {
@@ -100,6 +116,9 @@ SINKS = {
         r"|\bv-html\s*=\s*['\"]?(?:[\w.$]+|\{)"
         r"|\{%\s*autoescape\s+(?:false|off)|\|\s*safe\b|\bmark_safe\s*\(|\bMarkup\s*\("
         r"|res\.(?:send|write)\s*\(\s*[`'\"][^`'\"]*<[a-z][^`'\"]*\$\{[^}]*(?:req|request|params|query|body)\b")),
+    # Log injection / log forging (CWE-117). LOW severity, server-only. No active probe — a manual-verify
+    # lead ("log-forging-verify" is documentary; the probe field is cosmetic and never staged).
+    "log-injection": ("log-forging-verify", None, _LOG_INJECTION),
 }
 
 # A file that neutralizes HTML before rendering — DOMPurify / sanitize-html / the `xss` lib / Python
@@ -156,7 +175,10 @@ SSRF_PRIVATE_GUARD = re.compile(
 # several real repos). redirect/error-disclosure are likewise server-response classes.
 _SERVER_REQUEST_CLASSES = {"ssrf", "ssrf-outbound-http", "command-injection", "path-traversal",
                            "open-redirect", "sql-injection", "nosql-injection", "ssti",
-                           "eval-injection", "xxe", "redos", "error-disclosure"}
+                           "eval-injection", "xxe", "redos", "error-disclosure",
+                           # log-injection: a server handler logging request data — client/CLI/no-web-surface
+                           # files (which don't take an HTTP request) must not fire (bug-135/140 lesson).
+                           "log-injection"}
 # a Python module that is an operator CLI (has an __main__ entrypoint / argparse / click) and imports NO
 # web framework — its input is argv/stdin, not an HTTP request, so server-only sinks don't apply.
 _PY_CLI = re.compile(r"if\s+__name__\s*==\s*['\"]__main__['\"]|\bargparse\.|click\.command|\btyper\.|sys\.argv", re.I)

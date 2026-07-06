@@ -31,7 +31,7 @@ that makes the agent + human dramatically more effective.
 ## Component Map
 
 The tool is a single pure-Python package, `src/websec_validator/`. Recon walks the repo **once** into a
-shared `RepoContext`, then runs 20 extractors over it; the downstream modules turn those facts into
+shared `RepoContext`, then runs 22 extractors over it; the downstream modules turn those facts into
 scanner runs, a calibrated findings ledger, staged probes, and the briefing/report artifacts.
 
 | Component | Responsibility | Location | Tests |
@@ -134,7 +134,7 @@ symlink — nothing is ever overwritten.
 
 ```mermaid
 graph LR
-    R[your repo] --> A[1. Recon<br/>20 extractors]
+    R[your repo] --> A[1. Recon<br/>22 extractors]
     A --> B[2. Static scanners<br/>de-duplicated]
     B --> C[3. Findings ledger<br/>evidence + standards + calibrated P-real]
     A --> D[3. Stage tailored probes]

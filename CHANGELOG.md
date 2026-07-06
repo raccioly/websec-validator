@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **No-Row-Level-Security detection** (`missing-rls` class, in `schemas.py` + the ledger) — committed
+  Postgres/Supabase DDL declares owner/tenant-scoped tables but ships **zero** `CREATE POLICY` /
+  `ENABLE ROW LEVEL SECURITY` anywhere in the `.sql` corpus (the CVE-2025-48757 "Lovable" class).
+  Ledger-only correlation of existing facts (**not** a new extractor, count unchanged). Heavily FP-guarded:
+  fires only on an owner-column-bearing table, aggregates RLS tokens across all migrations, gates on a
+  Postgres/Supabase stack, honors the truncation guard, strips SQL comments, and ships **MEDIUM/LOW**
+  with an explicit "RLS may be dashboard-defined — verify" caveat (escalates to HIGH only when a Supabase
+  anon key makes the tables directly browser-reachable). Distinct from the existing `rls-context` class.
+- **`agent_config` extractor** (21st extractor) — scans the repo's OWN agent/MCP wiring as untrusted data
+  (`.claude/settings.json`, `.mcp.json`, cursor/copilot rules, `CLAUDE.md`/`AGENTS.md`), mapped to the
+  OWASP Top 10 for Agentic Applications. Five classes: invisible/bidi Unicode in a rules file
+  (Rules-File-Backdoor), a pre-consent hook with a fetch-and-execute command **shape** (CVE-2025-59536
+  class), blanket MCP auto-approval, a non-vendor `*_BASE_URL` override (key-exfil), and unpinned/remote
+  MCP servers. It reads a fixed bounded allow-list directly off the root and **never executes** anything it
+  finds. Tool-description *poisoning* (prose-grammar match) is intentionally deferred to keep the FP bar.
+- **Log-injection (CWE-117) sink class** — the 17th `surface` sink. User input concatenated/interpolated
+  into a logging call (`console`/`logger`/`logging`/`winston`/`pino`) with no CR/LF neutralization (log
+  forging). **LOW** severity (not RCE). Structured/parametrized logging (`logger.info('u=%s', x)`, pino's
+  object arg, `extra={…}`), bare `print()`, and client/CLI/no-web-surface files are all suppressed.
+- **`dependencies` extractor** (22nd extractor) — offline supply-chain hygiene for the AI slopsquat /
+  malicious-dep class Trivy can't see. Two ledger classes: a **malicious install/lifecycle script**
+  (fetch-and-execute/eval body — the Shai-Hulud shape, MEDIUM) and **lockfile drift** (a manifest dep
+  absent from an existing JSON lockfile's installed set, LOW). Unpinned/floating versions and
+  dependency-confusion-shaped names are surfaced as **advisory facts only** (never routed to the ledger,
+  so they can't inflate findings). Registry resolution / known-hallucinated-name / typosquat-distance are
+  **deferred behind an opt-in `--network` step** — the default pass makes zero network calls.
+- Metrics: **20 → 22 extractors** (`agent_config`, `dependencies`), **16 → 17 sink classes**
+  (log-injection), **285 → 324 tests**. New finding classes: `missing-rls`, `log-injection`,
+  `agent-config-hidden-unicode` / `agent-hook-autoexec` / `agent-mcp-autoapprove` /
+  `agent-config-baseurl-override` / `agent-mcp-unpinned-server`, `malicious-install-script`,
+  `lockfile-drift`. `schema_version` unchanged (`1.0`, additive facts). All findings flow through the
+  existing calibrated-`P(real)` + de-dup + `.websec-ignore` machinery.
 - Open-source hygiene surface: root `SECURITY.md` (GitHub-recognized security policy with
   private-reporting flow), `CONTRIBUTING.md` (ground rules + dev setup + PR checklist),
   `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), issue templates (bug / **false positive** /

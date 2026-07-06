@@ -1,0 +1,14 @@
+{
+  "name": "benign-monorepo",
+  "version": "1.0.0",
+  "dependencies": {
+    "@myorg/ui": "workspace:*",
+    "@myorg/db": "file:../db",
+    "react": "^18.2.0",
+    "@aws-sdk/client-s3": "^3.500.0"
+  },
+  "scripts": {
+    "postinstall": "husky install",
+    "prepare": "patch-package"
+  }
+}

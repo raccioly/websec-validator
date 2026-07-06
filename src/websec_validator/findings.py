@@ -130,6 +130,13 @@ STANDARDS = {
     "claim-authz": (["CWE-639 Authorization Bypass Through User-Controlled Key", "CWE-807 Reliance on Untrusted Inputs in a Security Decision"],
                     "ASVS V4.2.1", ["API1:2023 BOLA"]),
     "rls-context": (["CWE-1188 Insecure Default Initialization of Resource"], "ASVS V4.1.3", ["API1:2023 BOLA"]),
+    # DISTINCT from rls-context (which is the transaction-local set_config-timing bug): this is the
+    # simpler, higher-frequency Lovable / CVE-2025-48757 class — owner-scoped tables shipped with NO RLS
+    # policy at all. Own calibration cell + own remediation; must never share rls-context's string.
+    "missing-rls": (["CWE-1188 Insecure Default Initialization of Resource", "CWE-284 Improper Access Control"],
+                    "ASVS V4.1.3", ["API1:2023 BOLA"]),
+    "log-injection": (["CWE-117 Improper Output Neutralization for Logs"], "ASVS V7.3.1",
+                      ["API8:2023 Misconfiguration"]),
     # --- entitlement / licensing + browser-extension client-trust classes ---
     "entitlement-revocation-bypass": (["CWE-863 Incorrect Authorization",
                                        "CWE-672 Operation on a Resource after Expiration or Release"],
@@ -148,6 +155,26 @@ STANDARDS = {
     "extension-message-trust": (["CWE-346 Origin Validation Error",
                                  "CWE-940 Improper Verification of Source of a Communication Channel"],
                                 "ASVS V13.2", ["API8:2023 Misconfiguration"]),
+    # --- agent-config / MCP attack surface (OWASP Top 10 for Agentic Applications, 2026) ---
+    "agent-config-hidden-unicode": (["CWE-451 UI Misrepresentation of Critical Information",
+                                     "CWE-94 Improper Control of Generation of Code"],
+                                    "ASVS V5.1.3", ["ASI01:2026 Agent Goal Hijacking"]),
+    "agent-hook-autoexec": (["CWE-78 OS Command Injection", "CWE-829 Inclusion of Functionality from Untrusted "
+                             "Control Sphere"], "ASVS V5.2.4", ["ASI05:2026 Insufficient Sandboxing"]),
+    "agent-mcp-autoapprove": (["CWE-732 Incorrect Permission Assignment", "CWE-250 Execution with Unnecessary "
+                               "Privileges"], "ASVS V1.2.2", ["ASI06:2026 Excessive Agency"]),
+    "agent-config-baseurl-override": (["CWE-522 Insufficiently Protected Credentials",
+                                       "CWE-200 Exposure of Sensitive Information"],
+                                      "ASVS V2.10.4", ["ASI08:2026 Sensitive Information Disclosure"]),
+    "agent-mcp-unpinned-server": (["CWE-1357 Reliance on Insufficiently Trustworthy Component",
+                                   "CWE-829 Inclusion of Functionality from Untrusted Control Sphere"],
+                                  "ASVS V14.2.4", ["ASI09:2026 Supply Chain and Dependency Attacks"]),
+    # --- offline supply-chain hygiene (dependencies extractor) ---
+    "malicious-install-script": (["CWE-506 Embedded Malicious Code",
+                                  "CWE-829 Inclusion of Functionality from Untrusted Control Sphere"],
+                                 "ASVS V14.2.4", ["API8:2023 Misconfiguration"]),
+    "lockfile-drift": (["CWE-1104 Use of Unmaintained Third Party Components"], "ASVS V14.2.1",
+                       ["API8:2023 Misconfiguration"]),
 }
 REMEDIATION = {
     "missing-auth": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a "
@@ -280,6 +307,14 @@ REMEDIATION = {
     "rls-context": "Set the RLS context (`set_config('app.*', x, true)`) INSIDE the transaction that runs the "
                    "tenant-scoped query, on the SAME connection the handler uses — a transaction-local setting "
                    "emitted at autocommit resets before the query, so RLS evaluates with an empty context.",
+    "log-injection": "Neutralize user input before logging — strip/encode CR/LF (\\r\\n) and control chars, or "
+                     "use structured logging that writes the value as a discrete field instead of concatenating it "
+                     "into the message. Never write raw request data into a line-oriented log (CWE-117 log forging).",
+    "missing-rls": "Enable RLS on every owner/tenant-scoped table (`ALTER TABLE t ENABLE ROW LEVEL SECURITY`) and "
+                   "add a policy scoping rows to the authenticated principal (`CREATE POLICY … USING (owner_id = "
+                   "auth.uid())`). Commit policies as migrations so they're reviewable and can't silently drift in "
+                   "the dashboard. With a Supabase anon key in the client, RLS is the ONLY control between any "
+                   "visitor and every tenant's rows — verify it's actually on (dashboard or SQL) for each table.",
     "entitlement-revocation-bypass": "Don't grant on a truthy verify result alone — inspect the purchase/"
                                      "subscription object and reject refunded/chargebacked/disputed/cancelled/"
                                      "ended/expired states before granting. Cache the verified status and flip it "
@@ -299,6 +334,27 @@ REMEDIATION = {
                               "(check sender.id / event.origin against an allowlist), set an explicit target origin "
                               "on postMessage (never '*'), and minimise `world:\"MAIN\"` content scripts that expose "
                               "privileged page-world APIs.",
+    "agent-config-hidden-unicode": "Strip the invisible/bidi code point — no rules/config file needs one. Render "
+                                   "agent-instruction files with a bidi-aware viewer in review, and add a CI check "
+                                   "that rejects U+202A–202E / U+2066–2069 / zero-width chars in .claude/.cursor/"
+                                   "copilot instruction files so a hidden backdoor can't slip through a fork.",
+    "agent-hook-autoexec": "Never let a repo-controlled hook fetch-and-execute (curl|sh, base64|sh, eval, npx of a "
+                           "remote target). Pin hooks to a vetted local script committed in the repo, review hook "
+                           "changes like code, and treat a SessionStart/PreToolUse hook as running before you consent.",
+    "agent-mcp-autoapprove": "Remove blanket MCP auto-approval (`enableAllProjectMcpServers`, `autoApprove:'*'`); "
+                             "approve MCP servers explicitly by name so a forked/added server can't run unprompted.",
+    "agent-config-baseurl-override": "Remove the committed non-vendor `*_BASE_URL` — an agent using it sends its API "
+                                     "key to that host. Point the base URL back at the provider, or inject it from a "
+                                     "local untracked env only, and rotate any key that was used against the override.",
+    "malicious-install-script": "Audit the lifecycle script — an install/postinstall hook that fetches-and-"
+                                "executes runs on every `npm install` before review. Remove the network fetch, pin it "
+                                "to a committed local script, and consider installing with `--ignore-scripts` in CI.",
+    "lockfile-drift": "Regenerate and commit the lockfile so it matches the manifest — drift means `install` can "
+                      "resolve an unreviewed version. Treat the lockfile as source of truth; never hand-edit deps "
+                      "without updating it, and review lockfile changes as diffs.",
+    "agent-mcp-unpinned-server": "Pin every MCP server to an exact version or git sha and vet its source — an "
+                                 "unpinned `npx`/`uvx` server is a rug-pull/typosquat foothold with code execution in "
+                                 "your agent's context. Prefer a locally-installed, lockfile-tracked server.",
 }
 _DEFAULT_REM = "Review and remediate per the cited standard."
 
@@ -527,6 +583,13 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                    "same-line user marker isn't required here, so verify reachability from a req.query reader)"}]
             if cls == "ssrf-outbound-http":
                 sev = "LOW"               # var-arg only — weaker than the user-gated `ssrf` class
+        elif cls == "log-injection":
+            attack = "log-injection"
+            sev = "LOW"                   # log forging, not RCE — honest low severity
+            ev = [{"layer": "recon", "detail": f"user input reaches a logging sink in {info.get('count')} "
+                   "file(s) with no CR/LF neutralization (CWE-117 log forging) — an attacker can split log "
+                   "lines / inject fake entries. Strip \\r\\n before logging, or log the value as a discrete "
+                   "structured field."}]
         else:
             _acls = _SINK_ATTACK.get(cls, cls)
             attack = _acls if _acls in STANDARDS else "sast"
@@ -605,6 +668,36 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                       [{"layer": "recon", "detail": "a Supabase ANON/publishable key (role:anon) — designed to "
                         "ship to the browser and protected by Row-Level Security. Not a leak; listed so a scanner "
                         "'JWT' hit on it is acknowledged-and-cleared. Confirm RLS is actually enabled on every table."}]))
+
+    # ---- 4b. No Row-Level Security at all (the Lovable / CVE-2025-48757 class) ----
+    # Committed Postgres/Supabase DDL declares owner/tenant-scoped tables, yet the ENTIRE .sql corpus ships
+    # ZERO RLS artifacts (no CREATE POLICY, no ENABLE ROW LEVEL SECURITY anywhere). This is the archetypal
+    # AI-generated-schema bug: data is per-tenant but nothing isolates it. FP guard is deliberately heavy —
+    # fires ONLY when there's committed DDL to contradict, and ships MEDIUM/LOW because RLS is very often
+    # defined in the Supabase dashboard rather than committed SQL. Escalates to HIGH only when an anon key
+    # makes the tables directly browser-reachable via PostgREST (RLS is then the ONLY tenant boundary).
+    _sc = facts.get("schemas", {})
+    _frameworks = {fw.lower() for fw in (facts.get("stack", {}).get("frameworks") or [])}
+    _pg_stack = bool(_ds & {"postgres", "postgresql", "supabase"}) or "supabase" in _frameworks
+    if (_sc.get("sql_ddl_present") and _sc.get("owner_scoped_tables")
+            and int(_sc.get("rls_policy_count", 0)) == 0 and int(_sc.get("rls_enabled_count", 0)) == 0
+            and _pg_stack and not facts.get("files_truncated")):
+        _tbls = _sc["owner_scoped_tables"]
+        _first = _tbls[0]
+        _anon = bool(_cx.get("intended_public_supabase"))
+        _sev, _conf = ("HIGH", "MEDIUM") if _anon else ("MEDIUM", "LOW")
+        _names = ", ".join(t["name"] for t in _tbls[:6]) + ("…" if len(_tbls) > 6 else "")
+        _detail = (f"{len(_tbls)} owner/tenant-scoped table(s) ({_names}) are declared in committed SQL, but the "
+                   "entire .sql corpus contains ZERO Row-Level-Security artifacts (no CREATE POLICY, no ENABLE ROW "
+                   "LEVEL SECURITY) — the CVE-2025-48757 'Lovable' class where per-tenant data has no isolation. "
+                   "CAVEAT: RLS policies are often defined in the Supabase dashboard, not committed SQL — confirm "
+                   "in the dashboard before treating this as a live leak (hence MEDIUM/LOW).")
+        if _anon:
+            _detail += (" A Supabase ANON key is present in client-reachable code, so any visitor can query these "
+                        "tables directly via PostgREST — RLS is the only barrier, so this escalates to HIGH.")
+        out.append(_f(f"Owner-scoped tables with no Row-Level Security: {_first['name']}",
+                      "access-control", "missing-rls", _sev, _conf, _first["file"],
+                      [{"layer": "recon", "detail": _detail}]))
 
     # ---- 5. IaC / CI-CD (AppSync API_KEY default → anonymous/missing-auth, retest-corrected from CSWSH) ----
     for fnd in (facts.get("iac_ci", {}).get("findings", []) or []):
@@ -729,6 +822,24 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         out.append(_f(f"{fnd.get('kind')}: {fnd.get('file')}", "access-control",
                       fnd.get("attack_class", "cookie-authz"),
                       fnd.get("severity", "MEDIUM"), "LOW", fnd.get("file", ""),
+                      [{"layer": "recon", "detail": fnd.get("detail", "")}]))
+
+    # ---- 15. Agent-config / MCP attack surface — the repo's OWN agent wiring (OWASP Agentic Top 10).
+    # Read as untrusted data, never executed. Per-finding confidence (HIGH for the structural classes,
+    # MEDIUM for hook-shape / unpinned-server). ----
+    for fnd in (facts.get("agent_config", {}) or {}).get("findings", []):
+        out.append(_f(f"{fnd.get('kind')}: {fnd.get('file')}", "agent-config",
+                      fnd.get("attack_class", "agent-config-hidden-unicode"),
+                      fnd.get("severity", "MEDIUM"), fnd.get("confidence", "MEDIUM"), fnd.get("file", ""),
+                      [{"layer": "recon", "detail": fnd.get("detail", "")}]))
+
+    # ---- 16. Offline supply-chain hygiene — dependencies extractor. ONLY the ledger-bound findings
+    # (malicious-install-script + lockfile-drift); unpinned versions + dependency-confusion candidates
+    # stay ADVISORY in facts['dependencies'] and are deliberately NOT routed here (FP-safety). ----
+    for fnd in (facts.get("dependencies", {}) or {}).get("findings", []):
+        out.append(_f(f"{fnd.get('kind')}: {fnd.get('file')}", "supply-chain",
+                      fnd.get("attack_class", "lockfile-drift"),
+                      fnd.get("severity", "LOW"), fnd.get("confidence", "LOW"), fnd.get("file", ""),
                       [{"layer": "recon", "detail": fnd.get("detail", "")}]))
 
     # ---- suppress + rank ----

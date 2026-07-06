@@ -26,6 +26,13 @@ src/websec_validator/rules/
 
 # Extractor source — each detector's matched patterns appear here as example literals/regexes.
 src/websec_validator/extractors/auth.py
+# agent_config.py embeds attack-command literals (curl|sh, /dev/tcp, node -e, *_BASE_URL) as detection
+# definitions; suppress the SOURCE only. NOT `category:agent-config` — a real poisoned .claude/ config in
+# this repo should still surface (unlike the synthetic graphql self-reference below).
+src/websec_validator/extractors/agent_config.py
+# dependencies.py embeds install-script attack literals (curl|sh, base64 -d, node -e, /dev/tcp) as its
+# SUSPICIOUS_LIFECYCLE detection definition; suppress the SOURCE only.
+src/websec_validator/extractors/dependencies.py
 src/websec_validator/extractors/client_exposure.py
 src/websec_validator/extractors/client_integrity.py
 src/websec_validator/extractors/surface.py

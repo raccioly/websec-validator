@@ -33,6 +33,8 @@ from websec_validator.extractors.transport_security import TransportSecurityExtr
 from websec_validator.extractors.llm_security import LlmSecurityExtractor  # noqa: E402
 from websec_validator.extractors.crypto_usage import CryptoUsageExtractor  # noqa: E402
 from websec_validator.extractors.authz_dataflow import AuthzDataflowExtractor  # noqa: E402
+from websec_validator.extractors.agent_config import AgentConfigExtractor  # noqa: E402
+from websec_validator.extractors.dependencies import DependenciesExtractor  # noqa: E402
 
 FIX = Path(__file__).resolve().parent / "fixtures"
 
@@ -1321,6 +1323,207 @@ class Wave3DeferredDetectorTests(unittest.TestCase):
         out = self._adf({"rls.ts": "await db.transaction(async (tx) => { "
                                    "await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`); });"})
         self.assertNotIn("rls-context-no-transaction", self._akinds(out))
+
+
+# ---------------------------------------------------------------------------------------------------
+class AgentConfigTests(unittest.TestCase):
+    """P2 — agent-config / MCP attack surface (OWASP Agentic Top 10). Repo-own agent wiring read as
+    untrusted DATA, never executed. 5 structural classes; tool-description poisoning is deferred. The
+    clean control MIRRORS this repo's real OpenWolf config + a multilingual file with a legit LRM."""
+
+    def _kinds(self, fixture):
+        f = AgentConfigExtractor().extract(ctx(fixture), {})
+        return f, {x["kind"] for x in f["findings"]}
+
+    def test_poisoned_fires_all_five_classes(self):
+        f, kinds = self._kinds("agent_config_poisoned")
+        self.assertEqual(kinds, {"hidden-unicode", "hook-autoexec", "mcp-autoapprove",
+                                 "baseurl-override", "mcp-unpinned-server"})
+
+    def test_clean_config_is_silent(self):
+        f, kinds = self._kinds("agent_config_clean")
+        self.assertEqual(f["findings"], [], f"benign OpenWolf-shaped config must not fire: {kinds}")
+
+    def test_hidden_unicode_reports_codepoint_and_line(self):
+        f, _ = self._kinds("agent_config_poisoned")
+        hu = [x for x in f["findings"] if x["kind"] == "hidden-unicode"][0]
+        self.assertEqual(hu["file"], "CLAUDE.md")
+        self.assertIn("U+202E", hu["detail"])
+        self.assertIn("line", hu)
+
+    def test_legit_lrm_not_flagged(self):
+        # AGENTS.md control has U+200E (LRM) which is EXCLUDED from BAD_CP — multilingual repos are safe.
+        f, kinds = self._kinds("agent_config_clean")
+        self.assertNotIn("hidden-unicode", kinds)
+
+    def test_pinned_mcp_server_not_flagged(self):
+        f, _ = self._kinds("agent_config_poisoned")
+        unpinned = [x for x in f["findings"] if x["kind"] == "mcp-unpinned-server"]
+        self.assertEqual(len(unpinned), 1)              # only the @evil/mcp-server, not the pinned one
+        self.assertIn("evil", unpinned[0]["detail"])
+
+    def test_benign_hook_shape_not_flagged(self):
+        # `node "$CLAUDE_PROJECT_DIR/..."` and `python3 tools/x.py` (no -c/-e, no fetch|sh) must be silent.
+        f, kinds = self._kinds("agent_config_clean")
+        self.assertNotIn("hook-autoexec", kinds)
+
+    def test_vendor_baseurl_not_flagged(self):
+        d = Path(tempfile.mkdtemp())
+        (d / ".mcp.json").write_text('{"env": {"ANTHROPIC_BASE_URL": "https://api.anthropic.com"}}')
+        f = AgentConfigExtractor().extract(RepoContext(d), {})
+        self.assertNotIn("baseurl-override", {x["kind"] for x in f["findings"]})
+
+    def test_explicit_autoapprove_list_not_flagged(self):
+        d = Path(tempfile.mkdtemp())
+        (d / ".mcp.json").write_text('{"autoApprove": ["read_file", "list_dir"]}')
+        f = AgentConfigExtractor().extract(RepoContext(d), {})
+        self.assertNotIn("mcp-autoapprove", {x["kind"] for x in f["findings"]})
+
+    def test_malformed_json_does_not_crash(self):
+        d = Path(tempfile.mkdtemp())
+        (d / ".mcp.json").write_text('{"mcpServers": {  not valid json ]]')
+        f = AgentConfigExtractor().extract(RepoContext(d), {})   # must not raise
+        self.assertIn("agent_surface_present", f)
+
+    def test_no_agent_surface_is_empty(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "app.py").write_text("print('hi')")
+        f = AgentConfigExtractor().extract(RepoContext(d), {})
+        self.assertFalse(f["agent_surface_present"])
+        self.assertEqual(f["findings"], [])
+
+    def test_findings_reach_ledger_with_owasp_agentic_mapping(self):
+        facts = {"agent_config": AgentConfigExtractor().extract(ctx("agent_config_poisoned"), {})}
+        led = findings.build_ledger(facts, None, None, [])
+        classes = {x["attack_class"] for x in led["findings"]}
+        self.assertIn("agent-config-hidden-unicode", classes)
+        self.assertIn("agent-mcp-autoapprove", classes)
+        # OWASP Agentic Top 10 citation flows through _cite()/STANDARDS
+        hu = [x for x in led["findings"] if x["attack_class"] == "agent-config-hidden-unicode"][0]
+        self.assertTrue(any("ASI" in o for o in hu["standards"]["owasp_api"]))
+
+
+# ---------------------------------------------------------------------------------------------------
+class LogInjectionTests(unittest.TestCase):
+    """P1 — log injection (CWE-117), the 17th sink class. LOW severity (log forging, not RCE). The
+    load-bearing FP guard is that no regex arm may cross a comma — so STRUCTURED/parametrized logging
+    never matches. Server-only (client/CLI/no-web-surface suppressed)."""
+
+    rx = SINKS["log-injection"][2]
+
+    def test_regex_fires_on_concatenation_and_interpolation(self):
+        for s in ("logger.info('user: ' + req.query.name)",
+                  "logger.info(`login ${req.query.u}`)",
+                  'logging.info(f"ip={request.headers.get(\'x\')}")',
+                  "console.error(req.body)",
+                  "winston.warn('bad ' + request.args.get('q'))"):
+            self.assertTrue(self.rx.search(s), f"should flag: {s}")
+
+    def test_regex_ignores_structured_logging(self):
+        # the comma guard: a user value in a SEPARATE argument is parametrized/structured logging → safe
+        for s in ("logger.info('user=%s', req.query.name)",
+                  "logging.info('path=%s', request.args.get('p'))",
+                  "logger.info({ user: req.query.u }, 'login')",
+                  "log.info('event', extra={'user': request.user})",
+                  "logger.info('server started on port 3000')",
+                  "console.log(user.name)"):
+            self.assertFalse(self.rx.search(s), f"should NOT flag: {s}")
+
+    def test_bare_print_is_not_a_log_sink(self):
+        # protects the tool's own cli.py print() idiom and every CLI that prints user input
+        self.assertFalse(self.rx.search("print('target: ' + req.query.x)"))
+
+    def test_fires_in_server_file(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "server.js").write_text("function h(req,res){ logger.info('u: ' + req.query.name); }\n")
+        s = SurfaceExtractor().extract(RepoContext(d), {"stack": {"languages": ["node"], "frameworks": ["express"]}})
+        self.assertIn("log-injection", s["sinks"])
+
+    def test_suppressed_on_client_file(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "Widget.tsx").write_text("export const W = () => { console.log('u:' + req.query.name); return null; }\n")
+        s = SurfaceExtractor().extract(RepoContext(d), {"stack": {"languages": ["node"], "frameworks": ["express"]}})
+        self.assertNotIn("log-injection", s["sinks"])
+
+    def test_suppressed_on_non_web_repo(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "app.py").write_text("def h():\n    logging.info(f\"x={request.args.get('x')}\")\n")
+        cli = SurfaceExtractor().extract(RepoContext(d), {"stack": {"languages": ["python"], "frameworks": []}})
+        self.assertNotIn("log-injection", cli["sinks"])
+        web = SurfaceExtractor().extract(RepoContext(d), {"stack": {"languages": ["python"], "frameworks": ["flask"]}})
+        self.assertIn("log-injection", web["sinks"])
+
+    def test_ledger_ranks_low_with_cwe_117(self):
+        facts = {"surface": {"sinks": {"log-injection": {"probe": "log-forging-verify",
+                                                         "count": 1, "files": ["server.js"]}}}}
+        led = findings.build_ledger(facts, None, None, [])
+        li = [x for x in led["findings"] if x["attack_class"] == "log-injection"]
+        self.assertTrue(li)
+        self.assertEqual(li[0]["severity"], "LOW")
+        self.assertTrue(any("CWE-117" in c for c in li[0]["standards"]["cwe"]))
+
+
+# ---------------------------------------------------------------------------------------------------
+class DependenciesTests(unittest.TestCase):
+    """P3 — offline supply-chain hygiene (22nd extractor). LEDGER = malicious-install-script + lockfile-
+    drift ONLY. Unpinned versions and dependency-confusion names are ADVISORY facts, NEVER routed to the
+    ledger (the load-bearing FP-safety guarantee). Zero network in the default pass."""
+
+    def _dep(self, fixture):
+        return DependenciesExtractor().extract(ctx(fixture), {})
+
+    def test_malicious_install_script_fires(self):
+        f = self._dep("dep_supplychain")
+        self.assertIn("malicious-install-script", [x["kind"] for x in f["findings"]])
+
+    def test_benign_lifecycle_scripts_silent(self):
+        # husky install / patch-package / tsc are NOT fetch-and-execute → no finding
+        f = self._dep("dep_benign_monorepo")
+        self.assertNotIn("malicious-install-script", [x["kind"] for x in f["findings"]])
+
+    def test_lockfile_drift_fires_on_missing_dep(self):
+        f = self._dep("dep_supplychain_drift")
+        drift = [x for x in f["findings"] if x["kind"] == "lockfile-drift"]
+        self.assertEqual(len(drift), 1)              # only dotenv (express+helmet are in the lock)
+        self.assertIn("dotenv", drift[0]["detail"])
+
+    def test_no_lockfile_means_no_drift(self):
+        f = self._dep("node_app")                    # ^-range deps, NO lockfile
+        self.assertNotIn("lockfile-drift", [x["kind"] for x in f["findings"]])
+
+    def test_unpinned_is_advisory_only_never_ledger(self):
+        f = self._dep("node_app")
+        self.assertGreater(f["counts"]["unpinned"], 0)     # surfaced as advisory
+        self.assertEqual(f["findings"], [])                # but NOT in the ledger-bound findings[]
+
+    def test_workspace_and_public_scope_not_confusion(self):
+        f = self._dep("dep_benign_monorepo")
+        self.assertEqual(f["counts"]["confusion_candidates"], 0)   # @myorg workspace:/file:, @aws-sdk allowlisted
+
+    def test_pinned_pip_is_clean(self):
+        f = self._dep("dep_benign_pip")
+        self.assertEqual(f["findings"], [])
+        self.assertEqual(f["counts"]["unpinned"], 0)
+
+    def test_malformed_json_does_not_crash(self):
+        f = self._dep("dep_malformed")               # must not raise
+        self.assertEqual(f["findings"], [])
+
+    def test_network_never_runs_in_default_pass(self):
+        for fx in ("dep_supplychain", "node_app", "dep_benign_pip"):
+            self.assertFalse(self._dep(fx)["network"]["ran"])
+
+    def test_ledger_routes_findings_but_not_advisory(self):
+        # dep_supplychain (install-script) → routed; dep_benign_monorepo (only unpinned) → nothing routed
+        led_bad = findings.build_ledger({"dependencies": self._dep("dep_supplychain")}, None, None, [])
+        self.assertIn("malicious-install-script", {x["attack_class"] for x in led_bad["findings"]})
+        led_ok = findings.build_ledger({"dependencies": self._dep("dep_benign_monorepo")}, None, None, [])
+        self.assertNotIn("supply-chain", {x["category"] for x in led_ok["findings"]})
+
+    def test_install_script_cwe_mapping(self):
+        led = findings.build_ledger({"dependencies": self._dep("dep_supplychain")}, None, None, [])
+        mis = [x for x in led["findings"] if x["attack_class"] == "malicious-install-script"][0]
+        self.assertTrue(any("CWE-506" in c for c in mis["standards"]["cwe"]))
 
 
 if __name__ == "__main__":
