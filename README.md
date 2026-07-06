@@ -7,6 +7,8 @@
 [![SARIF 2.1.0](https://img.shields.io/badge/output-SARIF%202.1.0-orange)](#ci--enterprise-integration)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
+A senior pentester's "here's what to test and how" handoff — auto-generated from your repo, for your AI agent to execute.
+
 <!-- docguard:quality negation-load off — "no LLM / no server / no running app / not a SaaS / never touches prod" is this tool's core positioning; defining it by contrast with the scanners-and-SaaS it deliberately is NOT is intentional, not a phrasing defect. -->
 
 > Local-first security recon that **briefs your AI coding agent**. It does the deterministic
@@ -14,6 +16,8 @@
 > stage a probe library tailored to what it found — then hands your agent (Claude Code, Codex,
 > Gemini, Cursor) a marching-orders briefing. **Code in, artifacts out. No LLM in the tool, no
 > server, no running app required.**
+
+[![websec-validator demo](assets/demo.gif)](assets/demo.gif)
 
 It is *not* an autonomous scanner and *not* a SaaS. It's the missing front-half: the thing that
 turns a repo into a precise, fact-grounded security brief an AI agent (with a human in the loop)
