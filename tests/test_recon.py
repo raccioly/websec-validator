@@ -1211,6 +1211,31 @@ class Wave2bDetectorTests(unittest.TestCase):
                                     "Buffer.from(expected))) return deny();"})
         self.assertNotIn("timing-unsafe-compare", self._kinds(out))
 
+    def test_hibp_sha1_not_flagged(self):
+        code = "def check_pwned_password(password: str):\n  sha1_hash = hashlib.sha1(password.encode('utf-8')).hexdigest().upper()\n  return fetch(f'https://api.pwnedpasswords.com/range/{sha1_hash[:5]}')"
+        out = self._crypto({"auth.py": code})
+        self.assertNotIn("weak-password-hash", self._kinds(out))
+
+    def test_password_reset_token_not_flagged(self):
+        code = "def verify_password_reset_token(token: str, db_token_hash: str):\n  token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()\n  return crypto.timingSafeEqual(token_hash, db_token_hash)"
+        out = self._crypto({"auth.py": code})
+        self.assertNotIn("weak-password-hash", self._kinds(out))
+
+    def test_avatar_hash_not_flagged(self):
+        code = "def get_user_avatar(email: str):\n  user_id = hashlib.sha256(email.strip().lower().encode('utf-8')).hexdigest()\n  return f'https://www.gravatar.com/avatar/{user_id}?d=identicon'"
+        out = self._crypto({"avatar.py": code})
+        self.assertNotIn("predictable-principal", self._kinds(out))
+
+    def test_jwt_verify_options_variable_not_flagged(self):
+        code = "import { jwtVerifyOptions } from './config';\nexport async function verifyMyToken(token, key) {\n  const { payload } = await jwt.verify(token, key, jwtVerifyOptions);\n  return payload;\n}"
+        out = self._crypto({"mw.ts": code})
+        self.assertNotIn("jwt-verify-no-algorithms", self._kinds(out))
+
+    def test_predictable_principal_cache_key_not_flagged(self):
+        code = "const crypto = require('crypto');\nfunction getUserData(userId) {\n  const cacheKey = crypto.createHash('sha256').update(userId).digest('hex');\n  return redis.get(`cache:user:${cacheKey}`);\n}"
+        out = self._crypto({"cache.js": code})
+        self.assertNotIn("predictable-principal", self._kinds(out))
+
 
 class Wave3DeferredDetectorTests(unittest.TestCase):
     """0.8.0 deferred-backlog detectors: CORS, Next-config headers, SRI, host-redirect,

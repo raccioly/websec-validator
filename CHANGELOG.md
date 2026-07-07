@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Fixed multiple false positives in `crypto_usage` extractor (predictable principal caching/gravatar, JWT options variable, weak password hashes for reset tokens/HIBP check). Added 5 permanent regression tests.
+
 ### Added
 
 - **No-Row-Level-Security detection** (`missing-rls` class, in `schemas.py` + the ledger) — committed
