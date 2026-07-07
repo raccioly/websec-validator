@@ -35,7 +35,7 @@ runs:
   using: "composite"
   steps:
     - name: Set up Python
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
       with:
         python-version: "3.11"
 
@@ -54,7 +54,7 @@ runs:
 
     - name: Upload SARIF to Code Scanning
       if: ${{ always() && inputs.upload-sarif == 'true' }}
-      uses: github/codeql-action/upload-sarif@v4
+      uses: github/codeql-action/upload-sarif@8533807ff379ac610d2b2c389c47e7c629d31d13  # v4.36.3
       with:
         sarif_file: ${{ inputs.out }}/latest/results.sarif
         category: websec-validator

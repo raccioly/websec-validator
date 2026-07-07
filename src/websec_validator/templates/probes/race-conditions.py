@@ -16,11 +16,10 @@ For each target:
   - Compare to expected_unique (usually 1 — only one assignment should win)
   - If success_count > expected_unique -> race condition likely
 
-Uses async httpx for true parallelism (synchronous loops can't trigger races).
+Uses asyncio.to_thread with urllib for parallelism (synchronous loops can't trigger races).
 
-Install: pip install httpx
 """
-import asyncio, httpx, json, os, re, sys
+import asyncio, json, os, re, sys, urllib.request, urllib.error
 from pathlib import Path
 from collections import Counter
 
@@ -46,23 +45,25 @@ TARGETS = [{"name": f"{m} {p}", "method": m, "url": TARGET + re.sub(r"\{[^}]+\}"
 if not TARGETS:
     sys.exit("No write endpoints in probe-context.json — nothing to probe.")
 
-async def fire(client, t):
+def fire_sync(t):
     """Single request, return (status_code, response_body_preview)"""
     try:
-        r = await client.request(
-            t['method'], t['url'],
-            json=t['payload'],
-            headers=HEADERS,
-            timeout=30.0,
+        req = urllib.request.Request(
+            t['url'],
+            data=json.dumps(t['payload']).encode('utf-8') if t['payload'] else None,
+            headers={**HEADERS, "Content-Type": "application/json"} if t['payload'] else HEADERS,
+            method=t['method']
         )
-        return (r.status_code, r.text[:120])
+        with urllib.request.urlopen(req, timeout=30.0) as r:
+            return (r.status, r.read().decode('utf-8', errors='ignore')[:120])
+    except urllib.error.HTTPError as e:
+        return (e.code, e.read().decode('utf-8', errors='ignore')[:120])
     except Exception as e:
         return (None, str(e)[:120])
 
 async def run_target(t):
     print(f"  Firing {PARALLEL} parallel {t['method']} to {t['url'][len(TARGET):]}")
-    async with httpx.AsyncClient() as client:
-        results = await asyncio.gather(*[fire(client, t) for _ in range(PARALLEL)])
+    results = await asyncio.gather(*[asyncio.to_thread(fire_sync, t) for _ in range(PARALLEL)])
     codes = Counter(r[0] for r in results)
     success = sum(1 for r in results if r[0] and 200 <= r[0] < 300)
     race_likely = success > t['expected_unique']

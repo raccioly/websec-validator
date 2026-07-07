@@ -10,9 +10,9 @@ FROM python:3.14-slim
 # TARGETARCH is auto-populated by BuildKit (arm64/amd64) — do NOT give it a
 # default, or it shadows the real build arch and pulls the wrong-arch packages.
 ARG TARGETARCH
-ARG NOIR_VERSION=1.0.0
+ARG NOIR_VERSION=1.1.0
 ARG GITLEAKS_VERSION=8.30.1
-ARG TRIVY_VERSION=0.58.1
+ARG TRIVY_VERSION=0.59.1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl git \
@@ -37,7 +37,7 @@ RUN case "${TARGETARCH}" in amd64) GL=x64 ;; arm64) GL=arm64 ;; *) GL="${TARGETA
     && tar -xzf /tmp/gl.tgz -C /usr/local/bin gitleaks && rm /tmp/gl.tgz
 
 # Semgrep (SAST) + Checkov (IaC)
-RUN pip install --no-cache-dir semgrep checkov
+RUN pip install --no-cache-dir semgrep==1.168.0 checkov==3.3.6
 
 # The tool
 WORKDIR /opt/websec
