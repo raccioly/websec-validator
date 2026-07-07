@@ -40,13 +40,17 @@ STRONG_KDF = re.compile(r"\bbcrypt\b|\bargon2|\bscrypt\b|\bpbkdf2\b", re.I)
 # createHash('sha256') sitting in an auth file, but its input is a VERIFIER, not a password — flagging it
 # weak-password-hash is a false positive (real repos: a real Next.js app, a real app OAuth adapters).
 PKCE_CONTEXT = re.compile(r"code_challenge|code_verifier|codeVerifier|codeChallenge|\bS256\b|\bPKCE\b", re.I)
+# Benign password-related hashes: HIBP (checking sha1 prefix), password reset tokens (hashing the token).
+PW_EXCLUSION = re.compile(r"pwned|hibp|reset_?token|password_?reset", re.I)
 JWT_VERIFY = re.compile(r"\bjwtVerify\s*\(|\bjwt\.verify\s*\(|\bjwtv2\.verify\s*\(|verifyJwt\s*\(", re.I)
-JWT_ALGS = re.compile(r"algorithms?\s*[:=]|['\"]alg['\"]\s*:", re.I)
+JWT_ALGS = re.compile(r"algorithms?\s*[:=]|['\"]alg['\"]\s*:|[a-zA-Z0-9_]*[Oo]ptions\b", re.I)
 # a public hash of an identity field, used as a security principal / tenant key
 PRINCIPAL_HASH = re.compile(
     r"createHash\s*\(\s*['\"]sha256['\"]\s*\)[\s\S]{0,100}?\.update\s*\([^)]*\b(?:email|userId|user_id|username|userEmail|sub)\b"
     r"|hashlib\.sha256\s*\([^)]*\b(?:email|user_id|username)\b", re.I)
 PRINCIPAL_USE = re.compile(r"\b(?:tenant_?Id|user_?Id|set_config\s*\(\s*['\"]app\.|app\.user_id|principal|formatUuid|asUuid|toUuid)\b", re.I)
+# Exclude hashing emails for gravatar or cache keys
+PRINCIPAL_EXCLUSION = re.compile(r"gravatar|avatar|\bcache\b|redis", re.I)
 # a request-supplied secret/token/signature compared with ===/!== (non-constant-time) instead of a
 # timing-safe equal — a credential/HMAC timing side-channel (CWE-208).
 TIMING_UNSAFE = re.compile(
@@ -76,7 +80,8 @@ class CryptoUsageExtractor(Extractor):
                 continue
             if ((WEAK_PW_HASH.search(text) or (PW_CONTEXT.search(text) and FAST_HASH.search(text)
                                                and not STRONG_KDF.search(text)))
-                    and not PKCE_CONTEXT.search(text)):     # PKCE S256 over the verifier ≠ password hash
+                    and not PKCE_CONTEXT.search(text)       # PKCE S256 over the verifier ≠ password hash
+                    and not PW_EXCLUSION.search(text)):     # Exclude HIBP and reset tokens
                 add("HIGH", "weak-password-hash", "weak-password-hash", rel,
                     "A password appears to be hashed/verified with a FAST, unsalted digest "
                     "(SHA-256/SHA-1/MD5). These are GPU-crackable at billions/sec and rainbow-tableable "
@@ -94,7 +99,7 @@ class CryptoUsageExtractor(Extractor):
                     "(not constant-time). This leaks a byte-by-byte timing side-channel on the credential "
                     "(CWE-208). Compare with `crypto.timingSafeEqual` on equal-length buffers (or hash both "
                     "sides first). Low impact when fronted by another auth layer, but cheap to fix.")
-            if PRINCIPAL_HASH.search(text) and PRINCIPAL_USE.search(text):
+            if PRINCIPAL_HASH.search(text) and PRINCIPAL_USE.search(text) and not PRINCIPAL_EXCLUSION.search(text):
                 add("LOW", "predictable-principal", "predictable-principal", rel,
                     "A security principal (tenant/user id) appears to be derived as a public, keyless hash of "
                     "an identity field (e.g. `sha256(email)`), so anyone who knows the email can recompute the "

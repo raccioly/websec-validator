@@ -290,7 +290,7 @@ algorithms / predictable principal), **docker-compose host-takeover** + **`.gitl
 secret-suppression** audits, and a **reverse-proxy prefix-escape** detector), cross-tool de-dup +
 **bundled Semgrep rules**, **router-mount-auth modeling** (cuts the dominant Express-monorepo
 missing-auth false positive), tailored probe staging, agent briefing, traceable findings ledger with
-**calibrated confidence (CJE — Wilson CIs)**, proof harness, test suite (285), **Docker bundle** (all
+**calibrated confidence (CJE — Wilson CIs)**, proof harness, test suite (290), **Docker bundle** (all
 scanners + Noir, arch-aware), **dynamic phase v1** (authenticated read-only cross-tenant BOLA —
 validated live, reproduced a hand-pentest's 14/14). Validated against the **REF-PENTEST pen test +
 retest** and re-validated on a large real-world LLM-agent monorepo (HIGH-finding noise 178 → 15, AI +
