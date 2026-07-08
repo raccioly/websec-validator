@@ -200,7 +200,7 @@ Register it in your MCP client:
 ## Proof harness
 
 `websec proof` clones a vuln-app corpus (VAmPI, NodeGoat, DVGA) and scores whether recon surfaces
-each app's documented attack surface — a deterministic, CI-trackable proxy (currently **10/10**).
+each app's documented attack surface — a deterministic, CI-trackable proxy (currently **8/10**).
 The real kill-criterion (does the briefing lift an agent's bug-finding vs a generic prompt?) is the
 manual A/B in [`corpus/PROOF-PROTOCOL.md`](corpus/PROOF-PROTOCOL.md).
 
@@ -276,7 +276,7 @@ publisher** with project `websec-validator`, owner `raccioly`, repo `websec-vali
 
 ## Status / roadmap
 
-**Done:** 20-extractor recon (incl. a **WebExtension client-trust extractor** — client-side entitlement
+**Done:** 22-extractor recon (incl. a **WebExtension client-trust extractor** — client-side entitlement
 gate / over-broad host permissions / `world:"MAIN"` / unvalidated external messages — a
 **license/entitlement verification-trust** pass — revocation-bypass + no per-license usage cap, provider-
 agnostic — **Deno/Supabase-edge + Chrome-extension** stack & route modeling, an **authz-correctness data-flow extractor** — unsigned-cookie /
@@ -290,7 +290,7 @@ algorithms / predictable principal), **docker-compose host-takeover** + **`.gitl
 secret-suppression** audits, and a **reverse-proxy prefix-escape** detector), cross-tool de-dup +
 **bundled Semgrep rules**, **router-mount-auth modeling** (cuts the dominant Express-monorepo
 missing-auth false positive), tailored probe staging, agent briefing, traceable findings ledger with
-**calibrated confidence (CJE — Wilson CIs)**, proof harness, test suite (285), **Docker bundle** (all
+**calibrated confidence (CJE — Wilson CIs)**, proof harness, test suite (324), **Docker bundle** (all
 scanners + Noir, arch-aware), **dynamic phase v1** (authenticated read-only cross-tenant BOLA —
 validated live, reproduced a hand-pentest's 14/14). Validated against the **REF-PENTEST pen test +
 retest** and re-validated on a large real-world LLM-agent monorepo (HIGH-finding noise 178 → 15, AI +
