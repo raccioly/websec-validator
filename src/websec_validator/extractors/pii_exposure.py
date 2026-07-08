@@ -39,14 +39,14 @@ PII_FIELD = re.compile(r"\b(?:phone|phoneNumber|msisdn|mobile|email|emailAddress
 # returning a raw variable / a fresh ORM read straight to the client
 RES_RAW = re.compile(r"res\.(?:json|send)\s*\(\s*(?:await\s+)?[A-Za-z_$][\w$]*\s*\)"
                      r"|res\.(?:json|send)\s*\(\s*await\s+[\w.]+\.(?:find|findOne|findById|findAll|get|query)\s*\(")
-MASK_CALL_NEAR = re.compile(r"mask\w+\(|redact\w+\(|toPublic\w+\(|canViewFull\w+\(|\.serialize\(|toDto\(|\bDTO\b|pick\(", re.I)
+MASK_CALL_NEAR = re.compile(r"mask\w+\(|redact\w+\(|toPublic\w+\(|canViewFull\w+\(|\.serialize\(|toDto\(|\bDTO\b|pick\(|omit\(|exclude\(|anonymize\w*\(|sanitize\w*\(|\.toJSON\(|\.present\(", re.I)
 TESTFILE = re.compile(r"(?:^|/)(?:tests?|__tests__|spec)/|\.(?:test|spec)\.", re.I)
 # A helper that masks a SECRET (connection string / password / token), not customer PII — wrong
 # category, and "defined but unused" on it is at most a lint nit. Excluded from the PII dead-control.
 SECRET_MASKER = re.compile(r"(?:mask|redact|scrub)\w*(?:Url|Uri|Dsn|Database|Conn|Connection|Secret|Password|Passwd|Token|Key|Cred)\w*", re.I)
 # inline object-projection (`.map(x => ({...}))` / a returned object literal) IS a serializer — a
 # raw-entity finding on a file that projects fields before responding is a false positive.
-PROJECTION = re.compile(r"=>\s*\(\s*\{|\.map\s*\(\s*[\w$]*\s*=>|\bselect\s*:\s*\{|\binterface\s+\w+|\btype\s+\w+\s*=\s*\{", re.I)
+PROJECTION = re.compile(r"=>\s*\(\s*\{|\.map\s*\(\s*[\w$]*\s*=>|\bselect\s*:\s*\{|\binterface\s+\w+|\btype\s+\w+\s*=\s*\{|\.select\(|\bomit\s*:\s*\{", re.I)
 
 
 class PiiExposureExtractor(Extractor):
