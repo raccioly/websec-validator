@@ -1,0 +1,1 @@
+- Added PiiExposureExtractor exclusions for common benign serializers (omit, Prisma omit, Mongoose select, toJSON, anonymize, sanitize) to stop raw-entity false positives.
