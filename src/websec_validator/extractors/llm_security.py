@@ -67,7 +67,7 @@ TOOL_DEF = re.compile(r"\btool\s*\(|\btools\s*[:=]\s*\{|\bzodFunction|\bDynamicT
 HUMAN_GATE = re.compile(r"confirm\w*|requireApproval|humanInTheLoop|awaitConfirmation|pendingApproval|review\w*Required", re.I)
 
 # guardrail / moderation that FAILS OPEN
-GUARD_FN = re.compile(r"\b(?:guard|scan(?:Input|Output)?|moderat\w*|checkContent|safetyCheck|nemo|llmGuard)\w*\s*[\(=]", re.I)
+GUARD_FN = re.compile(r"\b(?:guard|scan(?:Input|Output)?|moderat\w*|checkContent|safetyCheck|nemo|llmGuard)\s*[\(=]", re.I)
 FAIL_OPEN = re.compile(
     r"catch[^{]*\{[^}]*\breturn\b[^}]*(?:allowed\s*:\s*true|action\s*:\s*['\"](?:allow|error|continue)|true)"
     r"|fail[-_ ]?open|continuing[^.\n]{0,20}(?:fail|open)|return\s*\{\s*allowed\s*:\s*true", re.I)
