@@ -48,3 +48,14 @@ src/websec_validator/briefing.py
 # The AppSync GraphQL "surface" is detected purely from our own `@aws_*` example strings — no real
 # GraphQL server lives in this repo, so the synthetic graphql finding is a self-reference.
 category:graphql
+# Extractor code defining attack patterns, ignored to prevent self-matching noise
+src/websec_validator/extractors/llm_security.py
+# Extractor code defining attack patterns, ignored to prevent self-matching noise
+src/websec_validator/extractors/authz.py
+# Extractor code defining attack patterns, ignored to prevent self-matching noise
+src/websec_validator/extractors/crypto_usage.py
+# Extractor code defining attack patterns, ignored to prevent self-matching noise
+src/websec_validator/extractors/transport_security.py
+
+# findings.py contains the text of the reports and findings definitions (e.g. 'fail-open' strings).
+src/websec_validator/findings.py

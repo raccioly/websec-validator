@@ -1110,6 +1110,11 @@ class Wave2DetectorTests(unittest.TestCase):
                                      "catch (e) { return { allowed: true }; } }"})
         self.assertIn("llm-guardrail-fail-open", self._kinds(out))
 
+    def test_guardrail_fail_open_false_positives(self):
+        out = self._llm({"guard.ts": "const Scanner = () => {}; const scan_dir = '/tmp';"
+                                     "catch (e) { return { allowed: true }; }"})
+        self.assertNotIn("llm-guardrail-fail-open", self._kinds(out))
+
     # --- docker-compose host exposure ---
     def _compose(self, body):
         d = Path(tempfile.mkdtemp())
