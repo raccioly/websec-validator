@@ -25,7 +25,7 @@ DENY_LIST = re.compile(r"isExecutableMimeType|blockedMimeTypes|blacklist|deny[_-
 ALLOW_LIST = re.compile(r"isAllowedMediaType|allowedMimeTypes|allow[_-]?list|whitelist|ALLOWED_(?:MIME|TYPES|EXT)"
                         r"|ACCEPTED_(?:MIME|TYPES?|EXT)|accepted(?:Mime|File|Content)?(?:Types?|Extensions?)"
                         r"|\bfile-type\b|fileTypeFrom|magic[_-]?byte|detectContentType|\.fromBuffer\b|sniff", re.I)
-KEY_FROM_NAME = re.compile(r"(?:Key|key|path|filename|filepath|destination|filename\s*\()\s*[:=(][^;\n]{0,90}"
+KEY_FROM_NAME = re.compile(r"(?:\b(?:Key|key|path|filename|filepath|destination)\b|filename\s*\()\s*[:=(][^;\n]{0,90}"
                            r"\b(?:originalname|originalName|file\.name)\b"
                            r"|`[^`]*\$\{[^}]*\boriginalname\b[^}]*\}[^`]*`", re.I)
 TRUST_CLIENT_MIME = re.compile(r"(?:req\.files?\.[\w$.]*\.|\bfile\.)mimetype\b|headers\[['\"]content-type['\"]\]", re.I)
@@ -33,8 +33,8 @@ ACCEPT_SVG = re.compile(r"image/svg\+xml|['\"]svg['\"]", re.I)
 # file-serving: streaming a STORED/PROXIED object back to the client. Tightened to genuine
 # file-bytes sinks — the old rule matched a bare `getObject` token (a local coercion helper) and a
 # Prometheus `res.set('Content-Type', registry.contentType)` (the /metrics endpoint), both FPs.
-SERVE_FILE = re.compile(r"res\.sendFile|\.sendFile\s*\(|\.getObject\s*\(|createReadStream|proxyMedia"
-                        r"|streamObject|\.pipe\s*\(\s*res\b|fs\.createReadStream", re.I)
+SERVE_FILE = re.compile(r"res\.sendFile|\.sendFile\s*\(|proxyMedia"
+                        r"|streamObject|\.pipe\s*\(\s*(?:res|reply|response)\b", re.I)
 NOSNIFF = re.compile(r"nosniff", re.I)
 # `Content-Disposition: attachment` fully defeats the MIME-sniff→stored-XSS vector (the browser
 # downloads instead of rendering), so a serve site that sets it is SAFE even without nosniff.
@@ -69,13 +69,27 @@ class UploadSecurityExtractor(Extractor):
                                                "bytes is stored executable. Derive the stored name/extension from the "
                                                "DETECTED type, never the upload filename."})
                 if TRUST_CLIENT_MIME.search(text) and not ALLOW_LIST.search(text):
-                    findings.append({"severity": "MEDIUM", "kind": "upload-trusts-client-mime", "file": rel,
-                                     "detail": "Storage/validation decision uses the client-supplied `mimetype`/"
-                                               "Content-Type, which is attacker-controlled. Sniff the bytes instead."})
+                    has_tp = False
+                    for line in text.splitlines():
+                        if TRUST_CLIENT_MIME.search(line):
+                            if not re.search(r'\b(?:console\.|logger\.|log\(|winston\.)', line, re.I):
+                                has_tp = True
+                                break
+                    if has_tp:
+                        findings.append({"severity": "MEDIUM", "kind": "upload-trusts-client-mime", "file": rel,
+                                         "detail": "Storage/validation decision uses the client-supplied `mimetype`/"
+                                                   "Content-Type, which is attacker-controlled. Sniff the bytes instead."})
                 if ACCEPT_SVG.search(text):
-                    findings.append({"severity": "MEDIUM", "kind": "upload-accepts-svg", "file": rel,
-                                     "detail": "`image/svg+xml` is accepted — SVG can carry inline <script> and renders "
-                                               "as HTML. Drop SVG from the allow-list, or sanitize + serve as attachment."})
+                    has_tp = False
+                    for line in text.splitlines():
+                        if ACCEPT_SVG.search(line):
+                            if not re.search(r'setHeader\s*\(\s*[\'"]Content-Type[\'"]', line, re.I):
+                                has_tp = True
+                                break
+                    if has_tp:
+                        findings.append({"severity": "MEDIUM", "kind": "upload-accepts-svg", "file": rel,
+                                         "detail": "`image/svg+xml` is accepted — SVG can carry inline <script> and renders "
+                                                   "as HTML. Drop SVG from the allow-list, or sanitize + serve as attachment."})
             if SERVE_FILE.search(text) and not NOSNIFF.search(text) and not ATTACHMENT.search(text):
                 serve_files.append(rel)
                 findings.append({"severity": "HIGH", "kind": "serve-no-nosniff", "file": rel,
