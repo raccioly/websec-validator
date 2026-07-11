@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **MCP over HTTP** (`websec mcp --http`). The MCP server gained an HTTP JSON-RPC transport alongside
+  stdio, so a team can point one URL at the recon tools instead of every client spawning its own
+  process. Built on the stdlib `http.server` — **no starlette, no new dependency** — with a
+  `GET /health` endpoint and a `POST` JSON-RPC endpoint. Binds `127.0.0.1:8733` by default (the tools
+  read local paths, so localhost-only unless `--host` is set on a trusted network); still read-only.
+  The request handler was refactored into a transport-agnostic `process()` shared by both transports.
+  11 new tests (incl. a live HTTP round-trip).
+
+- **`BENCHMARKS.md`** — open, reproducible measurement methodology: coverage (`websec proof` 10/10),
+  calibrated precision with Wilson 95% CIs from the labeled corpus (n=59), the zero-dependency /
+  determinism guarantees, and a documented identical-conditions protocol for a future Semgrep/Bandit
+  comparison (no head-to-head numbers are claimed until that harness is run). Adapted from graphify's
+  benchmark discipline.
+
 - **Blast-radius enrichment from a graphify knowledge graph** (`graph_enrich.py`, opt-in, zero new
   deps). If the scanned repo has `graphify-out/graph.json` (or `--graph <file>` is passed), each
   finding is tagged with how much of the app transitively **depends on** the vulnerable code —

@@ -92,49 +92,56 @@ DISPATCH = {
 }
 
 
-def _write(msg: dict) -> None:
-    sys.stdout.write(json.dumps(msg) + "\n")
-    sys.stdout.flush()
-
-
-def _respond(rid, result=None, error=None) -> None:
+def _msg(rid, result=None, error=None) -> dict:
     msg = {"jsonrpc": "2.0", "id": rid}
     if error is not None:
         msg["error"] = error
     else:
         msg["result"] = result
-    _write(msg)
+    return msg
 
 
-def handle(req: dict) -> None:
-    """Handle one JSON-RPC request/notification. Notifications (no id) never get a response."""
+def process(req: dict) -> dict | None:
+    """Handle one JSON-RPC request/notification and RETURN the response message (or None for a
+    notification, which gets no reply). Transport-agnostic: shared by the stdio and HTTP servers."""
     method = req.get("method")
     rid = req.get("id")
     if method == "initialize":
-        _respond(rid, {"protocolVersion": PROTOCOL_VERSION,
-                       "capabilities": {"tools": {"listChanged": False}},
-                       "serverInfo": {"name": "websec-validator", "version": __version__}})
-    elif method in ("notifications/initialized", "initialized", "notifications/cancelled"):
-        return  # notification — no reply
-    elif method == "ping":
-        _respond(rid, {})
-    elif method == "tools/list":
-        _respond(rid, {"tools": TOOLS})
-    elif method == "tools/call":
+        return _msg(rid, {"protocolVersion": PROTOCOL_VERSION,
+                          "capabilities": {"tools": {"listChanged": False}},
+                          "serverInfo": {"name": "websec-validator", "version": __version__}})
+    if method in ("notifications/initialized", "initialized", "notifications/cancelled"):
+        return None  # notification — no reply
+    if method == "ping":
+        return _msg(rid, {})
+    if method == "tools/list":
+        return _msg(rid, {"tools": TOOLS})
+    if method == "tools/call":
         params = req.get("params", {}) or {}
         name = params.get("name")
         if name not in DISPATCH:
-            _respond(rid, {"content": [{"type": "text", "text": f"unknown tool: {name}"}], "isError": True})
-            return
+            return _msg(rid, {"content": [{"type": "text", "text": f"unknown tool: {name}"}], "isError": True})
         try:
             text = DISPATCH[name](params.get("arguments", {}) or {})
-            _respond(rid, {"content": [{"type": "text", "text": text}]})
+            return _msg(rid, {"content": [{"type": "text", "text": text}]})
         except Exception as e:  # a tool error is reported to the model, not a protocol crash
-            _respond(rid, {"content": [{"type": "text", "text": f"error: {type(e).__name__}: {e}"}],
-                           "isError": True})
-    elif rid is not None:
-        _respond(rid, error={"code": -32601, "message": f"method not found: {method}"})
-    # else: unknown notification → ignore
+            return _msg(rid, {"content": [{"type": "text", "text": f"error: {type(e).__name__}: {e}"}],
+                             "isError": True})
+    if rid is not None:
+        return _msg(rid, error={"code": -32601, "message": f"method not found: {method}"})
+    return None  # unknown notification → ignore
+
+
+def _write(msg: dict) -> None:
+    sys.stdout.write(json.dumps(msg) + "\n")
+    sys.stdout.flush()
+
+
+def handle(req: dict) -> None:
+    """stdio convenience: process one request and write any response to stdout."""
+    msg = process(req)
+    if msg is not None:
+        _write(msg)
 
 
 def serve(argv=None) -> int:
@@ -151,7 +158,72 @@ def serve(argv=None) -> int:
             handle(req)
         except Exception as e:  # never let one bad request kill the loop
             if isinstance(req, dict) and req.get("id") is not None:
-                _respond(req.get("id"), error={"code": -32603, "message": f"internal error: {e}"})
+                _write(_msg(req.get("id"), error={"code": -32603, "message": f"internal error: {e}"}))
+    return 0
+
+
+def serve_http(host: str = "127.0.0.1", port: int = 8733) -> int:
+    """Serve MCP over HTTP (JSON-RPC POST) with only the stdlib — no starlette, no new dependency, so
+    a team can point one URL at the recon tools.
+
+    Trust boundary: the tools read local filesystem paths and run recon on them, so a client can scan
+    any path on THIS host. It therefore binds to 127.0.0.1 by default; exposing it on a routable
+    interface (--host 0.0.0.0) shares that capability with anyone who can reach the port — do that only
+    on a trusted network. Still read-only: it never writes to or touches the target app.
+    """
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def _send(self, code: int, payload: dict, ctype: str = "application/json") -> None:
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):  # noqa: N802 — a tiny health endpoint for load balancers / `curl`
+            if self.path in ("/", "/health", "/healthz"):
+                self._send(200, {"name": "websec-validator", "version": __version__,
+                                 "transport": "http", "protocolVersion": PROTOCOL_VERSION})
+            else:
+                self._send(404, {"error": "not found"})
+
+        def do_POST(self):  # noqa: N802
+            length = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(length) if length else b""
+            try:
+                req = json.loads(raw or b"{}")
+            except json.JSONDecodeError:
+                self._send(400, _msg(None, error={"code": -32700, "message": "parse error"}))
+                return
+            try:
+                msg = process(req)
+            except Exception as e:
+                rid = req.get("id") if isinstance(req, dict) else None
+                self._send(200, _msg(rid, error={"code": -32603, "message": f"internal error: {e}"}))
+                return
+            # A notification (no response) still needs a valid HTTP reply — 202 Accepted, empty body.
+            if msg is None:
+                self.send_response(202)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            self._send(200, msg)
+
+        def log_message(self, *args):  # keep stdout clean; the CLI prints its own startup line
+            return
+
+    httpd = ThreadingHTTPServer((host, port), Handler)
+    print(f"websec-mcp HTTP on http://{host}:{port}  (POST JSON-RPC · GET /health)", file=sys.stderr)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.server_close()
     return 0
 
 

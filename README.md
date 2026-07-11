@@ -222,6 +222,11 @@ Register it in your MCP client:
 { "mcpServers": { "websec": { "command": "websec", "args": ["mcp"] } } }
 ```
 
+Or serve it over **HTTP** so a whole team points one URL at the recon tools (stdlib only — no extra
+dependency): `websec mcp --http` (binds `127.0.0.1:8733`; `GET /health` for a load balancer, `POST`
+JSON-RPC for calls). It reads local paths and runs recon on them, so it binds to localhost by
+default — only expose it (`--host 0.0.0.0`) on a trusted network.
+
 **Blast-radius from a knowledge graph (opt-in, zero-dep).** If your repo has a
 [`graphify`](https://github.com/Graphify-Labs/graphify) graph at `graphify-out/graph.json` (or you
 pass `--graph <file>`), websec tags each finding with how much of the app **transitively depends on**
@@ -246,7 +251,8 @@ missing, malformed, or oversized graph is silently skipped, never failing the ru
 `websec proof` clones a vuln-app corpus (VAmPI, NodeGoat, DVGA) and scores whether recon surfaces
 each app's documented attack surface — a deterministic, CI-trackable proxy (currently **10/10**).
 The real kill-criterion (does the briefing lift an agent's bug-finding vs a generic prompt?) is the
-manual A/B in [`corpus/PROOF-PROTOCOL.md`](corpus/PROOF-PROTOCOL.md).
+manual A/B in [`corpus/PROOF-PROTOCOL.md`](corpus/PROOF-PROTOCOL.md). Full methodology, calibrated
+precision numbers, and the competitor-comparison protocol: [`BENCHMARKS.md`](BENCHMARKS.md).
 
 ## Calibrated confidence
 

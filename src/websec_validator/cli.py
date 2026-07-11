@@ -281,6 +281,8 @@ def cmd_dynamic(args) -> int:
 
 def cmd_mcp(args) -> int:
     from . import mcp_server
+    if getattr(args, "http", False):
+        return mcp_server.serve_http(args.host, args.port)
     return mcp_server.serve()
 
 
@@ -503,7 +505,12 @@ def build_parser() -> argparse.ArgumentParser:
     dyn.add_argument("--out", help="output dir (default: ./websec-out)")
     dyn.set_defaults(func=cmd_dynamic)
 
-    mc = sub.add_parser("mcp", help="run as an MCP server over stdio (typed recon tools for any MCP client)")
+    mc = sub.add_parser("mcp", help="run as an MCP server (typed recon tools for any MCP client): stdio, or --http for a team-shared URL")
+    mc.add_argument("--http", action="store_true",
+                    help="serve over HTTP (JSON-RPC POST) instead of stdio — one URL for a team (stdlib only)")
+    mc.add_argument("--host", default="127.0.0.1",
+                    help="HTTP bind host (default 127.0.0.1; use 0.0.0.0 to expose on a TRUSTED network only)")
+    mc.add_argument("--port", type=int, default=8733, help="HTTP port (default 8733)")
     mc.set_defaults(func=cmd_mcp)
 
     from . import install as _install
