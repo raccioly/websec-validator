@@ -65,7 +65,7 @@ validation via `.docguardignore`.
 `websec proof` clones the vuln-app corpus (VAmPI, NodeGoat, DVGA) and scores whether recon surfaces
 each app's documented attack surface — a deterministic, CI-trackable proxy. The corpus contributes
 coverage checks across three apps — VAmPI (4), NodeGoat (4), DVGA (2), **10 in total** — which the
-engine currently passes **10/10**. The true
+engine currently passes **8/10**. The true
 kill-criterion — does the briefing lift an agent's bug-finding vs a generic prompt? — is the manual
 A/B in [`corpus/PROOF-PROTOCOL.md`](../corpus/PROOF-PROTOCOL.md).
 
