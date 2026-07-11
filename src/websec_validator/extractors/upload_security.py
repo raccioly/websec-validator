@@ -25,9 +25,9 @@ DENY_LIST = re.compile(r"isExecutableMimeType|blockedMimeTypes|blacklist|deny[_-
 ALLOW_LIST = re.compile(r"isAllowedMediaType|allowedMimeTypes|allow[_-]?list|whitelist|ALLOWED_(?:MIME|TYPES|EXT)"
                         r"|ACCEPTED_(?:MIME|TYPES?|EXT)|accepted(?:Mime|File|Content)?(?:Types?|Extensions?)"
                         r"|\bfile-type\b|fileTypeFrom|magic[_-]?byte|detectContentType|\.fromBuffer\b|sniff", re.I)
-KEY_FROM_NAME = re.compile(r"(?:Key|key|path|filename|filepath|destination|filename\s*\()\s*[:=(][^;\n]{0,90}"
-                           r"\b(?:originalname|originalName|file\.name)\b"
-                           r"|`[^`]*\$\{[^}]*\boriginalname\b[^}]*\}[^`]*`", re.I)
+KEY_FROM_NAME = re.compile(r"(?:Key|key|path|filename|filepath|destination)\s*[:=]\s*(?:(?!(?:\w+|['\"]\w+['\"])\s*:|\/\/|\/\*)[^;\n])*?\b(?:originalname|originalName|file\.name)\b"
+                           r"|\b(?:path|filename|destination)\s*\(\s*(?:(?!(?:\w+|['\"]\w+['\"])\s*:|\/\/|\/\*)[^;\n])*?\b(?:originalname|originalName|file\.name)\b"
+                           r"|(?:Key|key|path|filename|filepath|destination)\s*[:=]\s*`[^`]*\$\{[^}]*\b(?:originalname|originalName|file\.name)\b", re.I)
 TRUST_CLIENT_MIME = re.compile(r"(?:req\.files?\.[\w$.]*\.|\bfile\.)mimetype\b|headers\[['\"]content-type['\"]\]", re.I)
 ACCEPT_SVG = re.compile(r"image/svg\+xml|['\"]svg['\"]", re.I)
 # file-serving: streaming a STORED/PROXIED object back to the client. Tightened to genuine
