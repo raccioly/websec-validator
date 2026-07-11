@@ -50,6 +50,7 @@ RUN pip install --no-cache-dir .
 # mounted volume matches your host user.
 RUN useradd --create-home --uid 1001 websec
 WORKDIR /scan
+HEALTHCHECK --interval=30s --timeout=3s CMD [ "websec", "--help" ]
 USER websec
 ENTRYPOINT ["websec"]
 CMD ["--help"]
