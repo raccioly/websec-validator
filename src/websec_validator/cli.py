@@ -268,6 +268,22 @@ def cmd_mcp(args) -> int:
     return mcp_server.serve()
 
 
+def cmd_install(args) -> int:
+    from . import install as _install
+    project_dir = Path(args.project_dir).expanduser() if args.project_dir else Path(".")
+    if args.host == "status":
+        print(_install.status(project_dir=project_dir, user=args.user))
+        return 0
+    try:
+        msg = _install.install(args.host, project_dir=project_dir, user=args.user,
+                               uninstall=args.uninstall)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    print(msg)
+    return 0
+
+
 def cmd_proof(args) -> int:
     from importlib import resources
     corpus_path = (Path(args.corpus).expanduser().resolve() if args.corpus
@@ -399,7 +415,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=f"websec-validator {__version__}")
     # metavar lists only the user-facing commands; recon/proof/calibrate still work but are
     # omitted (they get no `help=`, so argparse leaves them out of the listing entirely).
-    sub = p.add_subparsers(dest="cmd", required=True, metavar="{run,doctor,dynamic,mcp}")
+    sub = p.add_subparsers(dest="cmd", required=True, metavar="{run,doctor,dynamic,mcp,install}")
 
     r = sub.add_parser("run", help="full pipeline → briefing + tailored probes")
     r.add_argument("target")
@@ -454,10 +470,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     mc = sub.add_parser("mcp", help="run as an MCP server over stdio (typed recon tools for any MCP client)")
     mc.set_defaults(func=cmd_mcp)
+
+    from . import install as _install
+    ins = sub.add_parser("install",
+                         help="teach an AI coding agent to use websec (claude|codex|cursor|gemini|aider|generic)")
+    ins.add_argument("host", choices=[*_install.HOSTS, "status"],
+                     help="agent host to configure, or 'status' to list what's installed")
+    ins.add_argument("--user", action="store_true",
+                     help="install into your home dir (all repos) instead of this project")
+    ins.add_argument("--project-dir", dest="project_dir",
+                     help="project directory to install into (default: current dir)")
+    ins.add_argument("--uninstall", action="store_true", help="remove the websec block/skill instead")
+    ins.set_defaults(func=cmd_install)
     return p
 
 
-_COMMANDS = {"run", "recon", "doctor", "proof", "dynamic", "calibrate", "mcp"}
+_COMMANDS = {"run", "recon", "doctor", "proof", "dynamic", "calibrate", "mcp", "install"}
 
 
 def main(argv=None) -> int:

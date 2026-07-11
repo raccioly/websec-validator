@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`websec install <host>` — multi-host agent installer** (`install.py`). Teaches any of the core
+  agent hosts to reach for websec-validator on a security review: `claude`, `codex`, `cursor`,
+  `gemini`, `aider`, plus a `generic` `AGENTS.md` writer. Skill-style hosts (Claude, Cursor) get a
+  dedicated skill/rule file; shared-instruction hosts (Codex/Gemini/Aider/generic) get an idempotent
+  marked block injected into their standing-instructions file without clobbering the user's own
+  content. `--user` installs home-wide, `--uninstall` removes cleanly, `websec install status` lists
+  what's present. Closes the gap between the README's "any agent can act on it" and shipping only a
+  Claude plugin. Stdlib only, path-safety-guarded, 12 new tests.
+
 - **No-Row-Level-Security detection** (`missing-rls` class, in `schemas.py` + the ledger) — committed
   Postgres/Supabase DDL declares owner/tenant-scoped tables but ships **zero** `CREATE POLICY` /
   `ENABLE ROW LEVEL SECURITY` anywhere in the `.sql` corpus (the CVE-2025-48757 "Lovable" class).
