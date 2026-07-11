@@ -199,6 +199,20 @@ jobs:
           # baseline: .websec/baseline-ledger.json   # optional: gate only on NEW findings
 ```
 
+**Local guardrail — `websec hooks`.** Same baseline-diff, run from git instead of CI, so a new lead is
+caught before it ever reaches a PR:
+
+```bash
+websec hooks install              # advisory post-commit: prints "baseline: N new" after each commit (~1s, never blocks)
+websec hooks install --pre-push   # blocking gate: fails `git push` on a NEW finding at/above $WEBSEC_HOOK_FAIL_ON (default high)
+websec hooks status               # show what's installed
+websec hooks uninstall
+```
+
+The hook appends to (and cleanly removes from) any existing hook, pins its interpreter so it works
+under pipx/uv isolation, and honors `WEBSEC_SKIP_HOOK=1` for a one-off override. `WEBSEC_HOOK_SCAN=1`
+runs the full static scanners in the hook (slower); the default is fast recon-only.
+
 **MCP server (any agent, not just Claude Code).** `websec mcp` speaks the Model Context Protocol over
 stdio, exposing typed tools — `websec_recon`, `websec_findings`, `websec_sarif`, `websec_briefing` — so
 Cursor / Cline / Windsurf / Zed can call recon directly instead of shelling out and parsing stdout.

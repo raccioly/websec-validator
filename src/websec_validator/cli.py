@@ -268,6 +268,22 @@ def cmd_mcp(args) -> int:
     return mcp_server.serve()
 
 
+def cmd_hooks(args) -> int:
+    from . import hooks as _hooks
+    path = Path(args.path).expanduser() if getattr(args, "path", None) else Path(".")
+    try:
+        if args.action == "install":
+            print(_hooks.install(path, pre_push=args.pre_push))
+        elif args.action == "uninstall":
+            print(_hooks.uninstall(path))
+        else:  # status
+            print(_hooks.status(path))
+    except RuntimeError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def cmd_install(args) -> int:
     from . import install as _install
     project_dir = Path(args.project_dir).expanduser() if args.project_dir else Path(".")
@@ -415,7 +431,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=f"websec-validator {__version__}")
     # metavar lists only the user-facing commands; recon/proof/calibrate still work but are
     # omitted (they get no `help=`, so argparse leaves them out of the listing entirely).
-    sub = p.add_subparsers(dest="cmd", required=True, metavar="{run,doctor,dynamic,mcp,install}")
+    sub = p.add_subparsers(dest="cmd", required=True, metavar="{run,doctor,dynamic,mcp,install,hooks}")
 
     r = sub.add_parser("run", help="full pipeline → briefing + tailored probes")
     r.add_argument("target")
@@ -482,10 +498,18 @@ def build_parser() -> argparse.ArgumentParser:
                      help="project directory to install into (default: current dir)")
     ins.add_argument("--uninstall", action="store_true", help="remove the websec block/skill instead")
     ins.set_defaults(func=cmd_install)
+
+    hk = sub.add_parser("hooks",
+                        help="install a git guardrail hook (post-commit advisory or pre-push gate on NEW findings)")
+    hk.add_argument("action", choices=["install", "uninstall", "status"])
+    hk.add_argument("--pre-push", dest="pre_push", action="store_true",
+                    help="install a blocking pre-push gate (--fail-on new findings) instead of the advisory post-commit hook")
+    hk.add_argument("--path", help="repo directory (default: current dir)")
+    hk.set_defaults(func=cmd_hooks)
     return p
 
 
-_COMMANDS = {"run", "recon", "doctor", "proof", "dynamic", "calibrate", "mcp", "install"}
+_COMMANDS = {"run", "recon", "doctor", "proof", "dynamic", "calibrate", "mcp", "install", "hooks"}
 
 
 def main(argv=None) -> int:

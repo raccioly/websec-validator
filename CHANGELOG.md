@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`websec hooks` — git guardrail** (`hooks.py`). Wires the baseline-diff into git so websec runs
+  automatically per commit/push: `hooks install` writes an advisory **post-commit** hook (recon-only,
+  ~1s, prints a `baseline: N new` heads-up, never blocks); `hooks install --pre-push` writes a
+  blocking **pre-push gate** that fails the push when NEW findings at/above `WEBSEC_HOOK_FAIL_ON`
+  (default `high`) are introduced. Marker-delimited install/uninstall (appends to and preserves an
+  existing hook), interpreter pinned + allowlist-sanitized so it survives pipx/uv isolation without
+  shell-injection risk, hooks dir resolved via `git rev-parse` (worktrees + core.hooksPath aware),
+  and old guardrail runs pruned to the last 5. `WEBSEC_SKIP_HOOK=1` overrides. Stdlib only, 10 new
+  tests incl. an end-to-end real-commit run. Adapted from graphify's hook installer.
+
 - **`websec install <host>` — multi-host agent installer** (`install.py`). Teaches any of the core
   agent hosts to reach for websec-validator on a security review: `claude`, `codex`, `cursor`,
   `gemini`, `aider`, plus a `generic` `AGENTS.md` writer. Skill-style hosts (Claude, Cursor) get a
