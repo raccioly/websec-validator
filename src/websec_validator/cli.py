@@ -132,6 +132,22 @@ def cmd_run(args) -> int:
     ledger = findings.build_ledger(facts, unified, None, suppressions)
     baseline.annotate(ledger)          # stable per-finding fingerprints (baseline + SARIF tracking)
 
+    # 4a. optional blast-radius enrichment from a graphify knowledge graph (opt-in, zero-dep). If the
+    # repo has graphify-out/graph.json (or --graph is given), tag each finding with how much of the app
+    # transitively depends on the vulnerable code. Wrapped so a bad/oversized graph never fails a run.
+    graph_arg = getattr(args, "graph", None)
+    graph_path = Path(graph_arg).expanduser() if graph_arg else None
+    if graph_path or (target / "graphify-out" / "graph.json").exists():
+        try:
+            from . import graph_enrich
+            graph_enrich.enrich_ledger(ledger, target, graph_path)
+            ge = ledger.get("graph_enrichment")
+            if ge:
+                log(f"\n  graph: {ge['mapped']} finding(s) mapped to {ge['nodes']} nodes · "
+                    f"max blast-radius {ge['max_blast_radius']} (source: {ge['graph']})")
+        except Exception as e:  # enrichment is best-effort — never fail the run over it
+            log(f"\n  graph: enrichment skipped ({type(e).__name__}: {e})")
+
     # 4b. baseline / diff — only NEW findings gate CI when a baseline is supplied
     diff = None
     if getattr(args, "baseline", None):
@@ -449,6 +465,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "only NEW findings count.")
     r.add_argument("--baseline", metavar="LEDGER.json",
                    help="a prior findings-ledger.json — mark findings new/unchanged/fixed and gate only on NEW")
+    r.add_argument("--graph", metavar="GRAPH.json",
+                   help="a graphify graph.json for blast-radius enrichment "
+                        "(auto-detected at <target>/graphify-out/graph.json if present)")
     r.set_defaults(func=cmd_run)
 
     # recon/proof/calibrate are hidden from the main --help (argparse.SUPPRESS): recon is a

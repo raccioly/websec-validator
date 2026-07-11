@@ -222,6 +222,21 @@ Register it in your MCP client:
 { "mcpServers": { "websec": { "command": "websec", "args": ["mcp"] } } }
 ```
 
+**Blast-radius from a knowledge graph (opt-in, zero-dep).** If your repo has a
+[`graphify`](https://github.com/Graphify-Labs/graphify) graph at `graphify-out/graph.json` (or you
+pass `--graph <file>`), websec tags each finding with how much of the app **transitively depends on**
+the vulnerable code — so a SQLi in a leaf handler and the same SQLi in a helper imported by 40
+modules stop looking equally urgent:
+
+```bash
+websec run . --scan     # auto-detects graphify-out/graph.json if present
+```
+
+Each mapped finding gains a `graph` block (`blast_radius`, a `dependents` sample, `community`) in
+`findings-ledger.json`, and the ledger a `graph_enrichment` summary. It reads the graph as plain
+JSON — it never imports tree-sitter, so websec stays **stdlib-only, zero runtime deps** — and a
+missing, malformed, or oversized graph is silently skipped, never failing the run.
+
 **Versioned contract.** `FACTS.json`, `findings-ledger.json`, and `findings.envelope.json` all carry a
 `schema_version`; the JSON Schemas ship in the package (`schemas/facts.schema.json`,
 `schemas/ledger.schema.json`) so downstream tooling can validate against a stable shape.

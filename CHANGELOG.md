@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Blast-radius enrichment from a graphify knowledge graph** (`graph_enrich.py`, opt-in, zero new
+  deps). If the scanned repo has `graphify-out/graph.json` (or `--graph <file>` is passed), each
+  finding is tagged with how much of the app transitively **depends on** the vulnerable code —
+  reverse-reachability over dependency edges (calls/imports/references/inherits/…). A SQLi in a
+  leaf handler and the same SQLi in a shared helper imported by 40 modules stop looking equally
+  urgent. Findings gain a `graph` block (`nodes`, `blast_radius`, `dependents` sample, `community`)
+  and the ledger a `graph_enrichment` summary. Pure stdlib JSON (never imports tree-sitter, so the
+  zero-runtime-deps guarantee holds), reverse-BFS bounded at 20k visits with disclosed truncation,
+  and wrapped so a malformed/oversized graph can never fail a run. 10 new tests.
+
 - **`websec hooks` — git guardrail** (`hooks.py`). Wires the baseline-diff into git so websec runs
   automatically per commit/push: `hooks install` writes an advisory **post-commit** hook (recon-only,
   ~1s, prints a `baseline: N new` heads-up, never blocks); `hooks install --pre-push` writes a
