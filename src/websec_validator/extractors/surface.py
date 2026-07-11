@@ -80,7 +80,7 @@ SINKS = {
         r"|\{\s*\.\.\.[\w.$]+[^{}]{0,80}?,\s*(?:role|roles|tier|plan|isAdmin|is_admin|admin|permissions?"
         r"|balance|credits|isOwner|isSuperuser|superuser)\s*[,}]")),
     "redos": ("ssrf-probes", None, re.compile(
-        r"new\s+RegExp\s*\([^)]*(?:req\.|request\.|\+)|re\.(?:compile|match|search|fullmatch)\s*\([^,)]*(?:request\.|f['\"])")),
+        r"new\s+RegExp\s*\([^)]*(?:req\.|request\.|\+)|re\.(?:compile|match|search|fullmatch)\s*\([^,)]*(?:request\.|\bf['\"])")),
     "eval-injection": ("bola-write-verbs", None, re.compile(
         r"\beval\s*\([^)]*" + _U + r"|new\s+Function\s*\([^)]*" + _U)),
     # Var-arg SSRF: an http client called with a BARE identifier first-arg (not a string literal) —
@@ -98,7 +98,7 @@ SINKS = {
     "error-disclosure": ("error-disclosure-probe", None, re.compile(
         r"res\.(?:json|send)\s*\([^;]{0,200}\b(?:err|error|e|ex|exc)\.(?:stack|message)\b"
         r"|res\.status\(\s*\d+\s*\)\.(?:json|send)\s*\([^;]{0,200}\b(?:err|error|e)\.(?:stack|message)\b"
-        r"|NODE_ENV\s*[!=]==?\s*['\"]production['\"][^;{}]{0,160}\b(?:stack|message)\b")),
+        r"|NODE_ENV\s*[!=]==?\s*['\"]production['\"][^;{}]{0,160}\.\b(?:stack|message)\b")),
     # Reflected / DOM / template XSS — a user-influenced value reaching an HTML sink with no output
     # encoding. CLIENT DOM sinks (innerHTML/outerHTML/insertAdjacentHTML/document.write/jQuery .html /
     # React dangerouslySetInnerHTML / Vue v-html) + SERVER template-escape-off (Jinja `|safe`,
