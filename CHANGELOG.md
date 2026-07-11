@@ -349,6 +349,11 @@ No behavior change.
   approves each probe). Reduces dual-use false-positive pauses. The README hero line now leads with a
   defensive, ownership-asserting phrasing and the PyPI install. **No behavior change** — wording/order
   only; the live-fire confirmation checkpoint is intentionally preserved.
+## [Unreleased]
+
+### Fixed
+- **UploadSecurityExtractor False Positives**: Refined `KEY_FROM_NAME` regex in `upload_security.py` to prevent false positive `upload-key-from-filename` findings on safe metadata assignments, original name logging, and comments containing the original file name. Added regression tests to `FalsePositiveRegressionTests`.
+
 
 ## [0.6.2] — 2026-06-12
 
