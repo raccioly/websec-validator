@@ -130,6 +130,56 @@ class EnrichTests(unittest.TestCase):
         self.assertEqual(out["findings"][0]["graph"]["blast_radius"], 1)
 
 
+class SurfacingTests(unittest.TestCase):
+    """Blast radius must be visible in the artifacts consumers actually read: SARIF, REPORT, briefing."""
+
+    def _enriched_ledger(self):
+        from websec_validator import baseline
+        ledger = {
+            "schema_version": "1.0",
+            "findings": [{
+                "title": "SQLi sink", "category": "sink", "attack_class": "sqli",
+                "severity": "HIGH", "confidence": "MEDIUM", "location": "src/db.js",
+                "evidence": [{"layer": "recon"}],
+                "standards": {"cwe": ["CWE-89"], "asvs": [], "owasp_api": []},
+                "remediation": "parameterize", "status": "open",
+                "graph": {"nodes": ["db"], "blast_radius": 12,
+                          "dependents": ["a.js", "b.js", "c.js"], "community": 1, "truncated": False},
+            }],
+            "total": 1, "by_severity": {"HIGH": 1}, "by_confidence": {"MEDIUM": 1},
+            "graph_enrichment": {"graph": "graphify-out/graph.json", "nodes": 50,
+                                 "mapped": 1, "unmapped": 0, "max_blast_radius": 12},
+        }
+        baseline.annotate(ledger)
+        return ledger
+
+    def test_sarif_carries_blast_radius(self):
+        from websec_validator import formats
+        sarif = formats.to_sarif(self._enriched_ledger(), {"target": "x"}, "1.0")
+        result = sarif["runs"][0]["results"][0]
+        self.assertEqual(result["properties"]["blastRadius"], 12)
+        self.assertIn("Blast radius: 12", result["message"]["text"])
+
+    def test_report_shows_blast_radius(self):
+        from websec_validator import report
+        md = report.render({"target": "x", "stack": {}}, {"available": [], "missing": []}, [],
+                           None, [], "ts", self._enriched_ledger())
+        self.assertIn("blast radius", md.lower())
+        self.assertIn("12", md)
+
+    def test_briefing_shows_blast_radius_section(self):
+        from websec_validator import briefing
+        md = briefing.render({"target": "x", "stack": {}}, {"available": [], "missing": []}, [], [],
+                            None, self._enriched_ledger())
+        self.assertIn("Blast radius", md)
+        self.assertIn("src/db.js", md)
+
+    def test_briefing_omits_section_without_enrichment(self):
+        from websec_validator import briefing
+        md = briefing.render({"target": "x", "stack": {}}, {"available": [], "missing": []}, [], [], None, None)
+        self.assertNotIn("3d.", md)
+
+
 class IntegrationTests(unittest.TestCase):
     def test_websec_run_enriches_when_graph_present(self):
         with tempfile.TemporaryDirectory() as td:

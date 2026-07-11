@@ -163,7 +163,7 @@ def cmd_run(args) -> int:
             + (f" · {ledger['suppressed']} suppressed" if ledger["suppressed"] else ""))
 
     # 5. briefing + comprehensive REPORT.md (immutable run record) + machine artifacts
-    (out / "AGENT-BRIEFING.md").write_text(briefing.render(facts, det, scan_results, manifest, unified))
+    (out / "AGENT-BRIEFING.md").write_text(briefing.render(facts, det, scan_results, manifest, unified, ledger))
     (out / "REPORT.md").write_text(report.render(facts, det, scan_results, unified, manifest, ts, ledger))
     # SARIF is ALWAYS written — it's the enterprise/CI interchange artifact (GitHub Code Scanning etc.)
     sarif = formats.to_sarif(ledger, facts, __version__)

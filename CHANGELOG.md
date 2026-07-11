@@ -31,7 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   urgent. Findings gain a `graph` block (`nodes`, `blast_radius`, `dependents` sample, `community`)
   and the ledger a `graph_enrichment` summary. Pure stdlib JSON (never imports tree-sitter, so the
   zero-runtime-deps guarantee holds), reverse-BFS bounded at 20k visits with disclosed truncation,
-  and wrapped so a malformed/oversized graph can never fail a run. 10 new tests.
+  and wrapped so a malformed/oversized graph can never fail a run. **Surfaced in every consumer**: a
+  ranked "★ Blast radius" section in `AGENT-BRIEFING.md` (verify high-radius findings first), a
+  per-finding blast-radius line in `REPORT.md`, and a `blastRadius` property + message note in SARIF
+  (so GitHub Code Scanning sees it too). 14 new tests.
 
 - **`websec hooks` — git guardrail** (`hooks.py`). Wires the baseline-diff into git so websec runs
   automatically per commit/push: `hooks install` writes an advisory **post-commit** hook (recon-only,

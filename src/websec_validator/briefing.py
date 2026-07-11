@@ -24,7 +24,7 @@ def _section(title, items):
 
 
 def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list,
-           unified: dict | None = None) -> str:
+           unified: dict | None = None, ledger: dict | None = None) -> str:
     stack = facts.get("stack", {})
     auth = facts.get("auth", {})
     routes = facts.get("routes", {})
@@ -169,6 +169,26 @@ def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list
         "this repo. Re-run scoped to a subdirectory or with `--exclude` to cover the rest before trusting "
         "an absence of findings.\n" if facts.get("files_truncated") else "")
 
+    # Blast-radius prioritization (only when a graphify graph enriched the ledger). Highest-radius
+    # findings touch the most of the app, so verify those first.
+    blast_section = ""
+    ge = (ledger or {}).get("graph_enrichment")
+    if ge and ge.get("mapped"):
+        ranked = sorted(
+            ((f.get("graph", {}).get("blast_radius", 0), f) for f in (ledger.get("findings") or [])
+             if f.get("graph", {}).get("blast_radius")),
+            key=lambda x: -x[0])
+        rows = "\n".join(
+            f"- **{r}** module(s) depend on → `{f.get('location')}` — {f.get('title')}"
+            for r, f in ranked[:8])
+        blast_section = (
+            f"\n## 3d. ★ Blast radius (graph-derived — verify high-radius findings FIRST)\n\n"
+            f"A graphify knowledge graph mapped {ge['mapped']} finding(s) to code nodes. The more of the "
+            f"app that transitively depends on a vulnerable file, the more a single bug there costs — so "
+            f"triage these top-down:\n\n{rows}\n\n"
+            f"_Source: {ge['graph']} · max radius {ge['max_blast_radius']} across {ge['nodes']} nodes._\n"
+            if rows else "")
+
     return f"""# AGENT BRIEFING — security pass for `{facts.get('target','')}`
 
 > **Scope & authorization.** Defensive self-assessment of the operator's own codebase, run with their
@@ -266,6 +286,7 @@ Production source maps exposed: {client.get("production_source_maps", False)}
 **LLM / AI-agent surface (OWASP LLM Top 10 — prompt injection, insecure output, excessive agency, unbounded):**
 {llm_section}
 
+{blast_section}
 ## 4. Static findings (no running app needed)
 
 Scanners available: {avail}
