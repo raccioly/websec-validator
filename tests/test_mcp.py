@@ -48,6 +48,23 @@ class ProcessTests(unittest.TestCase):
                                   "params": {"name": "nope", "arguments": {}}})
         self.assertTrue(msg["result"]["isError"])
 
+    def test_findings_tool_enriches_when_graph_present(self):
+        import json as _json
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td)
+            (target / "app.py").write_text("import os\n")
+            gp = target / "graphify-out" / "graph.json"
+            gp.parent.mkdir(parents=True, exist_ok=True)
+            gp.write_text(_json.dumps({"nodes": [{"id": "app", "label": "app.py",
+                                                  "source_file": "app.py"}], "links": []}))
+            msg = mcp_server.process({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                                      "params": {"name": "websec_findings",
+                                                 "arguments": {"path": str(target)}}})
+            ledger = _json.loads(msg["result"]["content"][0]["text"])
+            self.assertIn("graph_enrichment", ledger)
+
 
 class HttpTransportTests(unittest.TestCase):
     @classmethod

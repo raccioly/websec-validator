@@ -62,15 +62,27 @@ def tool_websec_recon(a: dict) -> str:
     return json.dumps(_facts(a.get("path", "")), indent=2)
 
 
+def _ledger_for(path: str, suppressions) -> tuple[dict, dict]:
+    """Build the ledger for a repo and apply optional graphify blast-radius enrichment (best-effort)."""
+    root = _resolve(path)
+    facts = recon.build_facts(root, __version__)
+    ledger = findings.build_ledger(facts, None, None, suppressions)
+    try:
+        from . import graph_enrich
+        graph_enrich.enrich_ledger(ledger, root)
+    except Exception:
+        pass  # enrichment is optional — a missing/bad graph must not fail the tool call
+    return facts, ledger
+
+
 def tool_websec_findings(a: dict) -> str:
-    facts = _facts(a.get("path", ""))
-    ledger = findings.build_ledger(facts, None, None, findings.load_suppressions(_resolve(a["path"])))
+    path = a.get("path", "")
+    _, ledger = _ledger_for(path, findings.load_suppressions(_resolve(path)))
     return json.dumps(ledger, indent=2)
 
 
 def tool_websec_sarif(a: dict) -> str:
-    facts = _facts(a.get("path", ""))
-    ledger = findings.build_ledger(facts, None, None, [])
+    facts, ledger = _ledger_for(a.get("path", ""), [])
     return json.dumps(formats.to_sarif(ledger, facts, __version__), indent=2)
 
 
