@@ -41,6 +41,20 @@ src/websec_validator/extractors/iac_ci.py
 src/websec_validator/extractors/policy_consistency.py
 src/websec_validator/extractors/upload_security.py
 src/websec_validator/extractors/pii_exposure.py
+# Added 2026-07-12: these extractors post-date the list above and hold the same kind of detection
+# literals — llm_security.py (the "fail OPEN" guardrail + insecure-output prose it greps for),
+# transport_security.py (CORS/SRI/nosniff/ReDoS example strings), authz.py (the `jwtVerify` shape
+# it matches). All are analysis-only modules: the web-response finding classes they self-match on
+# (content-sniffing, cors, sri, llm-guardrail, redos) cannot occur in code that serves no HTTP.
+src/websec_validator/extractors/llm_security.py
+src/websec_validator/extractors/transport_security.py
+src/websec_validator/extractors/authz.py
+
+# Core engine (not extractors, no HTTP surface): the self-matches here are incidental PROSE, not
+# real sinks — findings.py carries `err.stack`/remediation text that trips error-disclosure, and
+# both files describe guard "fail OPEN" behavior that trips the llm-guardrail heuristic.
+src/websec_validator/findings.py
+src/websec_validator/scanners.py
 
 # Briefing renderer uses path-join templating that trips the path-traversal heuristic (not a sink).
 src/websec_validator/briefing.py
