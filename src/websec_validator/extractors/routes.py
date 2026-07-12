@@ -25,7 +25,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from .base import SKIP_DIRS, Extractor, RepoContext, path_in_skip_dir
+from .base import SKIP_DIRS, Extractor, RepoContext, is_test_file, path_in_skip_dir
 
 # Noir is a subprocess that scans the raw tree — it does NOT know the walker's SKIP_DIRS,
 # so without this it grinds through (and emits routes from) build output (.next, cdk.out,
@@ -42,6 +42,23 @@ def _in_skip_dir(code_path: str, root=None) -> bool:
     return path_in_skip_dir(code_path, root)
 
 WRITE_VERBS = {"POST", "PUT", "PATCH", "DELETE"}
+
+# Fixture/demo app code — an Express app under examples/ or tests/fixtures/ is a scanner's
+# INPUT CORPUS, not the product's attack surface (DocGuard field report: 29 phantom endpoints,
+# every one a fixture). base.is_test_file covers tests/fixtures/e2e/etc.; this adds the
+# example/sample/demo dir conventions locally (deliberately NOT base._SCRIPT_FILE — that also
+# matches scripts//tools//migrations/, where a real internal server CAN legitimately live).
+_FIXTURE_DIR = re.compile(r"(?:^|/)(?:examples?|samples?|demos?|demo[-_][\w.-]+)/", re.I)
+
+
+def _is_fixture_route(code_path: str, root=None) -> bool:
+    p = (code_path or "").replace("\\", "/")
+    if root is not None and Path(p).is_absolute():
+        try:
+            p = Path(p).resolve().relative_to(Path(root).resolve()).as_posix()
+        except (ValueError, OSError):
+            return False       # outside the root → fail open, keep as product route
+    return bool(is_test_file(p) or _FIXTURE_DIR.search(p))
 EXCLUDE_GLOBS = "*.test.ts,*.test.tsx,*.spec.ts,*.test.js,*.spec.js,*_test.go,*_test.py,test_*.py,*.stories.tsx"
 
 # param-name heuristics → attack class
@@ -241,6 +258,73 @@ def _supabase_edge_routes(ctx: RepoContext) -> list:
         for method in (sorted(methods) or ["POST"]):    # Supabase invokes edge functions via POST
             rows.append({"method": method, "path": f"/functions/v1/{m.group(1)}", "params": [],
                          "technology": "supabase-edge", "code_path": ctx.rel(p), "source": "supabase-edge"})
+    return rows
+
+
+# Raw (non-framework) HTTP servers — a hand-rolled `http.createServer` / `Bun.serve` / Python
+# `http.server` handler IS a network surface, but Noir + the framework regexes are framework-first
+# and don't model it, so a raw server reads as 0 routes → no authz/probes → false comfort. Recover
+# what we can: the server signal + methods (`req.method === 'X'`) + any path literals the dispatcher
+# compares against (`req.url === '/x'`, `pathname === '/x'`, `case '/x':`, `.startsWith('/x')`).
+# When no path literal is recoverable, emit ONE catch-all `/*` with a coverage note (honest: "a raw
+# server lives here, map its routes by hand") rather than staying invisible.
+_RAW_SERVER_SIG = re.compile(
+    r"\b(?:https?\.)?createServer\s*\(|"                 # node:http / node:https .createServer(
+    r"\bBun\.serve\s*\(|"                                 # Bun.serve({...})
+    r"\bBaseHTTPRequestHandler\b|"                        # python http.server
+    r"\b(?:HTTPServer|ThreadingHTTPServer)\s*\(", re.I)   # python http.server bind
+_RAW_METHOD_JS = re.compile(r"\breq(?:uest)?\.method\s*(?:===?|==)\s*['\"]([A-Za-z]+)['\"]")
+_RAW_METHOD_PY = re.compile(r"\bdef\s+do_([A-Z]+)\s*\(")   # BaseHTTPRequestHandler do_GET/do_POST/...
+_RAW_PATH = re.compile(
+    r"(?:req(?:uest)?\.url|pathname|\.path|url)\s*(?:===?|==|\.startsWith\s*\()\s*['\"](/[^'\"]*)['\"]"
+    r"|\bcase\s+['\"](/[^'\"]*)['\"]")
+# Hand-rolled-handler evidence: the raw node/http response API + request dispatch. Guards against
+# `http.createServer(expressApp)` — a FRAMEWORK app handed to createServer, whose real routes Noir
+# already found; without this we'd stamp a phantom `/*` on top of a mapped Express/Connect app.
+_RAW_HANDLER_HINT = re.compile(
+    r"\bres(?:ponse)?\.(?:writeHead|end|write)\s*\(|"
+    r"\breq(?:uest)?\.(?:url|method)\b|"
+    r"\bBun\.serve\s*\(\s*\{[\s\S]*?\bfetch\b")
+
+
+def _raw_server_routes(ctx: RepoContext) -> list:
+    rows = []
+    seen = set()
+    for _p, rel, text in ctx.iter_code():
+        if not _RAW_SERVER_SIG.search(text):
+            continue
+        is_py = rel.endswith(".py")
+        # JS/TS: demand hand-rolled-handler evidence so `createServer(expressApp)` isn't mistaken
+        # for a raw server. Python's do_GET / BaseHTTPRequestHandler signal is already specific.
+        if not is_py and not _RAW_HANDLER_HINT.search(text):
+            continue
+        methods = set(_RAW_METHOD_PY.findall(text)) if is_py else {
+            m.upper() for m in _RAW_METHOD_JS.findall(text)}
+        methods -= {"OPTIONS", "HEAD"}
+        tech = ("python-http" if is_py
+                else "bun-serve" if "Bun.serve" in text else "node-http")
+        paths = []
+        for a, b in _RAW_PATH.findall(text):
+            pth = _clean_path(a or b)
+            if pth and not _is_noise(pth) and pth not in paths:
+                paths.append(pth)
+        # A hand-rolled dispatcher branches on method AND url together, but a regex can't reliably
+        # associate which method serves which path. Emitting the method×path CROSS-PRODUCT would
+        # inflate the endpoint count (the very "N hallucinated endpoints" symptom we're fixing), so
+        # emit ONE route per distinct path with method "ANY" + the detected methods listed. Count
+        # stays honest (= #paths); the human maps the matrix by hand.
+        methods_detected = sorted(methods)
+        for pth in (paths or ["/*"]):                    # no literal → catch-all root surface
+            key = (pth, rel)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append({"method": "ANY", "path": pth, "params": [],
+                         "technology": tech, "code_path": rel, "source": "raw-server",
+                         "raw_server": True, "methods_detected": methods_detected,
+                         "note": ("raw HTTP server (no framework) — route discovery is best-effort; "
+                                  "map its dispatch + method matrix by hand"
+                                  + (" (no path literals recovered)" if pth == "/*" else ""))})
     return rows
 
 
@@ -525,6 +609,34 @@ class RoutesExtractor(Extractor):
             if engine.startswith(("noir (0 routes)", "regex-fallback")):
                 engine += " + aws-sam"
 
+        # Raw non-framework HTTP servers (node:http createServer / Bun.serve / python http.server) —
+        # invisible to Noir + the framework regexes. Raw routes carry method "ANY", so dedup on PATH
+        # (a framework GET /x already covers the raw server's /x). Respects --exclude + SKIP_DIRS.
+        raw_existing_paths = {r["path"] for r in routes}
+        raw_server_count = 0
+        for r in _raw_server_routes(ctx):
+            if getattr(ctx, "excludes", None) and ctx._excluded(r.get("code_path", "")):
+                continue
+            if _in_skip_dir(r.get("code_path", ""), ctx.root):
+                continue
+            if r["path"] in raw_existing_paths:
+                continue
+            raw_existing_paths.add(r["path"])
+            routes.append(r)
+            raw_server_count += 1
+            if engine.startswith(("noir (0 routes)", "regex-fallback")):
+                engine += " + raw-server"
+
+        # Fixture/example endpoints are NOT the app's attack surface — split them out of routes,
+        # targeting, probes and findings, but KEEP them in FACTS (visible + auditable, so "0
+        # endpoints" can never silently mean "29 hidden"). --include-fixtures restores them.
+        fixture_routes: list = []
+        if not getattr(ctx, "include_fixtures", False):
+            fixture_routes = [r for r in routes if _is_fixture_route(str(r.get("code_path", "")), ctx.root)]
+            if fixture_routes:
+                _fx = {id(r) for r in fixture_routes}
+                routes = [r for r in routes if id(r) not in _fx]
+
         by_method: dict = {}
         by_tech: dict = {}
         for r in routes:
@@ -550,6 +662,7 @@ class RoutesExtractor(Extractor):
             "coverage_warning": coverage_warning,
             "client_routes_excluded": _client_excluded,
             "serverless_public_endpoints": sam_public,   # Function URLs with AuthType: NONE (unauthenticated)
+            "raw_server_endpoints": raw_server_count,    # non-framework http.createServer/Bun.serve/http.server
         }
         if spec_derived:
             from collections import Counter
@@ -559,4 +672,13 @@ class RoutesExtractor(Extractor):
             out["note"] = (f"⚠ {len(spec_derived)} routes came from vendored API SPEC files "
                            f"(OpenAPI/Swagger/GraphQL), not app handlers — EXCLUDED from the {len(routes)} "
                            f"app routes + all findings. Sources: {', '.join(f for f, _ in srcs.most_common(5))}.")
+        if fixture_routes:
+            from collections import Counter
+            fsrcs = Counter(str(r.get("code_path", "")) for r in fixture_routes)
+            out["fixture_excluded"] = len(fixture_routes)
+            out["fixture_endpoints"] = fixture_routes
+            out["fixture_note"] = (
+                f"⚠ {len(fixture_routes)} routes live in test/example/fixture code — EXCLUDED from the "
+                f"{len(routes)} app routes, targeting and probes (kept here for audit; re-include with "
+                f"--include-fixtures). Sources: {', '.join(f for f, _ in fsrcs.most_common(5))}.")
         return out

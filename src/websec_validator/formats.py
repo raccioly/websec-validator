@@ -51,7 +51,11 @@ def to_sarif(ledger: dict, facts: dict | None = None, tool_version: str = "0") -
     # one rule per distinct attack class, carrying the standards citation + remediation
     rules: dict[str, dict] = {}
     results: list[dict] = []
-    for f in findings:
+    # Acknowledged findings stay IN the SARIF log but carry a `suppressions` block (SARIF 2.1.0):
+    # GitHub/viewers keep them visible + attributable but exclude them from active alert counts —
+    # exactly "shown, not gating". `total` in properties already excludes them (ledger.total).
+    _acked = [(f, True) for f in (ledger.get("acknowledged") or [])]
+    for f, _is_suppressed in [(f, False) for f in findings] + _acked:
         ac = f.get("attack_class", "finding")
         rid = _rule_id(ac)
         std = f.get("standards", {}) or {}
@@ -114,6 +118,9 @@ def to_sarif(ledger: dict, facts: dict | None = None, tool_version: str = "0") -
             result["properties"]["locationHint"] = loc or "(project-level)"
         if f.get("baseline_state"):
             result["baselineState"] = f["baseline_state"]   # new | unchanged | updated | absent
+        if _is_suppressed:
+            result["suppressions"] = [{"kind": "external",
+                                       "justification": f.get("ack_reason", "acknowledged")}]
         results.append(result)
 
     return {
@@ -158,6 +165,7 @@ def to_json(ledger: dict, facts: dict | None = None, tool_version: str = "0", ts
             "by_severity": ledger.get("by_severity", {}),
             "by_confidence": ledger.get("by_confidence", {}),
             "suppressed": ledger.get("suppressed", 0),
+            "acknowledged": ledger.get("acknowledged_n", 0),
             "dynamic_included": ledger.get("dynamic_included", False),
         },
         "calibration": ledger.get("calibration", {}),

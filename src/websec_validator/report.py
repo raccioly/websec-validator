@@ -55,9 +55,24 @@ def render(facts: dict, scanners: dict, scan_results: list, unified: dict | None
         ledger_block = "\n".join(_ll)
         ledger_hdr = (f"**{ledger['total']} findings** · {ledger['by_severity']} · "
                       f"confidence {ledger['by_confidence']}"
-                      + (f" · {ledger['suppressed']} suppressed" if ledger.get('suppressed') else ""))
+                      + (f" · {ledger['suppressed']} suppressed" if ledger.get('suppressed') else "")
+                      + (f" · {ledger['acknowledged_n']} acknowledged" if ledger.get('acknowledged_n') else ""))
     else:
         ledger_block, ledger_hdr = top_findings, sev_line
+
+    # Acknowledged findings — human-reviewed known results (fingerprint acks in .websec-ignore):
+    # kept VISIBLE + attributable here but excluded from the gating total above.
+    ack_block = ""
+    if (ledger or {}).get("acknowledged"):
+        _al = []
+        for f in ledger["acknowledged"]:
+            _al.append(f"- **[{f.get('severity')}/{f.get('confidence')}]** {f.get('title')}  \n"
+                       f"  `{f.get('location')}` · fingerprint `{f.get('fingerprint','')}`  \n"
+                       f"  _acknowledged:_ {f.get('ack_reason','')}")
+        ack_block = ("\n## 1a. Acknowledged (shown, not gating)\n\n"
+                     "_Known findings suppressed by `fingerprint:` acks in `.websec-ignore`, each with a "
+                     "required reason. Excluded from the gating total; listed here so every suppression "
+                     "stays auditable._\n\n" + "\n".join(_al) + "\n")
 
     cal_caveat = ((ledger or {}).get("calibration", {}).get("caveat")
                   or "calibrated on a vuln-app corpus — indicative only, skews optimistic on clean code")
@@ -84,6 +99,7 @@ def render(facts: dict, scanners: dict, scan_results: list, unified: dict | None
 {ledger_block}
 
 _Full ledger with complete evidence chains + remediation in `findings-ledger.json`. Confidence: HIGH = dynamically confirmed or verified; MEDIUM = concrete static evidence; LOW = single-source hypothesis to verify._
+{ack_block}
 
 _**P(real)** = measured real-vuln rate for that attack-class/confidence bucket, with a 95% confidence interval and sample size `n` ({cal_caveat}). A wide CI or `basis: prior (uncalibrated)` means thin data — lean on the verification debate, not the number; to be conservative, threshold on the CI lower bound._
 

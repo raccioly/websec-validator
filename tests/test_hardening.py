@@ -162,6 +162,121 @@ class ScannerHygieneTests(unittest.TestCase):
         self.assertEqual(by_file["src/real.ts"]["severity"], "HIGH")           # tracked → unchanged
         self.assertEqual(summary["local_only_downgraded"], 1)
 
+    def test_user_exclude_reaches_scanner_findings(self):
+        # DocGuard field report F2: `--exclude 'tests/**'` was honored by recon but gitleaks
+        # findings under tests/ still surfaced as HIGH. Gitleaks has no path-exclude flag, so
+        # the normalize_findings post-filter must enforce the user contract.
+        gl = [{"RuleID": "stripe-access-token", "Description": "Stripe Access Token",
+               "File": "tests/security.test.mjs", "StartLine": 3, "Secret": "sk_live_x", "Match": "sk_live_x"},
+              {"RuleID": "stripe-access-token", "Description": "Stripe Access Token",
+               "File": "src/billing.ts", "StartLine": 9, "Secret": "sk_live_y", "Match": "sk_live_y"}]
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "gitleaks.json").write_text(json.dumps(gl))
+            res = [{"key": "gitleaks", "output": str(d / "gitleaks.json"),
+                    "name": "Gitleaks", "category": "secrets"}]
+            summary = scanners.normalize_findings(res, d, target=d, excludes=["tests/**"])
+            files = [f["file"] for f in json.loads((d / "findings.json").read_text())]
+        self.assertNotIn("tests/security.test.mjs", files)   # excluded — the fixed contract
+        self.assertIn("src/billing.ts", files)               # product finding survives
+        self.assertEqual(summary["user_excluded_dropped"], 1)
+
+    def test_user_exclude_matches_absolute_paths_and_bare_dirs(self):
+        # Trivy/Semgrep can emit ABSOLUTE paths; a bare-dir exclude ('tests') must match via
+        # the same substring semantics RepoContext._excluded uses for recon.
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            abs_file = str(d / "tests" / "fixture.py")
+            trivy = {"Results": [{"Target": abs_file, "Secrets": [
+                {"RuleID": "aws-access-token", "Title": "AWS key",
+                 "Match": "AKIA" + "E" * 16, "StartLine": 1}]}]}
+            (d / "trivy.json").write_text(json.dumps(trivy))
+            res = [{"key": "trivy", "output": str(d / "trivy.json"), "name": "Trivy", "category": "sca"}]
+            summary = scanners.normalize_findings(res, d, target=d, excludes=["tests"])
+            files = [f["file"] for f in json.loads((d / "findings.json").read_text())]
+        self.assertEqual(files, [])
+        self.assertEqual(summary["user_excluded_dropped"], 1)
+
+    def test_no_excludes_drops_nothing(self):
+        gl = [{"RuleID": "stripe-access-token", "Description": "Stripe Access Token",
+               "File": "tests/security.test.mjs", "StartLine": 3, "Secret": "sk_live_x", "Match": "sk_live_x"}]
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "gitleaks.json").write_text(json.dumps(gl))
+            res = [{"key": "gitleaks", "output": str(d / "gitleaks.json"),
+                    "name": "Gitleaks", "category": "secrets"}]
+            summary = scanners.normalize_findings(res, d, target=d)
+        self.assertEqual(summary["user_excluded_dropped"], 0)
+        self.assertEqual(summary["total"], 1)
+
+
+class FixtureScopingTests(unittest.TestCase):
+    """DocGuard field report F1: test/example/fixture code is not the product's attack surface."""
+
+    GL = [{"RuleID": "stripe-access-token", "Description": "Stripe Access Token",
+           "File": "tests/security.test.mjs", "StartLine": 3, "Secret": "sk_live_x", "Match": "sk_live_x"},
+          {"RuleID": "stripe-access-token", "Description": "Stripe Access Token",
+           "File": "src/billing.ts", "StartLine": 9, "Secret": "sk_live_y", "Match": "sk_live_y"}]
+
+    def _normalize(self, include_fixtures):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "gitleaks.json").write_text(json.dumps(self.GL))
+            res = [{"key": "gitleaks", "output": str(d / "gitleaks.json"),
+                    "name": "Gitleaks", "category": "secrets"}]
+            summary = scanners.normalize_findings(res, d, target=d,
+                                                  include_fixtures=include_fixtures)
+            by_file = {f["file"]: f for f in json.loads((d / "findings.json").read_text())}
+        return summary, by_file
+
+    def test_fixture_secret_demoted_not_dropped(self):
+        summary, by_file = self._normalize(include_fixtures=False)
+        f = by_file["tests/security.test.mjs"]
+        self.assertEqual(f["severity"], "LOW")                    # demoted...
+        self.assertIn("test/fixture", f["title"])                 # ...and annotated
+        self.assertEqual(by_file["src/billing.ts"]["severity"], "HIGH")   # product secret untouched
+        self.assertEqual(summary["test_fixture_downgraded"], 1)
+
+    def test_include_fixtures_keeps_full_severity(self):
+        summary, by_file = self._normalize(include_fixtures=True)
+        self.assertEqual(by_file["tests/security.test.mjs"]["severity"], "HIGH")
+        self.assertEqual(summary["test_fixture_downgraded"], 0)
+
+    def test_fixture_routes_split_out_but_kept_in_facts(self):
+        from websec_validator.extractors import routes
+        from websec_validator.extractors.base import RepoContext
+        d = Path(tempfile.mkdtemp())
+        (d / "src").mkdir()
+        (d / "examples").mkdir()
+        (d / "tests").mkdir()
+        (d / "src" / "index.js").write_text("router.get('/api/real', h);\n")
+        (d / "examples" / "app.js").write_text("router.post('/api/demo', h);\n")
+        (d / "tests" / "server.test.js").write_text("router.get('/api/test-only', h);\n")
+        with mock.patch.object(routes, "_noir_scan", return_value=None):
+            out = routes.RoutesExtractor().extract(RepoContext(d), {})
+            inc = routes.RoutesExtractor().extract(RepoContext(d, include_fixtures=True), {})
+        paths = {e["path"] for e in out["endpoints"]}
+        self.assertEqual(paths, {"/api/real"})                    # fixtures out of the surface
+        self.assertEqual(out["fixture_excluded"], 2)
+        fx = {e["path"] for e in out["fixture_endpoints"]}
+        self.assertEqual(fx, {"/api/demo", "/api/test-only"})     # ...but kept, auditable
+        self.assertIn("fixture_note", out)
+        inc_paths = {e["path"] for e in inc["endpoints"]}
+        self.assertEqual(inc_paths, {"/api/real", "/api/demo", "/api/test-only"})
+        self.assertNotIn("fixture_excluded", inc)
+
+    def test_tenant_ignores_fixture_files(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "src").mkdir()
+        (d / "tests").mkdir()
+        (d / "src" / "app.js").write_text("const x = 1;\n")
+        (d / "tests" / "app.test.js").write_text("groupId; groupId; groupId; groupId;\n")
+        got = TenantExtractor().extract(RepoContext(d), {"routes": {"endpoints": []}})
+        self.assertEqual(got["candidates"], [])                   # fixture-only key → no candidate
+        inc = TenantExtractor().extract(RepoContext(d, include_fixtures=True),
+                                        {"routes": {"endpoints": []}})
+        self.assertTrue(any(c["key"] == "groupId" for c in inc["candidates"]))
+
 
 class CrossTenantNumericIdTests(unittest.TestCase):
     def test_numeric_tenant_id_does_not_crash(self):

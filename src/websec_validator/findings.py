@@ -375,18 +375,49 @@ def _cite(cls):
 
 
 def load_suppressions(repo_root: Path) -> list:
-    """Read `.websec-ignore` (repo root or cwd): glob path patterns or `category:<x>` lines."""
+    """Read `.websec-ignore` (repo root or cwd): glob path patterns or `category:<x>` lines.
+
+    `fingerprint:<fp>` lines are NOT path/category patterns — they are handled by
+    load_acknowledgements (kept + shown, not dropped) and skipped here so a fingerprint hex
+    can't accidentally substring-match a finding's location/title."""
     pats = []
     for cand in (repo_root / ".websec-ignore", Path.cwd() / ".websec-ignore"):
         try:
             if cand.is_file():
                 for ln in cand.read_text().splitlines():
                     ln = ln.split("#", 1)[0].strip()
-                    if ln:
+                    if ln and not ln.lower().startswith("fingerprint:"):
                         pats.append(ln)
         except Exception:
             pass
     return pats
+
+
+def load_acknowledgements(repo_root: Path) -> dict:
+    """Read `fingerprint:<fp> # <reason>` acks from `.websec-ignore` → {fp: reason}.
+
+    An acknowledged finding is a KNOWN, human-reviewed result (e.g. a confirmed false positive)
+    that should stay VISIBLE + attributable but not gate CI — distinct from a path/category
+    suppression which drops the finding entirely. A reason is REQUIRED: an ack with no
+    justification is ignored (a silent 'trust me' is exactly what we don't want in a security
+    tool). Reason = text after the first '#'; the fingerprint is the ledger's stable id."""
+    acks: dict = {}
+    for cand in (repo_root / ".websec-ignore", Path.cwd() / ".websec-ignore"):
+        try:
+            if not cand.is_file():
+                continue
+            for ln in cand.read_text().splitlines():
+                s = ln.strip()
+                if not s.lower().startswith("fingerprint:"):
+                    continue
+                body = s.split(":", 1)[1]
+                fp, _, reason = body.partition("#")
+                fp, reason = fp.strip(), reason.strip()
+                if fp and reason:                 # require BOTH — no reason ⇒ not honored
+                    acks.setdefault(fp, reason)
+        except Exception:
+            pass
+    return acks
 
 
 def _suppressed(f, pats):
@@ -408,8 +439,9 @@ def _f(title, category, attack_class, severity, confidence, location, evidence):
 
 
 def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
-                 suppressions: list | None = None) -> dict:
+                 suppressions: list | None = None, acknowledgements: dict | None = None) -> dict:
     suppressions = suppressions or []
+    acknowledgements = acknowledgements or {}
     out = []
 
     # ---- 1. Access control: correlate recon (per-endpoint guard) with dynamic verdicts ----
@@ -842,10 +874,29 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                       fnd.get("severity", "LOW"), fnd.get("confidence", "LOW"), fnd.get("file", ""),
                       [{"layer": "recon", "detail": fnd.get("detail", "")}]))
 
-    # ---- suppress + rank ----
+    # ---- suppress + acknowledge + rank ----
+    # (1) path/category suppressions DROP the finding (noise that isn't the product).
     kept = [f for f in out if not _suppressed(f, suppressions)]
     suppressed_n = len(out) - len(kept)
+    # (2) fingerprint acknowledgements KEEP the finding but move it off the gating list — a
+    # human-reviewed known result (e.g. a confirmed FP) stays visible + attributable with its
+    # reason, and is excluded from `findings`/total/gating so every downstream consumer
+    # (gate_count, by_severity, SARIF results, calibration) drops it with no change of theirs.
+    from . import baseline as _baseline
+    acknowledged = []
+    if acknowledgements:
+        active = []
+        for f in kept:
+            fp = f.setdefault("fingerprint", _baseline.fingerprint(f))
+            if fp in acknowledgements:
+                f["status"] = "acknowledged"
+                f["ack_reason"] = acknowledgements[fp]
+                acknowledged.append(f)
+            else:
+                active.append(f)
+        kept = active
     kept.sort(key=lambda f: (-SEV_RANK.get(f["severity"], 0), -CONF_RANK.get(f["confidence"], 0)))
+    acknowledged.sort(key=lambda f: (-SEV_RANK.get(f["severity"], 0), -CONF_RANK.get(f["confidence"], 0)))
 
     # ---- calibrate: attach a measured real-rate + CI to each finding (best-effort) ----
     cal_table = calibration.load()
@@ -856,6 +907,7 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         by_conf[f["confidence"]] = by_conf.get(f["confidence"], 0) + 1
         by_basis[f["calibrated"]["basis"]] = by_basis.get(f["calibrated"]["basis"], 0) + 1
     return {"schema_version": "1.0", "findings": kept, "total": len(kept), "suppressed": suppressed_n,
+            "acknowledged": acknowledged, "acknowledged_n": len(acknowledged),
             "by_severity": by_sev, "by_confidence": by_conf,
             "calibration": {"loaded": bool(cal_table), "by_basis": by_basis,
                             "personalized": bool((cal_table or {}).get("meta", {}).get("personalized")),

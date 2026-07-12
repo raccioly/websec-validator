@@ -91,12 +91,36 @@ Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and 
 
 > That's the whole user surface: **`run`** (plus the optional, advanced **`dynamic`** live-probing step below). `recon`/`proof`/`calibrate` exist for developing the tool itself and are hidden from `--help` — you never need them.
 
+## Scoping & suppression — keep the signal about *your* code
+
+Most real repos vendor an input corpus: `tests/`, `examples/`, `fixtures/` — sometimes whole demo apps with planted fake credentials. Those are **not your product's attack surface**, and websec scopes them out of the way by default without hiding anything a real leak would need:
+
+- **Fixture/example code is auto-scoped.** Test/example/fixture routes are split out of the attack surface (kept in `FACTS.json` under `fixture_endpoints`, counted in the console, not probed). Secrets found in fixture files are **demoted to LOW and annotated** — never dropped, because a real key pasted into a test is still a committed leak. Fixture package manifests don't drive framework detection (so a CLI that vendors an Express demo isn't misread as an Express app). Pass **`--include-fixtures`** to treat all of it as product code.
+- **`--exclude '<glob>'`** (repeatable) drops a path from **both** recon and the static scanners (gitleaks/trivy/semgrep/checkov). e.g. `websec run . --exclude 'tests/**' --exclude 'examples/**'`.
+- **`.websec-ignore`** (repo root) — a committed, gitignore-style config for persistent scoping, so you don't re-type flags every run or in CI. Two kinds of line:
+
+  ```
+  # 1. path globs / category — DROP the finding entirely (it isn't your product)
+  tests/
+  examples/**
+  category:supply-chain
+
+  # 2. fingerprint acknowledgement — KEEP the finding, shown but NOT gating.
+  #    A reason is REQUIRED (a bare fingerprint line is ignored). The fingerprint
+  #    is the stable id from findings-ledger.json.
+  fingerprint:b9c7f23e49bdab85  # confirmed FP: this is the scanner's own detection pattern
+  ```
+
+  Path/category lines remove noise that isn't your code. **Fingerprint acks** are the clean home for "this specific finding is a confirmed false positive" — the finding stays in the report (section *1a. Acknowledged*) and in SARIF (as a suppressed result, so GitHub keeps it visible + attributable), but it's excluded from the gating total and won't trip `--fail-on`. Every suppression stays auditable; nothing disappears silently.
+
+When most of a run's findings land in test/example code and there's no `.websec-ignore` yet, websec prints a one-line pointer to this section — it never edits your repo for you.
+
 ## What it extracts (22 deterministic extractors, no LLM)
 
 | | Dimension | Notable output |
 |---|---|---|
 | stack | languages, frameworks, datastores | monorepo-aware (aggregates every manifest) |
-| routes | every endpoint via **OWASP Noir** (+ Supabase-edge, **AWS SAM / Function-URL**) | method · path · typed params · code path · **AuthType:NONE public endpoints** |
+| routes | every endpoint via **OWASP Noir** (+ Supabase-edge, **AWS SAM / Function-URL**, **raw `http.createServer`/`Bun.serve`/py `http.server`**) | method · path · typed params · code path · **AuthType:NONE public endpoints**; **fixture/example routes split out of the attack surface** |
 | auth | scheme + login surface + **insecure-default signing secrets** + **broken-auth backdoors** | multi-scheme; flags a hard-coded `JWT_SECRET \|\| 'dev-secret'` fallback (forgeable JWT), a **`dev-`token / accept-any-password backdoor** (total bypass, CRITICAL), and a **fail-open** `if(env.SECRET)` signature check |
 | **authz** | access-control map | guard coverage (incl. **router-mount auth**) + **write endpoints with no visible guard** + roles |
 | **authz_dataflow** | authz *correctness* (does the guard trust the right thing?) | **unsigned-cookie authorization** · **claim-keyed authz** (user-influenceable JWT claim) · **transaction-local RLS context** (resets before the query) |

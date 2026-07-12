@@ -13,6 +13,7 @@ here — that is the dynamic phase, which v1 leaves to the agent + human.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import re
@@ -21,7 +22,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from .extractors.base import SKIP_DIRS, path_in_skip_dir
+from .extractors.base import SKIP_DIRS, is_test_file, path_in_skip_dir
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,36 @@ def _in_skip_dir(path: str, root=None) -> bool:
     dropped as 'contamination' (bug-005/066 recurrence). `root=None` keeps the legacy
     raw-segment behavior for relative inputs (and the existing single-arg unit test)."""
     return path_in_skip_dir(path, root)
+
+
+def _rel_to(path: str, root=None) -> str:
+    """Scanner paths normalized ROOT-RELATIVE (trivy/semgrep emit absolute). Empty string when
+    an absolute path can't be made relative — callers treat that as 'no match' (fail open)."""
+    p = (path or "").replace("\\", "/")
+    if not p:
+        return ""
+    if root is not None and Path(p).is_absolute():
+        try:
+            return Path(path).resolve().relative_to(Path(root).resolve()).as_posix()
+        except (ValueError, OSError):
+            return ""
+    return p
+
+
+def _matches_excludes(path: str, excludes, root=None) -> bool:
+    """True if `path` matches a user --exclude path/glob, measured RELATIVE to the scan root.
+
+    Same match semantics as RepoContext._excluded (substring OR fnmatch) so recon and the
+    scanner post-filter agree on what an exclude means. Gitleaks and checkov have no usable
+    path-exclude argv flag, so this post-filter — not the best-effort per-scanner flags —
+    is what makes the `--exclude` help-text contract ("recon + scanners") hold for every
+    scanner. Fail OPEN (keep the finding) when an absolute path can't be made root-relative."""
+    if not excludes:
+        return False
+    p = _rel_to(path, root)
+    if not p:
+        return False
+    return any(ex in p or fnmatch.fnmatch(p, ex) for ex in excludes if ex)
 
 
 def _trivy(target: Path, out: Path, excludes=()) -> list:
@@ -291,7 +322,9 @@ _DOC_NOTE = "in a documentation/example file — almost always a placeholder, ve
 
 
 def _is_doc_or_example(path: str) -> bool:
-    p = (path or "").replace("\\", "/").lower()
+    # "/" prefix so ROOT-LEVEL dirs match the /marker/ patterns too — `examples/app.js`
+    # previously slipped past `/examples/` and kept HIGH (DocGuard field report F1).
+    p = "/" + (path or "").replace("\\", "/").lower().lstrip("/")
     base = p.rsplit("/", 1)[-1]
     return (p.endswith(_DOC_EXT)
             or any(m in p for m in _DOC_DIR_MARKERS)
@@ -420,13 +453,18 @@ def _gitignored(target: Path | None, paths) -> set:
         return set()
 
 
-def normalize_findings(scan_results: list, outdir: Path, target: Path | None = None) -> dict:
+def normalize_findings(scan_results: list, outdir: Path, target: Path | None = None,
+                       excludes: list | None = None, include_fixtures: bool = False) -> dict:
     """Merge every scanner's native JSON into one de-duplicated, severity-ranked
     findings.json. Returns a summary (raw vs deduped, by severity/category).
 
     `target` (the scanned repo) enables two bug-066 hygiene passes: drop findings under a
     SKIP_DIR (a scanner re-entered a dir the walker skips), and downgrade working-tree secrets
-    that live in gitignored (never-committed) files."""
+    that live in gitignored (never-committed) files.
+
+    `excludes` (user --exclude paths/globs) is enforced HERE, not only in the per-scanner
+    argv flags: gitleaks/checkov ignore those flags entirely, so without this post-filter a
+    `--exclude 'tests/**'` still surfaced fixture secrets as HIGH (DocGuard field report)."""
     raw = []
     for r in scan_results:
         out, key = r.get("output"), r.get("key")
@@ -445,6 +483,12 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
     raw = [f for f in raw if not _in_skip_dir(f.get("file", ""), target)]
     contamination_dropped = before - len(raw)
 
+    # user --exclude contract: recon honors it via RepoContext, scanners must too. The argv
+    # flags above are best-effort (gitleaks/checkov have none) — this is the guarantee.
+    before = len(raw)
+    raw = [f for f in raw if not _matches_excludes(f.get("file", ""), excludes, target)]
+    user_excluded_dropped = before - len(raw)
+
     # bug-066 (b): working-tree secrets (trivy fs) in GITIGNORED files are local-only / never
     # committed — not a repo leak. Downgrade + annotate rather than report CRITICAL. Gitleaks
     # findings come from git HISTORY (already committed) and are deliberately left alone.
@@ -459,6 +503,22 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
             if "local-only" not in f["title"]:
                 f["title"] += " — local-only (gitignored, never committed; rotate if real, not a repo leak)"
             local_only_downgraded += 1
+
+    # DocGuard field report F1: secrets in test/fixture files are overwhelmingly PLANTED fakes
+    # (scanner corpora, negative tests). Demote to LOW + annotate — never drop: a real key pasted
+    # into a test is still a committed leak. Mirrors the local-only downgrade above; the doc/
+    # example-file tier already happens at parse time (_is_doc_or_example).
+    test_fixture_downgraded = 0
+    if not include_fixtures:
+        for f in raw:
+            if (f.get("category") == "secret"
+                    and is_test_file(_rel_to(f.get("file", ""), target))
+                    and SEV_ORDER.get(f.get("severity"), 0) >= SEV_ORDER["MEDIUM"]):
+                f["severity"] = "LOW"
+                if "test/fixture" not in f["title"]:
+                    f["title"] += (" — in a test/fixture file (planted fakes are common; "
+                                   "verify + rotate if real, or --include-fixtures)")
+                test_fixture_downgraded += 1
 
     by_fp: dict = {}
     for f in raw:
@@ -484,7 +544,9 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
     return {"total_raw": len(raw), "total": len(deduped),
             "cross_tool_or_dup_merged": len(raw) - len(deduped),
             "contamination_dropped": contamination_dropped,
+            "user_excluded_dropped": user_excluded_dropped,
             "local_only_downgraded": local_only_downgraded,
+            "test_fixture_downgraded": test_fixture_downgraded,
             "by_severity": by_sev, "by_category": by_cat,
             # `top` = a short slice for the human briefing; `all` = the FULL ranked set the
             # findings ledger consumes. The ledger must NOT silently drop a HIGH/CRITICAL static

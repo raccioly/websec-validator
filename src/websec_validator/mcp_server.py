@@ -64,7 +64,9 @@ def tool_websec_recon(a: dict) -> str:
 
 def tool_websec_findings(a: dict) -> str:
     facts = _facts(a.get("path", ""))
-    ledger = findings.build_ledger(facts, None, None, findings.load_suppressions(_resolve(a["path"])))
+    root = _resolve(a["path"])
+    ledger = findings.build_ledger(facts, None, None, findings.load_suppressions(root),
+                                   findings.load_acknowledgements(root))
     return json.dumps(ledger, indent=2)
 
 

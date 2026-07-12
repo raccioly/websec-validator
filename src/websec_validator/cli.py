@@ -27,6 +27,25 @@ def _resolve_target(raw: str) -> Path:
     return p
 
 
+def _maybe_nudge_websecignore(target: Path, ledger: dict, unified: dict | None, log) -> None:
+    """One-line advisory when most findings sit in test/example/fixture code and no
+    `.websec-ignore` exists yet — surfaces the suppression mechanism at the moment of need
+    (DocGuard field report: the feature existed but was undiscoverable). Never auto-creates it."""
+    from .extractors.base import is_script_file, is_test_file
+    if (target / ".websec-ignore").is_file() or (Path.cwd() / ".websec-ignore").is_file():
+        return
+    locs = [f.get("location", "") for f in ledger.get("findings", []) or []]
+    locs += [f.get("file", "") for f in ((unified or {}).get("all") or [])]
+    locs = [x for x in locs if x]
+    if len(locs) < 4:
+        return
+    fixture = sum(1 for x in locs if is_test_file(x) or is_script_file(x))
+    if fixture and fixture >= 0.5 * len(locs):
+        log(f"\n  ⓘ {fixture}/{len(locs)} findings are in test/example/fixture code. If those aren't "
+            "your product,\n    add a .websec-ignore (path globs or `category:` / `fingerprint:` acks) "
+            "— see the README\n    \"Scoping & suppression\" section, or narrow with --exclude.")
+
+
 def _default_out(target: Path, out: str | None) -> Path:
     d = Path(out).expanduser().resolve() if out else Path.cwd() / "websec-out"
     d.mkdir(parents=True, exist_ok=True)
@@ -92,7 +111,8 @@ def cmd_run(args) -> int:
     log(f"websec-validator v{__version__}  ·  target: {target}  ·  run {ts}\n")
 
     # 1. recon
-    facts = recon.build_facts(target, __version__, args.exclude)
+    facts = recon.build_facts(target, __version__, args.exclude,
+                              include_fixtures=getattr(args, "include_fixtures", False))
     recon.write_facts(facts, out / "FACTS.json")
     langs = facts["stack"]["languages"]
     _print_facts_summary(facts, log)
@@ -108,14 +128,19 @@ def cmd_run(args) -> int:
         for r in scan_results:
             tag = r.get("findings", r.get("status", "?"))
             log(f"    {r['name']}: {tag}")
-        unified = scanners.normalize_findings(scan_results, out, target=target)
+        unified = scanners.normalize_findings(scan_results, out, target=target, excludes=args.exclude,
+                                              include_fixtures=getattr(args, "include_fixtures", False))
         log(f"  → {unified['total']} de-duplicated findings "
             f"({unified['cross_tool_or_dup_merged']} merged) · {unified['by_severity']}")
         _hyg = []
         if unified.get('contamination_dropped'):
             _hyg.append(f"{unified['contamination_dropped']} dropped (skip-dir contamination)")
+        if unified.get('user_excluded_dropped'):
+            _hyg.append(f"{unified['user_excluded_dropped']} dropped (--exclude)")
         if unified.get('local_only_downgraded'):
             _hyg.append(f"{unified['local_only_downgraded']} downgraded (gitignored/local-only secret)")
+        if unified.get('test_fixture_downgraded'):
+            _hyg.append(f"{unified['test_fixture_downgraded']} downgraded (test/fixture secret → LOW)")
         if _hyg:
             log(f"    hygiene: {' · '.join(_hyg)}")
     else:
@@ -129,8 +154,13 @@ def cmd_run(args) -> int:
 
     # 4. traceable findings ledger (recon + static; dynamic merges in via `websec dynamic`)
     suppressions = findings.load_suppressions(target)
-    ledger = findings.build_ledger(facts, unified, None, suppressions)
+    acks = findings.load_acknowledgements(target)
+    ledger = findings.build_ledger(facts, unified, None, suppressions, acks)
     baseline.annotate(ledger)          # stable per-finding fingerprints (baseline + SARIF tracking)
+    if ledger.get("acknowledged_n"):
+        log(f"  acknowledged: {ledger['acknowledged_n']} known finding(s) shown but not gating "
+            "(fingerprint acks in .websec-ignore)")
+    _maybe_nudge_websecignore(target, ledger, unified, log)
 
     # 4b. baseline / diff — only NEW findings gate CI when a baseline is supplied
     diff = None
@@ -242,8 +272,10 @@ def cmd_dynamic(args) -> int:
 
     # merge dynamic evidence into the traceable ledger + write the immutable run report
     facts_dict = json.loads(facts_path.read_text())
+    _root = Path(facts_dict.get("target", "."))
     ledger = findings.build_ledger(facts_dict, None, dyn,
-                                   findings.load_suppressions(Path(facts_dict.get("target", "."))))
+                                   findings.load_suppressions(_root),
+                                   findings.load_acknowledgements(_root))
     (out / "findings-ledger.json").write_text(json.dumps(ledger, indent=2))
     (out / "CONSTITUTION.md").write_text(constitution.render(constitution.build(facts_dict, ledger)))
     (out / "REPORT.md").write_text(
@@ -385,6 +417,9 @@ def _print_facts_summary(facts: dict, log=print) -> None:
     log(f"  tenant?:  {', '.join(t['key'] for t in tc) or 'none detected'}"
         + ("   ← confirm THE boundary" if tc else ""))
     log(f"  routes:   {rt.get('count', 0)} endpoints via {rt.get('engine', '?').split(' ')[0]}")
+    if rt.get("fixture_excluded"):
+        log(f"            {rt['fixture_excluded']} fixture/example endpoint(s) excluded "
+            "(test/example code ≠ attack surface; --include-fixtures to analyze)")
     log(f"  targets:  IDOR={len(tg.get('idor_candidates', []))} "
         f"SSRF={len(tg.get('ssrf_candidates', []))} "
         f"upload={len(tg.get('upload_candidates', []))} "
@@ -407,6 +442,9 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--out", help="output dir (default: ./websec-out)")
     r.add_argument("--exclude", action="append", metavar="PATH",
                    help="exclude a path/glob from recon + scanners (repeatable; e.g. --exclude 'docs/**')")
+    r.add_argument("--include-fixtures", action="store_true", dest="include_fixtures",
+                   help="treat test/example/fixture code as product code: fixture routes count as attack "
+                        "surface and fixture secrets keep full severity (default: split out + demoted)")
     r.add_argument("--scanners", metavar="A,B",
                    help="comma-separated subset of scanners to run with --scan (e.g. gitleaks,semgrep)")
     r.add_argument("--format", choices=["briefing", "sarif", "json"], default="briefing",

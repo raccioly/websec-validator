@@ -6,7 +6,7 @@ tool reports candidates by frequency; the agent confirms THE one with the human.
 
 from __future__ import annotations
 
-from .base import Extractor, RepoContext
+from .base import Extractor, RepoContext, is_test_file
 
 TENANT_KEYS = ["groupId", "group_id", "orgId", "org_id", "organizationId",
                "tenantId", "tenant_id", "workspaceId", "workspace_id",
@@ -29,6 +29,10 @@ class TenantExtractor(Extractor):
         hits: dict = {}
         files: dict = {}
         for _p, rel, text in ctx.iter_code():
+            # a `groupId` in a test fixture is corpus data, not the app's isolation boundary
+            # (DocGuard field report: fixture Express apps produced a phantom tenant key)
+            if not getattr(ctx, "include_fixtures", False) and is_test_file(rel):
+                continue
             for key in TENANT_KEYS:
                 c = text.count(key)
                 if c:
