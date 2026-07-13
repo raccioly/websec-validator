@@ -25,11 +25,16 @@ DENY_LIST = re.compile(r"isExecutableMimeType|blockedMimeTypes|blacklist|deny[_-
 ALLOW_LIST = re.compile(r"isAllowedMediaType|allowedMimeTypes|allow[_-]?list|whitelist|ALLOWED_(?:MIME|TYPES|EXT)"
                         r"|ACCEPTED_(?:MIME|TYPES?|EXT)|accepted(?:Mime|File|Content)?(?:Types?|Extensions?)"
                         r"|\bfile-type\b|fileTypeFrom|magic[_-]?byte|detectContentType|\.fromBuffer\b|sniff", re.I)
-KEY_FROM_NAME = re.compile(r"(?:Key|key|path|filename|filepath|destination|filename\s*\()\s*[:=(][^;\n]{0,90}"
-                           r"\b(?:originalname|originalName|file\.name)\b"
-                           r"|`[^`]*\$\{[^}]*\boriginalname\b[^}]*\}[^`]*`", re.I)
-TRUST_CLIENT_MIME = re.compile(r"(?:req\.files?\.[\w$.]*\.|\bfile\.)mimetype\b|headers\[['\"]content-type['\"]\]", re.I)
-ACCEPT_SVG = re.compile(r"image/svg\+xml|['\"]svg['\"]", re.I)
+KEY_FROM_NAME = re.compile(r"(?:Key|key|path|filename|filepath|destination|filename\s*\()\s*[:=(]\s*"
+                           r"(?:[^;{\n]{0,90}?)?"
+                           r"(?:\b(?:originalname|originalName|file\.name)\b"
+                           r"|`[^`]*\$\{[^}]*\b(?:originalname|originalName|file\.name)\b[^}]*\}[^`]*`)", re.I)
+TRUST_CLIENT_MIME = re.compile(r"(?:===|!==|==|!=|\.includes\s*\(|[=:]\s*|switch\s*\(\s*|(?<!\blog)(?<!\binfo)(?<!\bwarn)(?<!\berror)(?<!\bdebug)\s*\(\s*[^);]*?)(?:req\.files?\.[\w$.]*\.|\bfile\.)mimetype\b"
+                               r"|(?:req\.files?\.[\w$.]*\.|\bfile\.)mimetype\b\s*(?:===|!==|==|!=)"
+                               r"|headers\[['\"]content-type['\"]\]\s*(?:===|!==|==|!=)", re.I)
+ACCEPT_SVG = re.compile(r"\[[^\]]*(?:image/svg\+xml|['\"]svg['\"])[^\]]*\]"
+                        r"|(?:\bincludes\b|\bindexOf\b)\s*\(\s*(?:['\"]image/svg\+xml['\"]|['\"]svg['\"])\s*\)"
+                        r"|(?:===|==)\s*(?:['\"]image/svg\+xml['\"]|['\"]svg['\"])(?![^;]*?(?:throw|return|res\.(?:status|send|json)))", re.I)
 # file-serving: streaming a STORED/PROXIED object back to the client. Tightened to genuine
 # file-bytes sinks — the old rule matched a bare `getObject` token (a local coercion helper) and a
 # Prometheus `res.set('Content-Type', registry.contentType)` (the /metrics endpoint), both FPs.

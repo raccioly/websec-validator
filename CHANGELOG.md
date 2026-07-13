@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Upload Security Extractor False Positives** — refined `KEY_FROM_NAME`, `TRUST_CLIENT_MIME`, and `ACCEPT_SVG` regexes to stop flagging benign usage of originalname in string templates, common mimetype logging, and explicit SVG rejection conditions.
+
+
 ### Added
 
 - **No-Row-Level-Security detection** (`missing-rls` class, in `schemas.py` + the ledger) — committed
