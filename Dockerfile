@@ -51,5 +51,6 @@ RUN pip install --no-cache-dir .
 RUN useradd --create-home --uid 1001 websec
 WORKDIR /scan
 USER websec
+HEALTHCHECK NONE
 ENTRYPOINT ["websec"]
 CMD ["--help"]
