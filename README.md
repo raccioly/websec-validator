@@ -274,7 +274,7 @@ upload, cross-tenant BOLA, role/authz gaps).
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 324 tests
+python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 342 tests
 ```
 
 ## Releasing (maintainer)

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **SSRF outbound HTTP detection**: updated `needle` regex in `surface.py` to allow methods such as `needle.get(url)`, catching previously missed NodeGoat SSRF vulnerability.
+
 ### Added
 
 - **No-Row-Level-Security detection** (`missing-rls` class, in `schemas.py` + the ledger) — committed
