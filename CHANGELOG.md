@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Upload Security False Positives** in `upload_security.py` where static file serving via `res.sendFile(__dirname)` or literal paths, and valid allowlist checking using variable names like `validTypes`, falsely triggered alerts. Also tightened the `image/svg+xml` check to avoid generic `'svg'` strings.
+
 ### Added
 
 - **No-Row-Level-Security detection** (`missing-rls` class, in `schemas.py` + the ledger) — committed

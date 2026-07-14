@@ -24,17 +24,19 @@ DENY_LIST = re.compile(r"isExecutableMimeType|blockedMimeTypes|blacklist|deny[_-
 # `ACCEPTED_*` / `acceptedMimeTypes` is the same intent under a different name (was missed → FP).
 ALLOW_LIST = re.compile(r"isAllowedMediaType|allowedMimeTypes|allow[_-]?list|whitelist|ALLOWED_(?:MIME|TYPES|EXT)"
                         r"|ACCEPTED_(?:MIME|TYPES?|EXT)|accepted(?:Mime|File|Content)?(?:Types?|Extensions?)"
+                        r"|(?:valid|supported)(?:Mime)?Types"
                         r"|\bfile-type\b|fileTypeFrom|magic[_-]?byte|detectContentType|\.fromBuffer\b|sniff", re.I)
 KEY_FROM_NAME = re.compile(r"(?:Key|key|path|filename|filepath|destination|filename\s*\()\s*[:=(][^;\n]{0,90}"
                            r"\b(?:originalname|originalName|file\.name)\b"
                            r"|`[^`]*\$\{[^}]*\boriginalname\b[^}]*\}[^`]*`", re.I)
 TRUST_CLIENT_MIME = re.compile(r"(?:req\.files?\.[\w$.]*\.|\bfile\.)mimetype\b|headers\[['\"]content-type['\"]\]", re.I)
-ACCEPT_SVG = re.compile(r"image/svg\+xml|['\"]svg['\"]", re.I)
+ACCEPT_SVG = re.compile(r"image/svg\+xml", re.I)
 # file-serving: streaming a STORED/PROXIED object back to the client. Tightened to genuine
 # file-bytes sinks — the old rule matched a bare `getObject` token (a local coercion helper) and a
 # Prometheus `res.set('Content-Type', registry.contentType)` (the /metrics endpoint), both FPs.
 SERVE_FILE = re.compile(r"res\.sendFile|\.sendFile\s*\(|\.getObject\s*\(|createReadStream|proxyMedia"
                         r"|streamObject|\.pipe\s*\(\s*res\b|fs\.createReadStream", re.I)
+STATIC_SERVE_CONTEXT = re.compile(r"__dirname|process\.cwd\(\)")
 NOSNIFF = re.compile(r"nosniff", re.I)
 # `Content-Disposition: attachment` fully defeats the MIME-sniff→stored-XSS vector (the browser
 # downloads instead of rendering), so a serve site that sets it is SAFE even without nosniff.
@@ -76,7 +78,19 @@ class UploadSecurityExtractor(Extractor):
                     findings.append({"severity": "MEDIUM", "kind": "upload-accepts-svg", "file": rel,
                                      "detail": "`image/svg+xml` is accepted — SVG can carry inline <script> and renders "
                                                "as HTML. Drop SVG from the allow-list, or sanitize + serve as attachment."})
-            if SERVE_FILE.search(text) and not NOSNIFF.search(text) and not ATTACHMENT.search(text):
+            serve_match = SERVE_FILE.search(text)
+            is_serve_no_nosniff = False
+            if serve_match and not NOSNIFF.search(text) and not ATTACHMENT.search(text):
+                # Exclude static file serving logic for sendFile without dynamic user inputs
+                # A file is flagged if *any* serve sink is NOT purely static.
+                for m in SERVE_FILE.finditer(text):
+                    # Check context around the match for static markers
+                    context = text[max(0, m.start()-20):m.start()+100]
+                    if not STATIC_SERVE_CONTEXT.search(context):
+                        is_serve_no_nosniff = True
+                        break
+
+            if is_serve_no_nosniff:
                 serve_files.append(rel)
                 findings.append({"severity": "HIGH", "kind": "serve-no-nosniff", "file": rel,
                                  "detail": "A stored/proxied file is served with no `X-Content-Type-Options: nosniff` "
