@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Improved route extraction with `_fallback_openapi` to discover routes from spec files (e.g. `openapi.yml`, `swagger.json`) directly when scanner falls back. Added parsing for `.yaml`, `.yml`, and `.json` files in the code fallback paths.
 
 - **No-Row-Level-Security detection** (`missing-rls` class, in `schemas.py` + the ledger) — committed
   Postgres/Supabase DDL declares owner/tenant-scoped tables but ships **zero** `CREATE POLICY` /
