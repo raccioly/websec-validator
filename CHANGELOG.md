@@ -101,9 +101,20 @@ websec keeps its zero-runtime-deps guarantee throughout (stdlib-only HTTP + JSON
 - PyPI metadata: trove classifiers and `[project.urls]` (homepage, docs, changelog, issues) —
   populates the sidebar on the PyPI project page from the next release.
 
+- **Fixture/example code is scoped out of the attack surface.** Test/example/fixture routes are split
+  out (kept in `FACTS.json` under `fixture_endpoints`, counted but not probed) so a project that
+  vendors a demo app isn't profiled as if that demo were the product; secrets in fixture files are
+  demoted to LOW and annotated rather than dropped. `--include-fixtures` treats all of it as product
+  code. Fixture package manifests no longer drive framework detection. Also adds raw-server detection.
+
 ### Changed
 
 ### Fixed
+
+- **`--exclude` now reaches every scanner** (bug-205). It was honored by trivy/semgrep but dropped by
+  the gitleaks/checkov paths and the findings post-filter (which only excluded built-in `SKIP_DIRS`).
+  Added a single post-filter choke point that applies every `--exclude` glob across all scanners, with
+  a disclosed `user_excluded_dropped` hygiene counter.
 
 ### Removed
 

@@ -62,11 +62,17 @@ def tool_websec_recon(a: dict) -> str:
     return json.dumps(_facts(a.get("path", "")), indent=2)
 
 
-def _ledger_for(path: str, suppressions) -> tuple[dict, dict]:
-    """Build the ledger for a repo and apply optional graphify blast-radius enrichment (best-effort)."""
+def _ledger_for(path: str, apply_policy: bool) -> tuple[dict, dict]:
+    """Build the ledger for a repo and apply optional graphify blast-radius enrichment (best-effort).
+
+    apply_policy=True honors the repo's `.websec-ignore` suppressions + acknowledgements (as the
+    findings tool does); False builds the raw ledger (as the SARIF tool does).
+    """
     root = _resolve(path)
     facts = recon.build_facts(root, __version__)
-    ledger = findings.build_ledger(facts, None, None, suppressions)
+    supp = findings.load_suppressions(root) if apply_policy else []
+    acks = findings.load_acknowledgements(root) if apply_policy else []
+    ledger = findings.build_ledger(facts, None, None, supp, acks)
     try:
         from . import graph_enrich
         graph_enrich.enrich_ledger(ledger, root)
@@ -76,13 +82,12 @@ def _ledger_for(path: str, suppressions) -> tuple[dict, dict]:
 
 
 def tool_websec_findings(a: dict) -> str:
-    path = a.get("path", "")
-    _, ledger = _ledger_for(path, findings.load_suppressions(_resolve(path)))
+    _, ledger = _ledger_for(a.get("path", ""), apply_policy=True)
     return json.dumps(ledger, indent=2)
 
 
 def tool_websec_sarif(a: dict) -> str:
-    facts, ledger = _ledger_for(a.get("path", ""), [])
+    facts, ledger = _ledger_for(a.get("path", ""), apply_policy=False)
     return json.dumps(formats.to_sarif(ledger, facts, __version__), indent=2)
 
 

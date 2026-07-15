@@ -106,9 +106,13 @@ def is_client_file(rel: str, text: str = "") -> bool:
 class RepoContext:
     """Walk the tree once; cache file text; serve cheap queries to every extractor."""
 
-    def __init__(self, root: Path, excludes: list | None = None):
+    def __init__(self, root: Path, excludes: list | None = None, include_fixtures: bool = False):
         self.root = root
         self.excludes = [e for e in (excludes or []) if e]   # user --exclude paths/globs
+        # --include-fixtures: treat test/example/fixture code as first-class product code
+        # (disables the fixture-scoping splits in routes/tenant/stack). Default False — a
+        # repo's fixture corpus is not its attack surface (DocGuard field report F1).
+        self.include_fixtures = bool(include_fixtures)
         self._text: dict[Path, str] = {}
         self.code_files: list[Path] = []
         self.stack: dict = {}          # filled by StackExtractor, read by the rest

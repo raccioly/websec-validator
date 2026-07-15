@@ -63,9 +63,10 @@ REGISTRY: list[Extractor] = [
 ]
 
 
-def run_all(root: Path, version: str, excludes: list | None = None) -> dict:
+def run_all(root: Path, version: str, excludes: list | None = None,
+            include_fixtures: bool = False) -> dict:
     """Walk the repo once, run every extractor, return the merged FACTS dict."""
-    ctx = RepoContext(root, excludes)
+    ctx = RepoContext(root, excludes, include_fixtures=include_fixtures)
     facts: dict = {
         "tool": "websec-validator",
         "schema_version": "1.0",   # lockstep with formats.SCHEMA_VERSION + schemas/facts.schema.json

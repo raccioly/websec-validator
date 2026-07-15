@@ -10,7 +10,30 @@ from __future__ import annotations
 
 import re
 
-from .base import Extractor, RepoContext
+from .base import Extractor, RepoContext, is_script_file, is_test_file
+
+
+def _is_fixture_manifest(ctx: RepoContext, p) -> bool:
+    rel = ctx.rel(p)
+    return bool(is_test_file(rel) or is_script_file(rel))
+
+
+def _product_first(ctx: RepoContext, paths: list, repo_has_product: bool) -> list:
+    """Drop manifests under test/example/fixture dirs, per DocGuard field report F4.
+
+    A Node CLI whose only prod dep is @babel/parser was flagged Express+Flask because its
+    tests/fixtures/ and examples/ ship whole Express/Flask apps whose manifests got aggregated.
+
+    The fallback is CROSS-LANGUAGE: keep fixture manifests only when the repo has NO product
+    manifest of ANY language (a fixtures-only repo still gets a stack model instead of reading
+    `languages: ?`). Without this, a Python project (product pyproject.toml, only fixture
+    package.json — like websec itself) would resurrect its fixtures' Express and read as Node."""
+    if getattr(ctx, "include_fixtures", False):
+        return paths
+    product = [p for p in paths if not _is_fixture_manifest(ctx, p)]
+    if product:
+        return product
+    return [] if repo_has_product else paths
 
 NODE_FRAMEWORKS = {"express": "express", "fastify": "fastify", "koa": "koa",
                    "@nestjs/core": "nestjs", "next": "next", "@hapi/hapi": "hapi",
@@ -35,7 +58,15 @@ class StackExtractor(Extractor):
     def extract(self, ctx: RepoContext, facts: dict) -> dict:
         langs, frameworks, managers, datastores = set(), set(), set(), set()
 
-        pkgs = ctx.glob("**/package.json", 120)
+        _node_manifests = ctx.glob("**/package.json", 120)
+        _py_manifests = (ctx.glob("**/requirements*.txt", 80) + ctx.glob("**/pyproject.toml", 80)
+                         + ctx.glob("**/setup.py", 80) + ctx.glob("**/Pipfile", 80))
+        # cross-language: is ANY manifest product code? (decides whether fixtures-only stacks
+        # fall back to their fixture manifests — see _product_first)
+        repo_has_product = any(not _is_fixture_manifest(ctx, p)
+                               for p in (_node_manifests + _py_manifests))
+
+        pkgs = _product_first(ctx, _node_manifests, repo_has_product)
         node_text = " ".join(ctx.text(p) for p in pkgs)
         if node_text:
             langs.add("node")
@@ -53,8 +84,7 @@ class StackExtractor(Extractor):
         if ctx.glob("**/yarn.lock", 1):
             managers.add("yarn")
 
-        py_manifests = (ctx.glob("**/requirements*.txt", 80) + ctx.glob("**/pyproject.toml", 80)
-                        + ctx.glob("**/setup.py", 80) + ctx.glob("**/Pipfile", 80))
+        py_manifests = _product_first(ctx, _py_manifests, repo_has_product)
         py_text = " ".join(ctx.text(p) for p in py_manifests).lower()
         if py_text.strip():
             langs.add("python")

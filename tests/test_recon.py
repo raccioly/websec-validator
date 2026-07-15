@@ -11,11 +11,12 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from websec_validator import calibration, findings, probes, scanners   # noqa: E402
+from websec_validator import baseline, calibration, findings, probes, scanners   # noqa: E402
 from websec_validator.extractors import routes                         # noqa: E402
 from websec_validator.extractors.auth import AuthExtractor             # noqa: E402
 from websec_validator.extractors.authz import AuthzExtractor           # noqa: E402
@@ -63,6 +64,42 @@ class StackTests(unittest.TestCase):
         out = StackExtractor().extract(RepoContext(d), {})
         self.assertIn("cloudflare-workers", out["frameworks"])
         self.assertIn("cloudflare-kv", out["datastores"])
+
+    def test_fixture_manifests_dont_pollute_framework_detection(self):
+        # DocGuard field report F4: a CLI whose only real dep is @babel/parser was flagged
+        # Express+Flask because its tests/fixtures ship whole Express/Flask apps.
+        d = Path(tempfile.mkdtemp())
+        (d / "package.json").write_text('{"name":"cli","dependencies":{"@babel/parser":"^7.0.0"}}')
+        (d / "tests" / "fixtures" / "exp").mkdir(parents=True)
+        (d / "tests" / "fixtures" / "exp" / "package.json").write_text(
+            '{"name":"fx","dependencies":{"express":"^4","flask":"^1"}}')
+        out = StackExtractor().extract(RepoContext(d), {})
+        self.assertNotIn("express", out["frameworks"])           # fixture dep — dropped
+        self.assertIn("node", out["languages"])                  # real product manifest kept
+        # escape hatch restores the old behavior
+        inc = StackExtractor().extract(RepoContext(d, include_fixtures=True), {})
+        self.assertIn("express", inc["frameworks"])
+
+    def test_fixtures_only_repo_falls_back_to_fixture_manifests(self):
+        # A repo that is ONLY fixtures (no product manifest of any language) must still get a
+        # stack model rather than reading `languages: ?`.
+        d = Path(tempfile.mkdtemp())
+        (d / "examples" / "app").mkdir(parents=True)
+        (d / "examples" / "app" / "package.json").write_text('{"dependencies":{"express":"^4"}}')
+        out = StackExtractor().extract(RepoContext(d), {})
+        self.assertIn("express", out["frameworks"])              # nothing else → keep fixtures
+        self.assertIn("node", out["languages"])
+
+    def test_python_product_manifest_suppresses_fixture_node(self):
+        # websec's own shape: Python project (product pyproject) whose only package.json are
+        # fixtures — must NOT resurrect fixture Express as if the repo were a Node app.
+        d = Path(tempfile.mkdtemp())
+        (d / "pyproject.toml").write_text('[project]\nname="tool"\ndependencies=["click"]\n')
+        (d / "tests" / "fixtures").mkdir(parents=True)
+        (d / "tests" / "fixtures" / "package.json").write_text('{"dependencies":{"express":"^4"}}')
+        out = StackExtractor().extract(RepoContext(d), {})
+        self.assertIn("python", out["languages"])
+        self.assertNotIn("express", out["frameworks"])           # fixture Node stays dropped
 
 
 class AuthTests(unittest.TestCase):
@@ -781,6 +818,70 @@ class RouteUnitTests(unittest.TestCase):
         self.assertNotIn("/api/phantom", paths)
 
 
+class RawServerRouteTests(unittest.TestCase):
+    """F5: raw node:http / Bun.serve / python http.server surfaces aren't invisible."""
+
+    def _extract(self, d):
+        # force the regex path (deterministic across machines w/ or w/o noir installed)
+        with mock.patch.object(routes, "_noir_scan", return_value=None):
+            return routes.RoutesExtractor().extract(RepoContext(d), {})
+
+    def test_node_http_paths_and_catchall(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "src").mkdir()
+        (d / "src" / "mcp.mjs").write_text(
+            'import http from "node:http";\n'
+            'http.createServer((req, res) => {\n'
+            '  if (req.method === "POST" && req.url === "/api/mcp") handle(req, res);\n'
+            '  res.end("ok");\n});\n')
+        out = self._extract(d)
+        by = {e["path"]: e for e in out["endpoints"]}
+        self.assertIn("/api/mcp", by)                            # recovered path literal
+        self.assertEqual(by["/api/mcp"]["technology"], "node-http")
+        self.assertTrue(by["/api/mcp"]["raw_server"])
+        self.assertEqual(out["raw_server_endpoints"], 1)         # ONE per path — not method×path
+
+    def test_python_http_server_catchall(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "srv.py").write_text(
+            "from http.server import BaseHTTPRequestHandler, HTTPServer\n"
+            "class H(BaseHTTPRequestHandler):\n"
+            "    def do_GET(self): pass\n"
+            "    def do_POST(self): pass\n"
+            "HTTPServer(('', 8000), H).serve_forever()\n")
+        out = self._extract(d)
+        raw = [e for e in out["endpoints"] if e.get("raw_server")]
+        self.assertEqual(len(raw), 1)
+        self.assertEqual(raw[0]["path"], "/*")                   # no literal → catch-all
+        self.assertEqual(raw[0]["technology"], "python-http")
+        self.assertEqual(sorted(raw[0]["methods_detected"]), ["GET", "POST"])
+
+    def test_createserver_with_express_app_not_flagged(self):
+        # `http.createServer(app)` where app is Express — Noir maps the real routes; we must NOT
+        # stamp a phantom /* raw-server surface on top (no hand-rolled handler evidence).
+        d = Path(tempfile.mkdtemp())
+        (d / "src").mkdir()
+        (d / "src" / "server.js").write_text(
+            'const express = require("express");\n'
+            'const app = express();\n'
+            'const http = require("http");\n'
+            'http.createServer(app).listen(3000);\n')
+        out = self._extract(d)
+        self.assertEqual([e for e in out["endpoints"] if e.get("raw_server")], [])
+        self.assertEqual(out["raw_server_endpoints"], 0)
+
+    def test_raw_server_honors_exclude(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "tools").mkdir()
+        (d / "tools" / "devserver.mjs").write_text(
+            'import http from "node:http";\n'
+            'http.createServer((req,res)=>{ if(req.url==="/x") res.end(); }).listen(1);\n')
+        with mock.patch.object(routes, "_noir_scan", return_value=None):
+            out = routes.RoutesExtractor().extract(
+                RepoContext(d, excludes=["tools/**"]), {})
+        self.assertEqual(out["raw_server_endpoints"], 0)
+
+
 class DedupTests(unittest.TestCase):
     def test_within_tool_dedup_and_counts(self):
         with tempfile.TemporaryDirectory() as d:
@@ -831,6 +932,48 @@ class LedgerTests(unittest.TestCase):
         led = findings.build_ledger(facts, None, None, ["category:access-control"])
         self.assertEqual(led["total"], 0)
         self.assertEqual(led["suppressed"], 1)
+
+    def test_fingerprint_ack_keeps_finding_but_off_gating(self):
+        # F3: an acknowledged finding is SHOWN + attributable but excluded from total/gating —
+        # unlike a category suppression which drops it entirely.
+        facts = self._facts([{"method": "PUT", "path": "/api/x", "code_path": "x.ts",
+                              "guarded": False, "analyzed": True, "public_hint": False}])
+        base = findings.build_ledger(facts, None, None, [])
+        baseline.annotate(base)
+        fp = base["findings"][0]["fingerprint"]
+        led = findings.build_ledger(facts, None, None, [], {fp: "reviewed — expected public endpoint"})
+        self.assertEqual(led["total"], 0)                       # off the gating list
+        self.assertEqual(led["acknowledged_n"], 1)             # ...but kept
+        self.assertEqual(led["acknowledged"][0]["ack_reason"], "reviewed — expected public endpoint")
+        self.assertEqual(led["acknowledged"][0]["status"], "acknowledged")
+        self.assertEqual(baseline.gate_count(led, "low"), 0)  # a --fail-on gate does NOT trip on it
+
+    def test_ack_without_reason_is_ignored(self):
+        # A reason is REQUIRED — a bare `fingerprint:<fp>` (no justification) must NOT suppress.
+        facts = self._facts([{"method": "PUT", "path": "/api/x", "code_path": "x.ts",
+                              "guarded": False, "analyzed": True, "public_hint": False}])
+        base = findings.build_ledger(facts, None, None, [])
+        baseline.annotate(base)
+        fp = base["findings"][0]["fingerprint"]
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / ".websec-ignore").write_text(f"fingerprint:{fp}\n")   # NO reason
+            acks = findings.load_acknowledgements(d)
+        self.assertEqual(acks, {})                             # unhonored
+        led = findings.build_ledger(facts, None, None, [], acks)
+        self.assertEqual(led["total"], 1)                      # still gates
+
+    def test_load_acknowledgements_parses_reason(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / ".websec-ignore").write_text(
+                "tests/\n"                                     # a normal path suppression
+                "fingerprint:abc123  # confirmed FP: scanner's own detection pattern\n")
+            acks = findings.load_acknowledgements(d)
+            pats = findings.load_suppressions(d)
+        self.assertEqual(acks, {"abc123": "confirmed FP: scanner's own detection pattern"})
+        self.assertIn("tests/", pats)                          # path pattern still loaded...
+        self.assertNotIn("fingerprint:abc123", pats)           # ...but the ack line is NOT a path pattern
 
     def test_webhook_without_sig_enters_ledger(self):
         # parity fix: unverified webhooks were surfaced in the briefing but never ranked/calibrated.
