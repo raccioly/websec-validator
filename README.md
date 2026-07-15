@@ -43,7 +43,22 @@ four ways to get there, all ending in the same `AGENT-BRIEFING.md` your agent ac
 | **Tell your agent** (simplest) | — | say the line above |
 | **CLI** (a terminal) | `pipx install websec-validator` | `websec run /path/to/your/app` |
 | **Claude Code plugin** (slash) | `/plugin marketplace add raccioly/websec-validator`  →  `/plugin install websec-validator@websec-plugins` | invoke the **security-pass** skill, or just ask |
+| **Any other agent** (Codex, Cursor, Gemini, Aider) | `pipx install websec-validator` | `websec install <host>` — see below |
 | **Docker** (no install) | `docker build -t websec-validator .` | `docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/scan" websec-validator run /scan --out /scan/websec-out` |
+
+**Teach any agent to use it — `websec install <host>`.** Point websec at whatever coding agent you
+run and it writes the standing instruction (a skill file for Claude/Cursor, an idempotent marked
+block in `AGENTS.md`/`GEMINI.md`/`CONVENTIONS.md` for Codex/Gemini/Aider/generic) so the agent knows
+to run `websec` for a security review instead of improvising:
+
+```bash
+websec install codex          # or: claude · cursor · gemini · aider · generic
+websec install cursor --user  # home-wide, applies to every repo
+websec install status         # show what's installed
+websec install codex --uninstall
+```
+
+It only ever touches its own marked region, so your existing `AGENTS.md` content is preserved.
 
 ➡️ **Want the reasoning behind every check?** Read **[docs/METHODOLOGY.md](docs/METHODOLOGY.md)** — what each test does and why.
 
@@ -208,6 +223,20 @@ jobs:
           # baseline: .websec/baseline-ledger.json   # optional: gate only on NEW findings
 ```
 
+**Local guardrail — `websec hooks`.** Same baseline-diff, run from git instead of CI, so a new lead is
+caught before it ever reaches a PR:
+
+```bash
+websec hooks install              # advisory post-commit: prints "baseline: N new" after each commit (~1s, never blocks)
+websec hooks install --pre-push   # blocking gate: fails `git push` on a NEW finding at/above $WEBSEC_HOOK_FAIL_ON (default high)
+websec hooks status               # show what's installed
+websec hooks uninstall
+```
+
+The hook appends to (and cleanly removes from) any existing hook, pins its interpreter so it works
+under pipx/uv isolation, and honors `WEBSEC_SKIP_HOOK=1` for a one-off override. `WEBSEC_HOOK_SCAN=1`
+runs the full static scanners in the hook (slower); the default is fast recon-only.
+
 **MCP server (any agent, not just Claude Code).** `websec mcp` speaks the Model Context Protocol over
 stdio, exposing typed tools — `websec_recon`, `websec_findings`, `websec_sarif`, `websec_briefing` — so
 Cursor / Cline / Windsurf / Zed can call recon directly instead of shelling out and parsing stdout.
@@ -216,6 +245,26 @@ Register it in your MCP client:
 ```json
 { "mcpServers": { "websec": { "command": "websec", "args": ["mcp"] } } }
 ```
+
+Or serve it over **HTTP** so a whole team points one URL at the recon tools (stdlib only — no extra
+dependency): `websec mcp --http` (binds `127.0.0.1:8733`; `GET /health` for a load balancer, `POST`
+JSON-RPC for calls). It reads local paths and runs recon on them, so it binds to localhost by
+default — only expose it (`--host 0.0.0.0`) on a trusted network.
+
+**Blast-radius from a knowledge graph (opt-in, zero-dep).** If your repo has a
+[`graphify`](https://github.com/Graphify-Labs/graphify) graph at `graphify-out/graph.json` (or you
+pass `--graph <file>`), websec tags each finding with how much of the app **transitively depends on**
+the vulnerable code — so a SQLi in a leaf handler and the same SQLi in a helper imported by 40
+modules stop looking equally urgent:
+
+```bash
+websec run . --scan     # auto-detects graphify-out/graph.json if present
+```
+
+Each mapped finding gains a `graph` block (`blast_radius`, a `dependents` sample, `community`) in
+`findings-ledger.json`, and the ledger a `graph_enrichment` summary. It reads the graph as plain
+JSON — it never imports tree-sitter, so websec stays **stdlib-only, zero runtime deps** — and a
+missing, malformed, or oversized graph is silently skipped, never failing the run.
 
 **Versioned contract.** `FACTS.json`, `findings-ledger.json`, and `findings.envelope.json` all carry a
 `schema_version`; the JSON Schemas ship in the package (`schemas/facts.schema.json`,
@@ -226,7 +275,8 @@ Register it in your MCP client:
 `websec proof` clones a vuln-app corpus (VAmPI, NodeGoat, DVGA) and scores whether recon surfaces
 each app's documented attack surface — a deterministic, CI-trackable proxy (currently **10/10**).
 The real kill-criterion (does the briefing lift an agent's bug-finding vs a generic prompt?) is the
-manual A/B in [`corpus/PROOF-PROTOCOL.md`](corpus/PROOF-PROTOCOL.md).
+manual A/B in [`corpus/PROOF-PROTOCOL.md`](corpus/PROOF-PROTOCOL.md). Full methodology, calibrated
+precision numbers, and the competitor-comparison protocol: [`BENCHMARKS.md`](BENCHMARKS.md).
 
 ## Calibrated confidence
 

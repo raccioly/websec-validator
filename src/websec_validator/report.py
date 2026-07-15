@@ -49,8 +49,15 @@ def render(facts: dict, scanners: dict, scan_results: list, unified: dict | None
                 calstr = " · P(real): _uncalibrated — verify manually_"   # don't dress n=0 as a measurement (B4)
             else:
                 calstr = f" · P(real)≈**{cal.get('p')}** CI {cal.get('ci')} (n={cal.get('n')}, {cal.get('basis')})"
+            gr = f.get("graph") or {}
+            radius = gr.get("blast_radius")
+            graphstr = ""
+            if radius:
+                deps = ", ".join(gr.get("dependents", [])[:3])
+                graphstr = (f"  \n  _blast radius:_ **{radius}** module(s) depend on this"
+                            + (f" (e.g. {deps}{'…' if gr.get('truncated') else ''})" if deps else ""))
             _ll.append(f"- **[{f['severity']}/{f['confidence']}]** {f['title']}  \n"
-                       f"  `{f['location']}` · evidence: {chain} · {cwe}{api}{calstr}  \n"
+                       f"  `{f['location']}` · evidence: {chain} · {cwe}{api}{calstr}{graphstr}  \n"
                        f"  _fix:_ {f['remediation']}")
         ledger_block = "\n".join(_ll)
         ledger_hdr = (f"**{ledger['total']} findings** · {ledger['by_severity']} · "

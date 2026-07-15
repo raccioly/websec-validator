@@ -7,7 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-07-11
+
+Distribution & integration round — reach every agent host, run as a local guardrail, and compose with
+a knowledge graph. Adapted from a review of [graphify](https://github.com/Graphify-Labs/graphify);
+websec keeps its zero-runtime-deps guarantee throughout (stdlib-only HTTP + JSON graph parsing).
+
 ### Added
+
+- **MCP over HTTP** (`websec mcp --http`). The MCP server gained an HTTP JSON-RPC transport alongside
+  stdio, so a team can point one URL at the recon tools instead of every client spawning its own
+  process. Built on the stdlib `http.server` — **no starlette, no new dependency** — with a
+  `GET /health` endpoint and a `POST` JSON-RPC endpoint. Binds `127.0.0.1:8733` by default (the tools
+  read local paths, so localhost-only unless `--host` is set on a trusted network); still read-only.
+  The request handler was refactored into a transport-agnostic `process()` shared by both transports.
+  11 new tests (incl. a live HTTP round-trip).
+
+- **`BENCHMARKS.md`** — open, reproducible measurement methodology: coverage (`websec proof` 10/10),
+  calibrated precision with Wilson 95% CIs from the labeled corpus (n=59), the zero-dependency /
+  determinism guarantees, and a documented identical-conditions protocol for a future Semgrep/Bandit
+  comparison (no head-to-head numbers are claimed until that harness is run). Adapted from graphify's
+  benchmark discipline.
+
+- **Blast-radius enrichment from a graphify knowledge graph** (`graph_enrich.py`, opt-in, zero new
+  deps). If the scanned repo has `graphify-out/graph.json` (or `--graph <file>` is passed), each
+  finding is tagged with how much of the app transitively **depends on** the vulnerable code —
+  reverse-reachability over dependency edges (calls/imports/references/inherits/…). A SQLi in a
+  leaf handler and the same SQLi in a shared helper imported by 40 modules stop looking equally
+  urgent. Findings gain a `graph` block (`nodes`, `blast_radius`, `dependents` sample, `community`)
+  and the ledger a `graph_enrichment` summary. Pure stdlib JSON (never imports tree-sitter, so the
+  zero-runtime-deps guarantee holds), reverse-BFS bounded at 20k visits with disclosed truncation,
+  and wrapped so a malformed/oversized graph can never fail a run. **Surfaced in every consumer**: a
+  ranked "★ Blast radius" section in `AGENT-BRIEFING.md` (verify high-radius findings first), a
+  per-finding blast-radius line in `REPORT.md`, and a `blastRadius` property + message note in SARIF
+  (so GitHub Code Scanning sees it too). 14 new tests.
+
+- **`websec hooks` — git guardrail** (`hooks.py`). Wires the baseline-diff into git so websec runs
+  automatically per commit/push: `hooks install` writes an advisory **post-commit** hook (recon-only,
+  ~1s, prints a `baseline: N new` heads-up, never blocks); `hooks install --pre-push` writes a
+  blocking **pre-push gate** that fails the push when NEW findings at/above `WEBSEC_HOOK_FAIL_ON`
+  (default `high`) are introduced. Marker-delimited install/uninstall (appends to and preserves an
+  existing hook), interpreter pinned + allowlist-sanitized so it survives pipx/uv isolation without
+  shell-injection risk, hooks dir resolved via `git rev-parse` (worktrees + core.hooksPath aware),
+  and old guardrail runs pruned to the last 5. `WEBSEC_SKIP_HOOK=1` overrides. Stdlib only, 10 new
+  tests incl. an end-to-end real-commit run. Adapted from graphify's hook installer.
+
+- **`websec install <host>` — multi-host agent installer** (`install.py`). Teaches any of the core
+  agent hosts to reach for websec-validator on a security review: `claude`, `codex`, `cursor`,
+  `gemini`, `aider`, plus a `generic` `AGENTS.md` writer. Skill-style hosts (Claude, Cursor) get a
+  dedicated skill/rule file; shared-instruction hosts (Codex/Gemini/Aider/generic) get an idempotent
+  marked block injected into their standing-instructions file without clobbering the user's own
+  content. `--user` installs home-wide, `--uninstall` removes cleanly, `websec install status` lists
+  what's present. Closes the gap between the README's "any agent can act on it" and shipping only a
+  Claude plugin. Stdlib only, path-safety-guarded, 12 new tests.
 
 - **No-Row-Level-Security detection** (`missing-rls` class, in `schemas.py` + the ledger) — committed
   Postgres/Supabase DDL declares owner/tenant-scoped tables but ships **zero** `CREATE POLICY` /
@@ -49,9 +101,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - PyPI metadata: trove classifiers and `[project.urls]` (homepage, docs, changelog, issues) —
   populates the sidebar on the PyPI project page from the next release.
 
+- **Fixture/example code is scoped out of the attack surface.** Test/example/fixture routes are split
+  out (kept in `FACTS.json` under `fixture_endpoints`, counted but not probed) so a project that
+  vendors a demo app isn't profiled as if that demo were the product; secrets in fixture files are
+  demoted to LOW and annotated rather than dropped. `--include-fixtures` treats all of it as product
+  code. Fixture package manifests no longer drive framework detection. Also adds raw-server detection.
+
 ### Changed
 
 ### Fixed
+
+- **`--exclude` now reaches every scanner** (bug-205). It was honored by trivy/semgrep but dropped by
+  the gitleaks/checkov paths and the findings post-filter (which only excluded built-in `SKIP_DIRS`).
+  Added a single post-filter choke point that applies every `--exclude` glob across all scanners, with
+  a disclosed `user_excluded_dropped` hygiene counter.
 
 ### Removed
 
@@ -507,7 +570,8 @@ The initial public line. Highlights across 0.2.1–0.2.9:
 ### Fixed
 - Scanner-contamination and rate-limit fixes (agent-wallet dogfood).
 
-[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/raccioly/websec-validator/compare/v0.10.0...v0.11.0
 [0.4.2]: https://github.com/raccioly/websec-validator/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/raccioly/websec-validator/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/raccioly/websec-validator/compare/v0.3.0...v0.4.0

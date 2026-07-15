@@ -162,6 +162,22 @@ def cmd_run(args) -> int:
             "(fingerprint acks in .websec-ignore)")
     _maybe_nudge_websecignore(target, ledger, unified, log)
 
+    # 4a. optional blast-radius enrichment from a graphify knowledge graph (opt-in, zero-dep). If the
+    # repo has graphify-out/graph.json (or --graph is given), tag each finding with how much of the app
+    # transitively depends on the vulnerable code. Wrapped so a bad/oversized graph never fails a run.
+    graph_arg = getattr(args, "graph", None)
+    graph_path = Path(graph_arg).expanduser() if graph_arg else None
+    if graph_path or (target / "graphify-out" / "graph.json").exists():
+        try:
+            from . import graph_enrich
+            graph_enrich.enrich_ledger(ledger, target, graph_path)
+            ge = ledger.get("graph_enrichment")
+            if ge:
+                log(f"\n  graph: {ge['mapped']} finding(s) mapped to {ge['nodes']} nodes · "
+                    f"max blast-radius {ge['max_blast_radius']} (source: {ge['graph']})")
+        except Exception as e:  # enrichment is best-effort — never fail the run over it
+            log(f"\n  graph: enrichment skipped ({type(e).__name__}: {e})")
+
     # 4b. baseline / diff — only NEW findings gate CI when a baseline is supplied
     diff = None
     if getattr(args, "baseline", None):
@@ -177,7 +193,7 @@ def cmd_run(args) -> int:
             + (f" · {ledger['suppressed']} suppressed" if ledger["suppressed"] else ""))
 
     # 5. briefing + comprehensive REPORT.md (immutable run record) + machine artifacts
-    (out / "AGENT-BRIEFING.md").write_text(briefing.render(facts, det, scan_results, manifest, unified))
+    (out / "AGENT-BRIEFING.md").write_text(briefing.render(facts, det, scan_results, manifest, unified, ledger))
     (out / "REPORT.md").write_text(report.render(facts, det, scan_results, unified, manifest, ts, ledger))
     # SARIF is ALWAYS written — it's the enterprise/CI interchange artifact (GitHub Code Scanning etc.)
     sarif = formats.to_sarif(ledger, facts, __version__)
@@ -297,7 +313,41 @@ def cmd_dynamic(args) -> int:
 
 def cmd_mcp(args) -> int:
     from . import mcp_server
+    if getattr(args, "http", False):
+        return mcp_server.serve_http(args.host, args.port)
     return mcp_server.serve()
+
+
+def cmd_hooks(args) -> int:
+    from . import hooks as _hooks
+    path = Path(args.path).expanduser() if getattr(args, "path", None) else Path(".")
+    try:
+        if args.action == "install":
+            print(_hooks.install(path, pre_push=args.pre_push))
+        elif args.action == "uninstall":
+            print(_hooks.uninstall(path))
+        else:  # status
+            print(_hooks.status(path))
+    except RuntimeError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def cmd_install(args) -> int:
+    from . import install as _install
+    project_dir = Path(args.project_dir).expanduser() if args.project_dir else Path(".")
+    if args.host == "status":
+        print(_install.status(project_dir=project_dir, user=args.user))
+        return 0
+    try:
+        msg = _install.install(args.host, project_dir=project_dir, user=args.user,
+                               uninstall=args.uninstall)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    print(msg)
+    return 0
 
 
 def cmd_proof(args) -> int:
@@ -434,7 +484,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=f"websec-validator {__version__}")
     # metavar lists only the user-facing commands; recon/proof/calibrate still work but are
     # omitted (they get no `help=`, so argparse leaves them out of the listing entirely).
-    sub = p.add_subparsers(dest="cmd", required=True, metavar="{run,doctor,dynamic,mcp}")
+    sub = p.add_subparsers(dest="cmd", required=True, metavar="{run,doctor,dynamic,mcp,install,hooks}")
 
     r = sub.add_parser("run", help="full pipeline → briefing + tailored probes")
     r.add_argument("target")
@@ -455,6 +505,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "only NEW findings count.")
     r.add_argument("--baseline", metavar="LEDGER.json",
                    help="a prior findings-ledger.json — mark findings new/unchanged/fixed and gate only on NEW")
+    r.add_argument("--graph", metavar="GRAPH.json",
+                   help="a graphify graph.json for blast-radius enrichment "
+                        "(auto-detected at <target>/graphify-out/graph.json if present)")
     r.set_defaults(func=cmd_run)
 
     # recon/proof/calibrate are hidden from the main --help (argparse.SUPPRESS): recon is a
@@ -490,12 +543,37 @@ def build_parser() -> argparse.ArgumentParser:
     dyn.add_argument("--out", help="output dir (default: ./websec-out)")
     dyn.set_defaults(func=cmd_dynamic)
 
-    mc = sub.add_parser("mcp", help="run as an MCP server over stdio (typed recon tools for any MCP client)")
+    mc = sub.add_parser("mcp", help="run as an MCP server (typed recon tools for any MCP client): stdio, or --http for a team-shared URL")
+    mc.add_argument("--http", action="store_true",
+                    help="serve over HTTP (JSON-RPC POST) instead of stdio — one URL for a team (stdlib only)")
+    mc.add_argument("--host", default="127.0.0.1",
+                    help="HTTP bind host (default 127.0.0.1; use 0.0.0.0 to expose on a TRUSTED network only)")
+    mc.add_argument("--port", type=int, default=8733, help="HTTP port (default 8733)")
     mc.set_defaults(func=cmd_mcp)
+
+    from . import install as _install
+    ins = sub.add_parser("install",
+                         help="teach an AI coding agent to use websec (claude|codex|cursor|gemini|aider|generic)")
+    ins.add_argument("host", choices=[*_install.HOSTS, "status"],
+                     help="agent host to configure, or 'status' to list what's installed")
+    ins.add_argument("--user", action="store_true",
+                     help="install into your home dir (all repos) instead of this project")
+    ins.add_argument("--project-dir", dest="project_dir",
+                     help="project directory to install into (default: current dir)")
+    ins.add_argument("--uninstall", action="store_true", help="remove the websec block/skill instead")
+    ins.set_defaults(func=cmd_install)
+
+    hk = sub.add_parser("hooks",
+                        help="install a git guardrail hook (post-commit advisory or pre-push gate on NEW findings)")
+    hk.add_argument("action", choices=["install", "uninstall", "status"])
+    hk.add_argument("--pre-push", dest="pre_push", action="store_true",
+                    help="install a blocking pre-push gate (--fail-on new findings) instead of the advisory post-commit hook")
+    hk.add_argument("--path", help="repo directory (default: current dir)")
+    hk.set_defaults(func=cmd_hooks)
     return p
 
 
-_COMMANDS = {"run", "recon", "doctor", "proof", "dynamic", "calibrate", "mcp"}
+_COMMANDS = {"run", "recon", "doctor", "proof", "dynamic", "calibrate", "mcp", "install", "hooks"}
 
 
 def main(argv=None) -> int:

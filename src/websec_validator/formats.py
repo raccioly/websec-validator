@@ -92,6 +92,11 @@ def to_sarif(ledger: dict, facts: dict | None = None, tool_version: str = "0") -
         if cal.get("p") is not None:
             msg += f"\n\nCalibrated P(real)={cal.get('p')} (basis={cal.get('basis')}, n={cal.get('n')})."
 
+        graph = f.get("graph") or {}
+        radius = graph.get("blast_radius")
+        if radius:
+            msg += f"\n\nBlast radius: {radius} module(s) transitively depend on this code (graph-derived)."
+
         result = {
             "ruleId": rid,
             "level": _SARIF_LEVEL.get(f.get("severity", "LOW"), "note"),
@@ -103,6 +108,7 @@ def to_sarif(ledger: dict, facts: dict | None = None, tool_version: str = "0") -
                 "category": f.get("category"),
                 "calibrated": cal or None,
                 "security-severity": _SECURITY_SEVERITY.get(f.get("severity", "LOW"), "3.0"),
+                "blastRadius": radius if radius else None,
             },
         }
         loc = f.get("location", "")
