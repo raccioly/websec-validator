@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Tightened regexes in `UploadSecurityExtractor` to eliminate false positives for file parsing loops, S3 `getObject` lookups, MIME-type logging, and metadata object key construction.
+
 ### Added
 
 - **No-Row-Level-Security detection** (`missing-rls` class, in `schemas.py` + the ledger) — committed
