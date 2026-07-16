@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- **Fix `test_hooks.py` regression**: Override `core.hooksPath` locally during git hook installation testing to prevent global configuration (like `/dev/null`) from bypassing the test suite assertions.
+
 ## [0.11.0] — 2026-07-11
 
 Distribution & integration round — reach every agent host, run as a local guardrail, and compose with
