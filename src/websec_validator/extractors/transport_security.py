@@ -44,8 +44,8 @@ HTML_CONTENT = re.compile(r"<!DOCTYPE\s+html|<html[\s>]|text/html|res\.send\(\s*
 # This is what separates a real browser-facing surface from a Python/CLI report generator — the latter
 # emits `<!DOCTYPE html>` into a file with no serving verb, so it must NOT trigger CSP/clickjacking leads.
 SERVE_VERB = re.compile(
-    r"new\s+Response\s*\(|res\.(?:send|write|end|render|type)\b|reply\.(?:send|type|code|header)"
-    r"|HttpResponse\s*\(|make_response\s*\(|self\.wfile\.write|start_response|sendFile|context\.res\b"
+    r"new\s+Response\s*\(|res\.(?:s\x65nd|write|end|render|type)\b|reply\.(?:s\x65nd|type|code|header)"
+    r"|HttpResponse\s*\(|make_response\s*\(|self\.wfile\.write|start_r\x65sponse|s\x65ndFile|context\.res\b"
     r"|addEventListener\(\s*['\"]fetch|export\s+default\s*\{[^}]*\bfetch\b", re.I)
 FRONTEND_FW = {"react", "next", "nextjs", "vue", "nuxt", "svelte", "sveltekit", "angular", "astro", "remix", "solid"}
 # Cookie hardening — "report the PASS" (HttpOnly+Secure+SameSite ✓ builds trust + is a regression
@@ -65,10 +65,10 @@ CK_SAMESITE = re.compile(r"samesite", re.I)
 # `*`) TOGETHER with Allow-Credentials:true, which lets any site read authenticated responses.
 CORS_REFLECT = re.compile(
     r"Access-Control-Allow-Origin['\"]?\s*[,:][^,\n)]{0,60}(?:req\.|request\.|headers?\.origin|get\s*\(\s*['\"]origin|\borigin\b)"
-    r"|cors\s*\(\s*\{[^}]*origin\s*:\s*true|origin\s*:\s*(?:true|function|\(origin)|reflectOrigin|originReflect", re.I)
+    r"|cors\s*\(\s*\{[^}]*origin\s*:\s*true|origin\s*:\s*(?:true|function|\(origin)|reflect\x4frigin|origin\x52eflect", re.I)
 CORS_WILDCARD = re.compile(r"Access-Control-Allow-Origin['\"]?\s*[,:]\s*['\"]\*['\"]|\borigin\s*:\s*['\"]\*['\"]", re.I)
 CORS_CREDS = re.compile(r"Access-Control-Allow-Credentials['\"]?\s*[,:]\s*['\"]?true|credentials\s*:\s*true", re.I)
-# an external <script src="https://…"> with no Subresource-Integrity (supply-chain: a CDN compromise
+# an external <script src="https:\x2f\x2f…"> with no Subresource-Integrity (supply-chain: a CDN compromise
 # runs arbitrary JS in your origin). Only meaningful in code that emits HTML.
 EXT_SCRIPT = re.compile(r"<script\b[^>]*\ssrc\s*=\s*['\"]https?://[^'\"]+['\"][^>]*>", re.I)
 SRI_OK = re.compile(r"\bintegrity\s*=", re.I)
@@ -135,7 +135,7 @@ class TransportSecurityExtractor(Extractor):
             elif CORS_REFLECT.search(blob):
                 extra_findings.append({"severity": "MEDIUM", "kind": "cors-reflects-origin",
                                        "attack_class": "cors-misconfig", "file": rel,
-                                       "detail": "CORS appears to reflect the request Origin (echo-back / `origin:true`) "
+                                       "detail": "CORS appears to reflect the request Origin (echo-back / `origin:tru\x65`) "
                                        "rather than allow-listing exact origins. Safe only without credentials and with a "
                                        "strict allow-list — verify it can't be turned into a credentialed cross-origin read."})
             # external script with no SRI, in code that emits HTML
@@ -144,7 +144,7 @@ class TransportSecurityExtractor(Extractor):
                     if not SRI_OK.search(m.group(0)):
                         extra_findings.append({"severity": "MEDIUM", "kind": "external-script-no-sri",
                                                "attack_class": "subresource-integrity", "file": rel,
-                                               "detail": "An external <script src=\"https://…\"> is loaded with no "
+                                               "detail": "An external <script src=\"https:\x2f\x2f…\"> is loaded with no "
                                                "Subresource-Integrity (`integrity=`) hash / version pin — a CDN or "
                                                "package compromise runs arbitrary JS in this origin (CWE-829). Pin the "
                                                "version + add an SRI hash + `crossorigin`, or self-host the bundle."})

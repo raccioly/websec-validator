@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- Fix: Suppress false-positives for own extractor string literals (e.g., `transport_security.py`)
+- Fix: Add missing `HEALTHCHECK NONE` in `Dockerfile`
 
 ## [0.11.0] — 2026-07-11
 
