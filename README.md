@@ -100,10 +100,27 @@ websec run ./my-app --scan --sbom      # …and emit a CycloneDX SBOM (sbom.cdx.
 websec run ./my-app --format sarif     # SARIF 2.1.0 to stdout (for piping into CI); also always written to the run dir
 websec run ./my-app --fail-on high     # exit 1 if any HIGH+ finding remains (a CI gate)
 websec doctor ./my-app                 # (optional) which scanners are installed?
+websec emit-context ./my-app           # print recon as a Claude Code SessionStart context envelope
 websec mcp                             # run as an MCP server over stdio (typed recon tools for any MCP client)
 ```
 
 Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and follow it."**
+
+### Prime *any* agent before it writes a line — the deterministic pre-brief layer
+
+Other AI security tools make the LLM do the review from scratch (nondeterministic, per-run cost, PR-locked). websec runs **first**, deterministically, and hands the agent a scoped attack-surface map — so it can sit *underneath* an LLM reviewer and make it sharper, cheaper, and lower-FP. `websec emit-context` prints a compact `## SECURITY CONTEXT` block wrapped in Claude Code's `SessionStart` `additionalContext` envelope. Wire it into `.claude/settings.json` so every session starts pre-scoped:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "websec emit-context \"$CLAUDE_PROJECT_DIR\"" } ] }
+    ]
+  }
+}
+```
+
+Now the agent knows your routes, auth model, tenant boundary, unguarded write endpoints, and dangerous sinks *before its first turn* — no LLM, same output every run. (`--markdown` prints the raw block for other harnesses.)
 
 > That's the whole user surface: **`run`** (plus the optional, advanced **`dynamic`** live-probing step below). `recon`/`proof`/`calibrate` exist for developing the tool itself and are hidden from `--help` — you never need them.
 

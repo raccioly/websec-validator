@@ -1748,5 +1748,44 @@ class DependenciesTests(unittest.TestCase):
         self.assertTrue(any("CWE-506" in c for c in mis["standards"]["cwe"]))
 
 
+class EmitContextTests(unittest.TestCase):
+    """`websec emit-context` — the SessionStart wedge that injects recon into any agent's context."""
+
+    def _run(self, argv):
+        import contextlib
+        import io
+        from websec_validator.cli import main
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = main(argv)
+        return rc, buf.getvalue()
+
+    def test_emits_valid_sessionstart_envelope(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "app.py").write_text("import os\nos.system(input())\n")   # a command-injection sink
+        rc, out = self._run(["emit-context", str(d)])
+        self.assertEqual(rc, 0)
+        env = json.loads(out)                                          # single-line JSON envelope
+        self.assertEqual(env["hookSpecificOutput"]["hookEventName"], "SessionStart")
+        ctx = env["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("SECURITY CONTEXT", ctx)
+        self.assertIn("Attack surface", ctx)
+
+    def test_markdown_flag_prints_raw_block(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "x.js").write_text("const x=1;\n")
+        rc, out = self._run(["emit-context", str(d), "--markdown"])
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith("## SECURITY CONTEXT"))
+        with self.assertRaises(json.JSONDecodeError):                 # markdown mode is NOT JSON
+            json.loads(out)
+
+    def test_bare_subcommand_not_rewritten_to_run(self):
+        # regression: `emit-context` must be in _COMMANDS, else main() rewrites it to `run
+        # emit-context <path>` and argparse rejects the target.
+        from websec_validator.cli import _COMMANDS
+        self.assertIn("emit-context", _COMMANDS)
+
+
 if __name__ == "__main__":
     unittest.main()

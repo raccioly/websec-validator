@@ -99,6 +99,59 @@ def cmd_recon(args) -> int:
     return 0
 
 
+def _security_context_md(facts: dict, ledger: dict) -> str:
+    """A compact, deterministic security-context block for injection into an agent's session — the
+    attack surface at a glance so the agent (or a downstream LLM reviewer) starts pre-scoped."""
+    st = facts.get("stack", {})
+    rt = facts.get("routes", {})
+    tg = rt.get("targeting", {})
+    az = facts.get("authz", {})
+    gs = az.get("guard_summary", {})
+    tc = [t["key"] for t in facts.get("tenant", {}).get("candidates", [])][:3]
+    unguarded = az.get("write_endpoints_without_visible_guard", []) or []
+    sinks = (facts.get("surface", {}) or {}).get("sink_counts", {}) or {}
+    top_sinks = ", ".join(f"{k}({v})" for k, v in list(sinks.items())[:6]) or "none"
+    lines = [
+        "## SECURITY CONTEXT (websec-validator — deterministic recon, no LLM)",
+        f"- Stack: {', '.join(st.get('languages', [])) or '?'} · "
+        f"{', '.join(st.get('frameworks', [])) or '?'} · datastores: {', '.join(st.get('datastores', [])) or '?'}",
+        f"- Attack surface: {rt.get('count', 0)} route(s) · auth: {facts.get('auth', {}).get('scheme', '?')} · "
+        f"tenant boundary candidate(s): {', '.join(tc) or 'none detected'}",
+        f"- Access control: {gs.get('with_visible_guard', 0)} guarded · "
+        f"**{gs.get('no_visible_guard', 0)} write endpoint(s) with NO visible guard**",
+        f"- Targeting: IDOR={len(tg.get('idor_candidates', []))} SSRF={len(tg.get('ssrf_candidates', []))} "
+        f"upload={len(tg.get('upload_candidates', []))} writes={len(tg.get('write_endpoints', []))}",
+        f"- Code sinks (user-input-gated): {top_sinks}",
+    ]
+    if unguarded:
+        lines.append("- ⚠ Missing-authz leads: " + "; ".join(str(u) for u in unguarded[:5]))
+    if ledger.get("findings"):
+        top = ledger["findings"][:5]
+        lines.append("- Top recon findings: " + "; ".join(
+            f"[{f['severity']}] {f['title'][:70]}" for f in top))
+    lines.append("- When editing this repo: treat the unguarded write endpoints + IDOR/SSRF targets "
+                 "as the highest-risk surface. Run `websec run . --scan` for the full briefing + probes.")
+    return "\n".join(lines)
+
+
+def cmd_emit_context(args) -> int:
+    """Emit websec's recon as a Claude Code SessionStart `additionalContext` JSON envelope (stdout),
+    so ANY agent starts a session with the deterministic attack-surface map already in context.
+    Recon-only (no scanners) → fast enough for a session hook. `--markdown` prints the raw block."""
+    target = _resolve_target(args.target)
+    facts = recon.build_facts(target, __version__)
+    ledger = findings.build_ledger(facts, None, None,
+                                   findings.load_suppressions(target),
+                                   findings.load_acknowledgements(target))
+    block = _security_context_md(facts, ledger)
+    if getattr(args, "markdown", False):
+        print(block)
+    else:
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "SessionStart", "additionalContext": block}}))
+    return 0
+
+
 def cmd_run(args) -> int:
     target = _resolve_target(args.target)
     out, ts = _new_run_dir(args.out)
@@ -547,6 +600,14 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("target", nargs="?", help="optional repo to scope scanner relevance")
     d.set_defaults(func=cmd_doctor)
 
+    ec = sub.add_parser("emit-context",
+                        help="emit recon as a Claude Code SessionStart additionalContext JSON "
+                             "envelope (pipe into a session hook so any agent starts pre-scoped)")
+    ec.add_argument("target")
+    ec.add_argument("--markdown", action="store_true",
+                    help="print the raw ## SECURITY CONTEXT block instead of the JSON envelope")
+    ec.set_defaults(func=cmd_emit_context)
+
     pf = sub.add_parser("proof")
     pf.add_argument("--corpus", help="corpus JSON (default: bundled)")
     pf.add_argument("--workdir", help="where to clone corpus apps (default: ~/.cache/websec-corpus)")
@@ -598,7 +659,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-_COMMANDS = {"run", "recon", "doctor", "proof", "dynamic", "calibrate", "mcp", "install", "hooks"}
+_COMMANDS = {"run", "recon", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks"}
 
 
 def main(argv=None) -> int:
