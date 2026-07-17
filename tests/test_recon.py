@@ -1471,8 +1471,8 @@ class Wave3DeferredDetectorTests(unittest.TestCase):
 # ---------------------------------------------------------------------------------------------------
 class AgentConfigTests(unittest.TestCase):
     """P2 — agent-config / MCP attack surface (OWASP Agentic Top 10). Repo-own agent wiring read as
-    untrusted DATA, never executed. 5 structural classes; tool-description poisoning is deferred. The
-    clean control MIRRORS this repo's real OpenWolf config + a multilingual file with a legit LRM."""
+    untrusted DATA, never executed. 6 structural classes; tool-description prose-poisoning is deferred.
+    The clean control MIRRORS this repo's real OpenWolf config + a multilingual file with a legit LRM."""
 
     def _kinds(self, fixture):
         f = AgentConfigExtractor().extract(ctx(fixture), {})
@@ -1521,6 +1521,35 @@ class AgentConfigTests(unittest.TestCase):
         (d / ".mcp.json").write_text('{"autoApprove": ["read_file", "list_dir"]}')
         f = AgentConfigExtractor().extract(RepoContext(d), {})
         self.assertNotIn("mcp-autoapprove", {x["kind"] for x in f["findings"]})
+
+    def test_mcp_env_literal_secret_fires(self):
+        d = Path(tempfile.mkdtemp())
+        (d / ".mcp.json").write_text(json.dumps({"mcpServers": {
+            "x": {"command": "node", "args": ["s.js"],
+                  "env": {"OPENAI_API_KEY": "sk-abcdefghij0123456789ABCDEFGHIJ", "PORT": "3000"}}}}))
+        f = AgentConfigExtractor().extract(RepoContext(d), {})
+        sec = [x for x in f["findings"] if x["kind"] == "mcp-env-secret"]
+        self.assertEqual(len(sec), 1)                       # the sk- key, NOT PORT=3000
+        self.assertIn("env.OPENAI_API_KEY", sec[0]["detail"])
+
+    def test_mcp_env_var_reference_not_flagged(self):
+        # the SAFE, common case: an env-ref placeholder must never fire (the low-FP bar).
+        d = Path(tempfile.mkdtemp())
+        (d / ".mcp.json").write_text(json.dumps({"mcpServers": {
+            "x": {"command": "node", "env": {"OPENAI_API_KEY": "${OPENAI_API_KEY}", "DEBUG": "true"}}}}))
+        f = AgentConfigExtractor().extract(RepoContext(d), {})
+        self.assertNotIn("mcp-env-secret", {x["kind"] for x in f["findings"]})
+
+    def test_mcp_header_bearer_secret_fires(self):
+        # remote MCP server with a committed Authorization: Bearer <token> header.
+        d = Path(tempfile.mkdtemp())
+        (d / ".mcp.json").write_text(json.dumps({"mcpServers": {
+            "r": {"url": "https://x/sse",
+                  "headers": {"Authorization": "Bearer ghp_ABCDEFGHIJ0123456789abcdefghij012345"}}}}))
+        f = AgentConfigExtractor().extract(RepoContext(d), {})
+        sec = [x for x in f["findings"] if x["kind"] == "mcp-env-secret"]
+        self.assertEqual(len(sec), 1)
+        self.assertIn("headers.Authorization", sec[0]["detail"])
 
     def test_malformed_json_does_not_crash(self):
         d = Path(tempfile.mkdtemp())

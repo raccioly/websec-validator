@@ -11,11 +11,15 @@ that steer a coding agent — `.claude/settings.json`, `.mcp.json`, cursor/copil
   - **mcp-autoapprove**     : blanket MCP auto-approval (`enableAllProjectMcpServers` / `autoApprove:*`).
   - **baseurl-override**    : a committed non-vendor `*_BASE_URL` for an LLM SDK (API-key exfil vector).
   - **mcp-unpinned-server** : an MCP server launched via unpinned `npx`/`uvx` (rug-pull / confusion).
+  - **mcp-env-secret**      : a LITERAL credential committed in an MCP server's `env`/`headers` block
+                              (a `sk-…` / `ghp_…` / `AKIA…` / bearer token) — a real key leak in agent
+                              config. Structural + value-shape, NOT prose grammar (keeps the FP bar).
 
 SAFETY: it reads a FIXED, bounded allow-list of paths directly off `ctx.root` (the walker deliberately
 SKIPs `.claude`/`.cursor`), parses them as text/JSON, and **never** imports, evals, or executes anything
-it finds — every byte is attacker-controlled. Tool-description *poisoning* (a prose-grammar match) is
-deliberately DEFERRED to a follow-up: it's the one class that would endanger the low-FP bar.
+it finds — every byte is attacker-controlled. Tool-description *poisoning* (a prose-grammar match over a
+running server's tool descriptions) remains deliberately DEFERRED: it's the one class that would endanger
+the low-FP bar, and tool descriptions aren't in the static config anyway (they come from tools/list).
 """
 
 from __future__ import annotations
@@ -65,6 +69,55 @@ _VENDOR_HOST = re.compile(
 # iac_ci's gha-unpinned-action logic. A pin (`@1.2.3`, `==1.2`, a git sha) or a local path exempts it.
 _LAUNCHER = {"npx", "uvx", "pipx", "pip", "pip3", "bunx"}
 _PINNED = re.compile(r"@\d|==\d|@[0-9a-f]{7,40}\b")
+
+# A LITERAL secret value committed in an MCP server's env/headers. Keys on well-known credential
+# SHAPES (never on the key NAME alone — an `API_KEY: "${MY_KEY}"` env-ref is the SAFE, common case and
+# must NOT fire). A `${VAR}` / `$VAR` placeholder never matches these prefixes, so env-indirected
+# configs stay silent — same low-FP discipline as BASEURL above.
+_SECRET_SHAPE = re.compile(
+    r"^(?:"
+    r"sk-[A-Za-z0-9]{20,}"                       # OpenAI / Anthropic-style
+    r"|sk-ant-[A-Za-z0-9_-]{20,}"
+    r"|sk_(?:live|test)_[A-Za-z0-9]{16,}|rk_live_[A-Za-z0-9]{16,}"  # Stripe
+    r"|gh[posru]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"     # GitHub
+    r"|xox[baprs]-[A-Za-z0-9-]{10,}"             # Slack
+    r"|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}"        # AWS access key id
+    r"|AIza[0-9A-Za-z_-]{35}"                    # Google API key
+    r"|glpat-[0-9A-Za-z_-]{20,}"                 # GitLab PAT
+    r"|dop_v1_[a-f0-9]{64}"                       # DigitalOcean
+    r"|SG\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}"  # SendGrid
+    r"|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}"  # JWT
+    r")$")
+_ENV_REF = re.compile(r"\$\{?[A-Za-z_]|^\s*$")   # ${VAR} / $VAR / empty → an env-ref, not a literal
+# an HTTP auth-scheme prefix on a header value (`Authorization: Bearer <token>`) — strip it so the
+# token itself is shape-matched.
+_AUTH_SCHEME = re.compile(r"^(?:Bearer|Token|Basic|ApiKey|Api-Key)\s+", re.I)
+
+
+def _looks_env_secret(val) -> bool:
+    v = str(val).strip()
+    v = _AUTH_SCHEME.sub("", v).strip()
+    return bool(v) and not _ENV_REF.match(v) and bool(_SECRET_SHAPE.match(v))
+
+
+def _mcp_env_secrets(data) -> list[tuple[str, str]]:
+    """(server_name, key) for every literal-secret value in an mcpServers env/headers block."""
+    hits: list[tuple[str, str]] = []
+    if not isinstance(data, dict):
+        return hits
+    block = data.get("mcpServers") or data.get("mcp_servers") or {}
+    if not isinstance(block, dict):
+        return hits
+    for name, spec in block.items():
+        if not isinstance(spec, dict):
+            continue
+        for section in ("env", "headers"):
+            sub = spec.get(section)
+            if isinstance(sub, dict):
+                for k, v in sub.items():
+                    if _looks_env_secret(v):
+                        hits.append((str(name), f"{section}.{k}"))
+    return hits
 
 
 def _read(ctx: RepoContext, rel: str) -> str:
@@ -192,6 +245,13 @@ class AgentConfigExtractor(Extractor):
 
             if data is None:
                 continue
+
+            # 6. literal credential committed in an MCP server env/headers block.
+            for sname, keypath in _mcp_env_secrets(data):
+                add("HIGH", "HIGH", "mcp-env-secret", "agent-mcp-env-secret", rel,
+                    f"MCP server `{sname}` has a LITERAL secret committed in `{keypath}` — a live "
+                    "credential in agent config is a key leak (anyone with the repo has it, and it ships "
+                    "to every fork). Move it to an env-var reference (`${VAR}`) and rotate the exposed key.")
 
             # 3. blanket MCP auto-approval.
             if _walk_autoapprove(data):
