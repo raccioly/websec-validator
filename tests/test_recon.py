@@ -952,6 +952,55 @@ class OsvScannerTests(unittest.TestCase):
         self.assertEqual(set(fj[0]["tools"]), {"trivy", "osv-scanner"})
 
 
+class SastAdapterTests(unittest.TestCase):
+    """gosec (Go) + Brakeman (Rails) per-language SAST adapters — gated on stack, native output."""
+
+    def test_gosec_parser(self):
+        data = {"Issues": [{"severity": "HIGH", "confidence": "HIGH", "cwe": {"id": "89"},
+                            "rule_id": "G201", "details": "SQL string formatting",
+                            "file": "/r/db.go", "line": "42"},
+                           {"severity": "MEDIUM", "rule_id": "G401", "cwe": {"id": "326"},
+                            "details": "weak crypto", "file": "/r/c.go", "line": "10-12"}]}
+        rows = scanners._norm_gosec(data)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["severity"], "HIGH")
+        self.assertEqual(rows[0]["key"], "G201")
+        self.assertIn("CWE-89", rows[0]["title"])
+        self.assertEqual(rows[1]["line"], 10)                   # "10-12" range → start line
+        self.assertEqual(scanners._count_findings("gosec",
+                         self._write("gosec.json", data)), 2)
+
+    def test_brakeman_parser_maps_confidence_and_keeps_fingerprint(self):
+        data = {"warnings": [{"warning_type": "SQL Injection", "message": "Possible SQLi",
+                              "file": "app/x.rb", "line": 10, "confidence": "High",
+                              "check_name": "SQL", "fingerprint": "abc123"},
+                             {"warning_type": "XSS", "message": "unescaped", "file": "app/v.erb",
+                              "line": 3, "confidence": "Weak", "check_name": "CrossSiteScripting"}]}
+        rows = scanners._norm_brakeman(data)
+        self.assertEqual(rows[0]["severity"], "HIGH")           # High → HIGH
+        self.assertEqual(rows[0]["fingerprint"], "abc123")      # native fingerprint reused
+        self.assertEqual(rows[1]["severity"], "LOW")            # Weak → LOW
+
+    def test_registered_with_language_gating(self):
+        gosec = next(s for s in scanners.REGISTRY if s.key == "gosec")
+        brakeman = next(s for s in scanners.REGISTRY if s.key == "brakeman")
+        self.assertEqual(gosec.languages, ("go",))
+        self.assertEqual(brakeman.languages, ("ruby",))
+        # detect() must NOT offer them to a Python-only repo
+        det = scanners.detect(["python"])
+        keys = {s["key"] for s in det["available"] + det["missing"]}
+        self.assertNotIn("gosec", keys)
+        self.assertNotIn("brakeman", keys)
+        # …but Go/Ruby repos see them
+        self.assertIn("gosec", {s["key"] for s in scanners.detect(["go"])["available"]
+                                + scanners.detect(["go"])["missing"]})
+
+    def _write(self, name, data):
+        d = Path(tempfile.mkdtemp())
+        (d / name).write_text(json.dumps(data))
+        return d / name
+
+
 class LedgerTests(unittest.TestCase):
     def _facts(self, guards):
         return {"authz": {"endpoint_guards": guards}, "surface": {"sinks": {}},

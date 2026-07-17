@@ -138,6 +138,24 @@ def _osv(target: Path, out: Path, excludes=()) -> list:
     return ["osv-scanner", "scan", "--format", "json", "--output", str(out), str(target)]
 
 
+def _gosec(target: Path, out: Path, excludes=()) -> list:
+    # Go SAST (securego/gosec) — hardcoded creds, SQLi, weak crypto, path traversal, unsafe TLS:
+    # framework-aware Go patterns Semgrep's community rules cover only shallowly. `-no-fail` so a
+    # finding isn't a non-zero exit; `<target>/...` recurses the module. Only runs for Go repos.
+    cmd = ["gosec", "-fmt", "json", "-out", str(out), "-quiet", "-no-fail"]
+    for d in list(EXCLUDE_DIRS) + list(excludes):
+        cmd += ["-exclude-dir", d]
+    return cmd + [f"{target}/..."]
+
+
+def _brakeman(target: Path, out: Path, excludes=()) -> list:
+    # Rails SAST (presidentbeef/brakeman) — deeply Rails-aware (knows ActiveRecord queries are
+    # parameterized, so far fewer FPs than generic SAST on Rails). Native JSON; `--no-exit-on-*` so
+    # findings don't fail the process. Only runs for Ruby repos with a Rails layout.
+    return ["brakeman", "-f", "json", "-o", str(out), "-q",
+            "--no-exit-on-warn", "--no-exit-on-error", str(target)]
+
+
 REGISTRY: tuple = (
     Scanner("trivy", "Trivy", "sca", "trivy",
             install="brew install trivy  # pin by digest in CI", argv=_trivy),
@@ -149,6 +167,10 @@ REGISTRY: tuple = (
             install="pipx install checkov", argv=_checkov),
     Scanner("bandit", "Bandit", "sast", "bandit", languages=("python",),
             install="pipx install bandit"),
+    Scanner("gosec", "gosec", "sast", "gosec", languages=("go",),
+            install="brew install gosec  # Go SAST", argv=_gosec),
+    Scanner("brakeman", "Brakeman", "sast", "brakeman", languages=("ruby",),
+            install="gem install brakeman  # Rails SAST", argv=_brakeman),
     Scanner("osv-scanner", "OSV-Scanner", "sca", "osv-scanner",
             install="brew install osv-scanner", argv=_osv),
     Scanner("prowler", "Prowler", "cloud", "prowler",
@@ -278,6 +300,10 @@ def _count_findings(key: str, out_file: Path) -> int:
     if key == "osv-scanner":
         return sum(len(p.get("groups", []) or [])
                    for r in (data.get("results") or []) for p in (r.get("packages") or []))
+    if key == "gosec":
+        return len(data.get("Issues", []) or [])
+    if key == "brakeman":
+        return len(data.get("warnings", []) or [])
     return 0
 
 
@@ -493,6 +519,44 @@ def _norm_semgrep(data: dict) -> list:
     return out
 
 
+def _norm_gosec(data: dict) -> list:
+    """gosec JSON (`{"Issues":[{severity,confidence,cwe:{id},rule_id,details,file,line}]}`) → sast."""
+    out = []
+    for i in (data.get("Issues") or []):
+        f = i.get("file", "")
+        try:
+            line = int(i.get("line", "0").split("-")[0])   # gosec line is a string, sometimes "12-14"
+        except (ValueError, AttributeError):
+            line = 0
+        rule = i.get("rule_id", "")
+        cwe = (i.get("cwe") or {}).get("id", "")
+        title = (i.get("details") or rule)[:90] + (f" (CWE-{cwe})" if cwe else "")
+        out.append({"tool": "gosec", "category": "sast", "severity": _sev(i.get("severity")),
+                    "key": rule, "file": f, "line": line, "title": title,
+                    "fingerprint": f"sast|{f}|{line}|{rule}"})
+    return out
+
+
+# brakeman uses a 3-level confidence, not a severity — map it (High→HIGH … Weak→LOW).
+_BRAKEMAN_SEV = {"High": "HIGH", "Medium": "MEDIUM", "Weak": "LOW"}
+
+
+def _norm_brakeman(data: dict) -> list:
+    """brakeman JSON (`{"warnings":[{warning_type,message,file,line,confidence,check_name,fingerprint}]}`)."""
+    out = []
+    for w in (data.get("warnings") or []):
+        f = w.get("file", "")
+        line = w.get("line") or 0
+        check = w.get("check_name", "")
+        title = f"{w.get('warning_type', 'warning')}: {w.get('message', '')}"[:90]
+        out.append({"tool": "brakeman", "category": "sast",
+                    "severity": _BRAKEMAN_SEV.get(w.get("confidence", "Medium"), "MEDIUM"),
+                    "key": check, "file": f, "line": line, "title": title,
+                    # brakeman ships a stable per-warning fingerprint — reuse it so re-runs dedup.
+                    "fingerprint": w.get("fingerprint") or f"sast|{f}|{line}|{check}"})
+    return out
+
+
 def _norm_checkov(data) -> list:
     """Checkov `failed_checks` → normalized IaC findings. Checkov emits either ONE object or a LIST
     of objects (one per framework: terraform / dockerfile / github_actions …), so handle both.
@@ -516,7 +580,8 @@ def _norm_checkov(data) -> list:
 
 
 _PARSERS = {"trivy": _norm_trivy, "gitleaks": _norm_gitleaks, "semgrep": _norm_semgrep,
-            "checkov": _norm_checkov, "osv-scanner": _norm_osv}
+            "checkov": _norm_checkov, "osv-scanner": _norm_osv,
+            "gosec": _norm_gosec, "brakeman": _norm_brakeman}
 
 
 def _gitignored(target: Path | None, paths) -> set:

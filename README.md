@@ -75,8 +75,10 @@ _Until the first PyPI release publishes (or for bleeding-edge), install straight
 
 Requires **Python 3.11+** (on stock macOS, `python3` is often 3.9 — use `pipx`, which picks a newer
 interpreter, or install via Homebrew/pyenv). Zero Python runtime dependencies: it shells out to
-scanners (Trivy, Gitleaks, Semgrep/OpenGrep, Checkov, Prowler) and Noir **when present**, reports
-what's missing, and never hard-fails if a tool is absent.
+scanners (Trivy, OSV-Scanner, Gitleaks, Semgrep/OpenGrep, Checkov, Prowler) and Noir **when present**,
+plus **per-language SAST auto-selected by stack** — Bandit (Python), gosec (Go), Brakeman (Rails) —
+each fired only when its language is detected. It reports what's missing and never hard-fails if a tool
+is absent.
 
 ### Or run via Docker (everything bundled, zero install)
 
