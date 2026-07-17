@@ -22,6 +22,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import enrichment
 from .extractors.base import SKIP_DIRS, is_test_file, path_in_skip_dir
 
 
@@ -336,9 +337,15 @@ def _norm_trivy(data: dict) -> list:
     out = []
     for res in (data.get("Results") or []):
         tgt = res.get("Target", "")
+        eco = (res.get("Type") or "").lower()   # npm | pip | gomod | cargo | ... — drives reachability
         for v in (res.get("Vulnerabilities") or []):
             out.append({"tool": "trivy", "category": "sca", "severity": _sev(v.get("Severity")),
                         "key": v.get("VulnerabilityID", ""), "file": tgt, "line": 0,
+                        # clean structured fields so the reachability + EPSS/KEV enrichers don't have to
+                        # re-parse the title (which stays human-readable for the ledger/briefing).
+                        "pkg": v.get("PkgName", ""), "cve": v.get("VulnerabilityID", ""),
+                        "installed": v.get("InstalledVersion", ""), "fixed": v.get("FixedVersion", ""),
+                        "ecosystem": eco,
                         "title": f"{v.get('PkgName')} {v.get('InstalledVersion')} → {v.get('FixedVersion', '(no fix)')}",
                         "fingerprint": f"cve|{v.get('PkgName')}|{v.get('VulnerabilityID')}"})
         for s in (res.get("Secrets") or []):
@@ -533,6 +540,12 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
             f["tools"] = [f.pop("tool")]
             by_fp[fp] = f
     deduped = sorted(by_fp.values(), key=lambda f: -SEV_ORDER[f["severity"]])
+
+    # ADDITIVE enrichment (never changes severity / count): is the vulnerable dependency actually
+    # imported (reachability), and is the CVE known-exploited / high-EPSS (exploitability)? Both
+    # sharpen triage in the briefing; neither can reintroduce a false positive.
+    reachability = enrichment.enrich_reachability(deduped, target)
+    exploitability = enrichment.enrich_exploitability(deduped)
     (outdir / "findings.json").write_text(json.dumps(deduped, indent=2))
 
     by_sev, by_cat = {}, {}
@@ -540,13 +553,20 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
         by_sev[f["severity"]] = by_sev.get(f["severity"], 0) + 1
         by_cat[f["category"]] = by_cat.get(f["category"], 0) + 1
     summaries = [{"severity": f["severity"], "category": f["category"], "title": f["title"],
-                  "file": f["file"], "tools": f["tools"]} for f in deduped]
+                  "file": f["file"], "tools": f["tools"],
+                  # carry enrichment fields so the briefing/ledger/SARIF can render structured badges
+                  **({"reachability": f["reachability"]} if f.get("reachability") else {}),
+                  **({"epss": f["epss"]} if f.get("epss") is not None else {}),
+                  **({"kev": True} if f.get("kev") else {})}
+                 for f in deduped]
     return {"total_raw": len(raw), "total": len(deduped),
             "cross_tool_or_dup_merged": len(raw) - len(deduped),
             "contamination_dropped": contamination_dropped,
             "user_excluded_dropped": user_excluded_dropped,
             "local_only_downgraded": local_only_downgraded,
             "test_fixture_downgraded": test_fixture_downgraded,
+            "reachability": reachability,
+            "exploitability": exploitability,
             "by_severity": by_sev, "by_category": by_cat,
             # `top` = a short slice for the human briefing; `all` = the FULL ranked set the
             # findings ledger consumes. The ledger must NOT silently drop a HIGH/CRITICAL static

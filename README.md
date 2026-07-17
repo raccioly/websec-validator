@@ -130,6 +130,26 @@ Most real repos vendor an input corpus: `tests/`, `examples/`, `fixtures/` — s
 
 When most of a run's findings land in test/example code and there's no `.websec-ignore` yet, websec prints a one-line pointer to this section — it never edits your repo for you.
 
+## Prioritization — reachable × exploitable (no cloud, no LLM)
+
+A dependency CVE list is noise until you know *which ones matter*. With `--scan`, websec enriches every
+dependency vulnerability along two deterministic, offline axes — the same "reachable AND exploitable"
+signal commercial tools sell, minus the cloud:
+
+- **Reachability** — is the vulnerable package actually **imported** in your first-party source, or just
+  sitting in the lockfile? websec greps the real `import`/`require`/`from` sites and tags each CVE
+  `imported` vs **`declared-only` (likely unreachable — verify)**. Declared-only vulns are the industry's
+  #1 noise class (Snyk/Endor/Semgrep all converge here). Name-based and honest — a full call graph is out
+  of model; unparsed ecosystems (Go, Rust…) are tagged `n/a` rather than guessed.
+- **Exploitability** — each CVE is joined against a **local cache** of [FIRST.org EPSS](https://www.first.org/epss/)
+  (exploit-probability) + [CISA KEV](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)
+  (known-exploited-in-the-wild). A `⚠ CISA KEV` or `EPSS 90%` beats a raw CVSS score every time.
+  Refresh the cache with `bash scripts/refresh-epss-kev.sh` (the *only* network step — the scan itself
+  stays offline; no cache → the feature skips cleanly with a one-line hint).
+
+Both are **strictly additive**: they annotate and re-rank, but never change a finding's severity, drop
+one, or add one — so they can only sharpen triage, never reintroduce a false positive.
+
 ## What it extracts (22 deterministic extractors, no LLM)
 
 | | Dimension | Notable output |

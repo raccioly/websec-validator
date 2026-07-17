@@ -143,6 +143,17 @@ def cmd_run(args) -> int:
             _hyg.append(f"{unified['test_fixture_downgraded']} downgraded (test/fixture secret → LOW)")
         if _hyg:
             log(f"    hygiene: {' · '.join(_hyg)}")
+        _rx = unified.get('reachability') or {}
+        if _rx.get('declared_only'):
+            log(f"    reachability: {_rx.get('imported', 0)} imported · "
+                f"{_rx['declared_only']} declared-only (pkg not imported → likely unreachable)")
+        _ex = unified.get('exploitability') or {}
+        if _ex.get('available') and (_ex.get('kev') or _ex.get('high_epss')):
+            log(f"    exploitability: {_ex.get('kev', 0)} CISA-KEV (known-exploited) · "
+                f"{_ex.get('high_epss', 0)} high-EPSS")
+        elif _ex and not _ex.get('available') and unified.get('by_category', {}).get('sca'):
+            log("    exploitability: EPSS/KEV cache absent — run scripts/refresh-epss-kev.sh to "
+                "prioritize CVEs by real-world exploit likelihood")
     else:
         log(f"\n  scanners available: {', '.join(s['name'] for s in det['available']) or 'none'}"
             "  (add --scan to execute them)")
