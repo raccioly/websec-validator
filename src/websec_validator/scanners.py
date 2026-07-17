@@ -129,6 +129,15 @@ def _checkov(target: Path, out: Path, excludes=()) -> list:
             "--output-file-path", str(out.parent)]
 
 
+def _osv(target: Path, out: Path, excludes=()) -> list:
+    # OSV-Scanner (Google) — SCA against the OSV.dev advisory DB, with the strongest lockfile
+    # ecosystem coverage of any OSS SCA tool. Runs ALONGSIDE Trivy: same-CVE findings collapse via
+    # the shared `cve|pkg|CVE` fingerprint (→ tools:[trivy,osv-scanner]), while OSV catches lockfile
+    # formats Trivy misses. Like Trivy's DB, it consults an advisory source about YOUR deps — not the
+    # target app. Exit 1 = "vulns found" (not an error); the run loop writes output regardless.
+    return ["osv-scanner", "scan", "--format", "json", "--output", str(out), str(target)]
+
+
 REGISTRY: tuple = (
     Scanner("trivy", "Trivy", "sca", "trivy",
             install="brew install trivy  # pin by digest in CI", argv=_trivy),
@@ -141,7 +150,7 @@ REGISTRY: tuple = (
     Scanner("bandit", "Bandit", "sast", "bandit", languages=("python",),
             install="pipx install bandit"),
     Scanner("osv-scanner", "OSV-Scanner", "sca", "osv-scanner",
-            install="brew install osv-scanner"),
+            install="brew install osv-scanner", argv=_osv),
     Scanner("prowler", "Prowler", "cloud", "prowler",
             install="pipx install prowler  # needs AWS creds"),
 )
@@ -266,6 +275,9 @@ def _count_findings(key: str, out_file: Path) -> int:
     if key == "checkov":
         return sum(len((b.get("results") or {}).get("failed_checks", []) or [])
                    for b in (data if isinstance(data, list) else [data]) if isinstance(b, dict))
+    if key == "osv-scanner":
+        return sum(len(p.get("groups", []) or [])
+                   for r in (data.get("results") or []) for p in (r.get("packages") or []))
     return 0
 
 
@@ -407,6 +419,46 @@ def _norm_trivy(data: dict) -> list:
     return out
 
 
+# OSV ecosystem label → the `ecosystem` token the reachability enricher understands.
+_OSV_ECO = {"pypi": "pip", "npm": "npm", "go": "gomod", "crates.io": "cargo",
+            "rubygems": "gem", "packagist": "composer", "maven": "maven", "nuget": "nuget"}
+
+
+def _cvss_band(score) -> str:
+    """CVSS base score → severity band (osv-scanner reports groups[].max_severity as a number)."""
+    try:
+        s = float(score)
+    except (TypeError, ValueError):
+        return "MEDIUM"           # no score → don't over- or under-claim; MEDIUM like _sev's default
+    return ("CRITICAL" if s >= 9.0 else "HIGH" if s >= 7.0
+            else "MEDIUM" if s >= 4.0 else "LOW" if s > 0 else "UNKNOWN")
+
+
+def _norm_osv(data: dict) -> list:
+    """OSV-Scanner JSON → SCA findings. One finding per vuln GROUP (a group aliases the OSV/GHSA/CVE
+    ids of the same underlying vuln). Fingerprint mirrors Trivy's `cve|pkg|CVE` so the same CVE from
+    both engines collapses to one row with tools:[trivy,osv-scanner]; OSV-only lockfile hits survive."""
+    out = []
+    for r in (data.get("results") or []):
+        for p in (r.get("packages") or []):
+            pkgobj = p.get("package", {}) or {}
+            name = pkgobj.get("name", "")
+            version = pkgobj.get("version", "")
+            eco = _OSV_ECO.get(str(pkgobj.get("ecosystem", "")).lower(), "")
+            # map each vuln id → its human summary for a readable title (best-effort)
+            for g in (p.get("groups") or []):
+                ids = g.get("ids", []) or []
+                aliases = g.get("aliases", ids) or ids
+                cve = next((a for a in aliases if str(a).upper().startswith("CVE-")), None) or (ids[0] if ids else "")
+                sev = _cvss_band(g.get("max_severity"))
+                out.append({"tool": "osv-scanner", "category": "sca", "severity": sev,
+                            "key": cve, "file": r.get("source", {}).get("path", ""), "line": 0,
+                            "pkg": name, "cve": cve, "installed": version, "fixed": "", "ecosystem": eco,
+                            "title": f"{name} {version} — {cve} ({', '.join(i for i in ids if i != cve)[:60]})".rstrip(" ()"),
+                            "fingerprint": f"cve|{name}|{cve}"})
+    return out
+
+
 def _norm_gitleaks(data) -> list:
     rows = data if isinstance(data, list) else (data.get("findings") or [])
     out = []
@@ -464,7 +516,7 @@ def _norm_checkov(data) -> list:
 
 
 _PARSERS = {"trivy": _norm_trivy, "gitleaks": _norm_gitleaks, "semgrep": _norm_semgrep,
-            "checkov": _norm_checkov}
+            "checkov": _norm_checkov, "osv-scanner": _norm_osv}
 
 
 def _gitignored(target: Path | None, paths) -> set:

@@ -902,6 +902,56 @@ class DedupTests(unittest.TestCase):
             self.assertTrue((d / "findings.json").exists())
 
 
+class OsvScannerTests(unittest.TestCase):
+    """The dormant osv-scanner registry entry, now wired as a 2nd SCA engine."""
+
+    def _osv_json(self):
+        return {"results": [{"source": {"path": "requirements.txt"}, "packages": [
+            {"package": {"name": "flask", "version": "0.12.2", "ecosystem": "PyPI"},
+             "groups": [{"ids": ["PYSEC-2018-66", "GHSA-x"],
+                         "aliases": ["CVE-2018-1000656", "GHSA-x", "PYSEC-2018-66"],
+                         "max_severity": "8.7"}]}]}]}
+
+    def test_argv_registered(self):
+        # the entry had NO argv (detect-only) before wiring; it must be runnable now.
+        entry = next(s for s in scanners.REGISTRY if s.key == "osv-scanner")
+        self.assertIsNotNone(entry.argv)
+        cmd = entry.argv(Path("/repo"), Path("/out.json"))
+        self.assertEqual(cmd[:2], ["osv-scanner", "scan"])
+        self.assertIn("--format", cmd)
+
+    def test_norm_extracts_cve_severity_ecosystem(self):
+        rows = scanners._norm_osv(self._osv_json())
+        self.assertEqual(len(rows), 1)
+        r = rows[0]
+        self.assertEqual(r["cve"], "CVE-2018-1000656")   # CVE preferred from aliases
+        self.assertEqual(r["severity"], "HIGH")          # CVSS 8.7 → HIGH band
+        self.assertEqual(r["ecosystem"], "pip")          # PyPI → pip (for reachability)
+        self.assertEqual(r["fingerprint"], "cve|flask|CVE-2018-1000656")  # mirrors trivy
+
+    def test_cvss_band_mapping(self):
+        self.assertEqual(scanners._cvss_band("9.1"), "CRITICAL")
+        self.assertEqual(scanners._cvss_band("7.0"), "HIGH")
+        self.assertEqual(scanners._cvss_band("4.0"), "MEDIUM")
+        self.assertEqual(scanners._cvss_band("2.5"), "LOW")
+        self.assertEqual(scanners._cvss_band(None), "MEDIUM")   # missing → neutral default
+
+    def test_cross_engine_dedup_with_trivy(self):
+        # the SAME CVE from trivy + osv must collapse to ONE row carrying BOTH tools.
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "trivy.json").write_text(json.dumps({"Results": [{"Target": "requirements.txt",
+                "Type": "pip", "Vulnerabilities": [{"VulnerabilityID": "CVE-2018-1000656",
+                "PkgName": "flask", "Severity": "HIGH", "InstalledVersion": "0.12.2", "FixedVersion": "0.12.3"}]}]}))
+            (d / "osv.json").write_text(json.dumps(self._osv_json()))
+            sr = [{"key": "trivy", "output": str(d / "trivy.json")},
+                  {"key": "osv-scanner", "output": str(d / "osv.json")}]
+            res = scanners.normalize_findings(sr, d)
+            fj = json.loads((d / "findings.json").read_text())
+        self.assertEqual(res["total"], 1)                        # collapsed, not doubled
+        self.assertEqual(set(fj[0]["tools"]), {"trivy", "osv-scanner"})
+
+
 class LedgerTests(unittest.TestCase):
     def _facts(self, guards):
         return {"authz": {"endpoint_guards": guards}, "surface": {"sinks": {}},

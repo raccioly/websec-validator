@@ -112,7 +112,9 @@ Then point your agent at the output: **"Read `websec-out/AGENT-BRIEFING.md` and 
 Most real repos vendor an input corpus: `tests/`, `examples/`, `fixtures/` — sometimes whole demo apps with planted fake credentials. Those are **not your product's attack surface**, and websec scopes them out of the way by default without hiding anything a real leak would need:
 
 - **Fixture/example code is auto-scoped.** Test/example/fixture routes are split out of the attack surface (kept in `FACTS.json` under `fixture_endpoints`, counted in the console, not probed). Secrets found in fixture files are **demoted to LOW and annotated** — never dropped, because a real key pasted into a test is still a committed leak. Fixture package manifests don't drive framework detection (so a CLI that vendors an Express demo isn't misread as an Express app). Pass **`--include-fixtures`** to treat all of it as product code.
-- **`--exclude '<glob>'`** (repeatable) drops a path from **both** recon and the static scanners (gitleaks/trivy/semgrep/checkov). e.g. `websec run . --exclude 'tests/**' --exclude 'examples/**'`.
+- **`--exclude '<glob>'`** (repeatable) drops a path from **both** recon and the static scanners (gitleaks/trivy/semgrep/checkov/osv-scanner). e.g. `websec run . --exclude 'tests/**' --exclude 'examples/**'`.
+
+> **Two SCA engines cross-check each other.** With `--scan`, both **Trivy** and **OSV-Scanner** run: the same CVE from both collapses to one row tagged `tools: [trivy, osv-scanner]` (agreement → higher confidence), while OSV's broader lockfile coverage catches CVEs Trivy misses. Every CVE then flows through the reachability + EPSS/KEV enrichment above.
 - **`.websec-ignore`** (repo root) — a committed, gitignore-style config for persistent scoping, so you don't re-type flags every run or in CI. Two kinds of line:
 
   ```
