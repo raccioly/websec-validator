@@ -53,3 +53,4 @@ WORKDIR /scan
 USER websec
 ENTRYPOINT ["websec"]
 CMD ["--help"]
+HEALTHCHECK NONE
