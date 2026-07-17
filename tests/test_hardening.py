@@ -73,6 +73,38 @@ class LedgerForgedBypassTests(unittest.TestCase):
         self.assertEqual(hit[0]["attack_class"], "unsafe-auth-decoder")
 
 
+class SbomEmissionTests(unittest.TestCase):
+    def test_skips_gracefully_when_trivy_absent(self):
+        with mock.patch.object(scanners.shutil, "which", return_value=None):
+            with tempfile.TemporaryDirectory() as d:
+                r = scanners.write_sbom(Path(d), Path(d), "cyclonedx")
+        self.assertFalse(r["available"])
+        self.assertIn("trivy", r["reason"])
+
+    def test_unknown_format_defaults_to_cyclonedx(self):
+        # bad --sbom value must not crash the format lookup (argparse guards the CLI, but the
+        # function is called elsewhere too)
+        with mock.patch.object(scanners.shutil, "which", return_value=None):
+            with tempfile.TemporaryDirectory() as d:
+                r = scanners.write_sbom(Path(d), Path(d), "bogus")
+        self.assertFalse(r["available"])   # trivy absent → skip, but no KeyError on the format
+
+    @unittest.skipUnless(shutil.which("trivy"), "trivy required")
+    def test_emits_valid_cyclonedx_with_components(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "requirements.txt").write_text("requests==2.20.0\nflask==1.0.0\n")
+            r = scanners.write_sbom(d, d, "cyclonedx")
+            self.assertTrue(r["available"])
+            self.assertEqual(r["path"], "sbom.cdx.json")
+            sbom = json.loads((d / "sbom.cdx.json").read_text())
+        self.assertEqual(sbom.get("bomFormat"), "CycloneDX")
+        names = {c.get("name") for c in sbom.get("components", [])}
+        self.assertIn("flask", names)
+        self.assertIn("requests", names)
+        self.assertGreaterEqual(r["components"], 2)
+
+
 class ScannerHygieneTests(unittest.TestCase):
     def test_in_skip_dir(self):
         self.assertTrue(scanners._in_skip_dir(".claude/worktrees/x/gitleaks.json"))

@@ -210,6 +210,42 @@ def run_available(target: Path, outdir: Path, stack_languages: list | None = Non
     return results
 
 
+_SBOM_FORMATS = {"cyclonedx": ("cyclonedx", "sbom.cdx.json"), "spdx": ("spdx-json", "sbom.spdx.json")}
+
+
+def write_sbom(target: Path, outdir: Path, fmt: str = "cyclonedx",
+               excludes: list | None = None, timeout: int = 300) -> dict:
+    """Emit a Software Bill of Materials via Trivy (offline, deterministic, read-only).
+
+    CycloneDX/SPDX SBOM is table-stakes for CI/compliance (SLSA, EO 14028) and the substrate a
+    downstream scanner can rescan without re-walking the tree. Trivy is already the SCA scanner, so
+    this is one more invocation of a tool we already require — no new dependency. Returns a status
+    dict; never raises (a missing trivy just yields {'available': False})."""
+    tfmt, fname = _SBOM_FORMATS.get(fmt, _SBOM_FORMATS["cyclonedx"])
+    if not shutil.which("trivy"):
+        return {"available": False, "reason": "trivy not on PATH (brew install trivy)"}
+    out_file = outdir / fname
+    cmd = ["trivy", "fs", "--format", tfmt, "--output", str(out_file)]
+    for d in list(EXCLUDE_DIRS) + list(excludes or []):
+        cmd += ["--skip-dirs", d]
+    cmd.append(str(target))
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if out_file.exists() and out_file.stat().st_size > 0:
+            comps = 0
+            try:
+                data = json.loads(out_file.read_text())
+                comps = len(data.get("components") or data.get("packages") or [])
+            except Exception:
+                pass
+            return {"available": True, "format": fmt, "path": fname, "components": comps}
+        return {"available": False, "reason": f"trivy exit {proc.returncode}: {(proc.stderr or '')[:120]}"}
+    except subprocess.TimeoutExpired:
+        return {"available": False, "reason": "trivy SBOM timed out"}
+    except Exception as e:
+        return {"available": False, "reason": f"{type(e).__name__}: {e}"}
+
+
 def _count_findings(key: str, out_file: Path) -> int:
     """Best-effort finding count from a scanner's native JSON (for the summary)."""
     if not out_file.exists():

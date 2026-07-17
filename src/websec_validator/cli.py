@@ -158,6 +158,15 @@ def cmd_run(args) -> int:
         log(f"\n  scanners available: {', '.join(s['name'] for s in det['available']) or 'none'}"
             "  (add --scan to execute them)")
 
+    # 2c. SBOM (opt-in) — offline CycloneDX/SPDX via Trivy, alongside the other machine artifacts.
+    sbom = None
+    if getattr(args, "sbom", None):
+        sbom = scanners.write_sbom(target, out, args.sbom, excludes=args.exclude)
+        if sbom.get("available"):
+            log(f"  SBOM ({sbom['format']}): {sbom['components']} components → {sbom['path']}")
+        else:
+            log(f"  SBOM skipped: {sbom.get('reason', 'unavailable')}")
+
     # 3. probes: choose + stage
     chosen = probes.applicable(facts)
     manifest = probes.stage(chosen, out, facts)
@@ -215,12 +224,14 @@ def cmd_run(args) -> int:
     (out / "manifest.json").write_text(json.dumps(
         {"facts": "FACTS.json", "scanners": det, "scan_results": scan_results,
          "findings_summary": manifest_summary, "ledger": {"total": ledger["total"], "by_severity": ledger["by_severity"]},
-         "sarif": "results.sarif", "probes": manifest, "timestamp": ts}, indent=2))
+         "sarif": "results.sarif", "sbom": sbom, "probes": manifest, "timestamp": ts}, indent=2))
 
     log(f"\n✓ run {ts} saved (immutable — nothing overwritten):\n    {out}")
     log("    REPORT.md          — full historical record")
     log("    AGENT-BRIEFING.md  — hand this to your AI coding agent")
     log("    results.sarif      — SARIF 2.1.0 for CI / GitHub Code Scanning")
+    if sbom and sbom.get("available"):
+        log(f"    {sbom['path']}   — {sbom['format']} SBOM ({sbom['components']} components)")
     log(f"  latest → {out.parent.parent / 'latest'}    ·    add `websec-out/` to .gitignore")
 
     # emit the requested machine format on STDOUT (for piping); default 'briefing' emits nothing extra
@@ -506,6 +517,9 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--include-fixtures", action="store_true", dest="include_fixtures",
                    help="treat test/example/fixture code as product code: fixture routes count as attack "
                         "surface and fixture secrets keep full severity (default: split out + demoted)")
+    r.add_argument("--sbom", nargs="?", const="cyclonedx", choices=["cyclonedx", "spdx"], metavar="FMT",
+                   help="also emit a Software Bill of Materials (default cyclonedx → sbom.cdx.json) via "
+                        "Trivy — offline, for CI/compliance (SLSA, EO 14028)")
     r.add_argument("--scanners", metavar="A,B",
                    help="comma-separated subset of scanners to run with --scan (e.g. gitleaks,semgrep)")
     r.add_argument("--format", choices=["briefing", "sarif", "json"], default="briefing",

@@ -96,6 +96,7 @@ artifacts land in `/scan/websec-out`.
 websec run ./my-app                    # ← the one command: recon + stage tailored probes + emit the briefing
 websec ./my-app                        # same thing — a bare path defaults to `run`
 websec run ./my-app --scan             # …and also execute the available static scanners
+websec run ./my-app --scan --sbom      # …and emit a CycloneDX SBOM (sbom.cdx.json) for CI/compliance
 websec run ./my-app --format sarif     # SARIF 2.1.0 to stdout (for piping into CI); also always written to the run dir
 websec run ./my-app --fail-on high     # exit 1 if any HIGH+ finding remains (a CI gate)
 websec doctor ./my-app                 # (optional) which scanners are installed?
@@ -189,6 +190,7 @@ candidates — so probes get pointed at the *exact* endpoints, not fired blindly
 | `findings-ledger.json` / `REPORT.md` | The traceable ledger: each finding with an evidence chain, CWE/ASVS/OWASP-API citation, remediation, and a **calibrated `P(real)`** (measured real-vuln rate + 95% CI + sample size). |
 | `results.sarif` | **SARIF 2.1.0** — always written. Drop it into **GitHub Code Scanning** (inline PR-diff annotations + the Security tab), GitLab, Azure DevOps, VS Code's SARIF viewer, DefectDojo. |
 | `findings.envelope.json` | A **versioned, self-describing** JSON envelope (`schema_version`) around the ledger — for non-GitHub CI / dashboards that shouldn't reverse-engineer the internal shape. |
+| `sbom.cdx.json` | A **CycloneDX SBOM** (with `--sbom`; `--sbom spdx` for SPDX) — the dependency inventory for SLSA / EO 14028 supply-chain gates, and the substrate a downstream scanner can rescan without re-walking the tree. |
 | `probes/` | The probe scripts selected + staged for *this* app (BOLA, JWT, SSRF, mass-assignment…). |
 
 ## The flow
