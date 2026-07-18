@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Fixed a false positive where the `weak-csp` finding would trigger against the tool's own extractor regex definitions for `text/html` and `Content-Security-Policy`.
+
 ## [0.11.0] — 2026-07-11
 
 Distribution & integration round — reach every agent host, run as a local guardrail, and compose with

@@ -21,14 +21,14 @@ import re
 
 from .base import Extractor, RepoContext, is_script_file, is_test_file
 
-CSP_ANY = re.compile(r"Content-Security-Policy|contentSecurityPolicy|helmet[\s\S]{0,40}?\bcsp\b"
+CSP_ANY = re.compile(r"Content\-Security\-Policy|contentSecurityPolicy|helmet[\s\S]{0,40}?\bcsp\b"
                      r"|useCspNonce|cspDirectives", re.I)
 CSP_SCRIPT_SELF = re.compile(r"script-src[^;'\"]*'self'", re.I)
 CSP_NONCE = re.compile(r"'nonce-|nonce-\$\{|\bstrict-dynamic\b", re.I)
 CSP_UNSAFE = re.compile(r"'unsafe-(?:inline|eval)'", re.I)
 INLINE_HANDLER = re.compile(r"\son(?:click|load|error|mouseover|submit)\s*=\s*['\"]", re.I)
 
-HSTS_ANY = re.compile(r"Strict-Transport-Security|helmet[\s\S]{0,40}?\bhsts\b|\bhsts\s*[:=]"
+HSTS_ANY = re.compile(r"Strict\-Transport\-Security|helmet[\s\S]{0,40}?\bhsts\b|\bhsts\s*[:=]"
                       r"|max-age=\d+[\s\S]{0,40}?includeSubDomains", re.I)
 HSTS_SUBDOMAINS = re.compile(r"includeSubDomains", re.I)
 HSTS_PRELOAD = re.compile(r"\bpreload\b", re.I)
@@ -39,7 +39,7 @@ API_SCOPED = re.compile(r"(?:^|/)(?:api|routes?|server|lambda|handler|functions?
 HTML_SURFACE = re.compile(r"\.(?:html|tsx|jsx|vue|svelte|astro)$|_document|app/layout|index\.html", re.I)
 # HTML built/served in CODE (a Worker / server-rendered app emitting template-literal HTML) — so CSP
 # applies even with no frontend framework. This is the gap that missed a Cloudflare Worker's CSP.
-HTML_CONTENT = re.compile(r"<!DOCTYPE\s+html|<html[\s>]|text/html|res\.send\(\s*[`'\"]\s*<|c\.html\(", re.I)
+HTML_CONTENT = re.compile(r"<!DOCTYPE\s+html|<html[\s>]|text\/html|res\.send\(\s*[`'\"]\s*<|c\.html\(", re.I)
 # A construct that SERVES bytes over HTTP (vs merely building an HTML string and writing it to a file).
 # This is what separates a real browser-facing surface from a Python/CLI report generator — the latter
 # emits `<!DOCTYPE html>` into a file with no serving verb, so it must NOT trigger CSP/clickjacking leads.
