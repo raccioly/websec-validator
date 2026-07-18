@@ -98,7 +98,10 @@ def tool_websec_briefing(a: dict) -> str:
     chosen = probes.applicable(facts)
     with tempfile.TemporaryDirectory() as td:
         manifest = probes.stage(chosen, Path(td), facts)
-    return briefing.render(facts, det, [], manifest, None)
+    # pass a ledger so the briefing's DAST-prediction section (§4b) is populated here too
+    ledger = findings.build_ledger(facts, None, None, findings.load_suppressions(root),
+                                   findings.load_acknowledgements(root))
+    return briefing.render(facts, det, [], manifest, None, ledger)
 
 
 DISPATCH = {

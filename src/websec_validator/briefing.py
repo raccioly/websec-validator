@@ -34,8 +34,12 @@ def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list
     sink_summary = ", ".join(f"{k} ({n})" for k, n in surface.get("sink_counts", {}).items()) or "_none_"
 
     # §3a — the ranked per-endpoint planning table (routes × guards × sinks × targeting).
+    from . import dast_predict as _dast
     from . import inventory as _inventory
     inventory_md = _inventory.render_md(_inventory.build(facts))
+    # §4b — which dynamic-scanner alerts this static state will produce, and which classes no
+    # scanner can find (so a clean scan is never mistaken for "safe").
+    dast_md = _dast.render_md(_dast.predict(facts, ledger))
 
     authz = facts.get("authz", {})
     gs = authz.get("guard_summary", {})
@@ -308,6 +312,10 @@ Scanners available: {avail}
 
 Install for fuller coverage:
 {missing}
+
+## 4b. ★★ What a DAST / pentest will report — predicted before you run one
+
+{dast_md}
 
 ## 5. Tailored probes (staged — drafts you finalize against §2–§3)
 
