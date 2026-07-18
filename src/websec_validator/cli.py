@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 from . import (__version__, baseline, briefing, calibration, constitution, dynamic, findings, formats,
-               probes, proof, recon, report, scanners)
+               inventory, probes, proof, recon, report, scanners)
 
 
 def _resolve_target(raw: str) -> Path:
@@ -220,6 +220,16 @@ def cmd_run(args) -> int:
         else:
             log(f"  SBOM skipped: {sbom.get('reason', 'unavailable')}")
 
+    # 2d. Attack-surface inventory — the ranked per-endpoint planning table (also rendered in §3a of
+    # the briefing, and the substrate for the DAST-prediction + pentest-plan sections).
+    inv = inventory.build(facts)
+    (out / "attack-surface.json").write_text(json.dumps(inv, indent=2))
+    _isum = inv.get("summary", {})
+    if _isum.get("endpoints"):
+        log(f"  attack surface: {_isum['endpoints']} endpoint(s) ranked · "
+            f"{_isum.get('unguarded', 0)} unguarded ({_isum.get('unguarded_writes', 0)} writes) "
+            f"→ attack-surface.json")
+
     # 3. probes: choose + stage
     chosen = probes.applicable(facts)
     manifest = probes.stage(chosen, out, facts)
@@ -277,7 +287,9 @@ def cmd_run(args) -> int:
     (out / "manifest.json").write_text(json.dumps(
         {"facts": "FACTS.json", "scanners": det, "scan_results": scan_results,
          "findings_summary": manifest_summary, "ledger": {"total": ledger["total"], "by_severity": ledger["by_severity"]},
-         "sarif": "results.sarif", "sbom": sbom, "probes": manifest, "timestamp": ts}, indent=2))
+         "sarif": "results.sarif", "sbom": sbom, "attack_surface": "attack-surface.json",
+         "attack_surface_summary": inv.get("summary", {}),
+         "probes": manifest, "timestamp": ts}, indent=2))
 
     log(f"\n✓ run {ts} saved (immutable — nothing overwritten):\n    {out}")
     log("    REPORT.md          — full historical record")

@@ -33,6 +33,10 @@ def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list
     surface = facts.get("surface", {})
     sink_summary = ", ".join(f"{k} ({n})" for k, n in surface.get("sink_counts", {}).items()) or "_none_"
 
+    # §3a — the ranked per-endpoint planning table (routes × guards × sinks × targeting).
+    from . import inventory as _inventory
+    inventory_md = _inventory.render_md(_inventory.build(facts))
+
     authz = facts.get("authz", {})
     gs = authz.get("guard_summary", {})
     global_auth = authz.get("global_auth_middleware", False)
@@ -240,6 +244,10 @@ credentials** — ask the human, never fabricate, never hit production.
 **Code-level sinks** (cross-reference with the above): {sink_summary}
 
 **Mass-assignment targets** — this app's privileged model fields (try injecting these into create/update payloads): {", ".join(facts.get("schemas", {}).get("sensitive_fields", [])) or "_none detected_"}  ·  ORMs: {", ".join(facts.get("schemas", {}).get("orms", [])) or "?"}
+
+## 3a. ★★ Attack-surface inventory — TEST IN THIS ORDER
+
+{inventory_md}
 
 ## 3b. ★ Access control (who can reach what — your #1 test)
 
