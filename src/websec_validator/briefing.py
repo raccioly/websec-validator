@@ -33,13 +33,15 @@ def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list
     surface = facts.get("surface", {})
     sink_summary = ", ".join(f"{k} ({n})" for k, n in surface.get("sink_counts", {}).items()) or "_none_"
 
-    # §3a — the ranked per-endpoint planning table (routes × guards × sinks × targeting).
+    # §3a/§4b/§5b — the planning trio, all off the same inventory (built once).
     from . import dast_predict as _dast
     from . import inventory as _inventory
-    inventory_md = _inventory.render_md(_inventory.build(facts))
-    # §4b — which dynamic-scanner alerts this static state will produce, and which classes no
-    # scanner can find (so a clean scan is never mistaken for "safe").
-    dast_md = _dast.render_md(_dast.predict(facts, ledger))
+    from . import testplan as _testplan
+    _inv = _inventory.build(facts)
+    _pred = _dast.predict(facts, ledger)
+    inventory_md = _inventory.render_md(_inv)                      # §3a — ranked "test in this order"
+    dast_md = _dast.render_md(_pred)                              # §4b — predicted scanner alerts + blind spots
+    testplan_md = _testplan.render_md(_testplan.build(facts, _inv, _pred))  # §5b — phased runbook
 
     authz = facts.get("authz", {})
     gs = authz.get("guard_summary", {})
@@ -322,6 +324,10 @@ Install for fuller coverage:
 {probe_lines}
 
 Keep these in the repo after you run them — re-running after a fix proves "still blocked, now safer."
+
+## 5b. ★★ Pentest runbook — phased & pre-aimed (opt-in, against an instance you own)
+
+{testplan_md}
 
 ## 6. How to work this — verify with a debate, then fix
 
