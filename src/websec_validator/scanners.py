@@ -96,6 +96,39 @@ def _trivy(target: Path, out: Path, excludes=()) -> list:
     return cmd + [str(target)]
 
 
+def _annotate_history_only_secrets(raw: list, target: Path | None) -> int:
+    """Flag secrets that exist ONLY in git history — the file is gone from the working tree.
+
+    `gitleaks detect` scans the commit graph across ALL refs (verified: a secret committed on a side
+    branch is found from another branch, with the file absent from HEAD and the tree). So a hit whose
+    file no longer exists is a HISTORY leak: someone already "fixed" it by deleting the file, which
+    does NOT un-leak anything — the blob is still fetchable by anyone with the repo. The only real
+    remediation is rotating the credential at the provider. Say so explicitly, because "I deleted it"
+    is the single most common false sense of safety with committed secrets."""
+    if not target:
+        return 0
+    n = 0
+    for f in raw:
+        if f.get("tool") != "gitleaks" or f.get("category") != "secret":
+            continue
+        rel = _rel_to(f.get("file", ""), target)
+        if not rel:
+            continue
+        try:
+            exists = (Path(target) / rel).exists()
+        except OSError:
+            continue
+        # guard on the FIELD, not a title substring: several provider notes already mention the word
+        # "history" ("…does NOT scrub pushed history"), which silently suppressed this annotation.
+        if not exists and not f.get("history_only"):
+            f["history_only"] = True
+            f["title"] += (" [HISTORY-ONLY: the file is already gone from the working tree — someone "
+                           "likely 'fixed' this by deleting it. The blob is still reachable in the "
+                           "repo, so it is NOT fixed until the credential is rotated.]")
+            n += 1
+    return n
+
+
 def _gitleaks(target: Path, out: Path, excludes=()) -> list:
     return ["gitleaks", "detect", "--source", str(target), "--no-banner",
             "--report-format", "json", "--report-path", str(out)]
@@ -664,6 +697,10 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
                 f["title"] += " — local-only (gitignored, never committed; rotate if real, not a repo leak)"
             local_only_downgraded += 1
 
+    # A gitleaks hit whose file is gone from the tree is a HISTORY-only leak — deleting the file did
+    # not un-leak it. Annotate so the remediation is ROTATE, not "already removed".
+    history_only = _annotate_history_only_secrets(raw, target)
+
     # DocGuard field report F1: secrets in test/fixture files are overwhelmingly PLANTED fakes
     # (scanner corpora, negative tests). Demote to LOW + annotate — never drop: a real key pasted
     # into a test is still a committed leak. Mirrors the local-only downgrade above; the doc/
@@ -718,6 +755,7 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
             "user_excluded_dropped": user_excluded_dropped,
             "local_only_downgraded": local_only_downgraded,
             "test_fixture_downgraded": test_fixture_downgraded,
+            "history_only_secrets": history_only,
             "reachability": reachability,
             "exploitability": exploitability,
             "by_severity": by_sev, "by_category": by_cat,

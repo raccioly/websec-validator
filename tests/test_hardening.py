@@ -586,3 +586,51 @@ class DeferredFixTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HistoryOnlySecretTests(unittest.TestCase):
+    """A committed secret whose file was later DELETED is still leaked — say so explicitly."""
+
+    def test_missing_file_is_tagged_history_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            raw = [{"tool": "gitleaks", "category": "secret", "file": "deleted.js",
+                    "title": "secret: token"}]
+            n = scanners._annotate_history_only_secrets(raw, Path(d))
+        self.assertEqual(n, 1)
+        self.assertTrue(raw[0]["history_only"])
+        self.assertIn("HISTORY-ONLY", raw[0]["title"])
+        self.assertIn("rotated", raw[0]["title"].lower())
+
+    def test_file_still_present_is_not_tagged(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "live.js").write_text("x")
+            raw = [{"tool": "gitleaks", "category": "secret", "file": "live.js",
+                    "title": "secret: token"}]
+            n = scanners._annotate_history_only_secrets(raw, Path(d))
+        self.assertEqual(n, 0)
+        self.assertNotIn("history_only", raw[0])
+
+    def test_guard_is_the_field_not_a_title_substring(self):
+        # regression: provider notes already say "...does NOT scrub pushed history", which a
+        # substring guard mistook for "already annotated" and silently skipped the tag.
+        with tempfile.TemporaryDirectory() as d:
+            raw = [{"tool": "gitleaks", "category": "secret", "file": "gone.js",
+                    "title": "secret: token — ROTATE FIRST; deleting does NOT scrub pushed history."}]
+            n = scanners._annotate_history_only_secrets(raw, Path(d))
+        self.assertEqual(n, 1)                       # still tagged despite 'history' in the title
+        self.assertTrue(raw[0]["history_only"])
+
+    def test_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as d:
+            raw = [{"tool": "gitleaks", "category": "secret", "file": "gone.js", "title": "s"}]
+            scanners._annotate_history_only_secrets(raw, Path(d))
+            n2 = scanners._annotate_history_only_secrets(raw, Path(d))
+        self.assertEqual(n2, 0)                      # no double-append
+        self.assertEqual(raw[0]["title"].count("HISTORY-ONLY"), 1)
+
+    def test_trivy_secrets_are_not_tagged(self):
+        # trivy scans the WORKING TREE, so "file missing" carries no history meaning there.
+        with tempfile.TemporaryDirectory() as d:
+            raw = [{"tool": "trivy", "category": "secret", "file": "gone.js", "title": "s"}]
+            n = scanners._annotate_history_only_secrets(raw, Path(d))
+        self.assertEqual(n, 0)
