@@ -634,3 +634,58 @@ class HistoryOnlySecretTests(unittest.TestCase):
             raw = [{"tool": "trivy", "category": "secret", "file": "gone.js", "title": "s"}]
             n = scanners._annotate_history_only_secrets(raw, Path(d))
         self.assertEqual(n, 0)
+
+
+class VerifySecretsOptInTests(unittest.TestCase):
+    """TruffleHog live verification — powerful, but it egresses credentials, so it is OPT-IN ONLY."""
+
+    def _run(self, **kw):
+        with mock.patch.object(scanners.shutil, "which", return_value="/usr/bin/x"), \
+             mock.patch.object(scanners.subprocess, "run") as m, \
+             tempfile.TemporaryDirectory() as d:
+            m.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+            return [r["key"] for r in scanners.run_available(Path(d), Path(d), ["python"], **kw)]
+
+    def test_never_runs_by_default_even_when_installed(self):
+        # THE safety property: verification sends the found credential to a third-party API. It must
+        # never happen because the binary merely exists on PATH.
+        self.assertNotIn("trufflehog", self._run())
+
+    def test_runs_only_when_explicitly_opted_in(self):
+        self.assertIn("trufflehog", self._run(verify_secrets=True))
+
+    def test_verified_secret_outranks_unverified(self):
+        rows = scanners._norm_trufflehog([
+            {"DetectorName": "AWS", "Verified": True,
+             "SourceMetadata": {"Data": {"Filesystem": {"file": "a.py", "line": 3}}}},
+            {"DetectorName": "Slack", "Verified": False,
+             "SourceMetadata": {"Data": {"Filesystem": {"file": "b.py", "line": 9}}}},
+        ])
+        self.assertEqual(rows[0]["severity"], "CRITICAL")     # authenticated against the provider
+        self.assertTrue(rows[0]["verified"])
+        self.assertIn("VERIFIED LIVE", rows[0]["title"])
+        self.assertEqual(rows[1]["severity"], "MEDIUM")       # matched, liveness unproven
+        self.assertFalse(rows[1]["verified"])
+
+    def test_jsonl_counting_does_not_use_whole_file_json(self):
+        # trufflehog emits JSON-LINES; a whole-file json.loads raises and would silently report 0.
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "trufflehog.json"
+            f.write_text('{"DetectorName":"AWS","Verified":true}\n{"DetectorName":"GH"}\n')
+            self.assertEqual(scanners._count_findings("trufflehog", f), 2)
+
+    def test_jsonl_is_parsed_by_normalize(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "trufflehog.json").write_text(
+                '{"DetectorName":"AWS","Verified":true,'
+                '"SourceMetadata":{"Data":{"Filesystem":{"file":"a.py","line":1}}}}\n'
+                'not-json-progress-line\n')
+            res = scanners.normalize_findings(
+                [{"key": "trufflehog", "output": str(d / "trufflehog.json"),
+                  "name": "TruffleHog", "category": "secrets"}], d, target=d)
+        self.assertEqual(res["total"], 1)                     # parsed despite the junk line
+        self.assertEqual(res["by_severity"].get("CRITICAL"), 1)
+
+    def test_registered_as_opt_in(self):
+        self.assertIn("trufflehog", scanners._OPT_IN_SCANNERS)

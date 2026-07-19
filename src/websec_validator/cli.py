@@ -177,7 +177,8 @@ def cmd_run(args) -> int:
     if args.scan:
         log("\n  running available static scanners (read-only)…")
         only = args.scanners.split(",") if args.scanners else None
-        scan_results = scanners.run_available(target, out, langs, excludes=args.exclude, only=only)
+        scan_results = scanners.run_available(target, out, langs, excludes=args.exclude, only=only,
+                                             verify_secrets=getattr(args, 'verify_secrets', False))
         for r in scan_results:
             tag = r.get("findings", r.get("status", "?"))
             log(f"    {r['name']}: {tag}")
@@ -642,6 +643,10 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--include-fixtures", action="store_true", dest="include_fixtures",
                    help="treat test/example/fixture code as product code: fixture routes count as attack "
                         "surface and fixture secrets keep full severity (default: split out + demoted)")
+    r.add_argument("--verify-secrets", action="store_true", dest="verify_secrets",
+                   help="opt in to TruffleHog LIVE VERIFICATION of discovered secrets. ⚠ this sends "
+                        "each candidate credential to its provider's API (a third party) to test if "
+                        "it is live — the only step in websec that leaves your machine. Off by default.")
     r.add_argument("--sbom", nargs="?", const="cyclonedx", choices=["cyclonedx", "spdx"], metavar="FMT",
                    help="also emit a Software Bill of Materials (default cyclonedx → sbom.cdx.json) via "
                         "Trivy — offline, for CI/compliance (SLSA, EO 14028)")

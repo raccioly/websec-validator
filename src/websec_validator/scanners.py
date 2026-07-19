@@ -47,6 +47,10 @@ class Scanner:
 # flag). Was previously a hand-maintained subset that omitted .claude / .worktrees / .wolf.
 EXCLUDE_DIRS = tuple(sorted(SKIP_DIRS))
 
+# Scanners that must NEVER run implicitly, even when installed — each departs from websec's
+# offline/read-only posture in a way the user has to consent to per run.
+_OPT_IN_SCANNERS = {"trufflehog"}
+
 
 def _in_skip_dir(path: str, root=None) -> bool:
     """True if `path` is under a SKIP_DIR, measured RELATIVE to the scan `root` when given.
@@ -134,6 +138,17 @@ def _gitleaks(target: Path, out: Path, excludes=()) -> list:
             "--report-format", "json", "--report-path", str(out)]
 
 
+def _trufflehog(target: Path, out: Path, excludes=()) -> list:
+    """TruffleHog with LIVE VERIFICATION — the only scanner here that answers "is this key actually
+    live?" by calling the provider's API (AWS GetCallerIdentity, GitHub /user, …).
+
+    GATED behind `--verify-secrets` because that is a genuine departure from websec's posture: it
+    sends the discovered credential to a THIRD PARTY. Everything else in this tool is offline and
+    read-only. Off by default, never implicit — the user opts in per run."""
+    return ["trufflehog", "filesystem", str(target), "--json", "--no-update",
+            "--results=verified,unknown"]
+
+
 def _bundled_rules_dir():
     """Path to the shipped Semgrep rules (websec_validator/rules/), or None if unavailable. These
     cover patterns the community registry misses — insecure-default signing secret + error-stack
@@ -206,6 +221,10 @@ REGISTRY: tuple = (
             install="gem install brakeman  # Rails SAST", argv=_brakeman),
     Scanner("osv-scanner", "OSV-Scanner", "sca", "osv-scanner",
             install="brew install osv-scanner", argv=_osv),
+    # OPT-IN ONLY (--verify-secrets): verification calls third-party APIs with the found credential.
+    # run_available() skips this unless explicitly enabled, even when the binary is installed.
+    Scanner("trufflehog", "TruffleHog (live verification)", "secrets", "trufflehog",
+            install="brew install trufflehog  # opt-in: websec run … --verify-secrets", argv=_trufflehog),
     Scanner("prowler", "Prowler", "cloud", "prowler",
             install="pipx install prowler  # needs AWS creds"),
 )
@@ -231,7 +250,8 @@ def detect(stack_languages: list | None = None) -> dict:
 
 
 def run_available(target: Path, outdir: Path, stack_languages: list | None = None,
-                  timeout: int = 600, excludes: list | None = None, only: list | None = None) -> list:
+                  timeout: int = 600, excludes: list | None = None, only: list | None = None,
+                  verify_secrets: bool = False) -> list:
     """Execute every available, runnable static scanner. Returns per-scanner status.
 
     `excludes`: extra paths/dirs to skip (--exclude). `only`: run just these scanner keys.
@@ -251,6 +271,10 @@ def run_available(target: Path, outdir: Path, stack_languages: list | None = Non
             continue
         if s.languages and not (set(s.languages) & langs):
             continue
+        # OPT-IN scanners stay off unless explicitly enabled — trufflehog's verification egresses the
+        # discovered credential to a third party, which must never happen implicitly.
+        if s.key in _OPT_IN_SCANNERS and not (verify_secrets and s.key == "trufflehog"):
+            continue
         if not shutil.which(s.binary):
             continue
         out_file = scan_dir / f"{s.key}.json"
@@ -260,6 +284,10 @@ def run_available(target: Path, outdir: Path, stack_languages: list | None = Non
             # Checkov ignores the filename and writes `results_json.json` into the dir passed to
             # `--output-file-path` — so the recorded <key>.json never existed and 100% of its findings
             # were silently dropped. Normalize the produced file to the expected path.
+            # trufflehog streams JSON-lines to STDOUT and writes no report file — persist it so the
+            # normal parse path works (same shape of special-case as checkov's renamed output).
+            if s.key == "trufflehog" and not out_file.exists():
+                out_file.write_text(proc.stdout or "")
             if s.key == "checkov" and not out_file.exists():
                 produced = scan_dir / "results_json.json"
                 if produced.exists():
@@ -314,6 +342,10 @@ def _count_findings(key: str, out_file: Path) -> int:
     """Best-effort finding count from a scanner's native JSON (for the summary)."""
     if not out_file.exists():
         return 0
+    # trufflehog emits JSON-LINES, not a JSON document — count before the whole-file parse below,
+    # which would raise and silently report 0.
+    if key == "trufflehog":
+        return sum(1 for ln in out_file.read_text().splitlines() if ln.strip().startswith("{"))
     try:
         data = json.loads(out_file.read_text())
     except Exception:
@@ -518,6 +550,35 @@ def _norm_osv(data: dict) -> list:
     return out
 
 
+def _norm_trufflehog(data) -> list:
+    """TruffleHog JSON-LINES → secret findings, carrying the VERIFICATION verdict.
+
+    `Verified: true` means the tool authenticated with the credential against the provider — that is
+    the single most actionable finding a security report can contain, so it outranks every heuristic
+    secret hit. Unverified/unknown stays MEDIUM (the detector matched but liveness is unproven)."""
+    out = []
+    rows = data if isinstance(data, list) else []
+    for x in rows:
+        if not isinstance(x, dict):
+            continue
+        det = x.get("DetectorName") or x.get("DetectorType") or "secret"
+        meta = ((x.get("SourceMetadata") or {}).get("Data") or {})
+        fs = meta.get("Filesystem") or meta.get("Git") or {}
+        f = fs.get("file") or fs.get("path") or ""
+        line = fs.get("line") or 0
+        verified = bool(x.get("Verified"))
+        sev = "CRITICAL" if verified else "MEDIUM"
+        note = ("★ VERIFIED LIVE — TruffleHog authenticated with this credential against the provider. "
+                "Rotate it NOW; it is not a maybe."
+                if verified else
+                "detector matched but liveness UNVERIFIED (provider unreachable or key inactive)")
+        out.append({"tool": "trufflehog", "category": "secret", "severity": sev,
+                    "key": str(det), "file": f, "line": line, "verified": verified,
+                    "title": f"secret: {det} — {note}",
+                    "fingerprint": f"secret|{f}|{det}|{line}"})
+    return out
+
+
 def _norm_gitleaks(data) -> list:
     rows = data if isinstance(data, list) else (data.get("findings") or [])
     out = []
@@ -614,7 +675,8 @@ def _norm_checkov(data) -> list:
 
 _PARSERS = {"trivy": _norm_trivy, "gitleaks": _norm_gitleaks, "semgrep": _norm_semgrep,
             "checkov": _norm_checkov, "osv-scanner": _norm_osv,
-            "gosec": _norm_gosec, "brakeman": _norm_brakeman}
+            "gosec": _norm_gosec, "brakeman": _norm_brakeman,
+            "trufflehog": _norm_trufflehog}
 
 
 def _gitignored(target: Path | None, paths) -> set:
@@ -665,7 +727,19 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
         if not (out and parser and Path(out).exists()):
             continue
         try:
-            raw += parser(json.loads(Path(out).read_text() or "{}"))
+            text = Path(out).read_text()
+            if key == "trufflehog":          # JSON-LINES, one finding per line
+                doc = []
+                for ln in text.splitlines():
+                    ln = ln.strip()
+                    if ln.startswith("{"):
+                        try:
+                            doc.append(json.loads(ln))
+                        except ValueError:
+                            continue         # a partial/among-progress line is not fatal
+            else:
+                doc = json.loads(text or "{}")
+            raw += parser(doc)
         except Exception:
             continue
 
