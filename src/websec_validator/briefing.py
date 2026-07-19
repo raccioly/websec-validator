@@ -42,6 +42,14 @@ def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list
     inventory_md = _inventory.render_md(_inv)                      # §3a — ranked "test in this order"
     dast_md = _dast.render_md(_pred)                              # §4b — predicted scanner alerts + blind spots
     testplan_md = _testplan.render_md(_testplan.build(facts, _inv, _pred))  # §5b — phased runbook
+    # §4c — findings a reviewer/LLM-reviewer would routinely filter (tagged, never dropped).
+    from . import fpfilter as _fpfilter
+    from . import fixprompt as _fixprompt
+    _fp_counts = {"likely_filtered": sum(1 for f in ((ledger or {}).get("findings") or [])
+                                         if f.get("likely_filtered"))}
+    fpfilter_md = _fpfilter.render_md(ledger or {}, _fp_counts)
+    # §6b — one paste-ready fix instruction per finding, each ending in a VERIFY step.
+    fixprompts_md = _fixprompt.render_md(_fixprompt.build(ledger or {}))
 
     authz = facts.get("authz", {})
     gs = authz.get("guard_summary", {})
@@ -319,6 +327,10 @@ Install for fuller coverage:
 
 {dast_md}
 
+## 4c. Pre-triage — what a reviewer would filter (tagged, NOT dropped)
+
+{fpfilter_md}
+
 ## 5. Tailored probes (staged — drafts you finalize against §2–§3)
 
 {probe_lines}
@@ -328,6 +340,10 @@ Keep these in the repo after you run them — re-running after a fix proves "sti
 ## 5b. ★★ Pentest runbook — phased & pre-aimed (opt-in, against an instance you own)
 
 {testplan_md}
+
+## 5c. ★ Fix prompts — paste one straight into your agent
+
+{fixprompts_md}
 
 ## 6. How to work this — verify with a debate, then fix
 

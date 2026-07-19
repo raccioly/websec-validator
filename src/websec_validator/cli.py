@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 from . import (__version__, baseline, briefing, calibration, constitution, diffscope, dynamic, findings,
-               formats, inventory, probes, proof, recon, report, scanners)
+               formats, fpfilter, inventory, probes, proof, recon, report, scanners)
 
 
 def _resolve_target(raw: str) -> Path:
@@ -260,6 +260,13 @@ def cmd_run(args) -> int:
                     f"max blast-radius {ge['max_blast_radius']} (source: {ge['graph']})")
         except Exception as e:  # enrichment is best-effort — never fail the run over it
             log(f"\n  graph: enrichment skipped ({type(e).__name__}: {e})")
+
+    # 4a1. FP pre-pass: tag (never drop) findings a reviewer/LLM-reviewer would routinely filter,
+    # so a downstream consumer can skip its own filtering pass.
+    fp_counts = fpfilter.annotate(ledger, facts)
+    if fp_counts.get("likely_filtered"):
+        log(f"  pre-triage: {fp_counts['likely_filtered']} finding(s) tagged likely-filtered "
+            f"(kept + reasoned, not dropped) · {fp_counts['kept']} high-signal")
 
     # 4a2. --diff: scope to what this branch/PR changed. Tags findings + emits exact hunk ranges so a
     # downstream reviewer (human or LLM) can validate that a finding sits on a CHANGED line.
