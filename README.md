@@ -101,6 +101,8 @@ websec run ./my-app --scan             # …and also execute the available stati
 websec run ./my-app --scan --sbom      # …and emit a CycloneDX SBOM (sbom.cdx.json) for CI/compliance
 websec run ./my-app --format sarif     # SARIF 2.1.0 to stdout (for piping into CI); also always written to the run dir
 websec run ./my-app --fail-on high     # exit 1 if any HIGH+ finding remains (a CI gate)
+websec run ./my-app --diff main        # PR mode: scope to changed files + exact hunk line ranges
+websec run ./my-app --scan --verify-secrets   # opt in to TruffleHog LIVE secret verification (egress!)
 websec doctor ./my-app                 # (optional) which scanners are installed?
 websec emit-context ./my-app           # print recon as a Claude Code SessionStart context envelope
 websec mcp                             # run as an MCP server over stdio (typed recon tools for any MCP client)
@@ -172,6 +174,25 @@ signal commercial tools sell, minus the cloud:
 Both are **strictly additive**: they annotate and re-rank, but never change a finding's severity, drop
 one, or add one — so they can only sharpen triage, never reintroduce a false positive.
 
+## Aim the pentest instead of competing with it
+
+Dynamic scanners re-discover at runtime, expensively, much of what is already visible in the source.
+websec knows it statically, so it aims them:
+
+- **§4b — what a DAST *will* report, before you run one.** Each static finding is mapped to the concrete
+  scanner signature it produces (`missing-csp` → ZAP 10038/10055, `sqli` → ZAP 40018 / sqlmap, `ssrf` →
+  Nuclei OAST…) with the source location that causes it. Fix those and the scan comes back clean on them
+  — the run becomes *confirmation*, not discovery.
+- **§4b also lists the blind spots.** BOLA, missing-auth, mass-assignment, RLS gaps, JWT alg-confusion,
+  committed secrets, supply-chain — with *why* no scanner finds them. A clean scan is not "safe", and
+  saying so is the point.
+- **§5b — a phased, pre-aimed runbook.** Phase 1 safe recon → Phase 2 authz (two identities, the
+  scanner-blind class) → Phase 3 injection, fired only at sink-backed endpoints and gated behind an
+  explicit authorization warning. Every item names a real target and a confirm/disconfirm oracle.
+- **Close the loop:** `websec calibrate --ingest-dast zap.json --ledger findings-ledger.json` feeds a real
+  scan back — confirming or refuting each prediction — so `P(real)` personalizes to your app over time.
+  Blind-spot classes are never scored: a scanner's silence there means nothing.
+
 ## What it extracts (22 deterministic extractors, no LLM)
 
 | | Dimension | Notable output |
@@ -212,6 +233,8 @@ candidates — so probes get pointed at the *exact* endpoints, not fired blindly
 | `results.sarif` | **SARIF 2.1.0** — always written. Drop it into **GitHub Code Scanning** (inline PR-diff annotations + the Security tab), GitLab, Azure DevOps, VS Code's SARIF viewer, DefectDojo. |
 | `findings.envelope.json` | A **versioned, self-describing** JSON envelope (`schema_version`) around the ledger — for non-GitHub CI / dashboards that shouldn't reverse-engineer the internal shape. |
 | `sbom.cdx.json` | A **CycloneDX SBOM** (with `--sbom`; `--sbom spdx` for SPDX) — the dependency inventory for SLSA / EO 14028 supply-chain gates, and the substrate a downstream scanner can rescan without re-walking the tree. |
+| `attack-surface.json` | The ranked per-endpoint planning table (routes × auth × sinks × risk + the reasons) — briefing §3a. |
+| `diff-scope.json` | With `--diff`: changed files + exact added/modified line ranges, so any reviewer can validate a finding sits on a changed line. |
 | `probes/` | The probe scripts selected + staged for *this* app (BOLA, JWT, SSRF, mass-assignment…). |
 
 ## The flow
