@@ -16,8 +16,8 @@ import json
 import sys
 from pathlib import Path
 
-from . import (__version__, baseline, briefing, calibration, constitution, dynamic, findings, formats,
-               inventory, probes, proof, recon, report, scanners)
+from . import (__version__, baseline, briefing, calibration, constitution, diffscope, dynamic, findings,
+               formats, inventory, probes, proof, recon, report, scanners)
 
 
 def _resolve_target(raw: str) -> Path:
@@ -261,6 +261,23 @@ def cmd_run(args) -> int:
         except Exception as e:  # enrichment is best-effort — never fail the run over it
             log(f"\n  graph: enrichment skipped ({type(e).__name__}: {e})")
 
+    # 4a2. --diff: scope to what this branch/PR changed. Tags findings + emits exact hunk ranges so a
+    # downstream reviewer (human or LLM) can validate that a finding sits on a CHANGED line.
+    diff_scope = diff_counts = None
+    if getattr(args, "diff", None):
+        diff_scope = diffscope.compute(target, args.diff)
+        diff_counts = diffscope.annotate(ledger, diff_scope)
+        (out / "diff-scope.json").write_text(json.dumps(
+            {"base": diff_scope.get("base"), "error": diff_scope.get("error"),
+             "files": {f: [list(r) for r in rs] for f, rs in (diff_scope.get("files") or {}).items()},
+             "counts": diff_counts}, indent=2))
+        if diff_scope.get("error"):
+            log(f"  ⚠ --diff {args.diff}: {diff_scope['error']} — running UNSCOPED (whole repo)")
+        else:
+            log(f"  diff scope: {diff_counts['changed_files']} changed file(s) vs {diff_scope['base']} · "
+                f"{diff_counts['in_changed_file']} finding(s) in changed files "
+                f"({diff_counts['untouched']} pre-existing) → diff-scope.json")
+
     # 4b. baseline / diff — only NEW findings gate CI when a baseline is supplied
     diff = None
     if getattr(args, "baseline", None):
@@ -308,10 +325,19 @@ def cmd_run(args) -> int:
     # 6. CI gate — exit non-zero if findings at/above --fail-on remain (only NEW ones when a baseline
     # is supplied). Default (no --fail-on) never fails the build.
     if getattr(args, "fail_on", None):
-        n = baseline.gate_count(ledger, args.fail_on, new_only=bool(diff))
+        # --diff narrows the gate to findings in CHANGED files (PR semantics: don't fail a PR on
+        # pre-existing debt it didn't touch). Only when scoping actually succeeded.
+        _gate_ledger = ledger
+        _scoped = bool(diff_scope and not diff_scope.get("error"))
+        if _scoped:
+            _gate_ledger = dict(ledger, findings=[f for f in ledger.get("findings", [])
+                                                  if f.get("diff_state") == "in-changed-file"])
+        n = baseline.gate_count(_gate_ledger, args.fail_on, new_only=bool(diff))
         if n:
             log(f"\n✗ --fail-on {args.fail_on}: {n} finding(s) at or above threshold"
-                + (" (new since baseline)" if diff else "") + " — failing the build.")
+                + (" (new since baseline)" if diff else "")
+                + (f" (in files changed vs {diff_scope['base']})" if _scoped else "")
+                + " — failing the build.")
             return 1
         log(f"\n✓ --fail-on {args.fail_on}: no findings at or above threshold"
             + (" (new since baseline)" if diff else "") + ".")
@@ -620,6 +646,10 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--fail-on", choices=["critical", "high", "medium", "low"], dest="fail_on",
                    help="exit 1 if any finding at/above this severity remains (CI gate). With --baseline, "
                         "only NEW findings count.")
+    r.add_argument("--diff", metavar="REF",
+                   help="scope to what changed vs REF (e.g. --diff main): tags findings "
+                        "in-changed-file, emits exact hunk line ranges to diff-scope.json, and "
+                        "narrows --fail-on to changed files (PR/CI review mode)")
     r.add_argument("--baseline", metavar="LEDGER.json",
                    help="a prior findings-ledger.json — mark findings new/unchanged/fixed and gate only on NEW")
     r.add_argument("--graph", metavar="GRAPH.json",
