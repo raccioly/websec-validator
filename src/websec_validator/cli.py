@@ -466,6 +466,33 @@ def cmd_calibrate(args) -> int:
     write calibration.json (shipped + applied at runtime by findings.build_ledger)."""
     from importlib import resources
 
+    # --ingest-dast: close the loop with a REAL scan — a ZAP/Nuclei report confirms/refutes websec's
+    # DAST-predictable findings (§4b) and folds the verdicts into your local overlay. Needs the ledger.
+    if getattr(args, "ingest_dast", None):
+        from . import dast_ingest
+        rpt = Path(args.ingest_dast).expanduser().resolve()
+        led_path = Path(args.ledger).expanduser().resolve() if getattr(args, "ledger", None) else None
+        if not rpt.is_file():
+            sys.exit(f"error: --ingest-dast report not found: {rpt}")
+        if not led_path or not led_path.is_file():
+            sys.exit("error: --ingest-dast needs --ledger <findings-ledger.json> to match against")
+        report = json.loads(rpt.read_text())
+        ledger = json.loads(led_path.read_text())
+        res = dast_ingest.derive_labels(ledger, report)
+        if not res["labels"]:
+            print("websec calibrate --ingest-dast: no DAST-predictable findings in the ledger matched "
+                  f"the scan (blind-spot findings skipped: {res['skipped_blind']}). Nothing to fold.")
+            return 0
+        rec = calibration.record_samples(res["labels"])
+        if not rec:
+            sys.exit("error: nothing ingested (local overlay not writable)")
+        nc, nr = len(res["confirmed"]), len(res["refuted"])
+        print(f"websec calibrate --ingest-dast: the scan CONFIRMED {nc} finding(s) and REFUTED {nr} "
+              f"(scanner-capable but silent → likely FP/fixed); {res['skipped_blind']} blind-spot "
+              f"finding(s) left unscored (a scan can't judge them). Folded {len(res['labels'])} sample(s) "
+              f"into {calibration.LOCAL_PATH} → {rec['meta']['samples']} total; P(real) now personalizes to your app.")
+        return 0
+
     # --ingest: fold a hand-labeled findings file into your LOCAL overlay (the manual real-repo path)
     if getattr(args, "ingest", None):
         src = Path(args.ingest).expanduser().resolve()
@@ -630,6 +657,12 @@ def build_parser() -> argparse.ArgumentParser:
     cal.add_argument("--workdir", help="where corpus apps are cloned (default: ~/.cache/websec-corpus)")
     cal.add_argument("--out", help="where to write calibration.json (default: bundled, next to the package)")
     cal.add_argument("--ingest", help="fold a hand-labeled findings JSON ({attack_class,confidence,is_real}) into your LOCAL overlay")
+    cal.add_argument("--ingest-dast", dest="ingest_dast", metavar="REPORT.json",
+                     help="close the loop with a real scan: a ZAP/Nuclei report confirms/refutes this "
+                          "repo's DAST-predictable findings and folds the verdicts into calibration "
+                          "(needs --ledger)")
+    cal.add_argument("--ledger", metavar="findings-ledger.json",
+                     help="the websec ledger the --ingest-dast report is matched against")
     cal.set_defaults(func=cmd_calibrate)
 
     dyn = sub.add_parser("dynamic", help="dynamic probes vs a LIVE target (read-only): cross-tenant BOLA (--config) or unauth reachability (--unauth)")
