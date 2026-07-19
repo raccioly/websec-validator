@@ -42,6 +42,13 @@ def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list
     inventory_md = _inventory.render_md(_inv)                      # §3a — ranked "test in this order"
     dast_md = _dast.render_md(_pred)                              # §4b — predicted scanner alerts + blind spots
     testplan_md = _testplan.render_md(_testplan.build(facts, _inv, _pred))  # §5b — phased runbook
+    # §3e — OpenAPI contract: shadow (undocumented) endpoints + spec hygiene.
+    # (§3d is the graph blast-radius section — do not reuse that label.)
+    from . import openapi as _openapi
+    try:
+        openapi_md = _openapi.render_md(_openapi.analyze(facts, facts.get("target") or "."))
+    except Exception:
+        openapi_md = "_OpenAPI analysis unavailable._"
     # §4c — findings a reviewer/LLM-reviewer would routinely filter (tagged, never dropped).
     from . import fpfilter as _fpfilter
     from . import fixprompt as _fixprompt
@@ -262,6 +269,10 @@ credentials** — ask the human, never fabricate, never hit production.
 ## 3a. ★★ Attack-surface inventory — TEST IN THIS ORDER
 
 {inventory_md}
+
+## 3e. ★ API contract — shadow endpoints & spec hygiene
+
+{openapi_md}
 
 ## 3b. ★ Access control (who can reach what — your #1 test)
 
