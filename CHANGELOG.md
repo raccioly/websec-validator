@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **UploadSecurityExtractor**: Tightened regexes to eliminate false positives around static asset serving, originalname logging, and generic blocklists (e.g., users or emails instead of file extensions).
+
 ## [0.11.0] — 2026-07-11
 
 Distribution & integration round — reach every agent host, run as a local guardrail, and compose with
