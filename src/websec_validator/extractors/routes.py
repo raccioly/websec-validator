@@ -422,10 +422,87 @@ def _handler_signal_count(ctx: RepoContext) -> int:
 
 # ---- regex fallback (Noir absent — decorator/file frameworks the heuristic doesn't cover) ----
 
+def _fallback_openapi(ctx: RepoContext) -> list:
+    rows = []
+    import json
+    from .base import SKIP_DIRS
+    for p in ctx.root.rglob("*"):
+        if p.is_file() and p.suffix.lower() in {".json", ".yaml", ".yml"}:
+            try:
+                if any(part in SKIP_DIRS for part in p.relative_to(ctx.root).parts):
+                    continue
+            except ValueError:
+                continue
+            if ctx._excluded(str(p)):
+                continue
+            try:
+                text = p.read_text(errors="ignore")
+                if not re.search(r"^(?:openapi|swagger)[\s'\":]", text, re.I | re.M) and '"openapi"' not in text and '"swagger"' not in text:
+                    continue
+                rel = ctx.rel(p)
+                # Naive openapi parsing for fallback using json/yaml if available or naive regex fallback
+                if p.suffix == ".json":
+                    try:
+                        data = json.loads(text)
+                        for path, methods in data.get("paths", {}).items():
+                            for method in methods.keys():
+                                if method.upper() in {"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"}:
+                                    rows.append({
+                                        "method": method.upper(),
+                                        "path": path,
+                                        "params": [],
+                                        "technology": "openapi",
+                                        "code_path": rel,
+                                        "source": "fallback-openapi"
+                                    })
+                        continue
+                    except:
+                        pass
+
+                in_paths = False
+                current_path = None
+                path_indent = -1
+                for line in text.splitlines():
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith("#"):
+                        continue
+                    if re.match(r"^['\"]?paths['\"]?\s*:", line.lstrip()):
+                        in_paths = True
+                        path_indent = len(line) - len(line.lstrip())
+                        continue
+
+                    if in_paths:
+                        indent = len(line) - len(line.lstrip())
+                        if indent <= path_indent and not stripped.startswith(("}", "]")) and stripped != "":
+                            in_paths = False
+                            continue
+
+                        path_match = re.match(r"^['\"]?(/[^'\"]*)['\"]?\s*:", stripped)
+                        if path_match:
+                            current_path = path_match.group(1)
+                            continue
+
+                        if current_path:
+                            method_match = re.match(r"^['\"]?(get|post|put|patch|delete|options|head)['\"]?\s*:", stripped, re.I)
+                            if method_match:
+                                rows.append({
+                                    "method": method_match.group(1).upper(),
+                                    "path": current_path,
+                                    "params": [],
+                                    "technology": "openapi",
+                                    "code_path": rel,
+                                    "source": "fallback-openapi"
+                                })
+            except Exception:
+                pass
+    return rows
+
+
 def _fallback(ctx: RepoContext) -> list:
     rows = []
     rows += _fallback_next_app_router(ctx)
     rows += _fallback_regex(ctx)
+    rows += _fallback_openapi(ctx)
     rows += _router_calls(ctx)           # generic router calls (Express/itty/Hono/Workers)
     # clean + filter noise + de-dup on (method, path)
     seen, out = set(), []
