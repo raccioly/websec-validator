@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Fixed false positives in `upload_security` extractor: `upload-key-from-filename` when logging `originalname`, and `upload-accepts-svg` when explicitly sanitizing SVGs with `DOMPurify.sanitize()`.
+
 ## [0.11.0] — 2026-07-11
 
 Distribution & integration round — reach every agent host, run as a local guardrail, and compose with

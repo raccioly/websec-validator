@@ -26,10 +26,10 @@ ALLOW_LIST = re.compile(r"isAllowedMediaType|allowedMimeTypes|allow[_-]?list|whi
                         r"|ACCEPTED_(?:MIME|TYPES?|EXT)|accepted(?:Mime|File|Content)?(?:Types?|Extensions?)"
                         r"|\bfile-type\b|fileTypeFrom|magic[_-]?byte|detectContentType|\.fromBuffer\b|sniff", re.I)
 KEY_FROM_NAME = re.compile(r"(?:Key|key|path|filename|filepath|destination|filename\s*\()\s*[:=(][^;\n]{0,90}"
-                           r"\b(?:originalname|originalName|file\.name)\b"
-                           r"|`[^`]*\$\{[^}]*\boriginalname\b[^}]*\}[^`]*`", re.I)
+                           r"\b(?:originalname|originalName|file\.name)\b", re.I)
 TRUST_CLIENT_MIME = re.compile(r"(?:req\.files?\.[\w$.]*\.|\bfile\.)mimetype\b|headers\[['\"]content-type['\"]\]", re.I)
 ACCEPT_SVG = re.compile(r"image/svg\+xml|['\"]svg['\"]", re.I)
+SVG_SANITIZE = re.compile(r"DOMPurify\.sanitize|sanitizeHtml", re.I)
 # file-serving: streaming a STORED/PROXIED object back to the client. Tightened to genuine
 # file-bytes sinks — the old rule matched a bare `getObject` token (a local coercion helper) and a
 # Prometheus `res.set('Content-Type', registry.contentType)` (the /metrics endpoint), both FPs.
@@ -72,7 +72,7 @@ class UploadSecurityExtractor(Extractor):
                     findings.append({"severity": "MEDIUM", "kind": "upload-trusts-client-mime", "file": rel,
                                      "detail": "Storage/validation decision uses the client-supplied `mimetype`/"
                                                "Content-Type, which is attacker-controlled. Sniff the bytes instead."})
-                if ACCEPT_SVG.search(text):
+                if ACCEPT_SVG.search(text) and not SVG_SANITIZE.search(text):
                     findings.append({"severity": "MEDIUM", "kind": "upload-accepts-svg", "file": rel,
                                      "detail": "`image/svg+xml` is accepted — SVG can carry inline <script> and renders "
                                                "as HTML. Drop SVG from the allow-list, or sanitize + serve as attachment."})
