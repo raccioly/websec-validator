@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- Fix `test_end_to_end_post_commit_runs` failing due to global `core.hooksPath` override by explicitly setting it in `_init_repo` in tests/test_hooks.py.
 
 ## [0.11.0] — 2026-07-11
 
