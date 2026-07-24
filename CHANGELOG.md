@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- **Extractors**: `SurfaceExtractor` fixed to catch SQL injection cases where a vulnerable formatted SQL string is assigned to a variable just before execution (e.g. VAmPI pattern).
 
 ## [0.11.0] — 2026-07-11
 

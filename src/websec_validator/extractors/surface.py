@@ -49,7 +49,7 @@ SINKS = {
         r"(?:child_process\.exec|\bexecSync|\bexec|\bspawn|os\.system|subprocess\.(?:run|call|check_output|Popen))\s*\([^)]*"
         + _U + r"|shell\s*=\s*True")),
     "sql-injection": ("bola-write-verbs", "sql", re.compile(
-        r"(?:\.query|\.execute|\.raw|cursor\.execute|sequelize\.query|knex\.raw)\s*\([^)]*(?:\$\{|\+|%\s*[\(%]|\.format\s*\(|f['\"])")),
+        r"(?:\.query|\.execute|\.raw|cursor\.execute|sequelize\.query|knex\.raw)\s*\([^)]*(?:\$\{|\+|%\s*[\(%]|\.format\s*\(|f['\"])|(?:f['\"]|`)[^'\"`]*(?:SELECT|UPDATE|INSERT|DELETE)[^'\"`]*(?:['\"]|`).{0,200}?(?:\.query|\.execute|\.raw)\s*\(", re.IGNORECASE | re.DOTALL)),
     "nosql-injection": ("bola-write-verbs", "nosql", re.compile(
         r"\.(?:find|findOne|update|updateOne|deleteOne|aggregate)\s*\(\s*(?:req\.|request\.)|\$where")),
     "path-traversal": ("bola-write-verbs", None, re.compile(
