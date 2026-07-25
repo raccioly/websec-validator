@@ -48,3 +48,4 @@ base-research/**
 # <PROJECT_NAME> they fill in for their own app). The "fill this in" instructional
 # comments are not project TODOs, so exclude them from TODO/surface validation.
 src/websec_validator/templates/probes/**
+websec-out/
