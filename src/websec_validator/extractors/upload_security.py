@@ -25,16 +25,16 @@ DENY_LIST = re.compile(r"isExecutableMimeType|blockedMimeTypes|blacklist|deny[_-
 ALLOW_LIST = re.compile(r"isAllowedMediaType|allowedMimeTypes|allow[_-]?list|whitelist|ALLOWED_(?:MIME|TYPES|EXT)"
                         r"|ACCEPTED_(?:MIME|TYPES?|EXT)|accepted(?:Mime|File|Content)?(?:Types?|Extensions?)"
                         r"|\bfile-type\b|fileTypeFrom|magic[_-]?byte|detectContentType|\.fromBuffer\b|sniff", re.I)
-KEY_FROM_NAME = re.compile(r"(?:Key|key|path|filename|filepath|destination|filename\s*\()\s*[:=(][^;\n]{0,90}"
-                           r"\b(?:originalname|originalName|file\.name)\b"
+KEY_FROM_NAME = re.compile(r"(?:(?:upload)?[Kk]ey|path|filepath|destination|uploadDir)\s*[:=(][^;\n]{0,90}\b(?:originalname|originalName|file\.name)\b"
+                           r"|(?:const|let|var)\s+filename\s*=\s*[^;\n]{0,90}\b(?:originalname|originalName|file\.name)\b"
+                           r"|filename\s*[:(]\s*(?:function|\([^)]*\)\s*=>)[^;\n]{0,90}\b(?:originalname|originalName|file\.name)\b"
                            r"|`[^`]*\$\{[^}]*\boriginalname\b[^}]*\}[^`]*`", re.I)
 TRUST_CLIENT_MIME = re.compile(r"(?:req\.files?\.[\w$.]*\.|\bfile\.)mimetype\b|headers\[['\"]content-type['\"]\]", re.I)
 ACCEPT_SVG = re.compile(r"image/svg\+xml|['\"]svg['\"]", re.I)
 # file-serving: streaming a STORED/PROXIED object back to the client. Tightened to genuine
 # file-bytes sinks — the old rule matched a bare `getObject` token (a local coercion helper) and a
 # Prometheus `res.set('Content-Type', registry.contentType)` (the /metrics endpoint), both FPs.
-SERVE_FILE = re.compile(r"res\.sendFile|\.sendFile\s*\(|\.getObject\s*\(|createReadStream|proxyMedia"
-                        r"|streamObject|\.pipe\s*\(\s*res\b|fs\.createReadStream", re.I)
+SERVE_FILE = re.compile(r"res\.sendFile|\.sendFile\s*\(|createReadStream|proxyMedia|streamObject|\.pipe\s*\(\s*res\b|fs\.createReadStream", re.I)
 NOSNIFF = re.compile(r"nosniff", re.I)
 # `Content-Disposition: attachment` fully defeats the MIME-sniff→stored-XSS vector (the browser
 # downloads instead of rendering), so a serve site that sets it is SAFE even without nosniff.

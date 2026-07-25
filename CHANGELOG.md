@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Fixed upload-key-from-filename and serve-no-nosniff false positives triggered by loggers, db updates, or benign stream usage in `upload_security.py`.
+
+
 ## [0.11.0] — 2026-07-11
 
 Distribution & integration round — reach every agent host, run as a local guardrail, and compose with
