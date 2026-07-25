@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Fixed an SSRF false-negative where `ssrf` and `ssrf-outbound-http` extractors did not match outbound HTTP requests using `needle.get(url, ...)`. Updated regex patterns in `surface.py` to use `needle(?:\.\w+)?` and added a regression test for the pattern found in NodeGoat.
+
 ## [0.11.0] — 2026-07-11
 
 Distribution & integration round — reach every agent host, run as a local guardrail, and compose with
