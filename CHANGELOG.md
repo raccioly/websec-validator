@@ -570,6 +570,11 @@ The initial public line. Highlights across 0.2.1–0.2.9:
 ### Fixed
 - Scanner-contamination and rate-limit fixes (agent-wallet dogfood).
 
+## [Unreleased]
+
+### Fixed
+- **Test environment hermeticity** — explicitly set `core.hooksPath` to `.git/hooks` locally inside test repository setups (`_init_repo` in `tests/test_hooks.py`) to prevent global git configurations from bypassing hook execution.
+
 [Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.11.0...HEAD
 [0.11.0]: https://github.com/raccioly/websec-validator/compare/v0.10.0...v0.11.0
 [0.4.2]: https://github.com/raccioly/websec-validator/compare/v0.4.1...v0.4.2
