@@ -25,16 +25,19 @@ from .base import Extractor, RepoContext, is_test_file
 _PW = r"(?:password|passwd|passphrase|\bpwd\b|userPassword|plainPassword)"
 # a fast digest fed a password-shaped value (either arg order, within a small window)
 WEAK_PW_HASH = re.compile(
-    r"createHash\s*\(\s*['\"](?:md5|sha1|sha256|sha224)['\"]\s*\)[\s\S]{0,160}?\.update\s*\([^)]*" + _PW
-    + r"|" + _PW + r"[\s\S]{0,80}?createHash\s*\(\s*['\"](?:md5|sha1|sha256|sha224)['\"]"
-    + r"|hashlib\.(?:md5|sha1|sha256|sha224)\s*\([^)]*" + _PW
-    + r"|(?:md5|sha1|sha256)\s*\([^)]*" + _PW + r"[^)]*\)\.(?:hexdigest|digest)", re.I)
+    r"createHash\s*\(\s*[\'\"](?:md5|sha1|sha256|sha224)[\'\"]\s*\)[\s\S]{0,80}?\.update\s*\(\s*" + _PW + r"\s*\)"
+    r"|hashlib\.(?:md5|sha1|sha256|sha224)\s*\(\s*" + _PW + r"\s*\)"
+    r"|(?:md5|sha1|sha256)\s*\(\s*" + _PW + r"\s*\)\.(?:hexdigest|digest)", re.I)
 # a password-auth context + a fast hash + no strong KDF in the file — catches the case where the
 # password is renamed (`sha256Hex(password)` → `createHash('sha256').update(input)`) so the token
 # isn't adjacent to the hash, but the file is clearly hashing a credential the weak way.
 PW_CONTEXT = re.compile(r"verify\w*[Pp]assword|hash\w*[Pp]assword|compare\w*[Pp]assword|"
                         r"[Pp]asswordHash|checkPassword|passwordDigest|set\w*[Pp]assword", re.I)
 FAST_HASH = re.compile(r"createHash\s*\(\s*['\"](?:md5|sha1|sha256|sha224)['\"]|hashlib\.(?:md5|sha1|sha256|sha224)\b", re.I)
+PW_CONTEXT_FAST_HASH = re.compile(
+    r"(?:verify|hash|compare|check|set)\w*[Pp]assword[\s\S]{0,250}?"
+    r"(?:createHash\s*\(\s*[\'\"](?:md5|sha1|sha256|sha224)[\'\"]\s*\)[\s\S]{0,40}?\.update\s*\(\s*(?:[a-zA-Z0-9_]*[Pp]ass(?:word)?|[a-zA-Z0-9_]*[Kk]ey|[a-zA-Z0-9_]*[Ss]ecret|[a-zA-Z0-9_]*[Cc]red|input|data|str|val|value|[a-zA-Z0-9_]{1,6})\s*\)"
+    r"|hashlib\.(?:md5|sha1|sha256|sha224)\s*\(\s*(?:[a-zA-Z0-9_]*[Pp]ass(?:word)?|[a-zA-Z0-9_]*[Kk]ey|[a-zA-Z0-9_]*[Ss]ecret|[a-zA-Z0-9_]*[Cc]red|input|data|str|val|value|[a-zA-Z0-9_]{1,6})\s*\))", re.I)
 STRONG_KDF = re.compile(r"\bbcrypt\b|\bargon2|\bscrypt\b|\bpbkdf2\b", re.I)
 # PKCE (RFC 7636) MANDATES a SHA-256 digest over the code_verifier to build the code_challenge. That's a
 # createHash('sha256') sitting in an auth file, but its input is a VERIFIER, not a password — flagging it
@@ -50,9 +53,10 @@ PRINCIPAL_USE = re.compile(r"\b(?:tenant_?Id|user_?Id|set_config\s*\(\s*['\"]app
 # a request-supplied secret/token/signature compared with ===/!== (non-constant-time) instead of a
 # timing-safe equal — a credential/HMAC timing side-channel (CWE-208).
 TIMING_UNSAFE = re.compile(
-    r"(?:req|request|ctx)\.(?:headers?|header|get)\b[^;\n]{0,70}\b(?:authorization|token|signature|hmac|secret|api[_-]?key)\b[^;\n]{0,70}[!=]==?"
-    r"|\b(?:authorization|signature|hmac|x-[\w-]*signature|providedToken|givenToken)\b[^;\n]{0,50}[!=]==?\s*(?:expected|valid|secret|process\.env|config\.)"
-    r"|[!=]==?\s*(?:expectedSignature|expectedToken|expectedAuth|expectedHmac|validSignature)\b", re.I)
+    r"(?:req|request|ctx)\.(?:headers?|header|get)\s*(?:\[|\()\s*[\'\"](?:authorization|token|signature|hmac|secret|api[_-]?key)[\'\"]\s*(?:\]|\))\s*(?:\|\|[\s\S]{0,30}?)?[!=]==?"
+    r"|\b(?:req|request|ctx)\.headers?\.(?:authorization|token|signature|hmac|secret|api[_-]?key)\b[\s\S]{0,30}?[!=]==?"
+    r"|\b(?!(?:is|has|was|should|can)[A-Z])(?:[a-zA-Z0-9_]*)(?:authorization|signature|hmac|x-[\w-]*signature|providedToken|givenToken)\b[^;\n]{0,50}[!=]==?\s*(?:expected|valid|secret|process\.env|config\.)"
+    r"|\b(?!(?:is|has|was|should|can)[A-Z]|(?:[a-zA-Z0-9_]*)(?:[sS]tatus|[sS]tate|[mM]ode|[cC]ompleted)\b)(?:[a-zA-Z0-9_]+)\s*[!=]==?\s*(?:expectedSignature|expectedToken|expectedAuth|expectedHmac|validSignature)\b", re.I)
 TIMING_SAFE = re.compile(r"timingSafeEqual|compare_digest|secure_compare|constantTimeEqual|crypto\.timingSafeEqual", re.I)
 
 
@@ -74,8 +78,7 @@ class CryptoUsageExtractor(Extractor):
         for _p, rel, text in ctx.iter_code():
             if is_test_file(rel):
                 continue
-            if ((WEAK_PW_HASH.search(text) or (PW_CONTEXT.search(text) and FAST_HASH.search(text)
-                                               and not STRONG_KDF.search(text)))
+            if ((WEAK_PW_HASH.search(text) or (PW_CONTEXT_FAST_HASH.search(text) and not STRONG_KDF.search(text)))
                     and not PKCE_CONTEXT.search(text)):     # PKCE S256 over the verifier ≠ password hash
                 add("HIGH", "weak-password-hash", "weak-password-hash", rel,
                     "A password appears to be hashed/verified with a FAST, unsalted digest "

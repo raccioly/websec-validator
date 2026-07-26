@@ -122,6 +122,7 @@ class HooksTests(unittest.TestCase):
         # Ensure the hook's interpreter can import websec_validator from source.
         env["PYTHONPATH"] = str(ROOT / "src") + os.pathsep + env.get("PYTHONPATH", "")
         subprocess.run(["git", "add", "-A"], cwd=self.root, check=True, env=env)
+        subprocess.run(["git", "config", "core.hooksPath", ".git/hooks"], cwd=self.root, check=True)
         r = subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=self.root,
                            capture_output=True, text=True, env=env)
         self.assertEqual(r.returncode, 0, r.stderr)
