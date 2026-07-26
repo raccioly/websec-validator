@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Fixed multiple false positives in `crypto_usage` extractor (timing-unsafe comparison and weak password hash).
+- Fixed `test_end_to_end_post_commit_runs` hook test to pass by injecting git hook config path before git commit.
+
+
 ## [0.11.0] — 2026-07-11
 
 Distribution & integration round — reach every agent host, run as a local guardrail, and compose with

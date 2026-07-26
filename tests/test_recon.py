@@ -1453,6 +1453,31 @@ class Wave2bDetectorTests(unittest.TestCase):
                                     "Buffer.from(expected))) return deny();"})
         self.assertNotIn("timing-unsafe-compare", self._kinds(out))
 
+    def test_fp_unrelated_status_compare_not_flagged(self):
+        out = self._crypto({"auth.ts": "const currentStatus = getStatus();\nif (currentStatus === expectedAuth) { proceed(); }"})
+        self.assertNotIn("timing-unsafe-compare", self._kinds(out))
+
+    def test_fp_password_nearby_unrelated_hash_not_flagged(self):
+        out = self._crypto({"auth.ts": "function uploadProfile(userPassword, fileBuffer) { return crypto.createHash('md5').update(fileBuffer).digest('hex'); }"})
+        self.assertNotIn("weak-password-hash", self._kinds(out))
+
+    def test_fp_pw_context_unrelated_hash_not_flagged(self):
+        out = self._crypto({"auth.ts": "function checkPasswordMatch(p1, p2) { const isMatch = p1 === p2; const eventId = crypto.createHash('sha1').update(Math.random().toString()).digest('hex'); return isMatch; }"})
+        self.assertNotIn("weak-password-hash", self._kinds(out))
+
+    def test_fp_header_authorization_mode_not_flagged(self):
+        out = self._crypto({"auth.ts": "if (req.header('x-authorization-mode') === 'sso') { redirectSso(); }"})
+        self.assertNotIn("timing-unsafe-compare", self._kinds(out))
+
+    def test_fp_boolean_authorization_check_not_flagged(self):
+        out = self._crypto({"auth.ts": "const hasAuthorization = checkPermissions(user);\nif (hasAuthorization === validSignature) { }"})
+        self.assertNotIn("timing-unsafe-compare", self._kinds(out))
+
+    def test_fp_weak_hash_other_var_not_flagged(self):
+        out = self._crypto({"auth.ts": "const setPassword = (password) => { const hash = createHash('sha256').update(someOtherData).digest(); return hash; }"})
+        self.assertNotIn("weak-password-hash", self._kinds(out))
+
+
 
 class Wave3DeferredDetectorTests(unittest.TestCase):
     """0.8.0 deferred-backlog detectors: CORS, Next-config headers, SRI, host-redirect,
