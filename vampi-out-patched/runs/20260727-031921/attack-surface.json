@@ -1,0 +1,272 @@
+{
+  "endpoints": [
+    {
+      "method": "DELETE",
+      "path": "/users/v1/{username}",
+      "handler": "openapi_specs/openapi3.yml",
+      "technology": "oas3",
+      "auth": "UNGUARDED",
+      "path_params": [
+        "username"
+      ],
+      "params": [
+        "username",
+        "Authorization"
+      ],
+      "sinks": [],
+      "risk": 8,
+      "why": [
+        "write endpoint with no visible guard",
+        "IDOR/BOLA candidate (object id in path)",
+        "enumerable path param on an unguarded route"
+      ],
+      "is_write": true
+    },
+    {
+      "method": "PUT",
+      "path": "/users/v1/{username}/email",
+      "handler": "openapi_specs/openapi3.yml",
+      "technology": "oas3",
+      "auth": "UNGUARDED",
+      "path_params": [
+        "username"
+      ],
+      "params": [
+        "username",
+        "email",
+        "Authorization"
+      ],
+      "sinks": [],
+      "risk": 8,
+      "why": [
+        "write endpoint with no visible guard",
+        "IDOR/BOLA candidate (object id in path)",
+        "enumerable path param on an unguarded route"
+      ],
+      "is_write": true
+    },
+    {
+      "method": "PUT",
+      "path": "/users/v1/{username}/password",
+      "handler": "openapi_specs/openapi3.yml",
+      "technology": "oas3",
+      "auth": "UNGUARDED",
+      "path_params": [
+        "username"
+      ],
+      "params": [
+        "username",
+        "password",
+        "Authorization"
+      ],
+      "sinks": [],
+      "risk": 8,
+      "why": [
+        "write endpoint with no visible guard",
+        "IDOR/BOLA candidate (object id in path)",
+        "enumerable path param on an unguarded route"
+      ],
+      "is_write": true
+    },
+    {
+      "method": "GET",
+      "path": "/books/v1/{book_title}",
+      "handler": "openapi_specs/openapi3.yml",
+      "technology": "oas3",
+      "auth": "UNGUARDED",
+      "path_params": [
+        "book_title"
+      ],
+      "params": [
+        "book_title",
+        "Authorization"
+      ],
+      "sinks": [],
+      "risk": 7,
+      "why": [
+        "no visible auth guard",
+        "IDOR/BOLA candidate (object id in path)",
+        "enumerable path param on an unguarded route"
+      ],
+      "is_write": false
+    },
+    {
+      "method": "GET",
+      "path": "/users/v1/{username}",
+      "handler": "openapi_specs/openapi3.yml",
+      "technology": "oas3",
+      "auth": "UNGUARDED",
+      "path_params": [
+        "username"
+      ],
+      "params": [
+        "username"
+      ],
+      "sinks": [],
+      "risk": 7,
+      "why": [
+        "no visible auth guard",
+        "IDOR/BOLA candidate (object id in path)",
+        "enumerable path param on an unguarded route"
+      ],
+      "is_write": false
+    },
+    {
+      "method": "GET",
+      "path": "/",
+      "handler": "openapi_specs/openapi3.yml",
+      "technology": "oas3",
+      "auth": "UNGUARDED",
+      "path_params": [],
+      "params": [],
+      "sinks": [],
+      "risk": 6,
+      "why": [
+        "no visible auth guard",
+        "IDOR/BOLA candidate (object id in path)"
+      ],
+      "is_write": false
+    },
+    {
+      "method": "GET",
+      "path": "/books/v1",
+      "handler": "openapi_specs/openapi3.yml",
+      "technology": "oas3",
+      "auth": "UNGUARDED",
+      "path_params": [],
+      "params": [],
+      "sinks": [],
+      "risk": 6,
+      "why": [
+        "no visible auth guard",
+        "IDOR/BOLA candidate (object id in path)"
+      ],
+      "is_write": false
+    },
+    {
+      "method": "GET",
+      "path": "/users/v1",
+      "handler": "openapi_specs/openapi3.yml",
+      "technology": "oas3",
+      "auth": "UNGUARDED",
+      "path_params": [],
+      "params": [],
+      "sinks": [],
+      "risk": 6,
+      "why": [
+        "no visible auth guard",
+        "IDOR/BOLA candidate (object id in path)"
+      ],
+      "is_write": false
+    },
+    {
+      "method": "POST",
+      "path": "/books/v1",
+      "handler": "openapi_specs/openapi3.yml",
+      "technology": "oas3",
+      "auth": "UNGUARDED",
+      "path_params": [],
+      "params": [
+        "book_title",
+        "secret",
+        "Authorization"
+      ],
+      "sinks": [],
+      "risk": 4,
+      "why": [
+        "write endpoint with no visible guard"
+      ],
+      "is_write": true
+    },
+    {
+      "method": "GET",
+      "path": "/createdb",
+      "handler": "openapi_specs/openapi3.yml",
+      "technology": "oas3",
+      "auth": "UNGUARDED",
+      "path_params": [],
+      "params": [],
+      "sinks": [],
+      "risk": 3,
+      "why": [
+        "no visible auth guard"
+      ],
+      "is_write": false
+    },
+    {
+      "method": "GET",
+      "path": "/me",
+      "handler": "openapi_specs/openapi3.yml",
+      "technology": "oas3",
+      "auth": "UNGUARDED",
+      "path_params": [],
+      "params": [
+        "Authorization"
+      ],
+      "sinks": [],
+      "risk": 3,
+      "why": [
+        "no visible auth guard"
+      ],
+      "is_write": false
+    },
+    {
+      "method": "GET",
+      "path": "/users/v1/_debug",
+      "handler": "openapi_specs/openapi3.yml",
+      "technology": "oas3",
+      "auth": "UNGUARDED",
+      "path_params": [],
+      "params": [],
+      "sinks": [],
+      "risk": 3,
+      "why": [
+        "no visible auth guard"
+      ],
+      "is_write": false
+    },
+    {
+      "method": "POST",
+      "path": "/users/v1/login",
+      "handler": "openapi_specs/openapi3.yml",
+      "technology": "oas3",
+      "auth": "public (intentional)",
+      "path_params": [],
+      "params": [
+        "username",
+        "password"
+      ],
+      "sinks": [],
+      "risk": 1,
+      "why": [
+        "auth endpoint (credential-attack surface)"
+      ],
+      "is_write": true
+    },
+    {
+      "method": "POST",
+      "path": "/users/v1/register",
+      "handler": "openapi_specs/openapi3.yml",
+      "technology": "oas3",
+      "auth": "public (intentional)",
+      "path_params": [],
+      "params": [
+        "username",
+        "password",
+        "email"
+      ],
+      "sinks": [],
+      "risk": 0,
+      "why": [],
+      "is_write": true
+    }
+  ],
+  "summary": {
+    "endpoints": 14,
+    "unguarded": 12,
+    "unguarded_writes": 4,
+    "with_high_risk_sink": 0,
+    "idor_candidates": 5,
+    "top_risk": 8
+  }
+}

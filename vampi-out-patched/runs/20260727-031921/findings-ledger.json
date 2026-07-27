@@ -1,0 +1,624 @@
+{
+  "schema_version": "1.0",
+  "findings": [
+    {
+      "title": "Missing authorization: POST /books/v1",
+      "category": "access-control",
+      "attack_class": "missing-auth",
+      "severity": "HIGH",
+      "confidence": "MEDIUM",
+      "location": "/books/v1",
+      "evidence": [
+        {
+          "layer": "recon",
+          "detail": "no auth guard found in handler openapi_specs/openapi3.yml"
+        }
+      ],
+      "standards": {
+        "cwe": [
+          "CWE-862 Missing Authorization",
+          "CWE-306 Missing Authentication"
+        ],
+        "asvs": "ASVS V4.1.1",
+        "owasp_api": [
+          "API1:2023 BOLA",
+          "API5:2023 BFLA"
+        ]
+      },
+      "remediation": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.",
+      "status": "open",
+      "calibrated": {
+        "p": 0.659,
+        "ci": [
+          0.505,
+          0.784
+        ],
+        "n": 41,
+        "basis": "class+label",
+        "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+      },
+      "fingerprint": "ccda9cf549971c16"
+    },
+    {
+      "title": "Missing authorization: DELETE /users/v1/{username}",
+      "category": "access-control",
+      "attack_class": "missing-auth",
+      "severity": "HIGH",
+      "confidence": "MEDIUM",
+      "location": "/users/v1/{username}",
+      "evidence": [
+        {
+          "layer": "recon",
+          "detail": "no auth guard found in handler openapi_specs/openapi3.yml"
+        }
+      ],
+      "standards": {
+        "cwe": [
+          "CWE-862 Missing Authorization",
+          "CWE-306 Missing Authentication"
+        ],
+        "asvs": "ASVS V4.1.1",
+        "owasp_api": [
+          "API1:2023 BOLA",
+          "API5:2023 BFLA"
+        ]
+      },
+      "remediation": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.",
+      "status": "open",
+      "calibrated": {
+        "p": 0.659,
+        "ci": [
+          0.505,
+          0.784
+        ],
+        "n": 41,
+        "basis": "class+label",
+        "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+      },
+      "fingerprint": "c32968d10958c9c3"
+    },
+    {
+      "title": "Missing authorization: PUT /users/v1/{username}/email",
+      "category": "access-control",
+      "attack_class": "missing-auth",
+      "severity": "HIGH",
+      "confidence": "MEDIUM",
+      "location": "/users/v1/{username}/email",
+      "evidence": [
+        {
+          "layer": "recon",
+          "detail": "no auth guard found in handler openapi_specs/openapi3.yml"
+        }
+      ],
+      "standards": {
+        "cwe": [
+          "CWE-862 Missing Authorization",
+          "CWE-306 Missing Authentication"
+        ],
+        "asvs": "ASVS V4.1.1",
+        "owasp_api": [
+          "API1:2023 BOLA",
+          "API5:2023 BFLA"
+        ]
+      },
+      "remediation": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.",
+      "status": "open",
+      "calibrated": {
+        "p": 0.659,
+        "ci": [
+          0.505,
+          0.784
+        ],
+        "n": 41,
+        "basis": "class+label",
+        "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+      },
+      "fingerprint": "f641e6b943ade7ec"
+    },
+    {
+      "title": "Missing authorization: PUT /users/v1/{username}/password",
+      "category": "access-control",
+      "attack_class": "missing-auth",
+      "severity": "HIGH",
+      "confidence": "MEDIUM",
+      "location": "/users/v1/{username}/password",
+      "evidence": [
+        {
+          "layer": "recon",
+          "detail": "no auth guard found in handler openapi_specs/openapi3.yml"
+        }
+      ],
+      "standards": {
+        "cwe": [
+          "CWE-862 Missing Authorization",
+          "CWE-306 Missing Authentication"
+        ],
+        "asvs": "ASVS V4.1.1",
+        "owasp_api": [
+          "API1:2023 BOLA",
+          "API5:2023 BFLA"
+        ]
+      },
+      "remediation": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.",
+      "status": "open",
+      "calibrated": {
+        "p": 0.659,
+        "ci": [
+          0.505,
+          0.784
+        ],
+        "n": 41,
+        "basis": "class+label",
+        "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+      },
+      "fingerprint": "97e214fdac4029de"
+    },
+    {
+      "title": "Missing authorization: GET /",
+      "category": "access-control",
+      "attack_class": "missing-auth",
+      "severity": "MEDIUM",
+      "confidence": "MEDIUM",
+      "location": "/",
+      "evidence": [
+        {
+          "layer": "recon",
+          "detail": "no auth guard found in handler openapi_specs/openapi3.yml"
+        }
+      ],
+      "standards": {
+        "cwe": [
+          "CWE-862 Missing Authorization",
+          "CWE-306 Missing Authentication"
+        ],
+        "asvs": "ASVS V4.1.1",
+        "owasp_api": [
+          "API1:2023 BOLA",
+          "API5:2023 BFLA"
+        ]
+      },
+      "remediation": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.",
+      "status": "open",
+      "calibrated": {
+        "p": 0.659,
+        "ci": [
+          0.505,
+          0.784
+        ],
+        "n": 41,
+        "basis": "class+label",
+        "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+      },
+      "fingerprint": "52f7d8ce874b5b5d"
+    },
+    {
+      "title": "Missing authorization: GET /books/v1",
+      "category": "access-control",
+      "attack_class": "missing-auth",
+      "severity": "MEDIUM",
+      "confidence": "MEDIUM",
+      "location": "/books/v1",
+      "evidence": [
+        {
+          "layer": "recon",
+          "detail": "no auth guard found in handler openapi_specs/openapi3.yml"
+        }
+      ],
+      "standards": {
+        "cwe": [
+          "CWE-862 Missing Authorization",
+          "CWE-306 Missing Authentication"
+        ],
+        "asvs": "ASVS V4.1.1",
+        "owasp_api": [
+          "API1:2023 BOLA",
+          "API5:2023 BFLA"
+        ]
+      },
+      "remediation": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.",
+      "status": "open",
+      "calibrated": {
+        "p": 0.659,
+        "ci": [
+          0.505,
+          0.784
+        ],
+        "n": 41,
+        "basis": "class+label",
+        "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+      },
+      "fingerprint": "c76a62be79e44ab2"
+    },
+    {
+      "title": "Missing authorization: GET /books/v1/{book_title}",
+      "category": "access-control",
+      "attack_class": "missing-auth",
+      "severity": "MEDIUM",
+      "confidence": "MEDIUM",
+      "location": "/books/v1/{book_title}",
+      "evidence": [
+        {
+          "layer": "recon",
+          "detail": "no auth guard found in handler openapi_specs/openapi3.yml"
+        }
+      ],
+      "standards": {
+        "cwe": [
+          "CWE-862 Missing Authorization",
+          "CWE-306 Missing Authentication"
+        ],
+        "asvs": "ASVS V4.1.1",
+        "owasp_api": [
+          "API1:2023 BOLA",
+          "API5:2023 BFLA"
+        ]
+      },
+      "remediation": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.",
+      "status": "open",
+      "calibrated": {
+        "p": 0.659,
+        "ci": [
+          0.505,
+          0.784
+        ],
+        "n": 41,
+        "basis": "class+label",
+        "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+      },
+      "fingerprint": "82e88da3362d05d9"
+    },
+    {
+      "title": "Missing authorization: GET /createdb",
+      "category": "access-control",
+      "attack_class": "missing-auth",
+      "severity": "MEDIUM",
+      "confidence": "MEDIUM",
+      "location": "/createdb",
+      "evidence": [
+        {
+          "layer": "recon",
+          "detail": "no auth guard found in handler openapi_specs/openapi3.yml"
+        }
+      ],
+      "standards": {
+        "cwe": [
+          "CWE-862 Missing Authorization",
+          "CWE-306 Missing Authentication"
+        ],
+        "asvs": "ASVS V4.1.1",
+        "owasp_api": [
+          "API1:2023 BOLA",
+          "API5:2023 BFLA"
+        ]
+      },
+      "remediation": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.",
+      "status": "open",
+      "calibrated": {
+        "p": 0.659,
+        "ci": [
+          0.505,
+          0.784
+        ],
+        "n": 41,
+        "basis": "class+label",
+        "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+      },
+      "fingerprint": "d39911c87724a075"
+    },
+    {
+      "title": "Missing authorization: GET /me",
+      "category": "access-control",
+      "attack_class": "missing-auth",
+      "severity": "MEDIUM",
+      "confidence": "MEDIUM",
+      "location": "/me",
+      "evidence": [
+        {
+          "layer": "recon",
+          "detail": "no auth guard found in handler openapi_specs/openapi3.yml"
+        }
+      ],
+      "standards": {
+        "cwe": [
+          "CWE-862 Missing Authorization",
+          "CWE-306 Missing Authentication"
+        ],
+        "asvs": "ASVS V4.1.1",
+        "owasp_api": [
+          "API1:2023 BOLA",
+          "API5:2023 BFLA"
+        ]
+      },
+      "remediation": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.",
+      "status": "open",
+      "calibrated": {
+        "p": 0.659,
+        "ci": [
+          0.505,
+          0.784
+        ],
+        "n": 41,
+        "basis": "class+label",
+        "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+      },
+      "fingerprint": "b94f3c9ff43eae6d"
+    },
+    {
+      "title": "Missing authorization: GET /users/v1",
+      "category": "access-control",
+      "attack_class": "missing-auth",
+      "severity": "MEDIUM",
+      "confidence": "MEDIUM",
+      "location": "/users/v1",
+      "evidence": [
+        {
+          "layer": "recon",
+          "detail": "no auth guard found in handler openapi_specs/openapi3.yml"
+        }
+      ],
+      "standards": {
+        "cwe": [
+          "CWE-862 Missing Authorization",
+          "CWE-306 Missing Authentication"
+        ],
+        "asvs": "ASVS V4.1.1",
+        "owasp_api": [
+          "API1:2023 BOLA",
+          "API5:2023 BFLA"
+        ]
+      },
+      "remediation": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.",
+      "status": "open",
+      "calibrated": {
+        "p": 0.659,
+        "ci": [
+          0.505,
+          0.784
+        ],
+        "n": 41,
+        "basis": "class+label",
+        "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+      },
+      "fingerprint": "920c877709b8d1e5"
+    },
+    {
+      "title": "Missing authorization: GET /users/v1/{username}",
+      "category": "access-control",
+      "attack_class": "missing-auth",
+      "severity": "MEDIUM",
+      "confidence": "MEDIUM",
+      "location": "/users/v1/{username}",
+      "evidence": [
+        {
+          "layer": "recon",
+          "detail": "no auth guard found in handler openapi_specs/openapi3.yml"
+        }
+      ],
+      "standards": {
+        "cwe": [
+          "CWE-862 Missing Authorization",
+          "CWE-306 Missing Authentication"
+        ],
+        "asvs": "ASVS V4.1.1",
+        "owasp_api": [
+          "API1:2023 BOLA",
+          "API5:2023 BFLA"
+        ]
+      },
+      "remediation": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.",
+      "status": "open",
+      "calibrated": {
+        "p": 0.659,
+        "ci": [
+          0.505,
+          0.784
+        ],
+        "n": 41,
+        "basis": "class+label",
+        "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+      },
+      "fingerprint": "ab2771d8e049e06b"
+    },
+    {
+      "title": "Missing authorization: GET /users/v1/_debug",
+      "category": "access-control",
+      "attack_class": "missing-auth",
+      "severity": "MEDIUM",
+      "confidence": "MEDIUM",
+      "location": "/users/v1/_debug",
+      "evidence": [
+        {
+          "layer": "recon",
+          "detail": "no auth guard found in handler openapi_specs/openapi3.yml"
+        }
+      ],
+      "standards": {
+        "cwe": [
+          "CWE-862 Missing Authorization",
+          "CWE-306 Missing Authentication"
+        ],
+        "asvs": "ASVS V4.1.1",
+        "owasp_api": [
+          "API1:2023 BOLA",
+          "API5:2023 BFLA"
+        ]
+      },
+      "remediation": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.",
+      "status": "open",
+      "calibrated": {
+        "p": 0.659,
+        "ci": [
+          0.505,
+          0.784
+        ],
+        "n": 41,
+        "basis": "class+label",
+        "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+      },
+      "fingerprint": "8f4ce95eb01b6b73"
+    },
+    {
+      "title": "gha-unpinned-action: actions pinned to a mutable tag (pin to a commit SHA): docker/build-push-action@",
+      "category": "iac-ci",
+      "attack_class": "iac",
+      "severity": "MEDIUM",
+      "confidence": "MEDIUM",
+      "location": ".github/workflows/docker-image.yml",
+      "evidence": [
+        {
+          "layer": "recon",
+          "detail": "actions pinned to a mutable tag (pin to a commit SHA): docker/build-push-action@v3, docker/login-action@v2, docker/setup-buildx-action@v2, docker/setup-qemu-action@v2"
+        }
+      ],
+      "standards": {
+        "cwe": [
+          "CWE-1188 Insecure Default"
+        ],
+        "asvs": "ASVS V14.1",
+        "owasp_api": []
+      },
+      "remediation": "Apply the hardening (non-root user, pin actions to a SHA, enforce TLS, etc.).",
+      "status": "open",
+      "calibrated": {
+        "p": 0.569,
+        "ci": [
+          0.433,
+          0.695
+        ],
+        "n": 51,
+        "basis": "label",
+        "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+      },
+      "fingerprint": "89e7cb3176361d71"
+    },
+    {
+      "title": "docker-root: container runs as root (add a non-root USER)",
+      "category": "iac-ci",
+      "attack_class": "iac",
+      "severity": "MEDIUM",
+      "confidence": "MEDIUM",
+      "location": "Dockerfile",
+      "evidence": [
+        {
+          "layer": "recon",
+          "detail": "container runs as root (add a non-root USER)"
+        }
+      ],
+      "standards": {
+        "cwe": [
+          "CWE-1188 Insecure Default"
+        ],
+        "asvs": "ASVS V14.1",
+        "owasp_api": []
+      },
+      "remediation": "Apply the hardening (non-root user, pin actions to a SHA, enforce TLS, etc.).",
+      "status": "open",
+      "calibrated": {
+        "p": 0.569,
+        "ci": [
+          0.433,
+          0.695
+        ],
+        "n": 51,
+        "basis": "label",
+        "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+      },
+      "fingerprint": "dfc2c51eeac06ce9"
+    },
+    {
+      "title": "docker-no-healthcheck: no HEALTHCHECK defined",
+      "category": "iac-ci",
+      "attack_class": "iac",
+      "severity": "LOW",
+      "confidence": "MEDIUM",
+      "location": "Dockerfile",
+      "evidence": [
+        {
+          "layer": "recon",
+          "detail": "no HEALTHCHECK defined"
+        }
+      ],
+      "standards": {
+        "cwe": [
+          "CWE-1188 Insecure Default"
+        ],
+        "asvs": "ASVS V14.1",
+        "owasp_api": []
+      },
+      "remediation": "Apply the hardening (non-root user, pin actions to a SHA, enforce TLS, etc.).",
+      "status": "open",
+      "calibrated": {
+        "p": 0.569,
+        "ci": [
+          0.433,
+          0.695
+        ],
+        "n": 51,
+        "basis": "label",
+        "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+      },
+      "fingerprint": "fc886e46ce90c502"
+    },
+    {
+      "title": "no-hsts: browser/transport hardening header",
+      "category": "transport",
+      "attack_class": "incomplete-hsts",
+      "severity": "LOW",
+      "confidence": "LOW",
+      "location": "(response headers)",
+      "evidence": [
+        {
+          "layer": "recon",
+          "detail": "No Strict-Transport-Security header found. Apply HSTS at the edge to ALL responses (`max-age>=31536000; includeSubDomains; preload` where the domain model allows) so the first-load page can't be downgraded over plaintext."
+        }
+      ],
+      "standards": {
+        "cwe": [
+          "CWE-523 Unprotected Transport of Credentials",
+          "CWE-319 Cleartext Transmission of Sensitive Information"
+        ],
+        "asvs": "ASVS V9.1.2",
+        "owasp_api": [
+          "API8:2023 Misconfiguration"
+        ]
+      },
+      "remediation": "Apply HSTS uniformly at the EDGE to ALL responses (not just /api): `max-age>=31536000; includeSubDomains; preload` where the domain model allows.",
+      "status": "open",
+      "calibrated": {
+        "p": 0.125,
+        "ci": [
+          0.022,
+          0.471
+        ],
+        "n": 8,
+        "basis": "label",
+        "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+      },
+      "fingerprint": "339f3c8ca3588ced"
+    }
+  ],
+  "total": 16,
+  "suppressed": 0,
+  "acknowledged": [],
+  "acknowledged_n": 0,
+  "by_severity": {
+    "HIGH": 4,
+    "MEDIUM": 10,
+    "LOW": 2
+  },
+  "by_confidence": {
+    "MEDIUM": 15,
+    "LOW": 1
+  },
+  "calibration": {
+    "loaded": true,
+    "by_basis": {
+      "class+label": 12,
+      "label": 4
+    },
+    "personalized": false,
+    "local_samples": 0,
+    "caveat": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+  },
+  "dynamic_included": false
+}
