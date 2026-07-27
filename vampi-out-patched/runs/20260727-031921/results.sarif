@@ -1,0 +1,701 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "websec-validator",
+          "informationUri": "https://github.com/raccioly/websec-validator",
+          "version": "0.11.0",
+          "rules": [
+            {
+              "id": "websec/missing-auth",
+              "name": "MissingAuth",
+              "shortDescription": {
+                "text": "CWE-862 Missing Authorization"
+              },
+              "fullDescription": {
+                "text": "Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten."
+              },
+              "helpUri": "https://github.com/raccioly/websec-validator",
+              "properties": {
+                "attack_class": "missing-auth",
+                "cwe": [
+                  "CWE-862 Missing Authorization",
+                  "CWE-306 Missing Authentication"
+                ],
+                "asvs": "ASVS V4.1.1",
+                "owasp_api": [
+                  "API1:2023 BOLA",
+                  "API5:2023 BFLA"
+                ],
+                "tags": [
+                  "security",
+                  "CWE-862",
+                  "CWE-306"
+                ],
+                "security-severity": "8.0"
+              }
+            },
+            {
+              "id": "websec/iac",
+              "name": "Iac",
+              "shortDescription": {
+                "text": "CWE-1188 Insecure Default"
+              },
+              "fullDescription": {
+                "text": "Apply the hardening (non-root user, pin actions to a SHA, enforce TLS, etc.)."
+              },
+              "helpUri": "https://github.com/raccioly/websec-validator",
+              "properties": {
+                "attack_class": "iac",
+                "cwe": [
+                  "CWE-1188 Insecure Default"
+                ],
+                "asvs": "ASVS V14.1",
+                "owasp_api": [],
+                "tags": [
+                  "security",
+                  "CWE-1188"
+                ],
+                "security-severity": "5.5"
+              }
+            },
+            {
+              "id": "websec/incomplete-hsts",
+              "name": "IncompleteHsts",
+              "shortDescription": {
+                "text": "CWE-523 Unprotected Transport of Credentials"
+              },
+              "fullDescription": {
+                "text": "Apply HSTS uniformly at the EDGE to ALL responses (not just /api): `max-age>=31536000; includeSubDomains; preload` where the domain model allows."
+              },
+              "helpUri": "https://github.com/raccioly/websec-validator",
+              "properties": {
+                "attack_class": "incomplete-hsts",
+                "cwe": [
+                  "CWE-523 Unprotected Transport of Credentials",
+                  "CWE-319 Cleartext Transmission of Sensitive Information"
+                ],
+                "asvs": "ASVS V9.1.2",
+                "owasp_api": [
+                  "API8:2023 Misconfiguration"
+                ],
+                "tags": [
+                  "security",
+                  "CWE-523",
+                  "CWE-319"
+                ],
+                "security-severity": "3.0"
+              }
+            }
+          ]
+        }
+      },
+      "properties": {
+        "schema_version": "1.0",
+        "target": "/home/jules/.cache/websec-corpus/VAmPI",
+        "total": 16,
+        "by_severity": {
+          "HIGH": 4,
+          "MEDIUM": 10,
+          "LOW": 2
+        }
+      },
+      "results": [
+        {
+          "ruleId": "websec/missing-auth",
+          "level": "error",
+          "message": {
+            "text": "Missing authorization: POST /books/v1\n\nno auth guard found in handler openapi_specs/openapi3.yml\n\nRemediation: Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.\n\nCalibrated P(real)=0.659 (basis=class+label, n=41)."
+          },
+          "partialFingerprints": {
+            "websecFingerprintV1": "ccda9cf549971c16"
+          },
+          "properties": {
+            "severity": "HIGH",
+            "confidence": "MEDIUM",
+            "category": "access-control",
+            "calibrated": {
+              "p": 0.659,
+              "ci": [
+                0.505,
+                0.784
+              ],
+              "n": 41,
+              "basis": "class+label",
+              "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+            },
+            "security-severity": "8.0",
+            "blastRadius": null
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/books/v1"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "websec/missing-auth",
+          "level": "error",
+          "message": {
+            "text": "Missing authorization: DELETE /users/v1/{username}\n\nno auth guard found in handler openapi_specs/openapi3.yml\n\nRemediation: Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.\n\nCalibrated P(real)=0.659 (basis=class+label, n=41)."
+          },
+          "partialFingerprints": {
+            "websecFingerprintV1": "c32968d10958c9c3"
+          },
+          "properties": {
+            "severity": "HIGH",
+            "confidence": "MEDIUM",
+            "category": "access-control",
+            "calibrated": {
+              "p": 0.659,
+              "ci": [
+                0.505,
+                0.784
+              ],
+              "n": 41,
+              "basis": "class+label",
+              "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+            },
+            "security-severity": "8.0",
+            "blastRadius": null
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/users/v1/{username}"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "websec/missing-auth",
+          "level": "error",
+          "message": {
+            "text": "Missing authorization: PUT /users/v1/{username}/email\n\nno auth guard found in handler openapi_specs/openapi3.yml\n\nRemediation: Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.\n\nCalibrated P(real)=0.659 (basis=class+label, n=41)."
+          },
+          "partialFingerprints": {
+            "websecFingerprintV1": "f641e6b943ade7ec"
+          },
+          "properties": {
+            "severity": "HIGH",
+            "confidence": "MEDIUM",
+            "category": "access-control",
+            "calibrated": {
+              "p": 0.659,
+              "ci": [
+                0.505,
+                0.784
+              ],
+              "n": 41,
+              "basis": "class+label",
+              "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+            },
+            "security-severity": "8.0",
+            "blastRadius": null
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/users/v1/{username}/email"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "websec/missing-auth",
+          "level": "error",
+          "message": {
+            "text": "Missing authorization: PUT /users/v1/{username}/password\n\nno auth guard found in handler openapi_specs/openapi3.yml\n\nRemediation: Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.\n\nCalibrated P(real)=0.659 (basis=class+label, n=41)."
+          },
+          "partialFingerprints": {
+            "websecFingerprintV1": "97e214fdac4029de"
+          },
+          "properties": {
+            "severity": "HIGH",
+            "confidence": "MEDIUM",
+            "category": "access-control",
+            "calibrated": {
+              "p": 0.659,
+              "ci": [
+                0.505,
+                0.784
+              ],
+              "n": 41,
+              "basis": "class+label",
+              "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+            },
+            "security-severity": "8.0",
+            "blastRadius": null
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/users/v1/{username}/password"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "websec/missing-auth",
+          "level": "warning",
+          "message": {
+            "text": "Missing authorization: GET /\n\nno auth guard found in handler openapi_specs/openapi3.yml\n\nRemediation: Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.\n\nCalibrated P(real)=0.659 (basis=class+label, n=41)."
+          },
+          "partialFingerprints": {
+            "websecFingerprintV1": "52f7d8ce874b5b5d"
+          },
+          "properties": {
+            "severity": "MEDIUM",
+            "confidence": "MEDIUM",
+            "category": "access-control",
+            "calibrated": {
+              "p": 0.659,
+              "ci": [
+                0.505,
+                0.784
+              ],
+              "n": 41,
+              "basis": "class+label",
+              "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+            },
+            "security-severity": "5.5",
+            "blastRadius": null
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "websec/missing-auth",
+          "level": "warning",
+          "message": {
+            "text": "Missing authorization: GET /books/v1\n\nno auth guard found in handler openapi_specs/openapi3.yml\n\nRemediation: Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.\n\nCalibrated P(real)=0.659 (basis=class+label, n=41)."
+          },
+          "partialFingerprints": {
+            "websecFingerprintV1": "c76a62be79e44ab2"
+          },
+          "properties": {
+            "severity": "MEDIUM",
+            "confidence": "MEDIUM",
+            "category": "access-control",
+            "calibrated": {
+              "p": 0.659,
+              "ci": [
+                0.505,
+                0.784
+              ],
+              "n": 41,
+              "basis": "class+label",
+              "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+            },
+            "security-severity": "5.5",
+            "blastRadius": null
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/books/v1"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "websec/missing-auth",
+          "level": "warning",
+          "message": {
+            "text": "Missing authorization: GET /books/v1/{book_title}\n\nno auth guard found in handler openapi_specs/openapi3.yml\n\nRemediation: Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.\n\nCalibrated P(real)=0.659 (basis=class+label, n=41)."
+          },
+          "partialFingerprints": {
+            "websecFingerprintV1": "82e88da3362d05d9"
+          },
+          "properties": {
+            "severity": "MEDIUM",
+            "confidence": "MEDIUM",
+            "category": "access-control",
+            "calibrated": {
+              "p": 0.659,
+              "ci": [
+                0.505,
+                0.784
+              ],
+              "n": 41,
+              "basis": "class+label",
+              "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+            },
+            "security-severity": "5.5",
+            "blastRadius": null
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/books/v1/{book_title}"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "websec/missing-auth",
+          "level": "warning",
+          "message": {
+            "text": "Missing authorization: GET /createdb\n\nno auth guard found in handler openapi_specs/openapi3.yml\n\nRemediation: Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.\n\nCalibrated P(real)=0.659 (basis=class+label, n=41)."
+          },
+          "partialFingerprints": {
+            "websecFingerprintV1": "d39911c87724a075"
+          },
+          "properties": {
+            "severity": "MEDIUM",
+            "confidence": "MEDIUM",
+            "category": "access-control",
+            "calibrated": {
+              "p": 0.659,
+              "ci": [
+                0.505,
+                0.784
+              ],
+              "n": 41,
+              "basis": "class+label",
+              "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+            },
+            "security-severity": "5.5",
+            "blastRadius": null
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/createdb"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "websec/missing-auth",
+          "level": "warning",
+          "message": {
+            "text": "Missing authorization: GET /me\n\nno auth guard found in handler openapi_specs/openapi3.yml\n\nRemediation: Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.\n\nCalibrated P(real)=0.659 (basis=class+label, n=41)."
+          },
+          "partialFingerprints": {
+            "websecFingerprintV1": "b94f3c9ff43eae6d"
+          },
+          "properties": {
+            "severity": "MEDIUM",
+            "confidence": "MEDIUM",
+            "category": "access-control",
+            "calibrated": {
+              "p": 0.659,
+              "ci": [
+                0.505,
+                0.784
+              ],
+              "n": 41,
+              "basis": "class+label",
+              "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+            },
+            "security-severity": "5.5",
+            "blastRadius": null
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/me"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "websec/missing-auth",
+          "level": "warning",
+          "message": {
+            "text": "Missing authorization: GET /users/v1\n\nno auth guard found in handler openapi_specs/openapi3.yml\n\nRemediation: Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.\n\nCalibrated P(real)=0.659 (basis=class+label, n=41)."
+          },
+          "partialFingerprints": {
+            "websecFingerprintV1": "920c877709b8d1e5"
+          },
+          "properties": {
+            "severity": "MEDIUM",
+            "confidence": "MEDIUM",
+            "category": "access-control",
+            "calibrated": {
+              "p": 0.659,
+              "ci": [
+                0.505,
+                0.784
+              ],
+              "n": 41,
+              "basis": "class+label",
+              "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+            },
+            "security-severity": "5.5",
+            "blastRadius": null
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/users/v1"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "websec/missing-auth",
+          "level": "warning",
+          "message": {
+            "text": "Missing authorization: GET /users/v1/{username}\n\nno auth guard found in handler openapi_specs/openapi3.yml\n\nRemediation: Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.\n\nCalibrated P(real)=0.659 (basis=class+label, n=41)."
+          },
+          "partialFingerprints": {
+            "websecFingerprintV1": "ab2771d8e049e06b"
+          },
+          "properties": {
+            "severity": "MEDIUM",
+            "confidence": "MEDIUM",
+            "category": "access-control",
+            "calibrated": {
+              "p": 0.659,
+              "ci": [
+                0.505,
+                0.784
+              ],
+              "n": 41,
+              "basis": "class+label",
+              "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+            },
+            "security-severity": "5.5",
+            "blastRadius": null
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/users/v1/{username}"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "websec/missing-auth",
+          "level": "warning",
+          "message": {
+            "text": "Missing authorization: GET /users/v1/_debug\n\nno auth guard found in handler openapi_specs/openapi3.yml\n\nRemediation: Add an auth guard to the handler (e.g. requireAuth()/getServerSession()), or a middleware matcher over /api/(.*) with an explicit public allowlist so it can't be forgotten.\n\nCalibrated P(real)=0.659 (basis=class+label, n=41)."
+          },
+          "partialFingerprints": {
+            "websecFingerprintV1": "8f4ce95eb01b6b73"
+          },
+          "properties": {
+            "severity": "MEDIUM",
+            "confidence": "MEDIUM",
+            "category": "access-control",
+            "calibrated": {
+              "p": 0.659,
+              "ci": [
+                0.505,
+                0.784
+              ],
+              "n": 41,
+              "basis": "class+label",
+              "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+            },
+            "security-severity": "5.5",
+            "blastRadius": null
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/users/v1/_debug"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "websec/iac",
+          "level": "warning",
+          "message": {
+            "text": "gha-unpinned-action: actions pinned to a mutable tag (pin to a commit SHA): docker/build-push-action@\n\nactions pinned to a mutable tag (pin to a commit SHA): docker/build-push-action@v3, docker/login-action@v2, docker/setup-buildx-action@v2, docker/setup-qemu-action@v2\n\nRemediation: Apply the hardening (non-root user, pin actions to a SHA, enforce TLS, etc.).\n\nCalibrated P(real)=0.569 (basis=label, n=51)."
+          },
+          "partialFingerprints": {
+            "websecFingerprintV1": "89e7cb3176361d71"
+          },
+          "properties": {
+            "severity": "MEDIUM",
+            "confidence": "MEDIUM",
+            "category": "iac-ci",
+            "calibrated": {
+              "p": 0.569,
+              "ci": [
+                0.433,
+                0.695
+              ],
+              "n": 51,
+              "basis": "label",
+              "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+            },
+            "security-severity": "5.5",
+            "blastRadius": null
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".github/workflows/docker-image.yml"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "websec/iac",
+          "level": "warning",
+          "message": {
+            "text": "docker-root: container runs as root (add a non-root USER)\n\ncontainer runs as root (add a non-root USER)\n\nRemediation: Apply the hardening (non-root user, pin actions to a SHA, enforce TLS, etc.).\n\nCalibrated P(real)=0.569 (basis=label, n=51)."
+          },
+          "partialFingerprints": {
+            "websecFingerprintV1": "dfc2c51eeac06ce9"
+          },
+          "properties": {
+            "severity": "MEDIUM",
+            "confidence": "MEDIUM",
+            "category": "iac-ci",
+            "calibrated": {
+              "p": 0.569,
+              "ci": [
+                0.433,
+                0.695
+              ],
+              "n": 51,
+              "basis": "label",
+              "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+            },
+            "security-severity": "5.5",
+            "blastRadius": null,
+            "locationHint": "Dockerfile"
+          }
+        },
+        {
+          "ruleId": "websec/iac",
+          "level": "note",
+          "message": {
+            "text": "docker-no-healthcheck: no HEALTHCHECK defined\n\nno HEALTHCHECK defined\n\nRemediation: Apply the hardening (non-root user, pin actions to a SHA, enforce TLS, etc.).\n\nCalibrated P(real)=0.569 (basis=label, n=51)."
+          },
+          "partialFingerprints": {
+            "websecFingerprintV1": "fc886e46ce90c502"
+          },
+          "properties": {
+            "severity": "LOW",
+            "confidence": "MEDIUM",
+            "category": "iac-ci",
+            "calibrated": {
+              "p": 0.569,
+              "ci": [
+                0.433,
+                0.695
+              ],
+              "n": 51,
+              "basis": "label",
+              "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+            },
+            "security-severity": "3.0",
+            "blastRadius": null,
+            "locationHint": "Dockerfile"
+          }
+        },
+        {
+          "ruleId": "websec/incomplete-hsts",
+          "level": "note",
+          "message": {
+            "text": "no-hsts: browser/transport hardening header\n\nNo Strict-Transport-Security header found. Apply HSTS at the edge to ALL responses (`max-age>=31536000; includeSubDomains; preload` where the domain model allows) so the first-load page can't be downgraded over plaintext.\n\nRemediation: Apply HSTS uniformly at the EDGE to ALL responses (not just /api): `max-age>=31536000; includeSubDomains; preload` where the domain model allows.\n\nCalibrated P(real)=0.125 (basis=label, n=8)."
+          },
+          "partialFingerprints": {
+            "websecFingerprintV1": "339f3c8ca3588ced"
+          },
+          "properties": {
+            "severity": "LOW",
+            "confidence": "LOW",
+            "category": "transport",
+            "calibrated": {
+              "p": 0.125,
+              "ci": [
+                0.022,
+                0.471
+              ],
+              "n": 8,
+              "basis": "label",
+              "note": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+            },
+            "security-severity": "3.0",
+            "blastRadius": null,
+            "locationHint": "(response headers)"
+          }
+        }
+      ]
+    }
+  ]
+}

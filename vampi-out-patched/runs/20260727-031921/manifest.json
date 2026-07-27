@@ -1,0 +1,169 @@
+{
+  "facts": "FACTS.json",
+  "scanners": {
+    "available": [],
+    "missing": [
+      {
+        "key": "trivy",
+        "name": "Trivy",
+        "category": "sca",
+        "install": "brew install trivy  # pin by digest in CI"
+      },
+      {
+        "key": "gitleaks",
+        "name": "Gitleaks",
+        "category": "secrets",
+        "install": "brew install gitleaks"
+      },
+      {
+        "key": "semgrep",
+        "name": "Semgrep/OpenGrep",
+        "category": "sast",
+        "install": "pipx install semgrep  # or opengrep for fully-OSS"
+      },
+      {
+        "key": "checkov",
+        "name": "Checkov",
+        "category": "iac",
+        "install": "pipx install checkov"
+      },
+      {
+        "key": "bandit",
+        "name": "Bandit",
+        "category": "sast",
+        "install": "pipx install bandit"
+      },
+      {
+        "key": "osv-scanner",
+        "name": "OSV-Scanner",
+        "category": "sca",
+        "install": "brew install osv-scanner"
+      },
+      {
+        "key": "trufflehog",
+        "name": "TruffleHog (live verification)",
+        "category": "secrets",
+        "install": "brew install trufflehog  # opt-in: websec run \u2026 --verify-secrets"
+      },
+      {
+        "key": "prowler",
+        "name": "Prowler",
+        "category": "cloud",
+        "install": "pipx install prowler  # needs AWS creds"
+      }
+    ]
+  },
+  "scan_results": [],
+  "findings_summary": null,
+  "ledger": {
+    "total": 16,
+    "by_severity": {
+      "HIGH": 4,
+      "MEDIUM": 10,
+      "LOW": 2
+    }
+  },
+  "sarif": "results.sarif",
+  "sbom": null,
+  "attack_surface": "attack-surface.json",
+  "attack_surface_summary": {
+    "endpoints": 14,
+    "unguarded": 12,
+    "unguarded_writes": 4,
+    "with_high_risk_sink": 0,
+    "idor_candidates": 5,
+    "top_risk": 8
+  },
+  "probes": [
+    {
+      "key": "_context",
+      "file": "probes/probe-context.json",
+      "note": "the target's real routes/auth/fields \u2014 finalize the drafts against this"
+    },
+    {
+      "key": "unauth-baseline",
+      "file": "probes/unauth-baseline.sh",
+      "attack_class": "Missing authentication (no-creds baseline)",
+      "agent_must_supply": "just the target base URL \u2014 it reads the routes from probe-context.json",
+      "targets": [
+        "DELETE /users/v1/{username}",
+        "POST /books/v1",
+        "POST /users/v1/login",
+        "POST /users/v1/register",
+        "PUT /users/v1/{username}/email",
+        "PUT /users/v1/{username}/password"
+      ]
+    },
+    {
+      "key": "rate-limit-burst",
+      "file": "probes/rate-limit-burst.sh",
+      "attack_class": "Rate-limit + X-Forwarded-For bypass",
+      "agent_must_supply": "the login + a rate-limited endpoint",
+      "targets": []
+    },
+    {
+      "key": "forged-token",
+      "file": "probes/forged-token.sh",
+      "attack_class": "Forged/unsigned-JWT acceptance (CWE-347 broken auth)",
+      "agent_must_supply": "just the target base URL \u2014 it forges its own token + reads routes from probe-context.json",
+      "targets": []
+    },
+    {
+      "key": "jwt-attacks",
+      "file": "probes/jwt-attacks.sh",
+      "attack_class": "JWT: alg:none, tamper, expiry, replay",
+      "agent_must_supply": "a valid token + the login + a protected endpoint",
+      "targets": []
+    },
+    {
+      "key": "hs256-brute-force",
+      "file": "probes/hs256-brute-force.py",
+      "attack_class": "Offline HS256 weak-secret brute",
+      "agent_must_supply": "one HS256 JWT (offline \u2014 no live app needed)",
+      "targets": []
+    },
+    {
+      "key": "mass-assignment",
+      "file": "probes/mass-assignment.py",
+      "attack_class": "BOPLA / mass assignment (OWASP API #3)",
+      "agent_must_supply": "a low-priv token + a write endpoint that updates a record",
+      "targets": [
+        "DELETE /users/v1/{username}",
+        "POST /books/v1",
+        "POST /users/v1/login",
+        "POST /users/v1/register",
+        "PUT /users/v1/{username}/email",
+        "PUT /users/v1/{username}/password"
+      ]
+    },
+    {
+      "key": "webhook-forgery",
+      "file": "probes/webhook-forgery.py",
+      "attack_class": "Inbound webhook signature/replay",
+      "agent_must_supply": "the webhook path + signature header name + scheme",
+      "targets": [
+        "DELETE /users/v1/{username}",
+        "POST /books/v1",
+        "POST /users/v1/login",
+        "POST /users/v1/register",
+        "PUT /users/v1/{username}/email",
+        "PUT /users/v1/{username}/password"
+      ]
+    },
+    {
+      "key": "race-conditions",
+      "file": "probes/race-conditions.py",
+      "attack_class": "Race / claim-collision invariants",
+      "agent_must_supply": "a token + an endpoint with a single-winner invariant + an idempotency key",
+      "targets": []
+    },
+    {
+      "key": "client-integrity-checklist",
+      "file": "probes/client-integrity-checklist.sh",
+      "attack_class": "Man-in-the-browser / tamperable-display posture",
+      "agent_must_supply": "a running TEST instance + the page that shows the address (PAGE=/receive)",
+      "targets": []
+    }
+  ],
+  "timestamp": "20260727-031921"
+}

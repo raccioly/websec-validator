@@ -1,0 +1,648 @@
+{
+  "tool": "websec-validator",
+  "schema_version": "1.0",
+  "version": "0.11.0",
+  "target": "/home/jules/.cache/websec-corpus/VAmPI",
+  "files_scanned": 11,
+  "files_truncated": false,
+  "file_cap": 12000,
+  "stack": {
+    "languages": [
+      "python"
+    ],
+    "frameworks": [
+      "flask"
+    ],
+    "package_managers": [
+      "pip"
+    ],
+    "datastores": [
+      "sql-orm"
+    ],
+    "cron_triggers": [],
+    "monorepo": false,
+    "services": 0
+  },
+  "routes": {
+    "engine": "noir (openapi-first: own spec is the route contract)",
+    "count": 14,
+    "by_method": {
+      "GET": 8,
+      "POST": 3,
+      "DELETE": 1,
+      "PUT": 2
+    },
+    "by_technology": {
+      "oas3": 14
+    },
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/",
+        "params": [],
+        "technology": "oas3",
+        "code_path": "/home/jules/.cache/websec-corpus/VAmPI/openapi_specs/openapi3.yml",
+        "source": "noir"
+      },
+      {
+        "method": "GET",
+        "path": "/books/v1",
+        "params": [],
+        "technology": "oas3",
+        "code_path": "/home/jules/.cache/websec-corpus/VAmPI/openapi_specs/openapi3.yml",
+        "source": "noir"
+      },
+      {
+        "method": "POST",
+        "path": "/books/v1",
+        "params": [
+          {
+            "name": "book_title",
+            "where": "json"
+          },
+          {
+            "name": "secret",
+            "where": "json"
+          },
+          {
+            "name": "Authorization",
+            "where": "header"
+          }
+        ],
+        "technology": "oas3",
+        "code_path": "/home/jules/.cache/websec-corpus/VAmPI/openapi_specs/openapi3.yml",
+        "source": "noir"
+      },
+      {
+        "method": "GET",
+        "path": "/books/v1/{book_title}",
+        "params": [
+          {
+            "name": "book_title",
+            "where": "path"
+          },
+          {
+            "name": "Authorization",
+            "where": "header"
+          }
+        ],
+        "technology": "oas3",
+        "code_path": "/home/jules/.cache/websec-corpus/VAmPI/openapi_specs/openapi3.yml",
+        "source": "noir"
+      },
+      {
+        "method": "GET",
+        "path": "/createdb",
+        "params": [],
+        "technology": "oas3",
+        "code_path": "/home/jules/.cache/websec-corpus/VAmPI/openapi_specs/openapi3.yml",
+        "source": "noir"
+      },
+      {
+        "method": "GET",
+        "path": "/me",
+        "params": [
+          {
+            "name": "Authorization",
+            "where": "header"
+          }
+        ],
+        "technology": "oas3",
+        "code_path": "/home/jules/.cache/websec-corpus/VAmPI/openapi_specs/openapi3.yml",
+        "source": "noir"
+      },
+      {
+        "method": "GET",
+        "path": "/users/v1",
+        "params": [],
+        "technology": "oas3",
+        "code_path": "/home/jules/.cache/websec-corpus/VAmPI/openapi_specs/openapi3.yml",
+        "source": "noir"
+      },
+      {
+        "method": "DELETE",
+        "path": "/users/v1/{username}",
+        "params": [
+          {
+            "name": "username",
+            "where": "path"
+          },
+          {
+            "name": "Authorization",
+            "where": "header"
+          }
+        ],
+        "technology": "oas3",
+        "code_path": "/home/jules/.cache/websec-corpus/VAmPI/openapi_specs/openapi3.yml",
+        "source": "noir"
+      },
+      {
+        "method": "GET",
+        "path": "/users/v1/{username}",
+        "params": [
+          {
+            "name": "username",
+            "where": "path"
+          }
+        ],
+        "technology": "oas3",
+        "code_path": "/home/jules/.cache/websec-corpus/VAmPI/openapi_specs/openapi3.yml",
+        "source": "noir"
+      },
+      {
+        "method": "PUT",
+        "path": "/users/v1/{username}/email",
+        "params": [
+          {
+            "name": "username",
+            "where": "path"
+          },
+          {
+            "name": "email",
+            "where": "json"
+          },
+          {
+            "name": "Authorization",
+            "where": "header"
+          }
+        ],
+        "technology": "oas3",
+        "code_path": "/home/jules/.cache/websec-corpus/VAmPI/openapi_specs/openapi3.yml",
+        "source": "noir"
+      },
+      {
+        "method": "PUT",
+        "path": "/users/v1/{username}/password",
+        "params": [
+          {
+            "name": "username",
+            "where": "path"
+          },
+          {
+            "name": "password",
+            "where": "json"
+          },
+          {
+            "name": "Authorization",
+            "where": "header"
+          }
+        ],
+        "technology": "oas3",
+        "code_path": "/home/jules/.cache/websec-corpus/VAmPI/openapi_specs/openapi3.yml",
+        "source": "noir"
+      },
+      {
+        "method": "GET",
+        "path": "/users/v1/_debug",
+        "params": [],
+        "technology": "oas3",
+        "code_path": "/home/jules/.cache/websec-corpus/VAmPI/openapi_specs/openapi3.yml",
+        "source": "noir"
+      },
+      {
+        "method": "POST",
+        "path": "/users/v1/login",
+        "params": [
+          {
+            "name": "username",
+            "where": "json"
+          },
+          {
+            "name": "password",
+            "where": "json"
+          }
+        ],
+        "technology": "oas3",
+        "code_path": "/home/jules/.cache/websec-corpus/VAmPI/openapi_specs/openapi3.yml",
+        "source": "noir"
+      },
+      {
+        "method": "POST",
+        "path": "/users/v1/register",
+        "params": [
+          {
+            "name": "username",
+            "where": "json"
+          },
+          {
+            "name": "password",
+            "where": "json"
+          },
+          {
+            "name": "email",
+            "where": "json"
+          }
+        ],
+        "technology": "oas3",
+        "code_path": "/home/jules/.cache/websec-corpus/VAmPI/openapi_specs/openapi3.yml",
+        "source": "noir"
+      }
+    ],
+    "targeting": {
+      "write_endpoints": [
+        "DELETE /users/v1/{username}",
+        "POST /books/v1",
+        "POST /users/v1/login",
+        "POST /users/v1/register",
+        "PUT /users/v1/{username}/email",
+        "PUT /users/v1/{username}/password"
+      ],
+      "idor_candidates": [
+        "DELETE /users/v1/{username}",
+        "GET /books/v1/{book_title}",
+        "GET /users/v1/{username}",
+        "PUT /users/v1/{username}/email",
+        "PUT /users/v1/{username}/password"
+      ],
+      "ssrf_candidates": [],
+      "open_redirect_candidates": [],
+      "upload_candidates": [],
+      "auth_endpoints": [
+        "POST /users/v1/login"
+      ]
+    },
+    "handler_signals": 0,
+    "coverage_warning": null,
+    "client_routes_excluded": 0,
+    "serverless_public_endpoints": 0,
+    "raw_server_endpoints": 0
+  },
+  "auth": {
+    "scheme": "jwt (bearer)",
+    "schemes_detected": [
+      "jwt (bearer)"
+    ],
+    "token_location": "bearer",
+    "login_endpoints": [
+      "POST /users/v1/login"
+    ],
+    "cookie_names": [],
+    "guard_files": [],
+    "signal_counts": {
+      "jwt": 2,
+      "passport": 0,
+      "session": 0,
+      "api_key": 0,
+      "hmac": 0
+    },
+    "insecure_secret_defaults": [],
+    "broken_auth": [],
+    "jwt_sign_verify_present": true,
+    "route_count": 14,
+    "reliable_signal": true,
+    "note": "AGENT: confirm the PRIMARY auth flow + how a test token is minted before the JWT/auth probes. Multiple schemes often mean primary bearer/session + secondary SSO."
+  },
+  "authz": {
+    "global_auth_middleware": false,
+    "mount_auth_detected": false,
+    "mount_authed_factories": [],
+    "mount_covered_files": 0,
+    "next_middleware": {
+      "present": false,
+      "matchers": [],
+      "is_auth": false
+    },
+    "roles_detected": [],
+    "guard_summary": {
+      "with_visible_guard": 0,
+      "no_visible_guard": 14,
+      "unknown": 0
+    },
+    "endpoint_guards": [
+      {
+        "method": "GET",
+        "path": "/",
+        "code_path": "openapi_specs/openapi3.yml",
+        "guarded": false,
+        "analyzed": true,
+        "public_hint": false
+      },
+      {
+        "method": "GET",
+        "path": "/books/v1",
+        "code_path": "openapi_specs/openapi3.yml",
+        "guarded": false,
+        "analyzed": true,
+        "public_hint": false
+      },
+      {
+        "method": "POST",
+        "path": "/books/v1",
+        "code_path": "openapi_specs/openapi3.yml",
+        "guarded": false,
+        "analyzed": true,
+        "public_hint": false
+      },
+      {
+        "method": "GET",
+        "path": "/books/v1/{book_title}",
+        "code_path": "openapi_specs/openapi3.yml",
+        "guarded": false,
+        "analyzed": true,
+        "public_hint": false
+      },
+      {
+        "method": "GET",
+        "path": "/createdb",
+        "code_path": "openapi_specs/openapi3.yml",
+        "guarded": false,
+        "analyzed": true,
+        "public_hint": false
+      },
+      {
+        "method": "GET",
+        "path": "/me",
+        "code_path": "openapi_specs/openapi3.yml",
+        "guarded": false,
+        "analyzed": true,
+        "public_hint": false
+      },
+      {
+        "method": "GET",
+        "path": "/users/v1",
+        "code_path": "openapi_specs/openapi3.yml",
+        "guarded": false,
+        "analyzed": true,
+        "public_hint": false
+      },
+      {
+        "method": "DELETE",
+        "path": "/users/v1/{username}",
+        "code_path": "openapi_specs/openapi3.yml",
+        "guarded": false,
+        "analyzed": true,
+        "public_hint": false
+      },
+      {
+        "method": "GET",
+        "path": "/users/v1/{username}",
+        "code_path": "openapi_specs/openapi3.yml",
+        "guarded": false,
+        "analyzed": true,
+        "public_hint": false
+      },
+      {
+        "method": "PUT",
+        "path": "/users/v1/{username}/email",
+        "code_path": "openapi_specs/openapi3.yml",
+        "guarded": false,
+        "analyzed": true,
+        "public_hint": false
+      },
+      {
+        "method": "PUT",
+        "path": "/users/v1/{username}/password",
+        "code_path": "openapi_specs/openapi3.yml",
+        "guarded": false,
+        "analyzed": true,
+        "public_hint": false
+      },
+      {
+        "method": "GET",
+        "path": "/users/v1/_debug",
+        "code_path": "openapi_specs/openapi3.yml",
+        "guarded": false,
+        "analyzed": true,
+        "public_hint": false
+      },
+      {
+        "method": "POST",
+        "path": "/users/v1/login",
+        "code_path": "openapi_specs/openapi3.yml",
+        "guarded": false,
+        "analyzed": true,
+        "public_hint": true
+      },
+      {
+        "method": "POST",
+        "path": "/users/v1/register",
+        "code_path": "openapi_specs/openapi3.yml",
+        "guarded": false,
+        "analyzed": true,
+        "public_hint": true
+      }
+    ],
+    "endpoint_guards_truncated": 0,
+    "write_endpoints_without_visible_guard": [
+      "DELETE /users/v1/{username}  (openapi_specs/openapi3.yml)",
+      "POST /books/v1  (openapi_specs/openapi3.yml)",
+      "PUT /users/v1/{username}/email  (openapi_specs/openapi3.yml)",
+      "PUT /users/v1/{username}/password  (openapi_specs/openapi3.yml)"
+    ],
+    "unsafe_auth_decoders": [],
+    "unverified_signature_routes": [],
+    "note": "No global/mount auth middleware detected. Write endpoints with no visible guard are high-signal missing-authz leads \u2014 verify each."
+  },
+  "tenant": {
+    "candidates": [],
+    "multi_tenant_likely": false,
+    "route_count": 14,
+    "note": "AGENT: confirm with the human which key (if any) is THE tenant boundary. If single-tenant, skip the cross-tenant BOLA probes."
+  },
+  "password_policy": {
+    "password_blocks": [],
+    "strongest_policy": [],
+    "drift": [],
+    "weak_policy": null,
+    "password_reuse": {
+      "hashes_passwords": false,
+      "has_set_password_path": false,
+      "has_reuse_check": false,
+      "model_has_passwordHash": false,
+      "model_has_history": false,
+      "gap": false
+    },
+    "consistent": true,
+    "note": "Heuristic over Zod/Joi/express-validator lookahead-required classes \u2014 verify against the actual validators; a helper-centralized policy can hide here."
+  },
+  "surface": {
+    "sinks": {},
+    "sink_counts": {},
+    "ssrf_redirect_unguarded": [],
+    "proxy_prefix_escape": [],
+    "host_header_redirect": [],
+    "follows_redirect_no_allowlist": [],
+    "datastore_class": "sql",
+    "note": "Each sink hit is user-input-gated (req./request./concat/interp), so these are higher-confidence leads. Cross-reference the files with routes.targeting to pick the endpoint to probe. On a NoSQL/JSON API, SQLi alerts from generic scanners are usually false positives."
+  },
+  "upload_security": {
+    "findings": [],
+    "upload_handlers": [],
+    "serve_paths_no_nosniff": [],
+    "by_severity": {},
+    "note": "No upload handlers detected. Probe with the upload matrix (polyglot, spoofed MIME, double-extension, SVG) then FETCH the stored object back and assert it's served as octet-stream/attachment with nosniff."
+  },
+  "schemas": {
+    "orms": [],
+    "entity_count": 0,
+    "entities": [],
+    "sensitive_fields": [],
+    "sql_ddl_present": false,
+    "sql_table_count": 0,
+    "owner_scoped_tables": [],
+    "rls_policy_count": 0,
+    "rls_enabled_count": 0,
+    "note": "Mass-assignment/BOPLA probes should try injecting these app-specific privileged fields into update/create payloads; ownership/tenant fields here are what BOLA must isolate."
+  },
+  "iac_ci": {
+    "findings": [
+      {
+        "severity": "MEDIUM",
+        "kind": "gha-unpinned-action",
+        "file": ".github/workflows/docker-image.yml",
+        "detail": "actions pinned to a mutable tag (pin to a commit SHA): docker/build-push-action@v3, docker/login-action@v2, docker/setup-buildx-action@v2, docker/setup-qemu-action@v2"
+      },
+      {
+        "severity": "MEDIUM",
+        "kind": "docker-root",
+        "file": "Dockerfile",
+        "detail": "container runs as root (add a non-root USER)"
+      },
+      {
+        "severity": "LOW",
+        "kind": "docker-no-healthcheck",
+        "file": "Dockerfile",
+        "detail": "no HEALTHCHECK defined"
+      }
+    ],
+    "by_severity": {
+      "MEDIUM": 2,
+      "LOW": 1
+    },
+    "workflows_scanned": 1
+  },
+  "client_exposure": {
+    "public_env_vars": [],
+    "public_secret_leaks": [],
+    "intended_public_analytics": [],
+    "server_secret_in_client_component": [],
+    "public_secret_value_leaks": [],
+    "public_var_from_cfn_output": [],
+    "intended_public_supabase": [],
+    "supabase_service_role_in_client": [],
+    "production_source_maps": false,
+    "note": "public_secret_leaks / server_secret_in_client_component / public_secret_value_leaks / public_var_from_cfn_output ship secrets to the browser \u2014 treat as HIGH and confirm. Name-based leaks are gated to packages with a frontend bundler (a backend service's NEXT_PUBLIC_*/PUBLIC_* fallback-key reference is not a browser leak); analytics ingest tokens (PostHog/Usertour/\u2026) are reported separately at INFO (designed to ship). Value/CFN-injection detection survives a benign var rename (the #3 gap)."
+  },
+  "client_integrity": {
+    "sensitive_display": [],
+    "sink_blast_radius": {},
+    "websocket_auth": "no websocket detected",
+    "qr_generation": [],
+    "clipboard_copy": [],
+    "strict_csp": false,
+    "csp_present": false,
+    "csp_has_unsafe": false,
+    "out_of_band_anchor": false,
+    "anchors_found": [],
+    "weak_fingerprints": [],
+    "overclaimed_controls": [],
+    "client_fetch_sinks": [],
+    "findings": [],
+    "note": "No security-critical display values detected \u2014 MITB/tamperable-display class N/A."
+  },
+  "transport_security": {
+    "web_surface": true,
+    "html_surface": false,
+    "csp_present": false,
+    "strict_csp": false,
+    "csp_has_unsafe": false,
+    "hsts_present": false,
+    "hsts_includes_subdomains": false,
+    "hsts_preload": false,
+    "hsts_files": [],
+    "clickjacking_protected": false,
+    "csrf_plumbing_present": false,
+    "inline_event_handlers": [],
+    "cookie_security": null,
+    "passes": [],
+    "findings": [
+      {
+        "severity": "LOW",
+        "kind": "no-hsts",
+        "attack_class": "incomplete-hsts",
+        "detail": "No Strict-Transport-Security header found. Apply HSTS at the edge to ALL responses (`max-age>=31536000; includeSubDomains; preload` where the domain model allows) so the first-load page can't be downgraded over plaintext."
+      }
+    ],
+    "note": "CSP/HSTS baseline audit \u2014 these are the enabling controls for the client trust boundary. LOW/architectural: verify against the LIVE response headers (a static scan can't see the edge/CDN layer)."
+  },
+  "pii_exposure": {
+    "findings": [],
+    "dead_controls": [],
+    "raw_pii_responses": [],
+    "masking_helpers": [],
+    "by_severity": {},
+    "note": "PII output-boundary review: no obvious raw-PII responses. Probe with a per-role response diff asserting NO phone/email VALUE (/\\+?\\d{7,}/ or an email regex) reaches a non-privileged caller \u2014 across nested objects, IDs, and exports (#8)."
+  },
+  "graphql": {
+    "present": false
+  },
+  "integrations": {
+    "webhook_endpoints": [],
+    "webhooks_without_sig_verification": [],
+    "third_party_integrations": [],
+    "findings": [],
+    "note": "Webhooks with no signature-verification code in their handler = forgery/replay risk (run webhook-forgery; verify against your middleware). Each integration is an outbound trust + secret-handling surface (SSRF, secret leakage, supply-chain)."
+  },
+  "llm_security": {
+    "is_ai_app": false,
+    "llm_call_sites": [],
+    "findings": [],
+    "by_severity": {},
+    "note": "No direct LLM SDK call sites detected. LLM findings are leads (regex, not dataflow) \u2014 verify each: is the content untrusted, does model output drive a tool, is the action human-gated, is generation bounded? The agentic surface (prompt construction \u2192 tool dispatch \u2192 output) is where the real risk in an AI app lives."
+  },
+  "crypto_usage": {
+    "findings": [],
+    "by_severity": {},
+    "note": "No weak-hash / unpinned-verify / predictable-principal crypto tells found."
+  },
+  "authz_dataflow": {
+    "findings": [],
+    "by_severity": {},
+    "note": "No unsigned-cookie / claim-keyed-authz / transaction-local-RLS tells found."
+  },
+  "webext": {
+    "is_extension": false,
+    "manifest_version": null,
+    "permissions": [],
+    "host_permissions": [],
+    "main_world_content_script": false,
+    "client_entitlement_gates": [],
+    "findings": [],
+    "note": "No WebExtension manifest detected \u2014 extension client-trust class N/A."
+  },
+  "agent_config": {
+    "agent_surface_present": false,
+    "files_scanned": [],
+    "mcp_servers": [],
+    "findings": [],
+    "by_severity": {},
+    "note": "Repo-own agent/MCP config read as untrusted data (never executed). Tool-description poisoning is intentionally not scanned here (deferred \u2014 prose-grammar, higher FP)."
+  },
+  "dependencies": {
+    "manifests_scanned": 1,
+    "ecosystems": [
+      "pip"
+    ],
+    "lockfiles_present": [],
+    "findings": [],
+    "unpinned": [
+      {
+        "file": "requirements.txt",
+        "name": "swagger-ui-bundle",
+        "spec": "*",
+        "reason": "unpinned pip requirement (no == pin)"
+      }
+    ],
+    "confusion_candidates": [],
+    "counts": {
+      "unpinned": 1,
+      "confusion_candidates": 0,
+      "install_scripts": 0,
+      "drift": 0
+    },
+    "network": {
+      "ran": false,
+      "note": "registry resolution / known-hallucinated-name list / typosquat distance are deferred behind an opt-in --network step; the default pass is fully offline."
+    }
+  }
+}

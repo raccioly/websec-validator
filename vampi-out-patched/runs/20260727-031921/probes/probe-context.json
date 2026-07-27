@@ -1,0 +1,48 @@
+{
+  "target_base_url": "FILL_ME (e.g. http://localhost:3000)",
+  "auth": {
+    "scheme": "jwt (bearer)",
+    "token_location": "bearer",
+    "cookie_names": [],
+    "login_endpoints": [
+      "POST /users/v1/login"
+    ],
+    "how_to_authenticate": "cookie-session (e.g. NextAuth) \u2192 send the session cookie; bearer \u2192 Authorization: Bearer <jwt>; api-key \u2192 the documented key header"
+  },
+  "endpoints": {
+    "writes": [
+      "POST /books/v1",
+      "DELETE /users/v1/{username}",
+      "PUT /users/v1/{username}/email",
+      "PUT /users/v1/{username}/password",
+      "POST /users/v1/login",
+      "POST /users/v1/register"
+    ],
+    "reads": [
+      "GET /",
+      "GET /books/v1",
+      "GET /books/v1/{book_title}",
+      "GET /createdb",
+      "GET /me",
+      "GET /users/v1",
+      "GET /users/v1/{username}",
+      "GET /users/v1/_debug"
+    ],
+    "idor_candidates": [
+      "DELETE /users/v1/{username}",
+      "GET /books/v1/{book_title}",
+      "GET /users/v1/{username}",
+      "PUT /users/v1/{username}/email",
+      "PUT /users/v1/{username}/password"
+    ],
+    "ssrf_candidates": [],
+    "upload_candidates": [],
+    "auth_endpoints": [
+      "POST /users/v1/login"
+    ]
+  },
+  "sensitive_fields": [],
+  "tenant_keys": [],
+  "datastore_class": "sql",
+  "note": "These are THIS app's real routes/auth (from FACTS.json). Finalize each probe draft against this file, supply secrets/tokens, then run against a TEST instance only."
+}
