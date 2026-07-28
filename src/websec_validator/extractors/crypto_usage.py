@@ -50,7 +50,7 @@ PRINCIPAL_USE = re.compile(r"\b(?:tenant_?Id|user_?Id|set_config\s*\(\s*['\"]app
 # a request-supplied secret/token/signature compared with ===/!== (non-constant-time) instead of a
 # timing-safe equal — a credential/HMAC timing side-channel (CWE-208).
 TIMING_UNSAFE = re.compile(
-    r"(?:req|request|ctx)\.(?:headers?|header|get)\b[^;\n]{0,70}\b(?:authorization|token|signature|hmac|secret|api[_-]?key)\b[^;\n]{0,70}[!=]==?"
+    r"(?:req|request|ctx)\.(?:headers?|header|get)\b[^;\n]{0,70}\b(?:authorization|token|signature|hmac|secret|api[_-]?key)\b[^;\n]{0,70}[!=]==?\s*(?!(?:undefined|null|true|false)\b|['\"](?:Bearer\s*)?['\"](?:;|\s|\)|$)|['\"]['\"](?:;|\s|\)|$))[a-zA-Z0-9_\"'\.`\$\(]+"
     r"|\b(?:authorization|signature|hmac|x-[\w-]*signature|providedToken|givenToken)\b[^;\n]{0,50}[!=]==?\s*(?:expected|valid|secret|process\.env|config\.)"
     r"|[!=]==?\s*(?:expectedSignature|expectedToken|expectedAuth|expectedHmac|validSignature)\b", re.I)
 TIMING_SAFE = re.compile(r"timingSafeEqual|compare_digest|secure_compare|constantTimeEqual|crypto\.timingSafeEqual", re.I)

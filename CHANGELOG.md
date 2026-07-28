@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Fix false positives in CryptoUsageExtractor for timing-unsafe checks when testing `req.headers['authorization']` against `undefined`, `null`, `true`, `false`, `''`, or static strings like `'Bearer'`.
+
 ## [0.11.0] — 2026-07-11
 
 Distribution & integration round — reach every agent host, run as a local guardrail, and compose with
