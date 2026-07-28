@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- Update Trivy to `0.72.0` in Dockerfile and configure `core.hooksPath` for testing post-commit hooks.
+
 
 ## [0.11.0] — 2026-07-11
 

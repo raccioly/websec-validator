@@ -12,7 +12,7 @@ FROM python:3.14-slim
 ARG TARGETARCH
 ARG NOIR_VERSION=1.0.0
 ARG GITLEAKS_VERSION=8.30.1
-ARG TRIVY_VERSION=0.58.1
+ARG TRIVY_VERSION=0.72.0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl git \
