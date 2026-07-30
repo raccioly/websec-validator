@@ -570,6 +570,10 @@ The initial public line. Highlights across 0.2.1–0.2.9:
 ### Fixed
 - Scanner-contamination and rate-limit fixes (agent-wallet dogfood).
 
+## [Unreleased]
+### Fixed
+- test_hooks: set core.hooksPath locally to fix post-commit test (`test_end_to_end_post_commit_runs`).
+
 [Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.11.0...HEAD
 [0.11.0]: https://github.com/raccioly/websec-validator/compare/v0.10.0...v0.11.0
 [0.4.2]: https://github.com/raccioly/websec-validator/compare/v0.4.1...v0.4.2
