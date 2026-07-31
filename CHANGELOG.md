@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **SSRF / Outbound HTTP Regex Precision** — Updated the `ssrf` and `ssrf-outbound-http` regular expressions in `src/websec_validator/extractors/surface.py` to correctly identify method chaining for HTTP clients like `needle` and `superagent` (e.g., `needle.get(...)`). Added regression tests in `tests/test_pentest_regressions.py`.
+
 ## [0.11.0] — 2026-07-11
 
 Distribution & integration round — reach every agent host, run as a local guardrail, and compose with
