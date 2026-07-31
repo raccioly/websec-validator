@@ -43,7 +43,7 @@ _LOG_INJECTION = re.compile(
 #   gating: None | "sql" | "nosql"  (datastore-dependent classes)
 SINKS = {
     "ssrf": ("ssrf-probes", None, re.compile(
-        r"(?:\bfetch|axios(?:\.\w+)?|got|node-fetch|superagent|needle|undici|requests\.\w+|httpx\.\w+|urllib\.request\.\w+)"
+        r"(?:\bfetch|axios(?:\.\w+)?|got(?:\.\w+)?|node-fetch|superagent(?:\.\w+)?|needle(?:\.\w+)?|undici(?:\.\w+)?|requests\.\w+|httpx\.\w+|urllib\.request\.\w+)"
         r"\s*\(\s*[^)\n;]{0,160}?" + _REQ_SRC)),
     "command-injection": ("ssrf-probes", None, re.compile(
         r"(?:child_process\.exec|\bexecSync|\bexec|\bspawn|os\.system|subprocess\.(?:run|call|check_output|Popen))\s*\([^)]*"
@@ -89,8 +89,7 @@ SINKS = {
     # MED-FP by design (axios.get(someVar) is common) → kept LOW-confidence; promote when reachable
     # from a controller that reads req.query.
     "ssrf-outbound-http": ("ssrf-probes", None, re.compile(
-        r"(?:axios(?:\.(?:get|post|put|delete|patch|request|head))?|got|node-fetch|needle|superagent|undici"
-        r"|https?\.request|requests\.(?:get|post|put|patch|request)|httpx\.(?:get|post|request|AsyncClient))"
+        r"(?:axios(?:\.(?:get|post|put|delete|patch|request|head))?|got(?:\.(?:get|post|put|delete|patch|request|head))?|node-fetch|needle(?:\.(?:get|post|put|delete|patch|request|head))?|superagent(?:\.(?:get|post|put|delete|patch|request|head))?|undici(?:\.request)?|https?\.request|requests\.(?:get|post|put|patch|request)|httpx\.(?:get|post|request|AsyncClient))"
         r"\s*\(\s*[A-Za-z_$][\w$.]*\s*[,)]")),
     # OUTPUT-side disclosure — a DOCUMENTED EXCEPTION to the user-input-marker rule (this is a
     # response sink, not an input sink). A 500 handler echoing err.stack/err.message, or a
