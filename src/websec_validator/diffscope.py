@@ -55,7 +55,13 @@ def compute(target: Path, ref: str) -> dict:
     if ref_err is not None:
         return {"base": base, "files": {}, "error": f"unknown git ref: {base}"}
 
-    diff, err = _git(target, "diff", "-U0", "--no-color", f"{base}...HEAD")
+    # Pin the diff format: diff.noprefix / diff.mnemonicPrefix / core.quotePath / diff.external are
+    # common global settings that change or replace this output. Any of them would yield zero parsed
+    # files → "nothing changed" → the scoped --fail-on gate silently passes. Never let a developer's
+    # git config turn the CI gate off.
+    diff, err = _git(target, "-c", "diff.noprefix=false", "-c", "diff.mnemonicPrefix=false",
+                     "-c", "core.quotePath=false", "diff", "--no-ext-diff", "-U0", "--no-color",
+                     f"{base}...HEAD")
     if err is not None:
         return {"base": base, "files": {}, "error": err}
 
@@ -102,16 +108,35 @@ def line_in_hunk(location: str, line: int, scope: dict) -> bool:
 
 def annotate(ledger: dict, scope: dict) -> dict:
     """Tag every ledger finding with `diff_state`. ADDITIVE — nothing is dropped here; gating is the
-    caller's choice. Returns counts."""
-    changed = untouched = 0
+    caller's choice. Returns counts.
+
+    Checks BOTH `location` and `file`: access-control findings carry a ROUTE path as their location
+    (/api/admin/users), which matches no changed file, so they were always "untouched" and the
+    --diff-scoped CI gate skipped them entirely. When a finding carries a line, the hunk check
+    (previously dead code) upgrades it to `in-changed-hunk` — the line-level validation the LLM
+    reviewers skip."""
+    changed = untouched = in_hunk = 0
     for f in (ledger or {}).get("findings", []) or []:
-        state = in_scope(f.get("location", ""), scope)
+        candidates = [f.get("location", ""), f.get("file", "")]
+        state = "untouched"
+        for cand in candidates:
+            if cand and in_scope(cand, scope) == "in-changed-file":
+                state = "in-changed-file"
+                # a location like "src/a.ts:42" carries a line — validate it against the hunks
+                for c in candidates:
+                    if c and ":" in str(c):
+                        tail = str(c).rsplit(":", 1)[-1]
+                        if tail.isdigit() and line_in_hunk(c, int(tail), scope):
+                            state = "in-changed-hunk"
+                break
         f["diff_state"] = state
-        if state == "in-changed-file":
+        if state.startswith("in-changed"):
             changed += 1
+            if state == "in-changed-hunk":
+                in_hunk += 1
         else:
             untouched += 1
-    return {"in_changed_file": changed, "untouched": untouched,
+    return {"in_changed_file": changed, "in_changed_hunk": in_hunk, "untouched": untouched,
             "changed_files": len(scope.get("files", {}) or {})}
 
 

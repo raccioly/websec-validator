@@ -493,8 +493,13 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                 sev = "HIGH" if is_write else "MEDIUM"
             elif verdict in _DYNAMIC_PROTECTED or verdict.startswith(_DYNAMIC_PROTECTED_PREFIXES):
                 continue  # dynamic says it's actually protected → not a finding
-        out.append(_f(f"Missing authorization: {m} {p}", "access-control", "missing-auth",
-                      sev, conf, p, ev))
+        _mf = _f(f"Missing authorization: {m} {p}", "access-control", "missing-auth",
+                 sev, conf, p, ev)
+        # `location` is the ROUTE path (/api/admin/users) — useful to a human, but it matches no file,
+        # so --diff scoping always marked these "untouched" and the scoped --fail-on gate skipped
+        # them: a PR adding an unauthenticated admin route passed CI. Carry the handler file too.
+        _mf["file"] = eg.get("code_path", "")
+        out.append(_mf)
 
     # ---- 1b. Cross-tenant BOLA leaks (dynamically confirmed) ----
     for lk in ((dynamic or {}).get("cross_tenant_bola", {}) or {}).get("leaks", []):

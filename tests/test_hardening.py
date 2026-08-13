@@ -979,3 +979,17 @@ class ScannerSilenceAttributionTests(unittest.TestCase):
                 [{"key": "gitleaks", "output": str(d / "gitleaks.json"),
                   "name": "Gitleaks", "category": "secrets"}], d, target=d)
         self.assertEqual(res["parse_failed"], [])
+
+
+class WorkflowSecretDemotionTests(unittest.TestCase):
+    """A live credential in CI config is NOT a documentation placeholder."""
+
+    def test_workflow_and_manifest_secrets_are_not_doc_demoted(self):
+        # a hardcoded token in a GitHub Actions workflow is live in CI — one of the highest-yield
+        # real-world leaks — and it sits under `/.github/`, which the doc-demotion matched.
+        for path in (".github/workflows/deploy.yml", "requirements.txt", "requirements-dev.txt"):
+            self.assertFalse(scanners._is_doc_or_example(path), path)
+
+    def test_genuine_docs_are_still_demoted(self):
+        for path in ("docs/readme.md", "README.md", ".env.example", ".github/ISSUE_TEMPLATE.md"):
+            self.assertTrue(scanners._is_doc_or_example(path), path)

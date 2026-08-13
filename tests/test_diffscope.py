@@ -101,7 +101,30 @@ class ScopingTests(unittest.TestCase):
         self.assertEqual(len(ledger["findings"]), 3)            # additive: nothing dropped
         self.assertEqual([f["diff_state"] for f in ledger["findings"]],
                          ["in-changed-file", "untouched", "untouched"])
-        self.assertEqual(counts, {"in_changed_file": 1, "untouched": 2, "changed_files": 1})
+        self.assertEqual(counts, {"in_changed_file": 1, "in_changed_hunk": 0,
+                                  "untouched": 2, "changed_files": 1})
+
+    def test_route_path_findings_are_scoped_via_their_handler_file(self):
+        # access-control findings carry a ROUTE path (/api/admin/users) as location, which matches no
+        # changed file — they were always "untouched", so `--diff main --fail-on high` let a PR that
+        # adds an unauthenticated admin route pass CI.
+        ledger = {"findings": [{"location": "/api/admin/users",
+                                "file": "app/api/admin/users/route.ts"}]}
+        counts = diffscope.annotate(ledger, {"files": {"app/api/admin/users/route.ts": [(1, 20)]}})
+        # file-level is the right verdict here: neither the route path nor the handler path carries a
+        # line number, so there is nothing to validate against the hunks — but it IS in scope now.
+        self.assertEqual(ledger["findings"][0]["diff_state"], "in-changed-file")
+        self.assertEqual(counts["in_changed_file"], 1)
+        self.assertEqual(counts["untouched"], 0)
+
+    def test_line_level_validation_is_actually_applied(self):
+        # line_in_hunk existed but was never called — the advertised line-in-diff validation didn't run
+        ledger = {"findings": [{"location": "src/a.ts:11", "file": "src/a.ts"},
+                               {"location": "src/a.ts:99", "file": "src/a.ts"}]}
+        counts = diffscope.annotate(ledger, {"files": {"src/a.ts": [(10, 12)]}})
+        self.assertEqual(ledger["findings"][0]["diff_state"], "in-changed-hunk")   # on a changed line
+        self.assertEqual(ledger["findings"][1]["diff_state"], "in-changed-file")   # file yes, line no
+        self.assertEqual(counts["in_changed_hunk"], 1)
 
     def test_render_reports_error_and_empty_states(self):
         self.assertIn("UNSCOPED", diffscope.render_md({"error": "not a git repository"}, {}))

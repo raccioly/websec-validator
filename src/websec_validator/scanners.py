@@ -456,6 +456,10 @@ def _generic_secret(rule: str) -> bool:
 # README + docs/*.md (bug below).
 _DOC_EXT = (".md", ".mdx", ".markdown", ".rst", ".txt", ".adoc")
 _DOC_DIR_MARKERS = ("/docs/", "/doc/", "/examples/", "/example/", "/samples/", "/sample/", "/.github/")
+# …but NOT these: a hardcoded token in a GitHub Actions workflow is live in CI (one of the highest-
+# yield real-world leaks), and a dependency manifest can carry an index URL with embedded credentials.
+# Both live under paths the doc-demotion would otherwise silently tier down to LOW "placeholder".
+_NEVER_DOC = ("/.github/workflows/", "/requirements", "/pipfile", "/poetry.lock")
 _DOC_NAME_PREFIX = ("readme", "changelog", "contributing", "license", "authors", "history", "notice")
 _EXAMPLE_SUFFIX = (".example", ".sample", ".dist", ".template", ".tmpl")
 _DOC_NOTE = "in a documentation/example file — almost always a placeholder, verify before treating as real"
@@ -465,6 +469,8 @@ def _is_doc_or_example(path: str) -> bool:
     # "/" prefix so ROOT-LEVEL dirs match the /marker/ patterns too — `examples/app.js`
     # previously slipped past `/examples/` and kept HIGH (DocGuard field report F1).
     p = "/" + (path or "").replace("\\", "/").lower().lstrip("/")
+    if any(m in p for m in _NEVER_DOC):
+        return False
     base = p.rsplit("/", 1)[-1]
     return (p.endswith(_DOC_EXT)
             or any(m in p for m in _DOC_DIR_MARKERS)
