@@ -4,6 +4,7 @@
   - rate-limit probe is FACTS-driven (bug-067)
 Stdlib unittest only:  python3 -m unittest discover -s tests
 """
+import http.server
 import json
 import shutil
 import subprocess
@@ -41,6 +42,64 @@ def _fake_request(method, url, token=None, timeout=20, data=None, cookie=None):
     if url.endswith("/api/public"):
         return 200, "x"                            # not gated unauthenticated
     return 404, ""
+
+
+def _start_server(handler_cls):
+    """Start a throwaway HTTP server for probe tests. ThreadingHTTPServer + allow_reuse_address +
+    server_close: a single-threaded TCPServer with a leaked listening socket made these tests flaky
+    (ConnectionReset / address-in-use), and FLAKY SECURITY TESTS GET MUTED — which is exactly how
+    bug-208 shipped. Returns (base_url, shutdown_callable)."""
+    import http.server
+    import socketserver
+    import threading
+
+    class _Srv(socketserver.ThreadingMixIn, http.server.HTTPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+
+    srv = _Srv(("127.0.0.1", 0), handler_cls)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+    def _stop():
+        srv.shutdown()
+        srv.server_close()          # release the listening socket — the leak that caused flakiness
+
+    return f"http://127.0.0.1:{srv.server_address[1]}", _stop
+
+
+class _DrainingHandler(http.server.BaseHTTPRequestHandler):
+    """Base handler that always CONSUMES the request body before responding.
+
+    A server that answers a POST with a 3xx without reading the body resets the connection — that is
+    real-world behavior (it is how bug-209 was found), but in tests it makes every probe flaky. Drain
+    first, then let the subclass reply."""
+
+    def log_message(self, *a):
+        pass
+
+    def _drain(self):
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            if n:
+                self.rfile.read(n)
+        except Exception:
+            pass
+
+    def send_body(self, code, body=b"", ctype="application/json"):
+        self._drain()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if body:
+            self.wfile.write(body)
+
+    def send_redirect(self, location="/login", code=307):
+        self._drain()
+        self.send_response(code)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
 
 class ForgedTokenBypassTests(unittest.TestCase):
@@ -697,39 +756,18 @@ class RedirectAuthJudgmentTests(unittest.TestCase):
     200. A redirect-to-login is the app CORRECTLY refusing access; it must never read as 'open'."""
 
     def _server(self):
-        import http.server
-        import socketserver
-        import threading
-
-        class H(http.server.BaseHTTPRequestHandler):
-            def log_message(self, *a):
-                pass
-
-            def _login(self):
-                b = b"<html><body>Please log in</body></html>"
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html")
-                self.send_header("Content-Length", str(len(b)))
-                self.end_headers()
-                self.wfile.write(b)
-
+        class H(_DrainingHandler):
             def do_GET(self):
                 if self.path == "/login":
-                    self._login()
-                else:
-                    self.send_response(307)
-                    self.send_header("Location", "/login")
-                    self.end_headers()
+                    return self.send_body(200, b"<html><body>Please log in</body></html>", "text/html")
+                return self.send_redirect("/login")
 
             def do_POST(self):
-                self.send_response(307)
-                self.send_header("Location", "/login")
-                self.end_headers()
+                return self.send_redirect("/login")
 
-        srv = socketserver.TCPServer(("127.0.0.1", 0), H)
-        threading.Thread(target=srv.serve_forever, daemon=True).start()
-        self.addCleanup(srv.shutdown)
-        return f"http://127.0.0.1:{srv.server_address[1]}"
+        base, stop = _start_server(H)
+        self.addCleanup(stop)
+        return base
 
     def test_request_does_not_follow_redirects(self):
         base = self._server()
@@ -770,50 +808,32 @@ class AuthVerdictMatrixTests(unittest.TestCase):
              "/api/flaky", "/api/throttled", "/api/empty"]
 
     def _server(self):
-        import http.server
         import json as _json
-        import socketserver
-        import threading
 
-        class H(http.server.BaseHTTPRequestHandler):
-            def log_message(self, *a):
-                pass
-
-            def _send(self, code, body=b"", ctype="application/json"):
-                self.send_response(code)
-                self.send_header("Content-Type", ctype)
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                if body:
-                    self.wfile.write(body)
-
+        class H(_DrainingHandler):
             def route(self):
                 p = self.path
                 if p == "/login":
-                    return self._send(200, b"<html>login</html>", "text/html")
-                if p == "/api/public-data":            # genuinely unauthenticated data
-                    return self._send(200, _json.dumps({"items": [1, 2, 3]}).encode())
+                    return self.send_body(200, b"<html>login</html>", "text/html")
+                if p == "/api/public-data":
+                    return self.send_body(200, _json.dumps({"items": [1, 2, 3]}).encode())
                 if p == "/api/protected":
-                    return self._send(401, b'{"error":"unauthorized"}')
-                if p == "/api/redirected":             # protected VIA redirect (bug-208)
-                    self.send_response(307)
-                    self.send_header("Location", "/login")
-                    self.end_headers()
-                    return
+                    return self.send_body(401, b'{"error":"unauthorized"}')
+                if p == "/api/redirected":
+                    return self.send_redirect("/login")
                 if p == "/api/flaky":
-                    return self._send(500, b'{"error":"boom"}')
+                    return self.send_body(500, b'{"error":"boom"}')
                 if p == "/api/throttled":
-                    return self._send(429, b'{"error":"slow down"}')
+                    return self.send_body(429, b'{"error":"slow down"}')
                 if p == "/api/empty":
-                    return self._send(200, b"")
-                return self._send(404, b'{"error":"nf"}')
+                    return self.send_body(200, b"")
+                return self.send_body(404, b'{"error":"nf"}')
 
             do_GET = do_POST = route
 
-        srv = socketserver.TCPServer(("127.0.0.1", 0), H)
-        threading.Thread(target=srv.serve_forever, daemon=True).start()
-        self.addCleanup(srv.shutdown)
-        return f"http://127.0.0.1:{srv.server_address[1]}"
+        base, stop = _start_server(H)
+        self.addCleanup(stop)
+        return base
 
     def test_unauth_reachability_verdict_matrix(self):
         base = self._server()

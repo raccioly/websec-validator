@@ -52,20 +52,23 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 _NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirect)
 
 
-def _read_body(resp, limit: int) -> str:
-    """Read at most `limit` bytes of a response body, NEVER raising.
+def _read_body(resp, limit: int):
+    """Read at most `limit` bytes of a response body. NEVER raises. Returns None if the read FAILED.
 
-    The status code decides every auth verdict here; the body is optional context (only used for a
-    size heuristic). Reading it can genuinely fail mid-scan — a server that answers a POST with a
-    3xx *without consuming the request body* resets the connection (Errno 54), and truncated or
-    chunked bodies can blow up too. Since the caller invokes this from inside an `except HTTPError`
-    handler, an exception here would NOT be caught by the sibling `except Exception` and would abort
-    the entire dynamic phase. Degrade to an empty body instead — losing context is survivable,
-    losing the status (or the run) is not."""
+    The status code decides every auth verdict here; the body is optional context. Reading it can
+    genuinely fail mid-scan — a server that answers a POST with a 3xx *without consuming the request
+    body* resets the connection (Errno 54), and truncated/chunked bodies can blow up too. Since the
+    caller invokes this from inside an `except HTTPError` handler, an exception here would NOT be
+    caught by the sibling `except Exception` and would abort the entire dynamic phase.
+
+    None (read failed) is deliberately DISTINCT from "" (genuinely empty body). Collapsing them
+    would turn "we don't know what came back" into "nothing came back" — which downgrades a
+    cross-tenant LEAK to 'blocked-empty' and an open endpoint to 'open-empty'. Unknown must never
+    silently read as safe."""
     try:
         return resp.read(limit).decode(errors="replace")
     except Exception:
-        return ""
+        return None
 
 
 def _request(method: str, url: str, token: str | None, timeout: int = 20,
@@ -185,6 +188,11 @@ def cross_tenant_bola(cfg: dict, facts: dict) -> dict:
             code, body = _request("GET", url, atk["token"])
             if code in (401, 403, 404):
                 verdict = "blocked"
+            elif code in (200, 206) and body is None:
+                # the read FAILED — we do not know whether the other tenant's data came back.
+                # Never let "unknown" collapse into "blocked-empty": that would report a possible
+                # cross-tenant LEAK (the most severe verdict here) as safe.
+                verdict = "investigate (200 but response body unreadable — re-run)"
             elif code in (200, 206):
                 verdict = "blocked-empty" if _no_records(body) else "LEAK"  # structural, not string-match
             else:
