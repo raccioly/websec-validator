@@ -114,6 +114,7 @@ class RepoContext:
         # repo's fixture corpus is not its attack surface (DocGuard field report F1).
         self.include_fixtures = bool(include_fixtures)
         self._text: dict[Path, str] = {}
+        self.oversized: list = []      # files skipped by the MAX_BYTES cap — disclosed, not silent
         self.code_files: list[Path] = []
         self.stack: dict = {}          # filled by StackExtractor, read by the rest
         self._walk()
@@ -148,7 +149,15 @@ class RepoContext:
     def text(self, p: Path) -> str:
         if p not in self._text:
             try:
-                self._text[p] = "" if p.stat().st_size > MAX_BYTES else p.read_text(errors="ignore")
+                if p.stat().st_size > MAX_BYTES:
+                    # Every extractor then sees an EMPTY file: no routes, no guards, no sinks, no
+                    # secrets. MAX_FILES truncation is disclosed end-to-end (ctx.truncated →
+                    # files_truncated → CLI + briefing); this cap had no equivalent, so a large
+                    # generated route table or schema silently contributed nothing. Record it.
+                    self.oversized.append(self.rel(p))
+                    self._text[p] = ""
+                else:
+                    self._text[p] = p.read_text(errors="ignore")
             except Exception:
                 self._text[p] = ""
         return self._text[p]

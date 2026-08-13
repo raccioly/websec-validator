@@ -103,5 +103,19 @@ class FpFilterTests(unittest.TestCase):
         self.assertIn("redos", md)
 
 
+
+
+class ProductLookalikeTests(unittest.TestCase):
+    def test_product_dirs_beginning_with_a_test_word_are_not_filtered(self):
+        # `is_test_file` matches a tests?/ segment; these are PRODUCT dirs that merely start with it
+        for loc in ("src/testimonials/route.ts", "src/contest/api.ts", "src/latest/handler.ts"):
+            flagged, _ = fpfilter.evaluate(_f(attack_class="bola", location=loc))
+            self.assertFalse(flagged, loc)
+
+    def test_real_test_files_are_still_filtered(self):
+        for loc in ("tests/app.test.js", "src/__tests__/x.ts", "spec/models_spec.rb"):
+            flagged, _ = fpfilter.evaluate(_f(attack_class="bola", location=loc))
+            self.assertTrue(flagged, loc)
+
 if __name__ == "__main__":
     unittest.main()

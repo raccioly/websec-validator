@@ -35,8 +35,20 @@ _PATHLIKE = re.compile(r"[\w./\\-]+\.[A-Za-z0-9]{1,6}$")
 
 
 def _is_pathlike(loc: str) -> bool:
+    """True only for something that can anchor to a REPO FILE.
+
+    A route path (`/api/platform-admin/secrets`, `GET /api/x`) contains "/" but matches no artifact,
+    and emitting it as a physicalLocation gives GitHub Code Scanning a URI it cannot map — the result
+    is dropped or unanchored instead of rendering as the intended locationHint. Require a real
+    file-ish shape: not absolute-with-no-extension, and no "METHOD /path" prefix."""
     loc = (loc or "").strip()
-    return bool(loc) and not loc.startswith("(") and (bool(_PATHLIKE.search(loc)) or "/" in loc)
+    if not loc or loc.startswith("("):
+        return False
+    if re.match(r"^(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|ANY)\s+/", loc):
+        return False                      # "GET /api/x" — a route, not a file
+    if loc.startswith("/") and not _PATHLIKE.search(loc):
+        return False                      # "/api/admin/users" — absolute route path, no extension
+    return bool(_PATHLIKE.search(loc)) or "/" in loc
 
 
 def _rule_id(attack_class: str) -> str:

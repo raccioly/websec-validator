@@ -21,8 +21,36 @@ them. Deterministic: pure functions over facts + inventory.
 
 from __future__ import annotations
 
+import re
+
 _HIGH_RISK_SINKS = {"sql-injection", "sqli", "command-injection", "eval-injection",
                     "nosql-injection", "path-traversal", "ssrf", "ssrf-outbound-http", "xxe"}
+
+
+# Route paths are parsed out of SOURCE and then interpolated into shell commands the user is told to
+# copy-paste. A path containing a quote, backtick or $( ) would break out of the string. websec is a
+# security tool; it must not hand anyone a command that executes something unintended.
+# Only the characters that actually BREAK OUT of the quoted string the path is embedded in:
+# quotes, backtick, `$` (expansion), backslash, and any whitespace/newline. Chars like ; | & < > ( )
+# are inert inside quotes, and `{ }` MUST stay allowed — `/api/orders/{id}` is the single most common
+# shape of an IDOR target, and rejecting it would strip nearly every parameterised endpoint from the
+# plan (a silent loss of exactly the endpoints Phase 2 exists to test).
+_SHELL_UNSAFE = re.compile(r"""["'`$\\\s]""")
+
+
+def _safe_path(path: str) -> str:
+    """A route path that is safe to embed in a shell command, or "" if it is not."""
+    p = str(path or "")
+    return p if p and not _SHELL_UNSAFE.search(p) else ""
+
+
+def _shell_safe_rows(rows: list) -> list:
+    """Drop endpoints whose path can't be safely interpolated into a copy-paste command.
+
+    Dropping is right here: these are OPTIONAL suggested commands, and a path with a quote/backtick/
+    $( ) is far more likely to be a parser artifact than a real route. The inventory (§3a) still
+    lists every endpoint, so nothing is hidden — only the generated command is withheld."""
+    return [r for r in rows if _safe_path(r.get("path", ""))]
 
 
 def _item(title, target, tool, command, oracle):
@@ -58,7 +86,8 @@ def build(facts: dict, inventory: dict, prediction: dict | None = None) -> dict:
 
     # ---- Phase 2: authz — pull concrete targets from the ranked inventory ----
     p2 = []
-    idor_targets = [r for r in rows if any("IDOR" in w for w in r.get("why", [])) or r.get("path_params")]
+    idor_targets = _shell_safe_rows(
+        [r for r in rows if any("IDOR" in w for w in r.get("why", [])) or r.get("path_params")])
     for r in idor_targets[:12]:
         pp = ", ".join(r.get("path_params", [])) or "id"
         p2.append(_item(
@@ -68,7 +97,7 @@ def build(facts: dict, inventory: dict, prediction: dict | None = None) -> dict:
             f"curl -s -H \"Authorization: Bearer $TOKEN_B\" \"$BASE_URL{r['path']}\"  "
             f"# with A's {pp}",
             "user B gets user A's object (200 + A's data) = BOLA; 403/404 = properly isolated"))
-    write_rows = [r for r in rows if r.get("is_write")]
+    write_rows = _shell_safe_rows([r for r in rows if r.get("is_write")])
     if priv_fields and write_rows:
         wr = write_rows[0]
         p2.append(_item(
@@ -78,7 +107,8 @@ def build(facts: dict, inventory: dict, prediction: dict | None = None) -> dict:
             f'-H "Content-Type: application/json" -d \'{{"...":"valid", '
             + ", ".join(f'"{f}":"attacker"' for f in priv_fields[:3]) + "}'",
             f"the privileged field ({', '.join(priv_fields[:3])}) is persisted = mass-assignment"))
-    unguarded_writes = [r for r in rows if r.get("is_write") and r.get("auth") == "UNGUARDED"]
+    unguarded_writes = _shell_safe_rows(
+        [r for r in rows if r.get("is_write") and r.get("auth") == "UNGUARDED"])
     for r in unguarded_writes[:6]:
         p2.append(_item(
             "BFLA / missing function-level authz — write with no visible guard",
@@ -88,7 +118,8 @@ def build(facts: dict, inventory: dict, prediction: dict | None = None) -> dict:
 
     # ---- Phase 3: injection — ONLY at sink-backed endpoints ----
     p3 = []
-    sink_rows = [r for r in rows if any(s in _HIGH_RISK_SINKS for s in r.get("sinks", []))]
+    sink_rows = _shell_safe_rows(
+        [r for r in rows if any(s in _HIGH_RISK_SINKS for s in r.get("sinks", []))])
     for r in sink_rows[:12]:
         hot = [s for s in r.get("sinks", []) if s in _HIGH_RISK_SINKS]
         if any(s in ("sql-injection", "sqli", "nosql-injection") for s in hot):

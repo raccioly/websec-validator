@@ -17,6 +17,8 @@ memory-safe languages, SSRF reachable only from HTML, and anything that lives pu
 
 from __future__ import annotations
 
+import re
+
 from .extractors.base import is_test_file
 
 # attack_class → why a reviewer would routinely filter it. Deliberately NARROW: each entry is a class
@@ -36,6 +38,9 @@ _DOC_SUFFIXES = (".md", ".mdx", ".rst", ".txt", ".adoc")
 
 # languages whose runtime forecloses classic memory-safety bugs — a memory-safety finding there is
 # almost always a scanner artefact.
+# Product directories whose names merely BEGIN with a test-ish word — never treat these as fixtures.
+_PRODUCT_LOOKALIKE = re.compile(r"(?:^|/)(?:testimonial|testament|contest|latest|protest)[\w-]*/", re.I)
+
 _MEMORY_SAFE = {"python", "node", "typescript", "ruby", "go", "java", "csharp"}
 _MEMORY_CLASSES = {"buffer-overflow", "use-after-free", "memory-safety"}
 
@@ -50,7 +55,9 @@ def evaluate(finding: dict, facts: dict | None = None) -> tuple:
         return True, _LOW_SIGNAL_CLASSES[ac]
     if low.endswith(_DOC_SUFFIXES):
         return True, "documentation/prose file — not product code"
-    if loc and is_test_file(loc):
+    # is_test_file matches a `tests?/` PATH SEGMENT, but guard the obvious product words that merely
+    # start with "test" (src/testimonials/, src/contest/) before trusting it to demote a real finding.
+    if loc and is_test_file(loc) and not _PRODUCT_LOOKALIKE.search(low):
         return True, "test/fixture file — not the deployed product"
     if ac in _MEMORY_CLASSES:
         langs = {str(x).lower() for x in ((facts or {}).get("stack", {}) or {}).get("languages", [])}
