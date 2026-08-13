@@ -7,6 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-07-19
+
+**Aim the pentest, then prove the aim.** This round adds the planning layer that turns websec's recon
+into a testing plan, closes the loop with real scans — and then hardens the result against a class of
+defect found by dogfooding: a transport or protocol reality (a redirect, a dead socket, a scanner that
+never ran) being silently converted into a security verdict.
+
+### Added — the planning trio
+
+- **§3a Attack-surface inventory** + `attack-surface.json` — one ranked row per endpoint (method/path →
+  handler → auth verdict → path params → risk tags → sinks in that file → an explainable risk score
+  with reasons). The "test in this order" table. Sink attribution is FILE-scoped and says so.
+- **§4b DAST prediction** — the concrete scanner alert each static finding will raise (`missing-csp` →
+  ZAP 10038/10055, `sqli` → ZAP 40018 / sqlmap, `ssrf` → Nuclei OAST…), *and* the blind spots no
+  scanner can find (BOLA, missing-auth, mass-assignment, RLS, secrets, supply-chain) with why — so a
+  clean scan is never mistaken for "safe". Plus "scan answers not to trust at face value".
+- **§5b Pentest runbook** — a phased, pre-aimed plan (safe recon → authz with two identities →
+  injection at sink-backed endpoints only), each item carrying a real target, a tool command and a
+  confirm/disconfirm oracle. Phase 3 is gated behind an explicit authorization warning.
+- **§5c Fix prompts** — one paste-ready instruction per finding, each ending in a class-specific
+  VERIFY step (BOLA → re-run the two-identity probe; secret → ROTATE, deleting doesn't un-leak).
+- **§4c FP pre-triage** — tags findings a reviewer/LLM-reviewer routinely filters, with the reason.
+  Tags only; never drops.
+- **§3e OpenAPI contract** — shadow (undocumented) endpoints diffed from SOURCE, stale spec entries,
+  and contract hygiene. An unusable spec produces NO verdict rather than a wrong one.
+
+### Added — integration & coverage
+
+- `websec run --diff REF` — PR scoping with exact changed-hunk line ranges (`diff-scope.json`), and
+  `--fail-on` narrows to changed files.
+- `websec emit-context` — recon as a Claude Code SessionStart `additionalContext` envelope, so any
+  agent starts pre-scoped.
+- `websec calibrate --ingest-dast` — feed a real ZAP/Nuclei report back to confirm/refute predictions
+  and personalise `P(real)`.
+- **Reachability + EPSS/KEV enrichment** for dependency CVEs ("reachable AND exploitable"), with
+  `scripts/refresh-epss-kev.sh`.
+- `--sbom` (CycloneDX/SPDX), **osv-scanner** wired as a second SCA engine, **gosec**/**Brakeman**
+  per-language SAST, opt-in **TruffleHog** `--verify-secrets`, MCP `env`/`headers` secret detection,
+  and HISTORY-ONLY secret flagging.
+
+### Fixed — verdict correctness (the headline)
+
+- **Redirects are no longer followed when judging auth** (bug-208). A route answering `307 → /login`
+  was scored as the login page's `200` and reported **OPEN-no-auth** — reported live on a real repo
+  against `/api/platform-admin/secrets`. All three auth probes were affected.
+- **A 200 that means "denied"** (`{"user":null,"error":"not authenticated"}`, a login/SPA shell) is no
+  longer reported open (bug-210).
+- **A crash mid-scan no longer aborts the run** — a failed body read kept the status (bug-209).
+- **The forged-token probe is no longer dead on redirect-gated apps** and reports INCONCLUSIVE rather
+  than a pass when nothing was testable (bug-210).
+- **An unreachable target is no longer a clean bill of health** (bug-210).
+- **`mint()` no longer follows a login redirect**, which could mint a bogus identity and run the whole
+  BOLA matrix against two fake tenants (bug-210).
+- **Write findings are no longer deleted by a GET's verdict** — dynamic correlation is method-exact
+  (bug-211); and every "gated" verdict is recognised as protection, guarded by a drift test.
+- **The calibration overlay can no longer be poisoned** by an untrustworthy run or by a passive-only
+  scan's silence (bug-212).
+- **`--diff --fail-on` now gates on access-control findings** (they carry a route path, so they were
+  always "untouched"), the line-in-hunk validation actually runs, and git config can't empty the
+  scope (bug-213).
+- **The authenticated BOLA probe no longer fires side-effecting endpoints** like `/send-invoices`
+  (bug-214); a 200 soft-deny is no longer a CRITICAL "leak"; IaC findings no longer collapse across
+  resources; UNKNOWN severity can trip a gate.
+- **`SIDE_EFFECTING` no longer over-matches**, which silently hid `/api/generated-content`,
+  `/api/sender-profiles` and `/api/runners` from every probe (bug-216).
+- Secrets in `.github/workflows/` and dependency manifests are no longer demoted as "documentation
+  placeholders"; oversized files are disclosed; SARIF no longer emits route paths as unmappable
+  artifact URIs; copy-paste commands are shell-safe (bug-215).
+
+### Testing
+
+413 → **551 tests**. The real-server probe tests were de-flaked (threading + socket close); several
+tests that had asserted wrong behavior as correct were corrected. Self-scan ledger unchanged
+throughout — every change strictly additive or a correction.
+
+
 ## [0.11.0] — 2026-07-11
 
 Distribution & integration round — reach every agent host, run as a local guardrail, and compose with
