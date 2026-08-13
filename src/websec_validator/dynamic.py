@@ -107,7 +107,19 @@ def mint(cfg: dict, role: str) -> dict:
     req = urllib.request.Request(cfg["target"] + cfg.get("login_path", "/api/auth/login"),
                                  data=body, headers={"Content-Type": "application/json"})
     try:
-        d = json.load(urllib.request.urlopen(req, timeout=20))
+        # Use the SHARED no-redirect opener (bug-208 discipline). urlopen would FOLLOW a login
+        # redirect: a 302 → /dashboard replays as a GET with the credentials dropped, and whatever
+        # that page returns gets mined for a token — so a FAILED login can mint a bogus identity and
+        # the whole BOLA matrix then runs against two fake tenants. A login that redirects instead of
+        # returning JSON is a configuration error we must REPORT, not silently follow.
+        resp = _NO_REDIRECT_OPENER.open(req, timeout=20)
+        d = json.load(resp)
+    except urllib.error.HTTPError as e:
+        if e.code in (301, 302, 303, 307, 308):
+            return {"error": f"login returned {e.code} → {e.headers.get('Location')} instead of a JSON "
+                             "token (cookie-session login?). Point --config login_path at the JSON "
+                             "auth endpoint, or supply tokens directly."}
+        return {"error": f"HTTP {e.code} from the login endpoint"}
     except Exception as e:
         return {"error": f"{type(e).__name__}: {e}"}
     token = _dig(d, cfg.get("token_json_path", "tokens.accessToken"))
@@ -122,6 +134,28 @@ def _first_tenant(raw):
     TypeError, uncaught) and a scalar string silently yields a single-CHARACTER tenant."""
     tenants = raw if isinstance(raw, list) else ([raw] if raw is not None else [])
     return tenants[0] if tenants else None
+
+
+# HTTP codes that mean "this route is GATED when unauthenticated". 3xx belongs here: a redirect to a
+# login page is a refusal (bug-208). Used as the baseline test for the forged-token probe and as the
+# 'protected' set elsewhere, so all probes agree on what "blocked" looks like.
+_GATED_CODES = {401, 403, 301, 302, 303, 307, 308}
+
+# A 200 that is actually a DENIAL. The other half of bug-208: plenty of apps answer an unauthenticated
+# API call with `200 {"user":null,"error":"not authenticated"}` or an SPA/login HTML shell instead of a
+# 401. Scoring those as "OPEN-no-auth" is the same catastrophic false positive as following a redirect.
+# Deliberately TIGHT — only unambiguous denial markers, so a genuinely open endpoint is not hidden.
+_SOFT_DENY = re.compile(
+    r'"(?:user|session|data)"\s*:\s*null'
+    r'|not\s+authenticated|unauthenticated|unauthorized|not\s+logged\s?in|must\s+be\s+logged\s?in'
+    r'|please\s+(?:log|sign)\s?in|login\s+required|authentication\s+required'
+    r'|"error"\s*:\s*"(?:forbidden|unauthorized|auth[^"]*)"'
+    r'|<title>[^<]*(?:log\s?in|sign\s?in)[^<]*</title>', re.I)
+
+
+def _looks_like_denial(body) -> bool:
+    """True when a 2xx body is really an 'access refused' response (soft deny)."""
+    return bool(body) and bool(_SOFT_DENY.search(body[:2000]))
 
 
 def _no_records(body: str) -> bool:
@@ -256,8 +290,14 @@ def unauth_reachability(target: str, facts: dict, max_endpoints: int = 50) -> di
         n = len(body) if isinstance(body, str) else 0
         if code in (401, 403):
             verdict = "protected"
-        elif code in (301, 302, 307, 308):
+        elif code in (301, 302, 303, 307, 308):
             verdict = "redirect (likely to login)"
+        elif code in (200, 206) and body is None:
+            # read failed → we do NOT know what came back. Never let unknown read as "open-empty".
+            verdict = "open? (200 but body unreadable — re-run)"
+        elif code in (200, 206) and _looks_like_denial(body):
+            # the other half of bug-208: a 200 that SAYS "not authenticated" is a refusal, not access.
+            verdict = "soft-deny (200 but body says not authenticated — verify)"
         elif code in (200, 206) and n > 2:
             verdict = "OPEN-no-auth"
         elif code in (200, 206):
@@ -271,6 +311,11 @@ def unauth_reachability(target: str, facts: dict, max_endpoints: int = 50) -> di
     openish = [r for r in results if r["verdict"] == "OPEN-no-auth"]
     protected = [r for r in results if r["verdict"] in ("protected", "redirect (likely to login)")]
     fail_open = len(results) >= 3 and not protected and bool(openish)
+    # TARGET UNREACHABLE: every probe failed at the transport layer (status None) — a typo'd --target,
+    # an app that isn't up yet, a CI race. Without this the run reports "0/N reachable — all gated ·
+    # authn_trustworthy", i.e. a clean bill of health for a host that was never contacted. Same class
+    # as bug-208: a transport reality silently converted into a security verdict.
+    unreachable = bool(results) and all(r["status"] is None for r in results)
     return {
         "target": target,
         "mode": "STRICT read-only · unauthenticated · GET-only · side-effecting paths skipped",
@@ -279,11 +324,16 @@ def unauth_reachability(target: str, facts: dict, max_endpoints: int = 50) -> di
         "open_no_auth": openish,
         "results": results,
         "endpoints_over_cap": over_cap,
+        "target_unreachable": unreachable,
         "fail_open_suspected": fail_open,
-        "authn_trustworthy": not fail_open,
-        "warning": FAIL_OPEN_WARNING if fail_open else "",
-        "summary": f"{len(openish)}/{len(results)} data-read GET endpoints reachable WITHOUT auth"
-                   + (" — review whether these should be public" if openish else " — all gated")
+        "authn_trustworthy": not (fail_open or unreachable),
+        "warning": (f"⚠ TARGET UNREACHABLE — every request to {target} failed at the transport layer. "
+                    "This is NOT a clean result: nothing was tested. Check the URL/port and that the "
+                    "app is running." if unreachable else (FAIL_OPEN_WARNING if fail_open else "")),
+        "summary": ("⚠ TARGET UNREACHABLE — 0 endpoints actually tested; this is NOT an all-clear"
+                    if unreachable else
+                    f"{len(openish)}/{len(results)} data-read GET endpoints reachable WITHOUT auth"
+                    + (" — review whether these should be public" if openish else " — all gated"))
                    + (f"  ·  ⚠ {over_cap} more over the {max_endpoints}-endpoint cap NOT tested" if over_cap else "")
                    + ("  ·  ⚠ FAIL-OPEN SUSPECTED (nothing enforced auth — results untrustworthy)" if fail_open else ""),
     }
@@ -321,7 +371,14 @@ def write_auth_enforcement(target: str, facts: dict, max_endpoints: int = 80) ->
             verdict = "auth-enforced"
         elif code in (200, 201, 204):
             verdict = "EXECUTED-UNAUTH"
-        elif code in (400, 422, 404, 405, 409, 415):
+        elif code in (404, 405):
+            # NOT evidence of a missing auth gate. A 405 comes from the ROUTER, before any auth
+            # middleware — it proves the method isn't routed, nothing about authorization. A 404 is
+            # usually a phantom route recon over-extracted. Treating either as "reached the handler"
+            # produced a HIGH missing-auth finding AND fed the calibration oracle a confirmed-real
+            # sample. unauth_reachability already gives 404 a neutral verdict; match it.
+            verdict = f"http-{code} (route/method not present — inconclusive, not an auth signal)"
+        elif code in (400, 422, 409, 415):
             verdict = "no-auth-gate (reached handler/validation)"
         else:
             # 500 (and any other code) is INCONCLUSIVE: a 500 may be the auth layer itself throwing,
@@ -407,7 +464,7 @@ def forged_token_bypass(target: str, facts: dict, cookie_names=None,
         url = target + path
         body = b"{}" if method in WRITE_VERBS else None
         base_code, _ = _request(method, url, token=None, data=body)
-        if base_code not in (401, 403):
+        if base_code not in _GATED_CODES:
             continue  # only routes that are gated WITHOUT auth tell us anything about forgery
         # Bearer first (cheapest, most universal); only forge into each known auth cookie if
         # Bearer didn't reach the handler — short-circuits to keep request volume (and
@@ -437,9 +494,17 @@ def forged_token_bypass(target: str, facts: dict, cookie_names=None,
         "bypassed": bypassed,
         "results": results,
         "endpoints_over_cap": over_cap,
-        "summary": f"{len(bypassed)}/{len(results)} gated route(s) accepted a forged unsigned token"
-                   + (" — ⚠ SIGNATURE NOT VERIFIED (CWE-347 auth bypass)" if bypassed
-                      else " — all rejected the forged token")
+        # NOT_RUN is not a PASS. If no route presented a gated baseline there was nothing to forge
+        # against, so "all rejected the forged token" would be an affirmative all-clear for a probe
+        # that never ran (it read that way on every redirect-gated app before _GATED_CODES).
+        "inconclusive": not results,
+        "summary": ("⚠ INCONCLUSIVE — no route returned a gated (401/403/3xx) baseline, so the "
+                    "forged-token probe had nothing to test. This is NOT a pass: check the target is "
+                    "up and that these routes really require auth."
+                    if not results else
+                    f"{len(bypassed)}/{len(results)} gated route(s) accepted a forged unsigned token"
+                    + (" — ⚠ SIGNATURE NOT VERIFIED (CWE-347 auth bypass)" if bypassed
+                       else " — all rejected the forged token"))
                    + (f"  ·  ⚠ {over_cap} more over the {max_endpoints}-endpoint cap NOT tested" if over_cap else ""),
     }
 

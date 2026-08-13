@@ -861,3 +861,98 @@ class AuthVerdictMatrixTests(unittest.TestCase):
         self.assertEqual(by["/api/redirected"]["verdict"], "auth-enforced")     # bug-208
         self.assertTrue(by["/api/flaky"]["verdict"].startswith("http-"))        # 500 NOT "no gate"
         self.assertTrue(by["/api/throttled"]["verdict"].startswith("http-"))
+
+
+class DynamicVerdictHardeningTests(unittest.TestCase):
+    """Release-audit fixes: five ways a transport/protocol reality became a wrong security verdict.
+
+    All exercise a REAL server — the bug-208 lesson is that mocking _request encodes the bug."""
+
+    def _server(self):
+        import json as _json
+
+        class H(_DrainingHandler):
+            def route(self):
+                p = self.path
+                if p == "/login":
+                    return self.send_body(200, b"<html>login</html>", "text/html")
+                if p == "/api/softdeny":     # 200 that MEANS denied
+                    return self.send_body(200, b'{"user":null,"error":"not authenticated"}')
+                if p == "/api/redirected":
+                    return self.send_redirect("/login")
+                if p == "/api/nomethod":     # router-level 405, before any auth middleware
+                    return self.send_body(405, b'{"error":"method not allowed"}')
+                if p == "/api/open":
+                    return self.send_body(200, _json.dumps({"items": [1, 2]}).encode())
+                return self.send_body(404, b"{}")
+
+            do_GET = do_POST = route
+
+        base, stop = _start_server(H)
+        self.addCleanup(stop)
+        return base
+
+    def test_200_soft_deny_is_not_reported_open(self):
+        # the OTHER half of bug-208: a 200 saying "not authenticated" is a refusal, not access.
+        base = self._server()
+        facts = {"routes": {"endpoints": [{"method": "GET", "path": "/api/softdeny"}]}}
+        r = dynamic.unauth_reachability(base, facts)
+        self.assertIn("soft-deny", r["results"][0]["verdict"])
+        self.assertEqual(r["open_no_auth"], [])
+
+    def test_genuinely_open_endpoint_is_still_reported(self):
+        # the soft-deny detector must not over-correct and hide a real finding
+        base = self._server()
+        facts = {"routes": {"endpoints": [{"method": "GET", "path": "/api/open"}]}}
+        r = dynamic.unauth_reachability(base, facts)
+        self.assertEqual([x["path"] for x in r["open_no_auth"]], ["/api/open"])
+
+    def test_405_is_not_evidence_of_a_missing_auth_gate(self):
+        # a 405 comes from the ROUTER, before auth middleware — it says nothing about authorization
+        base = self._server()
+        facts = {"routes": {"endpoints": [{"method": "POST", "path": "/api/nomethod"}]}}
+        r = dynamic.write_auth_enforcement(base, facts)
+        self.assertIn("inconclusive", r["results"][0]["verdict"])
+        self.assertEqual(r["no_auth_gate"], [])
+
+    def test_forged_token_probe_runs_on_redirect_gated_apps(self):
+        # cookie-session apps (Next-Auth/Django/Rails) redirect instead of 401. Before _GATED_CODES
+        # the baseline check skipped every route → tested=0 → "all rejected" (a false all-clear).
+        base = self._server()
+        facts = {"routes": {"endpoints": [{"method": "GET", "path": "/api/redirected"}]}}
+        r = dynamic.forged_token_bypass(base, facts)
+        self.assertEqual(r["tested"], 1)
+        self.assertFalse(r["inconclusive"])
+
+    def test_nothing_gated_reports_inconclusive_not_pass(self):
+        base = self._server()
+        facts = {"routes": {"endpoints": [{"method": "GET", "path": "/api/open"}]}}
+        r = dynamic.forged_token_bypass(base, facts)
+        self.assertTrue(r["inconclusive"])
+        self.assertIn("INCONCLUSIVE", r["summary"])
+        self.assertNotIn("all rejected", r["summary"])
+
+    def test_unreachable_target_is_not_an_all_clear(self):
+        # a typo'd --target or an app that isn't up must never read as "all gated · trustworthy"
+        facts = {"routes": {"endpoints": [{"method": "GET", "path": f"/api/x{i}"} for i in range(3)]}}
+        r = dynamic.unauth_reachability("http://127.0.0.1:1", facts)
+        self.assertTrue(r["target_unreachable"])
+        self.assertFalse(r["authn_trustworthy"])
+        self.assertIn("UNREACHABLE", r["summary"])
+
+    def test_mint_reports_a_redirecting_login_instead_of_minting_a_bogus_token(self):
+        # urlopen would FOLLOW the 302 and mine whatever page it landed on for a token, so a FAILED
+        # login could mint a fake identity and the whole BOLA matrix would run on two fake tenants.
+        class H(_DrainingHandler):
+            def do_POST(self):
+                return self.send_redirect("/dashboard", code=302)
+
+            def do_GET(self):
+                return self.send_body(200, b'{"tokens":{"accessToken":"PUBLIC-ANON"},"user":{}}')
+
+        base, stop = _start_server(H)
+        self.addCleanup(stop)
+        got = dynamic.mint({"target": base, "roles": {"a": {"email": "e", "password": "p"}}}, "a")
+        self.assertIn("error", got)
+        self.assertIsNone(got.get("token"))
+        self.assertIn("302", got["error"])
