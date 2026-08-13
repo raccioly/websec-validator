@@ -15,7 +15,9 @@ import hashlib
 import json
 from pathlib import Path
 
-SEV_RANK = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "INFO": 0}
+# UNKNOWN ranks WITH LOW, not below INFO: scanners.SEV_ORDER emits it (an OSV finding with
+# no CVSS score), and a missing key here made it rank 0 so it could never trip --fail-on low.
+SEV_RANK = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "UNKNOWN": 1, "INFO": 0}
 
 
 def fingerprint(f: dict) -> str:

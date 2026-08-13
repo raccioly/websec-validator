@@ -675,7 +675,10 @@ def _norm_checkov(data) -> list:
                         "severity": _sev(c.get("severity") or "MEDIUM"),
                         "key": cid, "file": f, "line": (rng[0] if rng else 0),
                         "title": (c.get("check_name") or cid)[:90],
-                        "fingerprint": f"iac|{f}|{cid}"})
+                        # include the LINE: a Terraform file with 12 unencrypted buckets is 12
+                        # findings, not one. Without it they collapsed and the undercount was
+                        # presented as healthy dedup (same reasoning as the secret fingerprint).
+                        "fingerprint": f"iac|{f}|{cid}|{rng[0] if rng else 0}"})
     return out
 
 

@@ -197,7 +197,10 @@ def _tenant_only_get_endpoints(facts: dict, param: str) -> list:
         if e.get("method") != "GET":
             continue
         params = brace.findall(e.get("path", ""))
-        if params == [param]:
+        # SAFETY: every OTHER probe filters side-effecting paths; this one did not — and it runs
+        # AUTHENTICATED, so it is the most likely to actually execute. Without this websec would GET
+        # /api/groups/{id}/send-invoices (twice, once per direction) against the user's test env.
+        if params == [param] and not SIDE_EFFECTING.search(e.get("path", "")):
             out.append(e["path"])
     return sorted(set(out))
 
@@ -227,6 +230,10 @@ def cross_tenant_bola(cfg: dict, facts: dict) -> dict:
                 # Never let "unknown" collapse into "blocked-empty": that would report a possible
                 # cross-tenant LEAK (the most severe verdict here) as safe.
                 verdict = "investigate (200 but response body unreadable — re-run)"
+            elif code in (200, 206) and _looks_like_denial(body):
+                # a 200 that SAYS "forbidden"/"not authenticated" is a refusal. Scoring it a LEAK
+                # emitted a CRITICAL BOLA finding AND fed the calibration oracle is_real=True.
+                verdict = "blocked (200 soft-deny)"
             elif code in (200, 206):
                 verdict = "blocked-empty" if _no_records(body) else "LEAK"  # structural, not string-match
             else:

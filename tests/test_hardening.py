@@ -993,3 +993,50 @@ class WorkflowSecretDemotionTests(unittest.TestCase):
     def test_genuine_docs_are_still_demoted(self):
         for path in ("docs/readme.md", "README.md", ".env.example", ".github/ISSUE_TEMPLATE.md"):
             self.assertTrue(scanners._is_doc_or_example(path), path)
+
+
+class ProbeSafetyAndPrecisionTests(unittest.TestCase):
+    """Release-audit: the authenticated probe must not fire side-effecting endpoints, and a 200
+    soft-deny must not be scored a cross-tenant LEAK."""
+
+    def test_bola_probe_skips_side_effecting_tenant_endpoints(self):
+        # SAFETY: this probe runs AUTHENTICATED, so it is the most likely to actually execute. Every
+        # other probe filtered SIDE_EFFECTING paths; this one didn't — it would GET
+        # /api/groups/{id}/send-invoices twice against the user's environment.
+        eps = dynamic._tenant_only_get_endpoints({"routes": {"endpoints": [
+            {"method": "GET", "path": "/api/groups/{groupId}/send-invoices"},
+            {"method": "GET", "path": "/api/groups/{groupId}/items"}]}}, "groupId")
+        self.assertEqual(eps, ["/api/groups/{groupId}/items"])
+
+    def test_200_soft_deny_is_not_a_cross_tenant_leak(self):
+        # `{"data":null,"error":"forbidden"}` has non-empty structure, so _no_records said "records!"
+        # → LEAK → a CRITICAL BOLA finding plus an is_real=True calibration sample.
+        for body in ('{"data": null, "error": "forbidden"}',
+                     '{"user":null,"message":"not authenticated"}'):
+            self.assertTrue(dynamic._looks_like_denial(body), body)
+
+    def test_real_tenant_data_is_still_a_leak(self):
+        # the soft-deny check must not swallow a genuine leak
+        self.assertFalse(dynamic._looks_like_denial('{"items":[{"id":1,"owner":"tenantA"}]}'))
+
+    def test_unknown_severity_can_trip_the_gate(self):
+        from websec_validator import baseline as _baseline
+        # scanners.SEV_ORDER emits UNKNOWN (an OSV finding with no CVSS); baseline.SEV_RANK lacked it,
+        # so it ranked 0 and could never trip even --fail-on low.
+        self.assertEqual(_baseline.gate_count({"findings": [{"severity": "UNKNOWN"}]}, "low"), 1)
+        self.assertEqual(_baseline.gate_count({"findings": [{"severity": "INFO"}]}, "low"), 0)
+
+    def test_iac_findings_do_not_collapse_across_resources(self):
+        # 12 unencrypted buckets in one main.tf is 12 findings, not 1
+        checkov = [{"check_type": "terraform", "results": {"failed_checks": [
+            {"check_id": "CKV_AWS_18", "file_path": "main.tf", "file_line_range": [10, 12],
+             "check_name": "Ensure bucket has access logging"},
+            {"check_id": "CKV_AWS_18", "file_path": "main.tf", "file_line_range": [80, 82],
+             "check_name": "Ensure bucket has access logging"}]}}]
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "checkov.json").write_text(json.dumps(checkov))
+            res = scanners.normalize_findings(
+                [{"key": "checkov", "output": str(d / "checkov.json"),
+                  "name": "Checkov", "category": "iac"}], d, target=d)
+        self.assertEqual(res["total"], 2)
