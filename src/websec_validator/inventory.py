@@ -40,9 +40,17 @@ def _rel(code_path: str, target: str | None) -> str:
 
 
 def _tagged(targeting: dict, key: str, method: str, path: str) -> bool:
-    """targeting lists are display strings ('GET /api/x  (param: url)') — match on the METHOD PATH head."""
+    """targeting lists are display strings ('GET /api/x  (param: url)') — match the METHOD PATH head.
+
+    Must match on a BOUNDARY, not a bare prefix: `GET /api/user` would otherwise pick up the entry
+    for `GET /api/users/{id}` and inherit its IDOR tag, which then flows into the test plan as a BOLA
+    target aimed at the wrong endpoint."""
     head = f"{method} {path}"
-    return any(str(entry).startswith(head) for entry in (targeting.get(key) or []))
+    for entry in (targeting.get(key) or []):
+        e = str(entry)
+        if e == head or e.startswith(head + " ") or e.startswith(head + "\t"):
+            return True
+    return False
 
 
 def build(facts: dict) -> dict:

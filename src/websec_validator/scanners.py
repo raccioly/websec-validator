@@ -721,6 +721,12 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
     argv flags: gitleaks/checkov ignore those flags entirely, so without this post-filter a
     `--exclude 'tests/**'` still surfaced fixture secrets as HIGH (DocGuard field report)."""
     raw = []
+    parse_failed: list = []
+    _parse_attempted: list = []
+    # A scanner that crashed, timed out, or wrote truncated JSON yields zero findings — which the CLI
+    # and briefing render identically to "scanned clean". Track it so silence can be attributed.
+    crashed = [r.get("key") for r in scan_results
+               if r.get("status") or (r.get("exit_code") not in (None, 0, 1))]
     for r in scan_results:
         out, key = r.get("output"), r.get("key")
         parser = _PARSERS.get(key)
@@ -728,6 +734,7 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
             continue
         try:
             text = Path(out).read_text()
+            _parse_attempted.append(key)
             if key == "trufflehog":          # JSON-LINES, one finding per line
                 doc = []
                 for ln in text.splitlines():
@@ -741,6 +748,7 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
                 doc = json.loads(text or "{}")
             raw += parser(doc)
         except Exception:
+            parse_failed.append(key)          # a truncated/OOM-killed scanner must not read as clean
             continue
 
     # bug-066 (a): a subprocess scanner can re-enter dirs the walker skips (nested worktrees,
@@ -832,6 +840,8 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
             "history_only_secrets": history_only,
             "reachability": reachability,
             "exploitability": exploitability,
+            "parse_failed": sorted(set(parse_failed)),
+            "scanner_errors": sorted({c for c in crashed if c}),
             "by_severity": by_sev, "by_category": by_cat,
             # `top` = a short slice for the human briefing; `all` = the FULL ranked set the
             # findings ledger consumes. The ledger must NOT silently drop a HIGH/CRITICAL static

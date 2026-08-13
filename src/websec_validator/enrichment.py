@@ -109,6 +109,14 @@ def enrich_reachability(findings: list, target: "Path | str | None") -> dict:
     if not sca or not target:
         return {"analyzed": 0, "imported": 0, "declared_only": 0, "not_analyzed": 0}
     js_roots, py_roots = _import_roots(Path(target))
+    # If we could not read ANY import from the tree (unreadable target, exotic layout, empty walk),
+    # we have no evidence either way. Claiming "no import found" would silently de-prioritise every
+    # CVE — including CRITICAL/KEV ones — as "likely unreachable". Make no claim instead.
+    if not js_roots and not py_roots:
+        for f in sca:
+            f["reachability"] = "n/a"
+        return {"analyzed": len(sca), "imported": 0, "declared_only": 0, "not_analyzed": len(sca),
+                "note": "no imports could be read from this tree — reachability not claimed"}
     imported = declared_only = not_analyzed = 0
     for f in sca:
         eco = (f.get("ecosystem") or "").lower()

@@ -116,5 +116,18 @@ class ExploitabilityTests(unittest.TestCase):
         self.assertNotIn("epss", findings[0])
 
 
+
+
+class NoImportsReadableTests(unittest.TestCase):
+    def test_unreadable_tree_makes_no_reachability_claim(self):
+        # If no import can be read at all, claiming "no import found" would silently de-prioritise
+        # EVERY CVE — including CRITICAL/KEV ones — as likely-unreachable.
+        findings = [{"category": "sca", "pkg": "lodash", "ecosystem": "npm",
+                     "severity": "CRITICAL", "title": "lodash"}]
+        summary = enrichment.enrich_reachability(findings, "/nonexistent-path-xyz-123")
+        self.assertEqual(findings[0]["reachability"], "n/a")
+        self.assertNotIn("declared-only", findings[0]["title"])
+        self.assertEqual(summary["declared_only"], 0)
+
 if __name__ == "__main__":
     unittest.main()

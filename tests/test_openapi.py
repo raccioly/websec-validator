@@ -129,11 +129,17 @@ class UnusableSpecTests(unittest.TestCase):
         self.assertEqual(res["shadow"], ["POST /api/admin"])  # real verdict still produced
         self.assertIn("NOT usable", openapi.render_md(res))
 
-    def test_minimal_valid_spec_with_version_key_is_accepted(self):
-        # guard against over-tightening: a spec with a version key but no paths yet is still a spec
-        res = openapi.analyze(_facts(), _repo({"openapi.json": json.dumps({"openapi": "3.0.0"})}))
-        self.assertEqual(res["summary"]["specs"], 1)
-        self.assertEqual(res["summary"]["unreadable"], 0)
+    def test_version_keyed_but_pathless_spec_produces_no_shadow_flood(self):
+        # A stub spec (version/info block, no `paths`) parses fine but cannot serve as a CONTRACT:
+        # diffing against it makes EVERY implemented route look undocumented. My first cut accepted
+        # it as a usable spec — this test previously asserted that, and was wrong. It must be
+        # disclosed as unusable and emit no verdict.
+        d = _repo({"openapi.json": json.dumps({"openapi": "3.0.0", "info": {"title": "stub"}})})
+        res = openapi.analyze(_facts(("GET", "/api/users"), ("POST", "/api/admin/purge")), d)
+        self.assertEqual(res["shadow"], [])                  # no flood
+        self.assertEqual(res["summary"]["specs"], 0)
+        self.assertEqual(res["summary"]["unreadable"], 1)
+        self.assertIn("no `paths`", " ".join(u["reason"] for u in res["unreadable"]))
 
 
 class YamlPartialTests(unittest.TestCase):

@@ -92,5 +92,22 @@ class InventoryTests(unittest.TestCase):
         self.assertIn("Why test it", md)
 
 
+
+
+class TaggingPrecisionTests(unittest.TestCase):
+    def test_prefix_does_not_over_fire_on_a_shorter_sibling_path(self):
+        # `GET /api/user` must NOT inherit the IDOR tag belonging to `GET /api/users/{id}` — it would
+        # flow into the test plan as a BOLA target aimed at the wrong endpoint.
+        f = _facts(endpoints=[{"method": "GET", "path": "/api/user", "code_path": "u.js"}],
+                   targeting={"idor_candidates": ["GET /api/users/{id}  (param: id)"]})
+        row = inventory.build(f)["endpoints"][0]
+        self.assertEqual(row["risk"], 0)
+        self.assertEqual(row["why"], [])
+
+    def test_exact_match_with_trailing_annotation_still_fires(self):
+        f = _facts(endpoints=[{"method": "GET", "path": "/api/users/{id}", "code_path": "u.js"}],
+                   targeting={"idor_candidates": ["GET /api/users/{id}  (param: id)"]})
+        self.assertTrue(any("IDOR" in w for w in inventory.build(f)["endpoints"][0]["why"]))
+
 if __name__ == "__main__":
     unittest.main()

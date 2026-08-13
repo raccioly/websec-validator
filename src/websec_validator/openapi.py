@@ -157,6 +157,18 @@ def analyze(facts: dict, target) -> dict:
         return {"specs": [], "shadow": [], "stale": [], "hygiene": [], "unreadable": unreadable,
                 "summary": {"specs": 0, "shadow": 0, "stale": 0, "unreadable": len(unreadable)}}
 
+    # A spec that parses but declares NO paths (a stub with only a version/info block) cannot serve
+    # as a contract: diffing against it makes every implemented route look undocumented. Treat it
+    # like an unusable spec — disclose it, emit no verdict.
+    pathless = [s for s in specs if not s["paths"]]
+    specs = [s for s in specs if s["paths"]]
+    for s_ in pathless:
+        unreadable.append({"file": s_["file"], "reason": "parses, but declares no `paths` — cannot be "
+                                                         "used as a contract to diff against"})
+    if not specs:
+        return {"specs": [], "shadow": [], "stale": [], "hygiene": [], "unreadable": unreadable,
+                "summary": {"specs": 0, "shadow": 0, "stale": 0, "unreadable": len(unreadable)}}
+
     spec_ops: set = set()
     for s in specs:
         for p, methods in s["paths"].items():

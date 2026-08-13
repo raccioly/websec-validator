@@ -956,3 +956,26 @@ class DynamicVerdictHardeningTests(unittest.TestCase):
         self.assertIn("error", got)
         self.assertIsNone(got.get("token"))
         self.assertIn("302", got["error"])
+
+
+class ScannerSilenceAttributionTests(unittest.TestCase):
+    """A crashed/truncated scanner yields zero findings — which reads identically to 'scanned clean'."""
+
+    def test_unparseable_output_is_reported_not_silently_zero(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "gitleaks.json").write_text('[{"RuleID":"x", TRUNCATED')
+            res = scanners.normalize_findings(
+                [{"key": "gitleaks", "output": str(d / "gitleaks.json"),
+                  "name": "Gitleaks", "category": "secrets"}], d, target=d)
+        self.assertEqual(res["total"], 0)
+        self.assertIn("gitleaks", res["parse_failed"])       # silence is ATTRIBUTED, not assumed clean
+
+    def test_healthy_scanner_reports_no_parse_failure(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "gitleaks.json").write_text("[]")
+            res = scanners.normalize_findings(
+                [{"key": "gitleaks", "output": str(d / "gitleaks.json"),
+                  "name": "Gitleaks", "category": "secrets"}], d, target=d)
+        self.assertEqual(res["parse_failed"], [])
