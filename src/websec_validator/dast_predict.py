@@ -144,6 +144,24 @@ def predict(facts: dict, ledger: dict | None) -> dict:
                         "sources": sum(len(r["sources"]) for r in pred)}}
 
 
+# Ways a dynamic scan reports something CONFIDENTLY WRONG. websec hit the first of these itself
+# (bug-208: it followed a 307 → /login and called a protected admin route "OPEN"), which is exactly
+# why it's worth warning about — the same default trips ZAP/Nuclei/curl-based checks. A predicted
+# alert list is only useful if you also know which of its answers not to trust.
+_SCANNER_CAVEATS = [
+    ("A \"reachable / 200\" verdict on a protected route",
+     "most HTTP clients and scanners FOLLOW redirects by default, so a route answering `307 → /login` "
+     "gets scored as the login page's 200. Re-check any \"open\" endpoint with redirects disabled "
+     "(`curl -sI` without `-L`): a 3xx to a login page means it is CORRECTLY protected. websec had "
+     "this exact bug (bug-208) and now judges auth with redirects off."),
+    ("A clean 401/403 sweep read as \"authz is fine\"",
+     "that only proves authentication, not AUTHORIZATION. Object-level access control (BOLA) needs "
+     "two real identities — see the blind spots above and the §5b Phase-2 probes."),
+    ("A 500 counted as \"the handler ran, so there is no auth gate\"",
+     "a 500 can be the auth layer itself throwing. Treat it as INCONCLUSIVE, not as a missing guard."),
+]
+
+
 def render_md(pred: dict) -> str:
     p, b = pred.get("predicted", []), pred.get("blind_spots", [])
     if not p and not b:
@@ -166,4 +184,7 @@ def render_md(pred: dict) -> str:
             out.append(f"- **{r['attack_class']}** — {r['reason']}  \n  _seen at:_ {src}")
         out.append("\n_These are what the staged probes in §5 are for: they need identities, state, and "
                    "intent that no crawler has._")
+    out.append("\n**⚠ Scan answers not to trust at face value:**\n")
+    for title, why in _SCANNER_CAVEATS:
+        out.append(f"- **{title}** — {why}")
     return "\n".join(out)

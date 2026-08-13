@@ -70,6 +70,18 @@ class PredictionTests(unittest.TestCase):
         self.assertEqual(p["predicted"], [])
         self.assertEqual(p["blind_spots"], [])
 
+    def test_scanner_caveats_warn_about_the_redirect_fp(self):
+        # bug-208 generalized: the same urlopen/curl default that fooled websec fools ZAP/Nuclei, so
+        # a predicted-alert list must also say which scan answers NOT to trust.
+        md = dast_predict.render_md(dast_predict.predict({}, _ledger("missing-csp")))
+        self.assertIn("not to trust", md.lower())
+        self.assertIn("FOLLOW redirects", md)
+        self.assertIn("307", md)
+
+    def test_caveats_present_even_for_a_blind_spot_only_ledger(self):
+        md = dast_predict.render_md(dast_predict.predict({}, _ledger("bola")))
+        self.assertIn("not to trust", md.lower())
+
     def test_empty_ledger_renders_gracefully(self):
         md = dast_predict.render_md(dast_predict.predict({}, None))
         self.assertIn("Nothing predicted", md)
