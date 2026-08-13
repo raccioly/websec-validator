@@ -258,9 +258,16 @@ def cross_tenant_bola(cfg: dict, facts: dict) -> dict:
 
 # GET endpoints that are NOT safe to hit even read-only — they trigger real work
 # (cron ticks, scraping, content generation, seeding, sending, uploads).
+# Paths whose mere GET/POST may DO something (send mail, run a job, mutate state) — every probe skips
+# them. Each alternative is bounded by `(?![\w-])` so it matches a whole path SEGMENT or a hyphenated
+# action, never a longer word: `generate` must not swallow `/api/generated-content`, `/send` must not
+# swallow `/api/sender-profiles`, `/run` must not swallow `/api/runners`. Over-matching here is not a
+# safety win — it silently removes an endpoint from EVERY probe, so a real vulnerability goes untested.
 SIDE_EFFECTING = re.compile(
-    r"/cron|/seed|generate|regenerate|/trigger|/sync|/send|/run\b|social-image|"
-    r"sponsor-post|upload|/refresh|/rebuild|/process|/dispatch|/import|/export|/scrape(?![\w-])", re.I)
+    r"/cron(?![\w-])|/seed(?![\w-])|(?:re)?generate(?![\w-])|/trigger(?![\w-])|/sync(?![\w-])|"
+    r"/send(?![\w-])|/send-[\w-]+|/run(?![\w-])|social-image|sponsor-post|upload(?![\w-])|"
+    r"/refresh(?![\w-])|/rebuild(?![\w-])|/process(?![\w-])|/dispatch(?![\w-])|/import(?![\w-])|"
+    r"/export(?![\w-])|/scrape(?![\w-])", re.I)
 
 
 # When NOTHING enforces auth, the likeliest cause in a test env is a fail-OPEN auth

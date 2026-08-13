@@ -1040,3 +1040,52 @@ class ProbeSafetyAndPrecisionTests(unittest.TestCase):
                 [{"key": "checkov", "output": str(d / "checkov.json"),
                   "name": "Checkov", "category": "iac"}], d, target=d)
         self.assertEqual(res["total"], 2)
+
+
+class ProductionSafetyGateTests(unittest.TestCase):
+    """is_localhost is the ONLY gate stopping unauthenticated POST/PUT/PATCH/DELETE at production."""
+
+    def test_localhost_forms_are_accepted(self):
+        for t in ("http://localhost:3000", "http://127.0.0.1", "http://127.0.0.1:8080",
+                  "http://[::1]:3000", "http://0.0.0.0:5000", "https://localhost"):
+            self.assertTrue(dynamic.is_localhost(t), t)
+
+    def test_remote_and_lookalike_hosts_are_refused(self):
+        # each of these has fooled a naive substring check in some tool's history
+        for t in ("https://api.prod.example.com", "http://127.0.0.1.evil.com",
+                  "http://localhost.attacker.net", "http://localhost@evil.com/",
+                  "https://evil.com/?x=localhost", "localhost:3000"):   # no scheme → hostname None
+            self.assertFalse(dynamic.is_localhost(t), t)
+
+    def test_side_effecting_paths_are_recognised(self):
+        for p in ("/api/cron/tick", "/api/reports/generate", "/api/users/send",
+                  "/api/invoices/send-invoices", "/api/jobs/run"):
+            self.assertTrue(dynamic.SIDE_EFFECTING.search(p), p)
+
+    def test_side_effecting_does_not_over_match_ordinary_routes(self):
+        # over-matching silently REMOVES endpoints from every probe — a coverage hole, not a safety win
+        for p in ("/api/users", "/api/generated-content", "/api/scraper-config",
+                  "/api/sender-profiles", "/api/runners"):
+            self.assertIsNone(dynamic.SIDE_EFFECTING.search(p), p)
+
+
+class ScannerArgvSafetyTests(unittest.TestCase):
+    """The opt-in gate is tested elsewhere; this asserts the COMMANDS themselves stay offline."""
+
+    def test_no_default_scanner_argv_enables_network_or_verification(self):
+        banned = ("--verify", "--online", "--remote", "--upload", "--api-key", "--token")
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            for s in scanners.REGISTRY:
+                if s.argv is None or s.key in scanners._OPT_IN_SCANNERS:
+                    continue
+                argv = [str(a) for a in s.argv(d, d / f"{s.key}.json")]
+                for flag in banned:
+                    self.assertFalse(any(a.startswith(flag) for a in argv),
+                                     f"{s.key} argv would egress: {argv}")
+
+    def test_trufflehog_argv_exists_but_is_gated(self):
+        # its argv legitimately performs verification — the protection is that it only runs opt-in
+        self.assertIn("trufflehog", scanners._OPT_IN_SCANNERS)
+        entry = next(s for s in scanners.REGISTRY if s.key == "trufflehog")
+        self.assertIsNotNone(entry.argv)
