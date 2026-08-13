@@ -65,11 +65,29 @@ class LabelDerivationTests(unittest.TestCase):
                                           "is_real": True}])
         self.assertEqual(len(res["confirmed"]), 1)
 
-    def test_scanner_capable_but_silent_refutes(self):
-        # ZAP CAN find SQLi (40018) — it reported nothing, so the static finding is likely FP/fixed.
+    def test_silence_refutes_only_when_the_scan_proves_it_ran_those_rules(self):
+        # A passive-only report (10038 = CSP header) is the most common ZAP CI config and CANNOT
+        # raise SQLi. Treating its silence as proof marked every active-class finding a false
+        # positive — permanently, in the cross-repo overlay. It must be left UNJUDGED.
         res = dast_ingest.derive_labels(_ledger(("sqli", "HIGH")), _zap("10038"))
+        self.assertEqual(res["refuted"], [])
+        self.assertEqual([u["attack_class"] for u in res["unjudged"]], ["sqli"])
+        self.assertEqual(res["labels"], [])                  # nothing written to calibration
+        self.assertFalse(res["active_rules_evidenced"])
+
+    def test_silence_does_refute_once_active_rules_are_evidenced(self):
+        # a report containing ANY active alert (40018) proves active scanning ran, so silence on
+        # another active class IS meaningful.
+        res = dast_ingest.derive_labels(_ledger(("xss", "HIGH")), _zap("40018", "10038"))
+        self.assertTrue(res["active_rules_evidenced"])
+        self.assertEqual([r["attack_class"] for r in res["refuted"]], ["xss"])
         self.assertEqual(res["labels"][0]["is_real"], False)
-        self.assertEqual(len(res["refuted"]), 1)
+
+    def test_empty_or_failed_report_judges_nothing(self):
+        for report in ({"site": [{"alerts": []}]}, {}, {"alerts": []}):
+            res = dast_ingest.derive_labels(_ledger(("sqli", "HIGH"), ("missing-csp", "LOW")), report)
+            self.assertEqual(res["labels"], [], report)
+            self.assertEqual(res["refuted"], [], report)
 
     def test_blind_spot_findings_are_never_scored(self):
         # THE critical guard: a scanner's silence on BOLA/mass-assignment means NOTHING. Scoring
@@ -81,12 +99,15 @@ class LabelDerivationTests(unittest.TestCase):
         self.assertEqual(res["skipped_blind"], 3)
 
     def test_mixed_ledger_splits_correctly(self):
+        # passive-only report: CSP is confirmed, sqli can't be judged (no active evidence), bola is
+        # a blind spot. Only the confirmed one is written to calibration.
         res = dast_ingest.derive_labels(
             _ledger(("missing-csp", "MEDIUM"), ("sqli", "HIGH"), ("bola", "MEDIUM")), _zap("10038"))
         self.assertEqual({c["attack_class"] for c in res["confirmed"]}, {"missing-csp"})
-        self.assertEqual({r["attack_class"] for r in res["refuted"]}, {"sqli"})
+        self.assertEqual({u["attack_class"] for u in res["unjudged"]}, {"sqli"})
+        self.assertEqual(res["refuted"], [])
         self.assertEqual(res["skipped_blind"], 1)
-        self.assertEqual(len(res["labels"]), 2)             # only the DAST-findable two
+        self.assertEqual(len(res["labels"]), 1)             # only the confirmed one
 
     def test_unmapped_class_is_ignored_entirely(self):
         res = dast_ingest.derive_labels(_ledger(("sast", "LOW")), _zap("10038"))

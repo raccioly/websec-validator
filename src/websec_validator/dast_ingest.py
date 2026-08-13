@@ -42,6 +42,18 @@ def _alertid_to_class() -> dict:
     return m
 
 
+def _is_active(attack_class: str) -> bool:
+    """True if this class needs an ACTIVE scan (payload injection) rather than passive observation.
+
+    Derived from the scanner label in dast_predict._DAST_MAP ("ZAP (passive)" vs "ZAP (active)"), so
+    the two modules can't drift. Passive classes (missing headers, cookie flags) are raised by simply
+    loading a page; active classes (SQLi, XSS, SSRF, cmd-injection) require the scanner to fuzz."""
+    entry = dast_predict._DAST_MAP.get(attack_class)
+    if not entry:
+        return False
+    return "passive" not in str(entry[0]).lower()
+
+
 def parse_report(data) -> dict:
     """→ {plugin_ids: set[str], names: set[str]} of alerts the scanner ACTUALLY raised.
 
@@ -86,7 +98,16 @@ def derive_labels(ledger: dict, report: dict) -> dict:
     for i in raised_ids:
         confirmed_classes |= id2class.get(i, set())
 
-    labels, confirmed, refuted = [], [], []
+    # CAN this report refute anything? Silence only means "not vulnerable" if the scan actually ran
+    # the relevant rules. A ZAP *baseline* (passive-only) scan — the most common CI configuration —
+    # structurally cannot raise SQLi/XSS/SSRF, and an empty or failed report raises nothing at all.
+    # Treating that silence as proof marked every active-class finding a FALSE POSITIVE and wrote it
+    # to the PERMANENT cross-repo overlay. Require positive evidence instead: at least one ACTIVE
+    # alert in the report proves active rules ran.
+    active_ran = any(_is_active(c) for c in confirmed_classes)
+    can_refute_passive = bool(raised_ids)          # any alert at all proves the scan reached the app
+
+    labels, confirmed, refuted, unjudged = [], [], [], []
     skipped_blind = 0
     for f in (ledger or {}).get("findings", []) or []:
         ac = str(f.get("attack_class", "")).lower()
@@ -96,10 +117,22 @@ def derive_labels(ledger: dict, report: dict) -> dict:
             if ac in dast_predict._BLIND_SPOTS:
                 skipped_blind += 1
             continue
-        is_real = ac in confirmed_classes
-        labels.append({"attack_class": ac, "confidence": conf, "is_real": is_real})
-        (confirmed if is_real else refuted).append(
-            {"attack_class": ac, "location": f.get("location", ""), "confidence": conf})
+        row = {"attack_class": ac, "location": f.get("location", ""), "confidence": conf}
+        if ac in confirmed_classes:
+            labels.append({"attack_class": ac, "confidence": conf, "is_real": True})
+            confirmed.append(row)
+            continue
+        # not raised — only score it a false positive if this scan COULD have raised it
+        provable = active_ran if _is_active(ac) else can_refute_passive
+        if provable:
+            labels.append({"attack_class": ac, "confidence": conf, "is_real": False})
+            refuted.append(row)
+        else:
+            row["why"] = ("this scan shows no evidence it ran "
+                          + ("active" if _is_active(ac) else "any")
+                          + " rules for this class — silence is not proof")
+            unjudged.append(row)
     return {"labels": labels, "confirmed": confirmed, "refuted": refuted,
-            "skipped_blind": skipped_blind,
+            "unjudged": unjudged, "skipped_blind": skipped_blind,
+            "active_rules_evidenced": active_ran,
             "scan_alert_classes": sorted(confirmed_classes)}

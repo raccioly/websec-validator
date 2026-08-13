@@ -194,6 +194,17 @@ def samples_from_dynamic(dynamic: dict) -> list:
     confirmed BOLA. (Unauth GET reachability is excluded — a public endpoint reached without auth
     may be intended, so it's not a clean label.)
     """
+    # NEVER learn from an untrustworthy run. dynamic.py computes fail_open_suspected (auth provider
+    # not resolving → everything looks unauthenticated) and target_unreachable (nothing was contacted)
+    # precisely to say "these results are meaningless" — the ledger already honors them, but this
+    # oracle did not, and its samples are written to a PERSISTENT, CROSS-REPO overlay. One run against
+    # a misconfigured test env would permanently inflate P(real) for missing-auth on every project.
+    _wae = (dynamic or {}).get("write_auth_enforcement", {}) or {}
+    _uar = (dynamic or {}).get("unauth_reachability", {}) or {}
+    if (_wae.get("fail_open_suspected") or _uar.get("fail_open_suspected")
+            or _wae.get("target_unreachable") or _uar.get("target_unreachable")):
+        return []
+
     out = []
     for r in (((dynamic or {}).get("write_auth_enforcement", {}) or {}).get("results", []) or []):
         v = r.get("verdict", "")

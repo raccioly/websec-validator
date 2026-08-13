@@ -520,11 +520,13 @@ def cmd_calibrate(args) -> int:
         rec = calibration.record_samples(res["labels"])
         if not rec:
             sys.exit("error: nothing ingested (local overlay not writable)")
-        nc, nr = len(res["confirmed"]), len(res["refuted"])
+        nc, nr, nu = len(res["confirmed"]), len(res["refuted"]), len(res.get("unjudged", []))
         print(f"websec calibrate --ingest-dast: the scan CONFIRMED {nc} finding(s) and REFUTED {nr} "
-              f"(scanner-capable but silent → likely FP/fixed); {res['skipped_blind']} blind-spot "
-              f"finding(s) left unscored (a scan can't judge them). Folded {len(res['labels'])} sample(s) "
-              f"into {calibration.LOCAL_PATH} → {rec['meta']['samples']} total; P(real) now personalizes to your app.")
+              f"(scanner ran those rules and stayed silent); {nu} left UNJUDGED (this scan shows no "
+              f"evidence it ran those rules — e.g. a passive-only baseline cannot test SQLi, so its "
+              f"silence proves nothing); {res['skipped_blind']} blind-spot finding(s) unscored. "
+              f"Folded {len(res['labels'])} sample(s) into {calibration.LOCAL_PATH} → "
+              f"{rec['meta']['samples']} total; P(real) now personalizes to your app.")
         return 0
 
     # --ingest: fold a hand-labeled findings file into your LOCAL overlay (the manual real-repo path)
