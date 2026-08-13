@@ -52,6 +52,22 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 _NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirect)
 
 
+def _read_body(resp, limit: int) -> str:
+    """Read at most `limit` bytes of a response body, NEVER raising.
+
+    The status code decides every auth verdict here; the body is optional context (only used for a
+    size heuristic). Reading it can genuinely fail mid-scan — a server that answers a POST with a
+    3xx *without consuming the request body* resets the connection (Errno 54), and truncated or
+    chunked bodies can blow up too. Since the caller invokes this from inside an `except HTTPError`
+    handler, an exception here would NOT be caught by the sibling `except Exception` and would abort
+    the entire dynamic phase. Degrade to an empty body instead — losing context is survivable,
+    losing the status (or the run) is not."""
+    try:
+        return resp.read(limit).decode(errors="replace")
+    except Exception:
+        return ""
+
+
 def _request(method: str, url: str, token: str | None, timeout: int = 20,
              data: bytes | None = None, cookie: str | None = None):
     headers = {"Accept": "application/json"}
@@ -66,9 +82,12 @@ def _request(method: str, url: str, token: str | None, timeout: int = 20,
         # NOTE: do NOT follow redirects — see _NoRedirect. A 3xx must reach the callers as a 3xx so a
         # redirect-to-login reads as "blocked", never as the endpoint being open.
         r = _NO_REDIRECT_OPENER.open(req, timeout=timeout)
-        return r.status, r.read(4000).decode(errors="replace")
+        return r.status, _read_body(r, 4000)
     except urllib.error.HTTPError as e:
-        return e.code, e.read(1000).decode(errors="replace")
+        # An HTTPError IS the answer (401/403/307/404 all decide a verdict) — never lose the status
+        # because the BODY could not be read. See _read_body: an exception raised inside this handler
+        # would NOT be caught by the sibling `except Exception` below and would kill the whole run.
+        return e.code, _read_body(e, 1000)
     except Exception as e:
         return None, f"{type(e).__name__}: {e}"
 

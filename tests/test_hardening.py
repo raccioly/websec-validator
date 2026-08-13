@@ -757,3 +757,87 @@ class RedirectAuthJudgmentTests(unittest.TestCase):
         facts = {"routes": {"endpoints": [{"method": "GET", "path": "/api/admin"}]}}
         r = dynamic.forged_token_bypass(base, facts)
         self.assertEqual(r.get("bypassed", []), [])          # 307 ∉ _REACHED_HANDLER
+
+
+class AuthVerdictMatrixTests(unittest.TestCase):
+    """End-to-end verdict matrix against a REAL server covering every auth-response shape.
+
+    The bug-208 fix must not OVER-correct: a genuinely open endpoint has to stay caught. This runs
+    all shapes at once so a future change that silences true positives (or resurrects the redirect
+    FP) fails here. No mocking of _request — mocked tests are what let bug-208 ship."""
+
+    PATHS = ["/api/public-data", "/api/protected", "/api/redirected",
+             "/api/flaky", "/api/throttled", "/api/empty"]
+
+    def _server(self):
+        import http.server
+        import json as _json
+        import socketserver
+        import threading
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _send(self, code, body=b"", ctype="application/json"):
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                if body:
+                    self.wfile.write(body)
+
+            def route(self):
+                p = self.path
+                if p == "/login":
+                    return self._send(200, b"<html>login</html>", "text/html")
+                if p == "/api/public-data":            # genuinely unauthenticated data
+                    return self._send(200, _json.dumps({"items": [1, 2, 3]}).encode())
+                if p == "/api/protected":
+                    return self._send(401, b'{"error":"unauthorized"}')
+                if p == "/api/redirected":             # protected VIA redirect (bug-208)
+                    self.send_response(307)
+                    self.send_header("Location", "/login")
+                    self.end_headers()
+                    return
+                if p == "/api/flaky":
+                    return self._send(500, b'{"error":"boom"}')
+                if p == "/api/throttled":
+                    return self._send(429, b'{"error":"slow down"}')
+                if p == "/api/empty":
+                    return self._send(200, b"")
+                return self._send(404, b'{"error":"nf"}')
+
+            do_GET = do_POST = route
+
+        srv = socketserver.TCPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.shutdown)
+        return f"http://127.0.0.1:{srv.server_address[1]}"
+
+    def test_unauth_reachability_verdict_matrix(self):
+        base = self._server()
+        facts = {"routes": {"endpoints": [{"method": "GET", "path": p} for p in self.PATHS]}}
+        by = {r["path"]: r for r in dynamic.unauth_reachability(base, facts)["results"]}
+        self.assertEqual(by["/api/public-data"]["verdict"], "OPEN-no-auth")   # TRUE positive kept
+        self.assertEqual(by["/api/protected"]["verdict"], "protected")
+        self.assertEqual(by["/api/redirected"]["verdict"], "redirect (likely to login)")
+        self.assertEqual(by["/api/empty"]["verdict"], "open-empty")
+        self.assertTrue(by["/api/flaky"]["verdict"].startswith("http-"))      # 500 inconclusive
+        self.assertTrue(by["/api/throttled"]["verdict"].startswith("http-"))  # 429 not "open"
+
+    def test_only_the_genuinely_open_endpoint_is_flagged_open(self):
+        base = self._server()
+        facts = {"routes": {"endpoints": [{"method": "GET", "path": p} for p in self.PATHS]}}
+        r = dynamic.unauth_reachability(base, facts)
+        self.assertEqual([x["path"] for x in r["open_no_auth"]], ["/api/public-data"])
+
+    def test_write_enforcement_verdict_matrix(self):
+        base = self._server()
+        facts = {"routes": {"endpoints": [{"method": "POST", "path": p} for p in self.PATHS]}}
+        by = {r["path"]: r for r in dynamic.write_auth_enforcement(base, facts)["results"]}
+        self.assertEqual(by["/api/public-data"]["verdict"], "EXECUTED-UNAUTH")  # TRUE positive kept
+        self.assertEqual(by["/api/protected"]["verdict"], "auth-enforced")
+        self.assertEqual(by["/api/redirected"]["verdict"], "auth-enforced")     # bug-208
+        self.assertTrue(by["/api/flaky"]["verdict"].startswith("http-"))        # 500 NOT "no gate"
+        self.assertTrue(by["/api/throttled"]["verdict"].startswith("http-"))
