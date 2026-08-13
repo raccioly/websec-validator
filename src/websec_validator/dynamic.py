@@ -37,6 +37,21 @@ def _dig(d: dict, dotted: str):
     return cur
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never auto-follow 3xx. For an AUTH judgment a redirect is a MEANINGFUL answer, not a detour:
+    a protected route responding `307 → /login` to an unauthenticated request is the app correctly
+    refusing access. Following it hands back the login page's `200` (HTML), which every probe here
+    then misreads as the endpoint itself being open — the exact false-positive the field report hit
+    (`/api/platform-admin/secrets` reported OPEN when it 307s to /login). Returning None makes urllib
+    surface the 3xx via HTTPError, so `_request` returns the real status (307/302/…)."""
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+# One shared opener so redirects are NOT followed anywhere in the dynamic phase.
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def _request(method: str, url: str, token: str | None, timeout: int = 20,
              data: bytes | None = None, cookie: str | None = None):
     headers = {"Accept": "application/json"}
@@ -48,7 +63,9 @@ def _request(method: str, url: str, token: str | None, timeout: int = 20,
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, method=method, headers=headers, data=data)
     try:
-        r = urllib.request.urlopen(req, timeout=timeout)
+        # NOTE: do NOT follow redirects — see _NoRedirect. A 3xx must reach the callers as a 3xx so a
+        # redirect-to-login reads as "blocked", never as the endpoint being open.
+        r = _NO_REDIRECT_OPENER.open(req, timeout=timeout)
         return r.status, r.read(4000).decode(errors="replace")
     except urllib.error.HTTPError as e:
         return e.code, e.read(1000).decode(errors="replace")
@@ -269,6 +286,11 @@ def write_auth_enforcement(target: str, facts: dict, max_endpoints: int = 80) ->
         url = target + re.sub(r"\{[^}]+\}", "websec-nonexistent-id", path)
         code, _ = _request(method, url, token=None, data=b"{}")
         if code in (401, 403):
+            verdict = "auth-enforced"
+        elif code in (301, 302, 303, 307, 308):
+            # a redirect (typically → /login) means the write was BOUNCED, not executed — auth is
+            # enforced. Since _request no longer follows redirects, this is now reachable instead of
+            # the login page's 200 being misread as EXECUTED-UNAUTH (critical FP).
             verdict = "auth-enforced"
         elif code in (200, 201, 204):
             verdict = "EXECUTED-UNAUTH"

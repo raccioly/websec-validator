@@ -689,3 +689,71 @@ class VerifySecretsOptInTests(unittest.TestCase):
 
     def test_registered_as_opt_in(self):
         self.assertIn("trufflehog", scanners._OPT_IN_SCANNERS)
+
+
+class RedirectAuthJudgmentTests(unittest.TestCase):
+    """Field report: `websec dynamic --unauth` reported 26 endpoints (incl. /api/platform-admin/
+    secrets) as OPEN-no-auth because _request followed a 307 → /login and scored the login page's
+    200. A redirect-to-login is the app CORRECTLY refusing access; it must never read as 'open'."""
+
+    def _server(self):
+        import http.server
+        import socketserver
+        import threading
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _login(self):
+                b = b"<html><body>Please log in</body></html>"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(b)))
+                self.end_headers()
+                self.wfile.write(b)
+
+            def do_GET(self):
+                if self.path == "/login":
+                    self._login()
+                else:
+                    self.send_response(307)
+                    self.send_header("Location", "/login")
+                    self.end_headers()
+
+            def do_POST(self):
+                self.send_response(307)
+                self.send_header("Location", "/login")
+                self.end_headers()
+
+        srv = socketserver.TCPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.shutdown)
+        return f"http://127.0.0.1:{srv.server_address[1]}"
+
+    def test_request_does_not_follow_redirects(self):
+        base = self._server()
+        code, body = dynamic._request("GET", base + "/api/secrets", token=None, timeout=5)
+        self.assertEqual(code, 307)                          # the real status, not the login 200
+        self.assertNotIn("log in", body.lower())             # never the login page body
+
+    def test_unauth_reachability_scores_redirect_as_protected_not_open(self):
+        base = self._server()
+        facts = {"routes": {"endpoints": [{"method": "GET", "path": "/api/platform-admin/secrets"}]}}
+        r = dynamic.unauth_reachability(base, facts)
+        self.assertEqual(r["open_no_auth"], [])              # THE bug: was reported OPEN
+        self.assertEqual(r["results"][0]["verdict"], "redirect (likely to login)")
+        self.assertEqual(r["results"][0]["status"], 307)
+
+    def test_write_enforcement_scores_redirect_as_enforced_not_executed(self):
+        base = self._server()
+        facts = {"routes": {"endpoints": [{"method": "POST", "path": "/api/users"}]}}
+        r = dynamic.write_auth_enforcement(base, facts)
+        self.assertEqual(r["executed_unauth"], [])           # was a CRITICAL false positive
+        self.assertEqual(r["results"][0]["verdict"], "auth-enforced")
+
+    def test_forged_token_redirect_is_not_a_bypass(self):
+        base = self._server()
+        facts = {"routes": {"endpoints": [{"method": "GET", "path": "/api/admin"}]}}
+        r = dynamic.forged_token_bypass(base, facts)
+        self.assertEqual(r.get("bypassed", []), [])          # 307 ∉ _REACHED_HANDLER
