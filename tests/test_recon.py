@@ -1838,3 +1838,64 @@ class EmitContextTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DynamicCorrelationTests(unittest.TestCase):
+    """The ledger must correlate dynamic evidence METHOD-EXACTLY, and honor every 'blocked' verdict."""
+
+    FACTS = {"authz": {"endpoint_guards": [
+        {"method": "GET", "path": "/api/admin/users", "code_path": "a.ts",
+         "guarded": False, "analyzed": True, "public_hint": False},
+        {"method": "POST", "path": "/api/admin/users", "code_path": "a.ts",
+         "guarded": False, "analyzed": True, "public_hint": False}]},
+        "surface": {"sinks": {}}, "client_exposure": {}, "iac_ci": {}, "graphql": {}}
+
+    def _titles(self, dyn):
+        return [f["title"] for f in findings.build_ledger(self.FACTS, None, dyn, [])["findings"]]
+
+    def test_protected_GET_does_not_delete_the_POST_finding(self):
+        # unauth_reachability is GET-ONLY and --probe-writes is localhost-gated, so on any remote
+        # target the write fell back to the GET verdict — a protected GET silently deleted the
+        # unguarded-write finding, the highest-value class this tool produces.
+        dyn = {"unauth_reachability": {"results": [
+            {"path": "/api/admin/users", "status": 401, "verdict": "protected"}]}}
+        titles = self._titles(dyn)
+        self.assertTrue(any("POST" in t for t in titles), f"POST finding was dropped: {titles}")
+        self.assertFalse(any("GET" in t for t in titles))     # the GET really is protected
+
+    def test_open_GET_does_not_escalate_the_POST_on_evidence_that_never_tested_it(self):
+        dyn = {"unauth_reachability": {"results": [
+            {"path": "/api/admin/users", "status": 200, "verdict": "OPEN-no-auth"}]}}
+        post = [f for f in findings.build_ledger(self.FACTS, None, dyn, [])["findings"]
+                if "POST" in f["title"]][0]
+        self.assertEqual(post["confidence"], "MEDIUM")        # recon-level, not dynamically confirmed
+
+    def test_redirect_and_soft_deny_verdicts_count_as_protected(self):
+        # mirror of bug-208: the classifier's input gained values its branches didn't cover, so a
+        # route dynamically PROVEN gated still emitted "Missing authorization".
+        for verdict in ("redirect (likely to login)",
+                        "soft-deny (200 but body says not authenticated — verify)"):
+            dyn = {"unauth_reachability": {"results": [
+                {"path": "/api/admin/users", "status": 307, "verdict": verdict}]}}
+            titles = self._titles(dyn)
+            self.assertFalse(any(t.startswith("Missing authorization: GET") for t in titles), verdict)
+
+    def test_every_gated_status_maps_to_a_ledger_protected_verdict(self):
+        # Guard against dynamic.py and findings.py drifting apart again — that drift IS bug-208's
+        # shape. Drive REAL verdict strings out of unauth_reachability for every gated status code
+        # and assert the ledger recognises each one as protection.
+        from websec_validator import dynamic
+
+        def _verdict_for(status):
+            with mock.patch.object(dynamic, "_request", lambda *a, **k: (status, "")):
+                r = dynamic.unauth_reachability(
+                    "http://t", {"routes": {"endpoints": [{"method": "GET", "path": "/x"}]}})
+            return r["results"][0]["verdict"]
+
+        for status in sorted(dynamic._GATED_CODES):
+            v = _verdict_for(status)
+            recognised = v in findings._DYNAMIC_PROTECTED or v.startswith(
+                findings._DYNAMIC_PROTECTED_PREFIXES)
+            self.assertTrue(recognised,
+                            f"HTTP {status} → dynamic verdict {v!r} is NOT recognised as protected "
+                            "by the ledger — a gated route would emit a false missing-auth finding")

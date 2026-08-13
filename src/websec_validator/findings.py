@@ -438,6 +438,14 @@ def _f(title, category, attack_class, severity, confidence, location, evidence):
             "remediation": REMEDIATION.get(attack_class, _DEFAULT_REM), "status": "open"}
 
 
+# Dynamic verdicts that PROVE a route is gated, so no missing-auth finding should be emitted.
+# Kept next to the consumer and covered by a test that walks dynamic.py's verdict vocabulary: the
+# original bug-208 was a classifier whose input gained a value its branches didn't cover, and this is
+# the same shape one layer up — when dynamic.py learns a new "blocked" verdict, this must learn it too.
+_DYNAMIC_PROTECTED = ("auth-enforced", "protected")
+_DYNAMIC_PROTECTED_PREFIXES = ("redirect (", "soft-deny (")
+
+
 def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                  suppressions: list | None = None, acknowledgements: dict | None = None) -> dict:
     suppressions = suppressions or []
@@ -462,7 +470,13 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         is_write = m in WRITE_VERBS
         ev = [{"layer": "recon", "detail": f"no auth guard found in handler {eg.get('code_path','?')}"}]
         conf, sev = "MEDIUM", ("HIGH" if is_write else "MEDIUM")
-        dv = dyn_write.get((m, p)) or dyn_get.get(p)
+        # METHOD-EXACT correlation only. `dyn_get` holds unauth_reachability rows, which are GET-ONLY;
+        # falling back to it for a POST/PUT/DELETE applied a GET's verdict to a write. Because
+        # --probe-writes is localhost-gated, dyn_write is EMPTY on any remote target, so every write
+        # endpoint took the GET path: a protected GET silently DELETED the unguarded-write finding
+        # (the highest-value class this tool produces), and an open GET escalated the write to HIGH
+        # confidence on evidence that never tested the write. Only use a GET verdict for a GET.
+        dv = dyn_write.get((m, p)) if is_write else dyn_get.get(p)
         if dv:
             verdict = dv.get("verdict", "")
             if dyn_fail_open and verdict not in ("auth-enforced", "protected"):
@@ -477,7 +491,7 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                 ev.append({"layer": "dynamic", "detail": f"reached unauthenticated (HTTP {dv.get('status')}, {verdict})"})
                 conf = "HIGH"
                 sev = "HIGH" if is_write else "MEDIUM"
-            elif verdict in ("auth-enforced", "protected"):
+            elif verdict in _DYNAMIC_PROTECTED or verdict.startswith(_DYNAMIC_PROTECTED_PREFIXES):
                 continue  # dynamic says it's actually protected → not a finding
         out.append(_f(f"Missing authorization: {m} {p}", "access-control", "missing-auth",
                       sev, conf, p, ev))
