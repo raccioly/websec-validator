@@ -91,6 +91,51 @@ class HygieneTests(unittest.TestCase):
         self.assertTrue(any("no `security`" in h for h in res["hygiene"]))
 
 
+class UnusableSpecTests(unittest.TestCase):
+    """A file matching a spec FILENAME but not parseable must yield NO verdict, never an empty one.
+
+    Regression: parse() returned ok=True for `{}`, `{"info":…}` and invalid YAML. A zero-path "spec"
+    then acts as an authoritative empty contract — so every implemented route looks undocumented (a
+    flood of false shadow endpoints), or on a route-less repo it produces a false all-clear."""
+
+    BAD = {"openapi.yaml": "not: [valid: yaml", "swagger.json": "{}",
+           "openapi-cfg.json": json.dumps({"info": {"title": "not a spec"}})}
+
+    def test_unusable_specs_are_not_counted_as_parsed(self):
+        for name, content in self.BAD.items():
+            res = openapi.analyze(_facts(("GET", "/a")), _repo({name: content}))
+            self.assertEqual(res["summary"]["specs"], 0, name)
+            self.assertEqual(res["summary"]["unreadable"], 1, name)
+
+    def test_no_shadow_verdict_is_emitted_without_a_usable_spec(self):
+        # THE bug: /api/admin/purge would be called "shadow" purely because the spec failed to parse.
+        res = openapi.analyze(_facts(("POST", "/api/admin/purge")),
+                              _repo({"openapi.yaml": "not: [valid: yaml"}))
+        self.assertEqual(res["shadow"], [])
+        self.assertEqual(res["stale"], [])
+
+    def test_unusable_spec_is_disclosed_not_silently_ignored(self):
+        md = openapi.render_md(openapi.analyze(_facts(("GET", "/a")), _repo({"swagger.json": "{}"})))
+        self.assertIn("NOT usable", md)
+        self.assertIn("SKIPPED", md)
+        self.assertIn("swagger.json", md)
+
+    def test_a_real_spec_alongside_a_broken_one_still_works(self):
+        d = _repo({"openapi.json": json.dumps({"openapi": "3.0.0", "paths": {"/api/users": {"get": {}}}}),
+                   "swagger-broken.json": "{}"})
+        res = openapi.analyze(_facts(("GET", "/api/users"), ("POST", "/api/admin")), d)
+        self.assertEqual(res["summary"]["specs"], 1)          # the good one is still used
+        self.assertEqual(res["summary"]["unreadable"], 1)     # the bad one is disclosed
+        self.assertEqual(res["shadow"], ["POST /api/admin"])  # real verdict still produced
+        self.assertIn("NOT usable", openapi.render_md(res))
+
+    def test_minimal_valid_spec_with_version_key_is_accepted(self):
+        # guard against over-tightening: a spec with a version key but no paths yet is still a spec
+        res = openapi.analyze(_facts(), _repo({"openapi.json": json.dumps({"openapi": "3.0.0"})}))
+        self.assertEqual(res["summary"]["specs"], 1)
+        self.assertEqual(res["summary"]["unreadable"], 0)
+
+
 class YamlPartialTests(unittest.TestCase):
     YAML = ("openapi: 3.0.0\n"
             "servers:\n  - url: http://insecure.example.com\n"

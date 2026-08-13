@@ -54,17 +54,34 @@ def find_specs(target: Path, limit: int = 10) -> list:
 
 
 def parse(path: Path) -> dict:
-    """→ {ok, mode, paths:{path:[methods]}, ops_without_security, has_schemes, insecure_servers}."""
-    res = {"file": str(path), "ok": False, "mode": "", "paths": {}, "ops_without_security": [],
-           "has_schemes": False, "insecure_servers": [], "global_security": False}
+    """→ {ok, mode, paths:{path:[methods]}, ops_without_security, has_schemes, insecure_servers}.
+
+    `ok=False` (with `reason`) when the file is NOT usable as a contract — unreadable, not valid
+    JSON/YAML, or valid but not actually a spec (`{}`, a config that merely matched the filename).
+    That distinction is load-bearing: a file we could not parse yields ZERO paths, and a zero-path
+    "spec" silently becomes an authoritative empty contract — which makes every implemented route
+    look undocumented (a flood of false shadow endpoints) or, on a repo with no routes, produces a
+    false all-clear. No verdict is better than a wrong verdict, so callers must skip these."""
+    res = {"file": str(path), "ok": False, "reason": "", "mode": "", "paths": {},
+           "ops_without_security": [], "has_schemes": False, "insecure_servers": [],
+           "global_security": False}
     try:
         text = path.read_text(errors="ignore")
     except OSError:
+        res["reason"] = "unreadable"
         return res
     if path.suffix.lower() == ".json":
         try:
             doc = json.loads(text)
         except ValueError:
+            res["reason"] = "not valid JSON"
+            return res
+        if not isinstance(doc, dict):
+            res["reason"] = "JSON is not an object"
+            return res
+        # must actually LOOK like a spec: a version marker, or a non-empty paths object.
+        if not (doc.get("openapi") or doc.get("swagger") or (doc.get("paths") or {})):
+            res["reason"] = "no `openapi`/`swagger` version key and no `paths` — not an API spec"
             return res
         res.update(mode="json", ok=True)
         comps = (doc.get("components") or {})
@@ -89,6 +106,12 @@ def parse(path: Path) -> dict:
         return res
 
     # YAML: bounded regex pass (no YAML parser in a zero-dependency tool) — PARTIAL by construction.
+    # Same "is it really a spec?" gate as JSON: a `paths:` section or an openapi/swagger version key.
+    # Without it we'd accept arbitrary YAML (or garbage) as an empty contract — see the docstring.
+    if not (re.search(r"^\s{0,2}paths\s*:", text, re.M)
+            or re.search(r"^\s*(openapi|swagger)\s*:", text, re.M)):
+        res["reason"] = "no `paths:` section and no `openapi:`/`swagger:` key — not an API spec"
+        return res
     res.update(mode="yaml-partial", ok=True)
     res["has_schemes"] = bool(_YAML_SCHEMES.search(text))
     res["insecure_servers"] = _HTTP_SERVER.findall(text)[:10]
@@ -125,11 +148,14 @@ def _norm(p: str) -> str:
 
 def analyze(facts: dict, target) -> dict:
     """→ {specs:[…], shadow:[…], stale:[…], hygiene:[…], summary:{…}}."""
-    specs = [parse(p) for p in find_specs(Path(target))]
-    specs = [s for s in specs if s["ok"]]
+    parsed = [parse(p) for p in find_specs(Path(target))]
+    specs = [s for s in parsed if s["ok"]]
+    # Files that LOOK like a spec by filename but aren't usable. Disclosed, never silently ignored —
+    # if the only spec in a repo is unreadable, "0 undocumented endpoints" would be a false all-clear.
+    unreadable = [{"file": s["file"], "reason": s["reason"]} for s in parsed if not s["ok"]]
     if not specs:
-        return {"specs": [], "shadow": [], "stale": [], "hygiene": [],
-                "summary": {"specs": 0, "shadow": 0, "stale": 0}}
+        return {"specs": [], "shadow": [], "stale": [], "hygiene": [], "unreadable": unreadable,
+                "summary": {"specs": 0, "shadow": 0, "stale": 0, "unreadable": len(unreadable)}}
 
     spec_ops: set = set()
     for s in specs:
@@ -168,12 +194,27 @@ def analyze(facts: dict, target) -> dict:
                            f"— e.g. {', '.join(ops[:3])}")
     return {"specs": [{"file": s["file"], "mode": s["mode"], "paths": len(s["paths"])} for s in specs],
             "shadow": sorted(set(shadow)), "stale": stale, "hygiene": hygiene,
+            "unreadable": unreadable,
             "summary": {"specs": len(specs), "shadow": len(set(shadow)), "stale": len(stale),
+                        "unreadable": len(unreadable),
                         "partial_parse": any(s["mode"] == "yaml-partial" for s in specs)}}
+
+
+def _unreadable_md(res: dict) -> str:
+    bad = res.get("unreadable") or []
+    if not bad:
+        return ""
+    rows = "\n".join(f"- `{Path(b['file']).name}` — {b['reason']}" for b in bad[:10])
+    return ("\n**⚠ Spec file(s) found but NOT usable as a contract** — excluded from the diff, because "
+            "treating an unparsed spec as an empty one would make every route look undocumented (or "
+            "produce a false all-clear). Fix or remove these, then re-run:\n" + rows + "\n")
 
 
 def render_md(res: dict, limit: int = 20) -> str:
     if not res.get("specs"):
+        if res.get("unreadable"):
+            return ("_No USABLE OpenAPI/Swagger spec — shadow-endpoint analysis was SKIPPED (no verdict "
+                    "is better than a wrong one)._\n" + _unreadable_md(res))
         return "_No OpenAPI/Swagger spec found — nothing to diff the implemented routes against._"
     s = res["summary"]
     out = [f"Found **{s['specs']} spec(s)**. **{s['shadow']} undocumented endpoint(s)** in code · "
@@ -194,4 +235,7 @@ def render_md(res: dict, limit: int = 20) -> str:
     if res["hygiene"]:
         out.append("\n**Contract hygiene:**\n")
         out += [f"- {h}" for h in res["hygiene"]]
+    um = _unreadable_md(res)
+    if um:
+        out.append(um)
     return "\n".join(out)
