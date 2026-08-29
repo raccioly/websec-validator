@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- Fixed `test_end_to_end_post_commit_runs` failing in environments with a global git configuration for `core.hooksPath` set to `/dev/null` by explicitly setting `core.hooksPath` locally for the test repo.
 
 ## [0.12.0] — 2026-07-19
 
