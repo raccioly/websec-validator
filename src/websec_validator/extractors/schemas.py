@@ -16,7 +16,7 @@ from .base import Extractor, RepoContext
 
 DECLS = [
     ("pydantic", re.compile(r"class\s+(\w+)\s*\([^)]*BaseModel")),
-    ("sqlalchemy", re.compile(r"class\s+(\w+)\s*\([^)]*\bBase\b[^)]*\)")),
+    ("sqlalchemy", re.compile(r"class\s+(\w+)\s*\([^)]*(?:\bBase\b|\bdb\.Model\b)[^)]*\)")),
     ("django", re.compile(r"class\s+(\w+)\s*\([^)]*models\.Model")),
     ("prisma", re.compile(r"\bmodel\s+(\w+)\s*\{")),
     ("mongoose", re.compile(r"\b(\w+)\s*=\s*(?:new\s+)?(?:mongoose\.)?Schema\s*\(")),
