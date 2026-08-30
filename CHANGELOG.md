@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Upload Security Extractors**: Refined `KEY_FROM_NAME` and `SERVE_FILE` regular expressions in `src/websec_validator/extractors/upload_security.py` to prevent false positives when filenames are simply logged (string interpolation) or when files are read but not served to a response stream.
+
 ## [0.12.0] — 2026-07-19
 
 **Aim the pentest, then prove the aim.** This round adds the planning layer that turns websec's recon
