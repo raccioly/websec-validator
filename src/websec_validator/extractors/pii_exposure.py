@@ -33,20 +33,25 @@ PII_NONCARRIER = re.compile(
     r"z\.string\(\)(?:\.\w+\([^)]*\))*\.email|\.email\(\)|email:\s*z\.|(?:joi|yup|zod)\b[^;\n]*email"
     r"|actor[_-]?email|performed[_-]?by[_-]?email|(?:req|request|ctx|session|token|payload)\.(?:user|auth|claims)\s*\??\.\s*email"
     r"|currentUser\s*\.\s*email|createdBy[_-]?email|updatedBy[_-]?email"
-    r"|\bemail\s*:\s*(?:z|Joi|yup|t)\.|@IsEmail|IsEmail\(|email\(\)\.(?:optional|required|min|max)", re.I)
+    r"|\bemail\s*:\s*(?:z|Joi|yup|t)\.|@IsEmail|IsEmail\(|email\(\)\.(?:optional|required|min|max)"
+    r"|(?:req|request)\.(?:body|query|params)\.(?:email|phone|phoneNumber|ssn|dob)\b"
+    r"|\{\s*[^}]*\b(?:email|phone|phoneNumber|ssn|dob)\b[^}]*\}\s*=\s*(?:req|request)\.(?:body|query|params)"
+    r"|\b(?:email|phone)Count\b"
+    r"|db\.\w+\(\s*(?:email|phone|phoneNumber|ssn|dob)\s*\)"
+    r"|const\s+(?:email|phone|phoneNumber|ssn|dob)\s*=\s*(?:req|request)\.", re.I)
 PII_FIELD = re.compile(r"\b(?:phone|phoneNumber|msisdn|mobile|email|emailAddress|ssn|socialSecurity"
                        r"|dob|dateOfBirth|birthDate|creditCard|cardNumber|taxId|nationalId)\b", re.I)
 # returning a raw variable / a fresh ORM read straight to the client
-RES_RAW = re.compile(r"res\.(?:json|send)\s*\(\s*(?:await\s+)?[A-Za-z_$][\w$]*\s*\)"
+RES_RAW = re.compile(r"res\.(?:json|send)\s*\(\s*(?:await\s+)?(?!(?:true|false|success|ok|id|count|exists|status)\b)[A-Za-z_$][\w$]*\s*\)"
                      r"|res\.(?:json|send)\s*\(\s*await\s+[\w.]+\.(?:find|findOne|findById|findAll|get|query)\s*\(")
-MASK_CALL_NEAR = re.compile(r"mask\w+\(|redact\w+\(|toPublic\w+\(|canViewFull\w+\(|\.serialize\(|toDto\(|\bDTO\b|pick\(", re.I)
+MASK_CALL_NEAR = re.compile(r"mask\w+\(|redact\w+\(|toPublic\w+\(|canViewFull\w+\(|\.serialize\(|toDto\(|\bDTO\b|pick\(|Pick<|Omit<|Exclude<", re.I)
 TESTFILE = re.compile(r"(?:^|/)(?:tests?|__tests__|spec)/|\.(?:test|spec)\.", re.I)
 # A helper that masks a SECRET (connection string / password / token), not customer PII — wrong
 # category, and "defined but unused" on it is at most a lint nit. Excluded from the PII dead-control.
 SECRET_MASKER = re.compile(r"(?:mask|redact|scrub)\w*(?:Url|Uri|Dsn|Database|Conn|Connection|Secret|Password|Passwd|Token|Key|Cred)\w*", re.I)
 # inline object-projection (`.map(x => ({...}))` / a returned object literal) IS a serializer — a
 # raw-entity finding on a file that projects fields before responding is a false positive.
-PROJECTION = re.compile(r"=>\s*\(\s*\{|\.map\s*\(\s*[\w$]*\s*=>|\bselect\s*:\s*\{|\binterface\s+\w+|\btype\s+\w+\s*=\s*\{", re.I)
+PROJECTION = re.compile(r"=>\s*\(\s*\{|\.map\s*\(\s*[\w$]*\s*=>|\bselect\s*:\s*\{|\binterface\s+\w+|\btype\s+\w+\s*=\s*\{|\{\s*[^}]*\.\.\.[\w$]+\s*\}\s*=", re.I)
 
 
 class PiiExposureExtractor(Extractor):
