@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- Tuned `PiiExposureExtractor` to fix false positives involving destructuring rest properties (`const { email, ...safe } = user`), boolean success/exists checks (`res.json(exists)`), TypeScript omit properties (`Omit<User, 'email'>`), and references checking request fields (`req.body.email`). Added regression tests.
 
 ## [0.12.0] — 2026-07-19
 
