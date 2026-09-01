@@ -18,17 +18,20 @@ import re
 from .base import Extractor, RepoContext, is_client_file, is_test_file
 
 UPLOAD_MARK = re.compile(r"\bmulter\b|req\.files?\b|multipart/form-data|formidable|busboy|fileFilter"
-                         r"|uploadMedia|presignedPost|\.upload\s*\(", re.I)
+                         r"|uploadMedia|presignedPost|\.upload\s*\("
+                         r"|\bUploadFile\b|werkzeug\.datastructures\.FileStorage|django\.core\.files\.uploadedfile", re.I)
 DENY_LIST = re.compile(r"isExecutableMimeType|blockedMimeTypes|blacklist|deny[_-]?list|forbidden(?:Ext|Mime)|isBlocked", re.I)
 # positive allow-list, ideally by sniffed bytes (file-type / magic detection), not by declared type.
 # `ACCEPTED_*` / `acceptedMimeTypes` is the same intent under a different name (was missed → FP).
 ALLOW_LIST = re.compile(r"isAllowedMediaType|allowedMimeTypes|allow[_-]?list|whitelist|ALLOWED_(?:MIME|TYPES|EXT)"
                         r"|ACCEPTED_(?:MIME|TYPES?|EXT)|accepted(?:Mime|File|Content)?(?:Types?|Extensions?)"
-                        r"|\bfile-type\b|fileTypeFrom|magic[_-]?byte|detectContentType|\.fromBuffer\b|sniff", re.I)
+                        r"|\bfile-type\b|fileTypeFrom|magic[_-]?byte|detectContentType|\.fromBuffer\b|sniff"
+                        r"|python-magic|magic\.from_buffer", re.I)
 KEY_FROM_NAME = re.compile(r"(?:Key|key|path|filename|filepath|destination|filename\s*\()\s*[:=(][^;\n]{0,90}"
-                           r"\b(?:originalname|originalName|file\.name)\b"
-                           r"|`[^`]*\$\{[^}]*\boriginalname\b[^}]*\}[^`]*`", re.I)
-TRUST_CLIENT_MIME = re.compile(r"(?:req\.files?\.[\w$.]*\.|\bfile\.)mimetype\b|headers\[['\"]content-type['\"]\]", re.I)
+                           r"\b(?:originalname|originalName|file\.name|file\.filename)\b"
+                           r"|`[^`]*\$\{[^}]*\b(?:originalname|file\.filename)\b[^}]*\}[^`]*`"
+                           r"|f['\"][^'\"]*\{[^}]*\b(?:file\.filename|file\.name|originalname)\b[^}]*\}", re.I)
+TRUST_CLIENT_MIME = re.compile(r"(?:req\.files?\.[\w$.]*\.|\bfile\.)(?:mimetype|content_type)\b|headers\[['\"]content-type['\"]\]", re.I)
 ACCEPT_SVG = re.compile(r"image/svg\+xml|['\"]svg['\"]", re.I)
 # file-serving: streaming a STORED/PROXIED object back to the client. Tightened to genuine
 # file-bytes sinks — the old rule matched a bare `getObject` token (a local coercion helper) and a

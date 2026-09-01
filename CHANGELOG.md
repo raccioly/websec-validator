@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- upload_security: extend upload handler detection to modern Python frameworks, specifically FastAPI (`UploadFile`) and Flask/Django upload structures.
+- upload_security: detect modern Python idioms for filename derivation (`file.filename`, f-strings) and mime type trust (`file.content_type`).
+- upload_security: add `magic.from_buffer` to safe allow-list patterns.
+
 ## [0.12.0] — 2026-07-19
 
 **Aim the pentest, then prove the aim.** This round adds the planning layer that turns websec's recon
