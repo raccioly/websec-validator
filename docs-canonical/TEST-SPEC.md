@@ -10,11 +10,11 @@
 > Last updated: 2026-06-22
 
 The suite is **stdlib `unittest` only** — no third-party test runner, no network, no Noir, no running
-app. **324 tests** across five files run in ~1s and gate every release (the `publish.yml` workflow
+app. **551 tests** across seventeen files run in ~1s and gate every release (the `publish.yml` workflow
 also installs the built wheel and smoke-runs `websec run`).
 
 ```bash
-python3 -m unittest discover -s tests    # 324 tests, stdlib only
+python3 -m unittest discover -s tests    # 551 tests, stdlib only
 ```
 
 ---
@@ -43,12 +43,13 @@ python3 -m unittest discover -s tests    # 324 tests, stdlib only
 
 | Source area | Test File | Tests | Status |
 |-------------|-----------|-------|--------|
-| Recon extractors, ledger, calibration, scanners, probes, briefing (incl. the FP-killer + detector tests: LLM-security, crypto-usage, authz-dataflow, CORS/SRI/header-gap, mount-auth, **no-RLS, log-injection, agent-config/MCP, offline-deps**) | `tests/test_recon.py` | 165 | ✅ |
+| Recon extractors, ledger, calibration, scanners, probes, briefing (incl. the FP-killer + detector tests: LLM-security, crypto-usage, authz-dataflow, CORS/SRI/header-gap, mount-auth, **no-RLS, log-injection, agent-config/MCP, offline-deps**) | `tests/test_recon.py` | 192 | ✅ |
 | Pen-test + bug-fix regressions (detection precision, false-positive/negative guards) | `tests/test_pentest_regressions.py` | 66 | ✅ |
 | Entitlement / licensing + WebExtension client-trust classes (incl. **no-RLS-at-all**) | `tests/test_entitlement_webext.py` | 45 | ✅ |
-| CLI / dynamic-phase hardening + safety gates + edge cases | `tests/test_hardening.py` | 34 | ✅ |
+| CLI / dynamic-phase hardening + safety gates + edge cases | `tests/test_hardening.py` | 84 | ✅ |
 | SARIF / S4RIF + baseline/formats | `tests/test_formats.py` | 14 | ✅ |
-| **Total** | | **324** | ✅ |
+| Test planning, DAST ingestion, diff scope, and enrichment modules | `tests/test_*.py` (other) | 150 | ✅ |
+| **Total** | | **551** | ✅ |
 
 ## Test Fixtures
 
