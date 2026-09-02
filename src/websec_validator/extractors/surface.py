@@ -46,8 +46,8 @@ SINKS = {
         r"(?:\bfetch|axios(?:\.\w+)?|got|node-fetch|superagent|needle|undici|requests\.\w+|httpx\.\w+|urllib\.request\.\w+)"
         r"\s*\(\s*[^)\n;]{0,160}?" + _REQ_SRC)),
     "command-injection": ("ssrf-probes", None, re.compile(
-        r"(?:child_process\.exec|\bexecSync|\bexec|\bspawn|os\.system|subprocess\.(?:run|call|check_output|Popen))\s*\([^)]*"
-        + _U + r"|shell\s*=\s*True")),
+        r"(?:child_process\.exec|\bexecSync|\bexec|\bspawn|os\.system|os\.popen|subprocess\.(?:run|call|check_output|Popen))\s*\([^)]*"
+        + _U + r"|os\.(?:system|popen)\s*\(\s*(?!['\"])[a-zA-Z_]\w*|shell\s*=\s*True")),
     "sql-injection": ("bola-write-verbs", "sql", re.compile(
         r"(?:\.query|\.execute|\.raw|cursor\.execute|sequelize\.query|knex\.raw)\s*\([^)]*(?:\$\{|\+|%\s*[\(%]|\.format\s*\(|f['\"])")),
     "nosql-injection": ("bola-write-verbs", "nosql", re.compile(
