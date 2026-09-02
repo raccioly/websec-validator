@@ -62,3 +62,6 @@ src/websec_validator/briefing.py
 # The AppSync GraphQL "surface" is detected purely from our own `@aws_*` example strings — no real
 # GraphQL server lives in this repo, so the synthetic graphql finding is a self-reference.
 category:graphql
+
+# The tool acts as a security scanner, not a web server. Transport security findings (like CSP) are triggered by matched HTML definitions in its own extractors.
+category:transport
