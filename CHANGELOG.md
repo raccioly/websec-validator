@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Enhanced `command-injection` extractor to catch `os.popen` and `os.system` invoked with variable arguments (addressing a missing detection pattern in DVGA).
+
 ## [0.12.0] — 2026-07-19
 
 **Aim the pentest, then prove the aim.** This round adds the planning layer that turns websec's recon
