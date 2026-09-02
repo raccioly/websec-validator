@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`websec-guardrail` Hook Test Failure**: Configured local `core.hooksPath` in tests to prevent global config from bypassing the test environment hook.
+- **Triage self-findings**: Fixed `docker-no-healthcheck` true positive in `Dockerfile` and suppressed `weak-csp` (a false positive since the tool acts as a scanner, not a web server) in `.websec-ignore`.
+
 ## [0.12.0] — 2026-07-19
 
 **Aim the pentest, then prove the aim.** This round adds the planning layer that turns websec's recon
