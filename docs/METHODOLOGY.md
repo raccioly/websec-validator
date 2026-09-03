@@ -48,7 +48,7 @@ it safe to run anywhere.
 ```
                  ┌─────────────────────────── deterministic, no LLM, no running app ──────────────────────────┐
   your repo ──▶  1. RECON          2. STATIC SCANNERS      3. FINDINGS LEDGER        4. BRIEFING + REPORT
-                 (22 extractors)   (Trivy/Gitleaks/…,      (evidence chain +         (marching orders for
+                 (21 extractors)   (Trivy/Gitleaks/…,      (evidence chain +         (marching orders for
                  walk once         de-duplicated)          standards + calibrated     your agent) + immutable
                                                            confidence)                run record
                                                                   │
@@ -61,7 +61,7 @@ Every `run` is written to an **immutable, timestamped directory** (`websec-out/r
 
 ---
 
-## Layer 1 — Recon: the 22 extractors
+## Layer 1 — Recon: the 21 extractors
 
 Recon walks the repository **once** into a shared `RepoContext`, then runs twenty-two focused
 extractors over it. Each answers one question a pentester asks first. The output is `FACTS.json`.
