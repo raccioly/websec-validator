@@ -25,6 +25,7 @@ HAVE_GIT = shutil.which("git") is not None
 
 def _init_repo(root: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "core.hooksPath", ".git/hooks"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
 
