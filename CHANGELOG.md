@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- **fix:** Added `core.hooksPath` configuration to `_init_repo` in `tests/test_hooks.py` to ensure Git hooks run in the temporary test environment instead of bypassing it due to global config.
+
 ## [0.12.0] — 2026-07-19
 
 **Aim the pentest, then prove the aim.** This round adds the planning layer that turns websec's recon
