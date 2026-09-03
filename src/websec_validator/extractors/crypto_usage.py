@@ -25,15 +25,15 @@ from .base import Extractor, RepoContext, is_test_file
 _PW = r"(?:password|passwd|passphrase|\bpwd\b|userPassword|plainPassword)"
 # a fast digest fed a password-shaped value (either arg order, within a small window)
 WEAK_PW_HASH = re.compile(
-    r"createHash\s*\(\s*['\"](?:md5|sha1|sha256|sha224)['\"]\s*\)[\s\S]{0,160}?\.update\s*\([^)]*" + _PW
-    + r"|" + _PW + r"[\s\S]{0,80}?createHash\s*\(\s*['\"](?:md5|sha1|sha256|sha224)['\"]"
-    + r"|hashlib\.(?:md5|sha1|sha256|sha224)\s*\([^)]*" + _PW
-    + r"|(?:md5|sha1|sha256)\s*\([^)]*" + _PW + r"[^)]*\)\.(?:hexdigest|digest)", re.I)
+    r"createHash\s*\(\s*['\"](?:md5|sha1|sha256|sha224)['\"]\s*\)[\s\S]{0,160}?\.update\s*\([^)]*?\b(?:password|passwd|passphrase|\bpwd\b|userPassword|plainPassword)\b(?!\s*['\":])"
+    + r"|\b(?:password|passwd|passphrase|\bpwd\b|userPassword|plainPassword)\b(?!\s*['\":])[\s\S]{0,80}?createHash\s*\(\s*['\"](?:md5|sha1|sha256|sha224)['\"]"
+    + r"|hashlib\.(?:md5|sha1|sha256|sha224)\s*\([^)]*?\b(?:password|passwd|passphrase|\bpwd\b|userPassword|plainPassword)\b(?!\s*['\":])"
+    + r"|(?:md5|sha1|sha256)\s*\([^)]*?\b(?:password|passwd|passphrase|\bpwd\b|userPassword|plainPassword)\b(?!\s*['\":])[^)]*\)\.(?:hexdigest|digest)", re.I)
 # a password-auth context + a fast hash + no strong KDF in the file — catches the case where the
 # password is renamed (`sha256Hex(password)` → `createHash('sha256').update(input)`) so the token
 # isn't adjacent to the hash, but the file is clearly hashing a credential the weak way.
-PW_CONTEXT = re.compile(r"verify\w*[Pp]assword|hash\w*[Pp]assword|compare\w*[Pp]assword|"
-                        r"[Pp]asswordHash|checkPassword|passwordDigest|set\w*[Pp]assword", re.I)
+PW_CONTEXT = re.compile(r"\b(?:verify\w*[Pp]assword|hash\w*[Pp]assword|compare\w*[Pp]assword|"
+                        r"[Pp]asswordHash|checkPassword|passwordDigest|set\w*[Pp]assword)\b", re.I)
 FAST_HASH = re.compile(r"createHash\s*\(\s*['\"](?:md5|sha1|sha256|sha224)['\"]|hashlib\.(?:md5|sha1|sha256|sha224)\b", re.I)
 STRONG_KDF = re.compile(r"\bbcrypt\b|\bargon2|\bscrypt\b|\bpbkdf2\b", re.I)
 # PKCE (RFC 7636) MANDATES a SHA-256 digest over the code_verifier to build the code_challenge. That's a
@@ -41,7 +41,7 @@ STRONG_KDF = re.compile(r"\bbcrypt\b|\bargon2|\bscrypt\b|\bpbkdf2\b", re.I)
 # weak-password-hash is a false positive (real repos: a real Next.js app, a real app OAuth adapters).
 PKCE_CONTEXT = re.compile(r"code_challenge|code_verifier|codeVerifier|codeChallenge|\bS256\b|\bPKCE\b", re.I)
 JWT_VERIFY = re.compile(r"\bjwtVerify\s*\(|\bjwt\.verify\s*\(|\bjwtv2\.verify\s*\(|verifyJwt\s*\(", re.I)
-JWT_ALGS = re.compile(r"algorithms?\s*[:=]|['\"]alg['\"]\s*:", re.I)
+JWT_ALGS = re.compile(r"algorithms?\s*[:=]|['\"]alg['\"]\s*:|\b(?:options|config|opts)\b|\.\.\.", re.I)
 # a public hash of an identity field, used as a security principal / tenant key
 PRINCIPAL_HASH = re.compile(
     r"createHash\s*\(\s*['\"]sha256['\"]\s*\)[\s\S]{0,100}?\.update\s*\([^)]*\b(?:email|userId|user_id|username|userEmail|sub)\b"
@@ -50,7 +50,7 @@ PRINCIPAL_USE = re.compile(r"\b(?:tenant_?Id|user_?Id|set_config\s*\(\s*['\"]app
 # a request-supplied secret/token/signature compared with ===/!== (non-constant-time) instead of a
 # timing-safe equal — a credential/HMAC timing side-channel (CWE-208).
 TIMING_UNSAFE = re.compile(
-    r"(?:req|request|ctx)\.(?:headers?|header|get)\b[^;\n]{0,70}\b(?:authorization|token|signature|hmac|secret|api[_-]?key)\b[^;\n]{0,70}[!=]==?"
+    r"(?:req|request|ctx)\.(?:headers?|header|get)\b[^;\n]{0,70}\b(?:authorization|token|signature|hmac|secret|api[_-]?key)\b[^;\n]{0,70}[!=]==?\s*(?!undefined\b|null\b|typeof\b|['\"])\w+"
     r"|\b(?:authorization|signature|hmac|x-[\w-]*signature|providedToken|givenToken)\b[^;\n]{0,50}[!=]==?\s*(?:expected|valid|secret|process\.env|config\.)"
     r"|[!=]==?\s*(?:expectedSignature|expectedToken|expectedAuth|expectedHmac|validSignature)\b", re.I)
 TIMING_SAFE = re.compile(r"timingSafeEqual|compare_digest|secure_compare|constantTimeEqual|crypto\.timingSafeEqual", re.I)

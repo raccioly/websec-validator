@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Security / Code Scanning
+- **crypto_usage extractor**: Refined regex patterns for `TIMING_UNSAFE`, `WEAK_PW_HASH`, `PW_CONTEXT`, and `JWT_ALGS` to eliminate several common false positives (e.g., matching timing-unsafe non-secret headers, password hashes of JSON strings, or JWT verify options config objects).
+
 
 ## [0.12.0] — 2026-07-19
 
