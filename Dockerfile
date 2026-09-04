@@ -53,3 +53,4 @@ WORKDIR /scan
 USER websec
 ENTRYPOINT ["websec"]
 CMD ["--help"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 CMD [ "websec", "--help" ]
