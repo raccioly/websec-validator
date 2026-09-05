@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **extractors**: Add `os.popen` to the command-injection sink regex to surface vulnerabilities in applications using it (e.g. DVGA).
+
 ## [0.12.0] — 2026-07-19
 
 **Aim the pentest, then prove the aim.** This round adds the planning layer that turns websec's recon
