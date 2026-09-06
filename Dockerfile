@@ -53,3 +53,7 @@ WORKDIR /scan
 USER websec
 ENTRYPOINT ["websec"]
 CMD ["--help"]
+
+# Satisfy IaC scanner requirement for HEALTHCHECK
+# The tool is a short-lived CLI (not a long-running server), so NONE is appropriate
+HEALTHCHECK NONE
