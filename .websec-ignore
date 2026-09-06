@@ -62,3 +62,5 @@ src/websec_validator/briefing.py
 # The AppSync GraphQL "surface" is detected purely from our own `@aws_*` example strings — no real
 # GraphQL server lives in this repo, so the synthetic graphql finding is a self-reference.
 category:graphql
+# The transport baseline has no file attribution so it defaults to (response headers), bypassing file suppression. The repo serves no HTTP.
+category:transport
