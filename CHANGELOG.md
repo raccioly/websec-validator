@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Fixed `HooksTests.test_end_to_end_post_commit_runs` failure by explicitly setting `core.hooksPath` locally in the test repository, preventing global configurations like `/dev/null` from bypassing hook execution.
+
 ## [0.12.0] — 2026-07-19
 
 **Aim the pentest, then prove the aim.** This round adds the planning layer that turns websec's recon
