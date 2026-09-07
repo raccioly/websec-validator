@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- Add `HEALTHCHECK NONE` to Dockerfile to resolve IaC finding for CLI tool.
+- Suppress transport findings in `.websec-ignore` as the tool does not serve a web UI.
+
 ## [0.12.0] — 2026-07-19
 
 **Aim the pentest, then prove the aim.** This round adds the planning layer that turns websec's recon

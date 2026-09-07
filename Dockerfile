@@ -52,4 +52,5 @@ RUN useradd --create-home --uid 1001 websec
 WORKDIR /scan
 USER websec
 ENTRYPOINT ["websec"]
+HEALTHCHECK NONE
 CMD ["--help"]
