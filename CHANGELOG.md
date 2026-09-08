@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- Fixed a failing test in `tests/test_hooks.py` by explicitly setting `core.hooksPath` to `.git/hooks` in test repository initialization, preventing global configurations from bypassing the hook execution.
+- Updated documentation metrics to reflect the accurate total number of tests (551) across all `unittest` modules.
 
 ## [0.12.0] — 2026-07-19
 

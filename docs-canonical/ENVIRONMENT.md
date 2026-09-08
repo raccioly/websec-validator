@@ -96,6 +96,6 @@ Never point the dynamic phase at production.
 ```bash
 git clone https://github.com/raccioly/websec-validator && cd websec-validator
 pipx install --editable .                # or: pip install -e . in a 3.11+ venv
-python3 -m unittest discover -s tests    # 324 tests, stdlib only
+python3 -m unittest discover -s tests    # 551 tests, stdlib only
 docguard guard                           # validate the documentation (CDD)
 ```
