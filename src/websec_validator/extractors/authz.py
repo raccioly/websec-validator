@@ -38,6 +38,8 @@ GUARD = re.compile(
     r"@login_required|@jwt_required|@permission_required|@roles_required|ensureAuth|"
     r"withAuth|getServerSession|getToken\s*\(|verifyToken|authMiddleware|@UseGuards|"
     r"@Roles\b|Depends\s*\(\s*(?:get_current_user|oauth2_scheme|require_)|Security\s*\(|"
+    r"dependencies\s*=\s*\[\s*Depends\s*\(\s*\w*(?:[Aa]uth|[Vv]erify|[Gg]uard|[Ll]ogin|[Rr]equire)\w*\s*\)|"
+    r"(?:protected|private)Procedure\b|"
     r"PermissionRequired|LoginRequired|passport\.authenticate|"
     # `.use(authMw)` OR `.use('/prefix', authMw)` — the path-first form (Express-5 `router.use('/Users',
     # scimAuth)`) was uncredited, a real-repo FP on SCIM routes.

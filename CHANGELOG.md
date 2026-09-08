@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- Detections for FastAPI route dependencies (`Depends()`) and tRPC protected procedures (`protectedProcedure`, `privateProcedure`) added.
 ## [0.12.0] — 2026-07-19
 
 **Aim the pentest, then prove the aim.** This round adds the planning layer that turns websec's recon
