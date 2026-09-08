@@ -118,6 +118,7 @@ class HooksTests(unittest.TestCase):
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 dst.write_bytes(f.read_bytes())
         hooks.install(self.root)
+        subprocess.run(["git", "config", "core.hooksPath", ".git/hooks"], cwd=self.root, check=True)
         env = dict(os.environ)
         # Ensure the hook's interpreter can import websec_validator from source.
         env["PYTHONPATH"] = str(ROOT / "src") + os.pathsep + env.get("PYTHONPATH", "")
