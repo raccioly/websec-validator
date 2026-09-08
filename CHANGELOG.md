@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+### Fixed
+- **Test stability**: Fixed `test_end_to_end_post_commit_runs` failing in environments where `core.hooksPath` is set globally (e.g. CI environments with `/dev/null`). Tests now explicitly set `core.hooksPath` to `.git/hooks` locally within the temp repo to isolate from global git config.
+
+
 ## [Unreleased]
 
 ## [0.12.0] — 2026-07-19
