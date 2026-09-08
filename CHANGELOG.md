@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Added
+- Pinned unpinned GitHub Actions workflows and updated version comments in `action.yml` and `.github/workflows/publish.yml` to match their SHAs.
+- Bumped bundled scanner versions in `Dockerfile`: `NOIR_VERSION` to `1.3.1` and `TRIVY_VERSION` to `0.74.0`.
+- Fixed a test regression in `test_hooks.py` by setting `core.hooksPath` to `.git/hooks` in the temporary test git repository.
 
 ## [0.12.0] — 2026-07-19
 

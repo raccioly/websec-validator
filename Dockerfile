@@ -10,9 +10,9 @@ FROM python:3.14-slim
 # TARGETARCH is auto-populated by BuildKit (arm64/amd64) — do NOT give it a
 # default, or it shadows the real build arch and pulls the wrong-arch packages.
 ARG TARGETARCH
-ARG NOIR_VERSION=1.0.0
+ARG NOIR_VERSION=1.3.1
 ARG GITLEAKS_VERSION=8.30.1
-ARG TRIVY_VERSION=0.58.1
+ARG TRIVY_VERSION=0.74.0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl git \
