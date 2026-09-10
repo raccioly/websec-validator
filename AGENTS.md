@@ -53,7 +53,7 @@ docguard diagnose              # guard → emit AI fix prompts
 ### AI Agent Workflow
 
 1. **Before any work**: read `docs-canonical/` and run `docguard guard` to see the compliance state.
-2. **After changing code or docs**: re-run `docguard guard`; keep the numbers (20 extractors, 16 sink
+2. **After changing code or docs**: re-run `docguard guard`; keep the numbers (23 extractors, 16 sink
    classes, 285 tests, 10/10 proof) consistent across every doc — DocGuard's metrics-consistency
    validator cross-checks them.
 3. **Update `CHANGELOG.md`** for any user-visible change.

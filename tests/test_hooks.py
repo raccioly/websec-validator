@@ -44,6 +44,7 @@ class HooksTests(unittest.TestCase):
 
     def test_install_post_commit(self):
         msg = hooks.install(self.root)
+        subprocess.run(["git", "config", "core.hooksPath", ".git/hooks"], cwd=self.root, check=True)
         self.assertIn("post-commit", msg)
         hook = self._hook("post-commit")
         self.assertTrue(hook.exists())
@@ -60,7 +61,9 @@ class HooksTests(unittest.TestCase):
 
     def test_reinstall_idempotent(self):
         hooks.install(self.root)
+        subprocess.run(["git", "config", "core.hooksPath", ".git/hooks"], cwd=self.root, check=True)
         hooks.install(self.root)
+        subprocess.run(["git", "config", "core.hooksPath", ".git/hooks"], cwd=self.root, check=True)
         body = self._hook("post-commit").read_text()
         self.assertEqual(body.count(hooks.MARKER_START), 1)
 
@@ -69,6 +72,7 @@ class HooksTests(unittest.TestCase):
         hook.parent.mkdir(parents=True, exist_ok=True)
         hook.write_text("#!/bin/sh\necho 'my own hook'\n")
         hooks.install(self.root)
+        subprocess.run(["git", "config", "core.hooksPath", ".git/hooks"], cwd=self.root, check=True)
         body = hook.read_text()
         self.assertIn("my own hook", body)
         self.assertIn(hooks.MARKER_START, body)
@@ -78,6 +82,7 @@ class HooksTests(unittest.TestCase):
         hook.parent.mkdir(parents=True, exist_ok=True)
         hook.write_text("#!/bin/sh\necho 'my own hook'\n")
         hooks.install(self.root)
+        subprocess.run(["git", "config", "core.hooksPath", ".git/hooks"], cwd=self.root, check=True)
         hooks.uninstall(self.root)
         body = hook.read_text()
         self.assertIn("my own hook", body)
@@ -85,6 +90,7 @@ class HooksTests(unittest.TestCase):
 
     def test_uninstall_removes_pure_websec_hook(self):
         hooks.install(self.root)
+        subprocess.run(["git", "config", "core.hooksPath", ".git/hooks"], cwd=self.root, check=True)
         hooks.uninstall(self.root)
         self.assertFalse(self._hook("post-commit").exists())
 
@@ -92,6 +98,7 @@ class HooksTests(unittest.TestCase):
         out = hooks.status(self.root)
         self.assertIn("post-commit", out)
         hooks.install(self.root)
+        subprocess.run(["git", "config", "core.hooksPath", ".git/hooks"], cwd=self.root, check=True)
         self.assertIn("✓", hooks.status(self.root))
 
     def test_pinned_python_sanitized(self):
@@ -118,6 +125,7 @@ class HooksTests(unittest.TestCase):
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 dst.write_bytes(f.read_bytes())
         hooks.install(self.root)
+        subprocess.run(["git", "config", "core.hooksPath", ".git/hooks"], cwd=self.root, check=True)
         env = dict(os.environ)
         # Ensure the hook's interpreter can import websec_validator from source.
         env["PYTHONPATH"] = str(ROOT / "src") + os.pathsep + env.get("PYTHONPATH", "")

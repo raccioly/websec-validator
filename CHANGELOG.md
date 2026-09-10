@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+
+- **CryptoUsageExtractor**: Fixed false positive `timing-unsafe-compare` detections against primitive constants (`undefined`, `null`, `true`, `false`, `0`, or strings).
 
 ## [0.12.0] — 2026-07-19
 
