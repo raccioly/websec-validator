@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-09-11
+
 ### Fixed
 - **`command-injection` missed `os.popen`, and `shell=False` could hide always-shell sinks
   (issue #101).** Two false negatives in the same sink, both silent:
@@ -681,7 +683,8 @@ The initial public line. Highlights across 0.2.1–0.2.9:
 ### Fixed
 - Scanner-contamination and rate-limit fixes (agent-wallet dogfood).
 
-[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/raccioly/websec-validator/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/raccioly/websec-validator/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/raccioly/websec-validator/compare/v0.10.0...v0.11.0
 [0.4.2]: https://github.com/raccioly/websec-validator/compare/v0.4.1...v0.4.2
