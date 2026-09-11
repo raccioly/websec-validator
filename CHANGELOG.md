@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Test suite was not hermetic against ambient git config (bug-217).** `tests/test_hooks.py`
+  resolved the hooks dir through `hooks._hooks_dir()`, which deliberately honours
+  `core.hooksPath` so the guardrail lands in Husky's dir on projects that use one. With a
+  **global** `core.hooksPath` set — as agent sandboxes and Husky users have — every install in
+  that class wrote to the shared hooks dir instead of the temp repo, and
+  `test_uninstall_removes_pure_websec_hook` **deleted the real hook there while still reporting
+  `OK`**. `tests/test_diffscope.py` had the same class of defect via `commit.gpgsign=true`
+  (commits failed outright) and `core.autocrlf` (line-ending rewrites under exact hunk-range
+  assertions). Both now pin the git settings they depend on locally, `test_hooks` additionally
+  neutralises `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` for the git processes it spawns, and a new
+  `test_hooks_dir_never_escapes_the_temp_repo` asserts the containment invariant directly so the
+  silent-escape mode fails loudly instead of passing green.
+
 ## [0.12.0] — 2026-07-19
 
 **Aim the pentest, then prove the aim.** This round adds the planning layer that turns websec's recon

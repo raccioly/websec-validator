@@ -12,6 +12,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -27,11 +28,25 @@ def _init_repo(root: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
+    # Pin the hooks dir to THIS repo. `hooks.install()` deliberately honours core.hooksPath so the
+    # guardrail lands in Husky's dir when a project uses one — which means an ambient (global or
+    # system) core.hooksPath would otherwise redirect every install in this class, and the unlink in
+    # test_uninstall_removes_pure_websec_hook, at that shared directory instead of the temp repo.
+    subprocess.run(["git", "config", "core.hooksPath", ".git/hooks"], cwd=root, check=True)
 
 
 @unittest.skipUnless(HAVE_GIT, "git not available")
 class HooksTests(unittest.TestCase):
     def setUp(self):
+        # Neutralise ambient git config for every git process these tests spawn — both our own calls
+        # and the ones hooks.py makes internally, which inherit os.environ. Without this, a global
+        # core.hooksPath (agent sandboxes and Husky users have one) or commit.gpgsign leaks in.
+        env_patch = mock.patch.dict(
+            os.environ,
+            {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull},
+        )
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
         _init_repo(self.root)
@@ -109,6 +124,17 @@ class HooksTests(unittest.TestCase):
         self.assertTrue(self._hook("post-commit").exists())
         self.assertEqual(main(["hooks", "status", "--path", str(self.root)]), 0)
         self.assertEqual(main(["hooks", "uninstall", "--path", str(self.root)]), 0)
+
+    def test_hooks_dir_never_escapes_the_temp_repo(self):
+        # Guard for the environment-dependent defect behind ~27 duplicate bot PRs: with an ambient
+        # core.hooksPath set, every install/uninstall in this class silently targeted that shared
+        # directory. The destructive part passed green — test_uninstall_removes_pure_websec_hook
+        # deleted the real hook and still reported OK. Assert the containment invariant directly.
+        resolved = hooks._hooks_dir(self.root)
+        self.assertTrue(
+            resolved.is_relative_to(self.root.resolve()),
+            f"hooks dir {resolved} escaped the temp repo {self.root.resolve()}",
+        )
 
     def test_end_to_end_post_commit_runs(self):
         # Copy the fixture app into the repo, install the hook, commit, and assert the guardrail ran.

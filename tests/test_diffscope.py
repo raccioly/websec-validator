@@ -15,7 +15,12 @@ from websec_validator import diffscope  # noqa: E402
 def _repo():
     d = Path(tempfile.mkdtemp())
     subprocess.run(["git", "init", "-q", str(d)], check=True)
-    for k, v in (("user.email", "t@t"), ("user.name", "t")):
+    # Pin every ambient git setting these tests depend on. A developer or agent-sandbox global config
+    # otherwise reaches in: commit.gpgsign=true fails the commits outright (no secret key), autocrlf
+    # rewrites line endings under assertions that check exact hunk ranges, and a global core.hooksPath
+    # runs someone else's post-commit hook inside our fixture repo.
+    for k, v in (("user.email", "t@t"), ("user.name", "t"), ("commit.gpgsign", "false"),
+                 ("core.autocrlf", "false"), ("core.hooksPath", ".git/hooks")):
         subprocess.run(["git", "-C", str(d), "config", k, v], check=True)
     return d
 
