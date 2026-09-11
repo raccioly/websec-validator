@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:        # lets the release workflow dispatch CI against a bot-opened branch,
+                            # which GITHUB_TOKEN-created PRs never trigger on their own.
 
 permissions:
   contents: read
@@ -35,3 +37,58 @@ jobs:
 
       - name: Run test suite
         run: python -m unittest discover -s tests -v
+
+  hermeticity:
+    # bug-217: the suite was not hermetic against ambient git config. A global core.hooksPath
+    # redirected every hook install in test_hooks out of the temp repo — silently, while the
+    # assertions still passed — and commit.gpgsign broke test_diffscope's commits outright. Bare
+    # GitHub runners have no global git config, so plain CI can never see this class of defect;
+    # agent sandboxes and Husky users hit it constantly. This leg manufactures that environment.
+    name: hermeticity (hostile git config)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -e .
+
+      - name: Build a hostile global git config + sentinel hooks
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/globalhooks"
+          # post-commit holds ONLY a shebang: that is the shape hooks.uninstall() deletes outright
+          # once our marker block is stripped, so it detects the destructive path.
+          printf '#!/bin/sh\n' > "$RUNNER_TEMP/globalhooks/post-commit"
+          # pre-push carries foreign content: uninstall must preserve it byte-for-byte.
+          printf '#!/bin/sh\necho SENTINEL\n' > "$RUNNER_TEMP/globalhooks/pre-push"
+          chmod +x "$RUNNER_TEMP/globalhooks/"*
+          ( cd "$RUNNER_TEMP/globalhooks" && md5sum -- * > "$RUNNER_TEMP/hooks.md5" )
+          cat "$RUNNER_TEMP/hooks.md5"
+          cfg="$RUNNER_TEMP/gitconfig-hostile"
+          git config --file "$cfg" core.hooksPath "$RUNNER_TEMP/globalhooks"
+          git config --file "$cfg" core.autocrlf true
+          git config --file "$cfg" commit.gpgsign true
+          git config --file "$cfg" init.defaultBranch trunk
+          cat "$cfg"
+
+      - name: Suite must pass under that config
+        env:
+          GIT_CONFIG_GLOBAL: ${{ runner.temp }}/gitconfig-hostile
+        run: python -m unittest discover -s tests
+
+      - name: Sentinel hooks must be untouched (suite must not write outside its temp repos)
+        # A write that is later perfectly reverted is undetectable this way; the step above is the
+        # primary signal. This catches the residue: a deleted hook, a modified one, or a stray file.
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/globalhooks"
+          if ! md5sum -c "$RUNNER_TEMP/hooks.md5"; then
+            echo "::error::the test suite altered or deleted a git hook outside its own temp repo"
+            ls -la; exit 1
+          fi
+          extra=$(ls -1 | grep -vxE 'post-commit|pre-push' || true)
+          if [ -n "$extra" ]; then
+            echo "::error::the test suite created files in the global hooks dir: $extra"; exit 1
+          fi
+          echo "sentinel hooks intact"
