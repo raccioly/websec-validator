@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Fixed
+## [0.12.0] — 2026-09-11
+
+### Fixed (post-tag hardening, included in this release)
 - **Test suite was not hermetic against ambient git config (bug-217).** `tests/test_hooks.py`
   resolved the hooks dir through `hooks._hooks_dir()`, which deliberately honours
   `core.hooksPath` so the guardrail lands in Husky's dir on projects that use one. With a
@@ -20,8 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   neutralises `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` for the git processes it spawns, and a new
   `test_hooks_dir_never_escapes_the_temp_repo` asserts the containment invariant directly so the
   silent-escape mode fails loudly instead of passing green.
-
-## [0.12.0] — 2026-07-19
+- **Repo automation.** Branch protection on `main` requiring five checks; a `hermeticity` CI leg
+  that runs the suite under a hostile global git config and verifies it writes nothing outside its
+  temp repos; a `suite-integrity` leg enforcing a test-count floor (a deleted test makes a suite
+  greener *and* faster, so nothing else catches it); and bot-PR triage/auto-merge plus a weekly
+  release train. None of this changes the shipped package.
 
 **Aim the pentest, then prove the aim.** This round adds the planning layer that turns websec's recon
 into a testing plan, closes the loop with real scans — and then hardens the result against a class of
@@ -660,7 +665,8 @@ The initial public line. Highlights across 0.2.1–0.2.9:
 ### Fixed
 - Scanner-contamination and rate-limit fixes (agent-wallet dogfood).
 
-[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/raccioly/websec-validator/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/raccioly/websec-validator/compare/v0.10.0...v0.11.0
 [0.4.2]: https://github.com/raccioly/websec-validator/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/raccioly/websec-validator/compare/v0.4.0...v0.4.1
