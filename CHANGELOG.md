@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Fixed a false positive in the `CryptoUsageExtractor` where benign variable comparisons (e.g. `req.headers['authorization'] === undefined`, `!== null`, `=== ''`, or `typeof`) were incorrectly flagged as non-constant-time comparisons (CWE-208).
+
 ## [0.12.0] — 2026-07-19
 
 **Aim the pentest, then prove the aim.** This round adds the planning layer that turns websec's recon
