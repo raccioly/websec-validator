@@ -1,0 +1,110 @@
+name: Release train (propose)
+
+# Weekly, and only if anything merged since the last tag: open a version-bump PR. Publishing to PyPI
+# is public and irreversible (releases cannot be replaced, only yanked by hand), so the train stops
+# here and waits for a human to merge. Merging is what creates the tag and publishes.
+on:
+  schedule:
+    - cron: "17 9 * * 1"      # Mondays 09:17 UTC — off the hour, where scheduler contention piles up
+  workflow_dispatch:
+    inputs:
+      level:
+        description: "Override the inferred bump level"
+        required: false
+        type: choice
+        options: ["", "patch", "minor"]
+        default: ""
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write              # to dispatch CI against the branch this creates
+
+jobs:
+  propose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: 0      # tags are needed to find the last release
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: "3.13"
+
+      - name: Decide whether to release, and at what version
+        id: decide
+        run: |
+          set -euo pipefail
+          ARGS=""
+          if [ -n "${{ inputs.level }}" ]; then ARGS="--force-level ${{ inputs.level }}"; fi
+          python .github/scripts/release.py propose $ARGS | tee "$RUNNER_TEMP/decide.txt"
+          # The script prints key=value lines; forward them as step outputs.
+          grep -E '^[a-z_]+=' "$RUNNER_TEMP/decide.txt" >> "$GITHUB_OUTPUT"
+
+      - name: Nothing merged since the last tag
+        if: steps.decide.outputs.should_release != 'true'
+        run: echo "No commits since ${{ steps.decide.outputs.last_tag }} — no release this week."
+
+      - name: Prepare the release commit
+        if: steps.decide.outputs.should_release == 'true'
+        env:
+          VERSION: ${{ steps.decide.outputs.next }}
+        run: |
+          set -euo pipefail
+          BRANCH="release/v$VERSION"
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "::notice::$BRANCH already exists — a release PR for v$VERSION is already open."
+            exit 0
+          fi
+          python .github/scripts/release_prepare.py "$VERSION"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add pyproject.toml CHANGELOG.md
+          # --allow-empty on purpose: when the tree already declares this version and its changelog
+          # section is already closed (a previous cycle bumped but never shipped), there is nothing
+          # to stage — yet the release still needs a `release: vX.Y.Z` commit for the tag workflow to
+          # key on. Without this the job dies on "nothing to commit" under set -e.
+          git commit --allow-empty -m "release: v$VERSION"
+          git push origin "$BRANCH"
+          echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
+
+      - name: Open the release PR and start CI on it
+        if: steps.decide.outputs.should_release == 'true' && env.BRANCH != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.decide.outputs.next }}
+          LEVEL: ${{ steps.decide.outputs.level }}
+          LAST_TAG: ${{ steps.decide.outputs.last_tag }}
+          COMMITS: ${{ steps.decide.outputs.commits_since_tag }}
+        run: |
+          set -euo pipefail
+          # The PR title becomes the squash-merge commit subject, and `release: vX.Y.Z` is exactly
+          # what the tag workflow keys on. Do not reword it.
+          gh pr create \
+            --base "${{ github.event.repository.default_branch }}" \
+            --head "$BRANCH" \
+            --title "release: v$VERSION" \
+            --body "Weekly release train.
+
+          | | |
+          |---|---|
+          | Version | \`$VERSION\` (bump: \`$LEVEL\`) |
+          | Since | \`$LAST_TAG\` — $COMMITS commit(s) |
+
+          Merging this **publishes \`$VERSION\` to PyPI**, which cannot be undone — a release can be
+          yanked by hand, never replaced. Check the changelog section above before merging.
+
+          Merge with **squash** so the commit subject stays \`release: v$VERSION\`; the tag workflow
+          keys on that subject, and will do nothing if it is reworded.
+
+          CI is dispatched explicitly below: a PR opened with \`GITHUB_TOKEN\` does not trigger
+          workflows on its own, so required checks would otherwise never report and this PR could
+          never merge.
+
+          🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+
+          # Explicitly kick CI against the branch — see above.
+          gh workflow run ci.yml --ref "$BRANCH"
+          echo "dispatched CI against $BRANCH"

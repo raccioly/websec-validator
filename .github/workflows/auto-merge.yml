@@ -1,0 +1,41 @@
+name: Auto-merge bot PRs
+
+# workflow_run, not `gh pr merge --auto`: with no required checks configured, --auto merges
+# immediately without waiting for CI. This fires only after CI completes and then re-derives the
+# full check state from the API, so a single green leg cannot stand in for the matrix.
+#
+# Runs with write scope against the base repo. No PR code is checked out or executed.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  checks: read
+
+jobs:
+  merge:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out automation from the default branch (never the PR head)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: "3.13"
+
+      - name: Decide and merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: python .github/scripts/auto_merge.py

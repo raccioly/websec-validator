@@ -17,8 +17,16 @@ def _token() -> str:
     return t
 
 
+DRY_RUN = os.environ.get("DRY_RUN") == "1"
+MUTATING = {"POST", "PATCH", "PUT", "DELETE"}
+
+
 def request(method: str, path: str, body=None, *, accept_status=()):
     url = path if path.startswith("http") else f"{API}{path}"
+    if DRY_RUN and method in MUTATING:
+        # Exercised locally against real PRs before this automation was ever given write scope.
+        print(f"    [DRY_RUN] {method} {url} {json.dumps(body)[:160] if body else ''}")
+        return 200, {"dry_run": True}
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("Authorization", f"Bearer {_token()}")
@@ -47,6 +55,20 @@ def get(path, **kw):
     return request("GET", path, **kw)[1]
 
 
+def _as_list(payload):
+    """Some paginated endpoints return a bare array (`/pulls`), others wrap it in an object with a
+    total_count (`/commits/{sha}/check-runs` -> {"check_runs": [...]}, `/actions/runs/{id}/jobs` ->
+    {"jobs": [...]}). Extending a list with the dict yields its KEYS, which fails later with a
+    confusing "string indices must be integers"."""
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        for k, v in payload.items():
+            if k != "total_count" and isinstance(v, list):
+                return v
+    raise SystemExit(f"unexpected paginated payload shape: {type(payload).__name__}")
+
+
 def paged(path):
     """Follow pagination; GitHub caps per_page at 100."""
     sep = "&" if "?" in path else "?"
@@ -58,7 +80,7 @@ def paged(path):
         req.add_header("Accept", "application/vnd.github+json")
         req.add_header("User-Agent", "websec-validator-automation")
         with urllib.request.urlopen(req) as r:
-            out.extend(json.loads(r.read()))
+            out.extend(_as_list(json.loads(r.read())))
             link = r.headers.get("Link", "")
         url = ""
         for part in link.split(","):

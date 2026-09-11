@@ -1,0 +1,56 @@
+name: Release train (tag and publish)
+
+# Fires when a `release: vX.Y.Z` commit lands on the default branch — i.e. when the weekly release
+# PR is merged. Creates the tag and then explicitly dispatches the publish workflow.
+#
+# Why the explicit dispatch: a tag pushed with GITHUB_TOKEN does not trigger `on: push: tags`, by
+# GitHub's recursion guard. workflow_dispatch and repository_dispatch are the two events exempt from
+# it, so dispatching publish.yml at the new tag is the supported way across that boundary.
+#
+# Keyed on the commit SUBJECT, never on "pyproject version != latest tag". A version bumped by hand,
+# or one already sitting un-tagged in the tree, must not trigger a publish to PyPI.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write             # create and push the tag
+  actions: write              # dispatch publish.yml
+
+jobs:
+  tag:
+    if: startsWith(github.event.head_commit.message, 'release:')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: "3.13"
+
+      - name: Confirm this really is a release commit
+        id: check
+        run: |
+          set -euo pipefail
+          python .github/scripts/release.py tag-version | tee "$RUNNER_TEMP/tag.txt"
+          grep -E '^[a-z_]+=' "$RUNNER_TEMP/tag.txt" >> "$GITHUB_OUTPUT" || true
+
+      - name: Tag and dispatch the publish workflow
+        if: steps.check.outputs.should_tag == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.check.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "v$VERSION"
+          git push origin "v$VERSION"
+          echo "tagged v$VERSION"
+
+          # publish.yml re-verifies tag == pyproject version and smoke-tests the built wheel before
+          # it uploads, so the tag ref is what must be dispatched.
+          gh workflow run publish.yml --ref "v$VERSION"
+          echo "dispatched publish.yml at v$VERSION"
