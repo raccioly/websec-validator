@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Fixed a test suite regression (`test_end_to_end_post_commit_runs` in `tests/test_hooks.py`) caused by global git configurations (`core.hooksPath` set to `/dev/null`) interfering with local git hook tests, resolving a failing test issue.
+
 ## [0.12.0] — 2026-07-19
 
 **Aim the pentest, then prove the aim.** This round adds the planning layer that turns websec's recon
