@@ -39,6 +39,13 @@ _LOG_INJECTION = re.compile(
     r"|" + _REQ_SRC +                                        # log the raw user value as the first arg
     r")", re.I)
 
+# Command sinks that ALWAYS go through a shell. os.popen/os.system/subprocess.getoutput take a
+# command STRING and have no argv form, so no keyword argument can make them safe — unlike
+# subprocess.run(argv, shell=False). Used to stop the file-level shell=False guard below from
+# suppressing them (issue #101): one safe argv call elsewhere in the same module was enough to hide
+# a tainted os.system, which is the same false-negative class as the missing os.popen itself.
+_ALWAYS_SHELL = re.compile(r"(?:os\.(?:system|popen)|subprocess\.(?:getoutput|getstatusoutput))\s*\(")
+
 # class -> (probe it feeds, gating, compiled regex)
 #   gating: None | "sql" | "nosql"  (datastore-dependent classes)
 SINKS = {
@@ -46,7 +53,8 @@ SINKS = {
         r"(?:\bfetch|axios(?:\.\w+)?|got|node-fetch|superagent|needle|undici|requests\.\w+|httpx\.\w+|urllib\.request\.\w+)"
         r"\s*\(\s*[^)\n;]{0,160}?" + _REQ_SRC)),
     "command-injection": ("ssrf-probes", None, re.compile(
-        r"(?:child_process\.exec|\bexecSync|\bexec|\bspawn|os\.system|subprocess\.(?:run|call|check_output|Popen))\s*\([^)]*"
+        r"(?:child_process\.exec|\bexecSync|\bexec|\bspawn|os\.system|os\.popen"
+        r"|subprocess\.(?:run|call|check_output|Popen|getoutput|getstatusoutput))\s*\([^)]*"
         + _U + r"|shell\s*=\s*True")),
     "sql-injection": ("bola-write-verbs", "sql", re.compile(
         r"(?:\.query|\.execute|\.raw|cursor\.execute|sequelize\.query|knex\.raw)\s*\([^)]*(?:\$\{|\+|%\s*[\(%]|\.format\s*\(|f['\"])")),
@@ -232,7 +240,8 @@ class SurfaceExtractor(Extractor):
                     # command-injection precision: an argv-list subprocess with shell=False is safe —
                     # the dangerous form is shell=True or a concatenated command string.
                     if (cls == "command-injection" and re.search(r"shell\s*=\s*False", text)
-                            and not re.search(r"shell\s*=\s*True", text)):
+                            and not re.search(r"shell\s*=\s*True", text)
+                            and not _ALWAYS_SHELL.search(text)):
                         continue
                     # xss precision: a file that sanitizes/encodes HTML (DOMPurify/bleach/escape) before
                     # the sink is the safe pattern — suppress its xss lead (file-level FP guard).
