@@ -182,6 +182,22 @@ class SurfaceTests(unittest.TestCase):
         self.assertTrue(rx.search("child_process.exec(req.body.cmd)"))
         self.assertFalse(rx.search("child_process.exec('ls -la')"))
 
+    def test_command_injection_covers_always_shell_stdlib_sinks(self):
+        # issue #101: os.popen was missing while os.system matched, so a tainted os.popen was a
+        # silent false negative. subprocess.Popen does NOT cover it — that alternative requires the
+        # literal `subprocess.` prefix. getoutput/getstatusoutput are the same always-shell class.
+        rx = SINKS["command-injection"][2]
+        for call in ('os.popen("ping -c1 " + host)',
+                     'os.system("ping -c1 " + host)',
+                     'subprocess.getoutput("ls " + request.args["d"])',
+                     'subprocess.getstatusoutput(f"cat {request.args[\'f\']}")'):
+            with self.subTest(call=call):
+                self.assertTrue(rx.search(call), call)
+        # still user-gated: a constant command is not a finding
+        for call in ('os.popen("ls -la")', 'subprocess.getoutput("uptime")'):
+            with self.subTest(call=call):
+                self.assertFalse(rx.search(call), call)
+
     def test_xss_sink_regex_detects_dom_and_template(self):
         rx = SINKS["xss"][2]
         self.assertTrue(rx.search("el.innerHTML = req.query.q"))
@@ -1214,6 +1230,31 @@ class Wave1FalsePositiveTests(unittest.TestCase):
 
     def test_command_injection_argv_shell_false_is_safe(self):
         s = self._surface({"r.py": "subprocess.run(cmd, capture_output=True, shell=False, timeout=t)"})
+        self.assertNotIn("command-injection", s["sinks"])
+
+    def test_shell_false_does_not_suppress_an_always_shell_sink(self):
+        # issue #101, second half. The shell=False guard is FILE-level, so one safe argv call
+        # anywhere in a module used to hide a tainted os.popen/os.system in the same file — and
+        # those take a command string with no argv form, so shell=False cannot apply to them.
+        for sink in ("os.popen", "os.system", "subprocess.getoutput"):
+            with self.subTest(sink=sink):
+                s = self._surface({"mixed.py":
+                    "import os, subprocess\n"
+                    "def safe(n):\n"
+                    "    return subprocess.run(['ls', n], shell=False)\n"
+                    "def danger():\n"
+                    "    host = request.args.get('host')\n"
+                    f"    return {sink}('ping -c1 ' + host)\n"})
+                self.assertIn("command-injection", s["sinks"], sink)
+
+    def test_shell_false_still_suppresses_when_only_argv_calls_are_present(self):
+        # The guard must keep working for the case it was written for — no always-shell sink here.
+        s = self._surface({"r.py":
+            "import subprocess\n"
+            "def run(cmd):\n"
+            "    return subprocess.run(cmd, shell=False, capture_output=True)\n"
+            "def run2(cmd):\n"
+            "    return subprocess.check_output(cmd + ['-x'], shell=False)\n"})
         self.assertNotIn("command-injection", s["sinks"])
 
     # --- client exposure: per-package frontend gating + analytics allowlist ---

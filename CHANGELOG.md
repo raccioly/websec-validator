@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`command-injection` missed `os.popen`, and `shell=False` could hide always-shell sinks
+  (issue #101).** Two false negatives in the same sink, both silent:
+  - `os.popen` was absent from the sink alternation while `os.system` was present.
+    `subprocess.Popen` does not cover it — that alternative requires the literal `subprocess.`
+    prefix. Added, along with `subprocess.getoutput`/`getstatusoutput`.
+  - the `shell=False` precision guard is **file-level**, so a single safe
+    `subprocess.run(argv, shell=False)` anywhere in a module suppressed the whole file's
+    command-injection finding — including a tainted `os.popen`/`os.system`, which take a command
+    string, have no argv form, and cannot be made safe by any keyword argument. The guard now
+    stands down when an always-shell sink is present, and is otherwise unchanged.
+
+  Verified end-to-end: on a Flask route doing `os.popen("ping -c1 " + request.args["host"])`
+  alongside one safe argv call, 0.12.0 reports no sinks at all; this reports `command-injection`.
+  Coverage-only — no finding that was reported before is suppressed now.
+
 ## [0.12.0] — 2026-09-11
 
 ### Fixed (post-tag hardening, included in this release)
