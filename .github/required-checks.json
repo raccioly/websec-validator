@@ -1,0 +1,10 @@
+{
+  "_comment": "Single source of truth for the checks that gate main. Branch protection requires exactly these names, and auto_merge.py refuses to merge unless every one of them reported success on the head SHA. Keeping it in one file is what stops the two from drifting — a required check that never runs leaves every PR stuck on 'Expected — waiting for status to be reported' forever.",
+  "required": [
+    "tests (py3.11)",
+    "tests (py3.12)",
+    "tests (py3.13)",
+    "hermeticity (hostile git config)",
+    "suite-integrity"
+  ]
+}

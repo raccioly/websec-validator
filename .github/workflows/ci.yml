@@ -92,3 +92,63 @@ jobs:
             echo "::error::the test suite created files in the global hooks dir: $extra"; exit 1
           fi
           echo "sentinel hooks intact"
+
+  suite-integrity:
+    # Guards the "green but wrong" failure mode that matters for a scanner: a change that makes CI
+    # pass by REMOVING coverage. A deleted or neutered test makes the suite greener AND faster, so
+    # neither a pass/fail signal nor a runtime ceiling catches it — only a floor does. Raising the
+    # floor means editing this workflow, which is a human-reviewed path.
+    name: suite-integrity
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read      # reads this run's own job names to validate required-checks.json
+    env:
+      MIN_TESTS: 552          # bump when adding tests; never lower it to make a PR pass
+      MAX_SECONDS: 300        # runaway guard (a test blocking on the network), not a perf budget
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -e .
+
+      - name: Classifier unit tests (the logic that merges PRs without a human)
+        run: python -m unittest discover -s .github/scripts -p 'test_*.py' -v
+
+      - name: Required-check names must match the jobs this run actually emits
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: python .github/scripts/verify_required_checks.py
+
+      - name: Count tests and enforce the floor
+        run: |
+          set -euo pipefail
+          # No pipe on purpose — a pipeline reports the exit code of its LAST stage and would mask
+          # a suite failure here.
+          start=$(date +%s)
+          rc=0
+          python -m unittest discover -s tests > "$RUNNER_TEMP/suite.log" 2>&1 || rc=$?
+          elapsed=$(( $(date +%s) - start ))
+          tail -5 "$RUNNER_TEMP/suite.log"
+          if [ "$rc" -ne 0 ]; then echo "::error::test suite failed"; exit "$rc"; fi
+
+          # awk, not `sed -n 's/...tests\?.../'` — `\?` is a GNU extension, so that form works on the
+          # runner while being unverifiable on a BSD-sed machine.
+          count=$(awk '/^Ran [0-9]+ tests? in /{n=$2} END{print n}' "$RUNNER_TEMP/suite.log")
+          if [ -z "$count" ]; then
+            echo "::error::could not parse the test count from unittest output"; exit 1
+          fi
+          echo "collected $count tests in ${elapsed}s (floor $MIN_TESTS, ceiling ${MAX_SECONDS}s)"
+
+          if [ "$count" -lt "$MIN_TESTS" ]; then
+            echo "::error::test count $count is below the floor $MIN_TESTS — coverage was removed."
+            echo "::error::If intentional, lower MIN_TESTS in .github/workflows/ci.yml in the same PR."
+            exit 1
+          fi
+          if [ "$elapsed" -gt "$MAX_SECONDS" ]; then
+            echo "::error::suite took ${elapsed}s (> ${MAX_SECONDS}s) — likely a test blocking on the network"
+            exit 1
+          fi
