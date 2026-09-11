@@ -54,3 +54,28 @@ jobs:
           # it uploads, so the tag ref is what must be dispatched.
           gh workflow run publish.yml --ref "v$VERSION"
           echo "dispatched publish.yml at v$VERSION"
+
+      - name: Publish the GitHub Release
+        if: steps.check.outputs.should_tag == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.check.outputs.version }}
+        # Tagging alone leaves the Releases page stale — v0.11.0 was tagged and shipped to PyPI
+        # without one, breaking an otherwise unbroken run. Notes are lifted from the changelog
+        # section for this version so the two never drift.
+        run: |
+          set -euo pipefail
+          python - "$VERSION" > "$RUNNER_TEMP/notes.md" <<'EOF'
+          import sys
+          from pathlib import Path
+          version = sys.argv[1]
+          lines = Path("CHANGELOG.md").read_text().split("\n")
+          start = next((i for i, l in enumerate(lines) if l.startswith(f"## [{version}]")), None)
+          if start is None:
+              print(f"Release {version}.")
+          else:
+              end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## [")), len(lines))
+              print("\n".join(lines[start + 1:end]).strip())
+          EOF
+          gh release create "v$VERSION" --title "v$VERSION" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
+          echo "published GitHub Release v$VERSION"
