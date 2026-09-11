@@ -85,3 +85,27 @@ class PrepareTests(unittest.TestCase):
     def test_missing_unreleased_fails_loudly(self):
         with self.assertRaises(SystemExit):
             self.rp.close_changelog("# Changelog\n", "0.12.0", "2026-09-11")
+
+
+class LinkRefTests(unittest.TestCase):
+    def setUp(self):
+        import release_prepare
+        self.rp = release_prepare
+        self.base = "https://github.com/raccioly/websec-validator"
+
+    def _refs(self, prev="v0.12.0"):
+        return f"[Unreleased]: {self.base}/compare/{prev}...HEAD\n[0.11.0]: {self.base}/compare/v0.10.0...v0.11.0\n"
+
+    def test_repoints_unreleased_and_adds_this_version(self):
+        out = self.rp.update_link_refs(self._refs(), "0.13.0", "")
+        self.assertIn(f"[Unreleased]: {self.base}/compare/v0.13.0...HEAD", out)
+        self.assertIn(f"[0.13.0]: {self.base}/compare/v0.12.0...v0.13.0", out)
+        self.assertIn("[0.11.0]:", out)          # existing refs preserved
+
+    def test_is_idempotent(self):
+        once = self.rp.update_link_refs(self._refs(), "0.13.0", "")
+        self.assertEqual(self.rp.update_link_refs(once, "0.13.0", ""), once)
+
+    def test_changelog_without_link_refs_is_left_alone(self):
+        src = "# Changelog\n\n## [Unreleased]\n"
+        self.assertEqual(self.rp.update_link_refs(src, "0.13.0", ""), src)

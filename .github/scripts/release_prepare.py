@@ -30,6 +30,27 @@ def close_changelog(text: str, version: str, today: str) -> str:
     return text.replace(marker, f"{marker}\n\n## [{version}] — {today}", 1)
 
 
+def update_link_refs(text: str, version: str, repo_url: str) -> str:
+    """Repoint the [Unreleased] compare link at the new tag and add one for this version.
+
+    Hand-patched for 0.12.0; doing it by hand twice means the release is not actually automated, and
+    a stale `[Unreleased]: compare/v0.11.0...HEAD` quietly misreports what is unreleased.
+    """
+    if f"\n[{version}]:" in text:
+        return text  # already added by a previous run
+    pat = re.compile(r"(?m)^\[Unreleased\]:\s*(\S+)/compare/(v[\w.]+)\.\.\.HEAD\s*$")
+    m = pat.search(text)
+    if not m:
+        return text  # no link-ref block in this changelog; nothing to keep in sync
+    base, prev = m.group(1), m.group(2)
+    if prev == f"v{version}":
+        return text
+    return pat.sub(
+        f"[Unreleased]: {base}/compare/v{version}...HEAD\n"
+        f"[{version}]: {base}/compare/{prev}...v{version}",
+        text, count=1)
+
+
 def main() -> int:
     version = sys.argv[1]
     today = sys.argv[2] if len(sys.argv) > 2 else dt.date.today().isoformat()
@@ -38,7 +59,8 @@ def main() -> int:
     p.write_text(set_pyproject_version(p.read_text(), version))
 
     c = Path("CHANGELOG.md")
-    c.write_text(close_changelog(c.read_text(), version, today))
+    text = close_changelog(c.read_text(), version, today)
+    c.write_text(update_link_refs(text, version, ""))
 
     print(f"prepared release {version} ({today})")
     return 0
