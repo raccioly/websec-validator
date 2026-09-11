@@ -105,7 +105,12 @@ jobs:
       actions: read      # reads this run's own job names to validate required-checks.json
     env:
       MIN_TESTS: 552          # bump when adding tests; never lower it to make a PR pass
-      MAX_SECONDS: 300        # runaway guard (a test blocking on the network), not a perf budget
+      # The suite runs in ~10s on CI. 300s would have been 30x nominal and useless: the known
+      # failure in this class (docguard PR #328 — a test given "/" as its project dir walked the
+      # whole filesystem) was a 7.6x blowup that stayed GREEN throughout, and 7.6x of 10s still
+      # fits under 300s. 60s is 6x nominal, which catches that shape while tolerating a 3x slow
+      # runner. Loose enough for jitter, tight enough to mean something.
+      MAX_SECONDS: 60
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6

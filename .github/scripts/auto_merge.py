@@ -135,6 +135,12 @@ def main():
             accept_status=(405, 409, 403),
         )
         if status == 200:
+            gh.request("POST", f"/repos/{REPO}/issues/{n}/comments", {
+                "body": f"<!-- websec-automation:merged -->\n**Auto-merged.** {reason}\n\n"
+                        f"All {len(REQUIRED)} required checks were re-verified against this head SHA "
+                        f"via the API, not inferred from the run that triggered the merge. Policy "
+                        f"lives in `.github/scripts/triage.py`.",
+            }, accept_status=(403, 404))
             print(f"  MERGED #{n}")
         else:
             print(f"  merge refused ({status}): {body}")

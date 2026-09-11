@@ -27,9 +27,22 @@ BOTS = {"dependabot[bot]", "google-labs-jules[bot]"}
 MARKER = "<!-- websec-automation:triage -->"
 
 
-def close_with(number, body):
+AGENT_GUIDANCE = (
+    "\n\n---\n@jules — before opening a PR, search **open and closed** PRs for the same change. "
+    "This one has been proposed many times over. The repo rule is in `AGENTS.md` under *Automated "
+    "agents*: no duplicates, and a new PR only for a genuinely new finding backed by evidence "
+    "(a failing test for a defect, a reproduction for a false positive)."
+)
+
+
+def close_with(number, body, label="auto-closed"):
     gh.request("POST", f"/repos/{REPO}/issues/{number}/comments",
                {"body": f"{MARKER}\n{body}"}, accept_status=(403, 404))
+    gh.request("POST", f"/repos/{REPO}/labels",
+               {"name": label, "color": "CCCCCC", "description": "Closed automatically by bot-PR triage"},
+               accept_status=(422,))
+    gh.request("POST", f"/repos/{REPO}/issues/{number}/labels", {"labels": [label]},
+               accept_status=(403, 404, 422))
     gh.request("PATCH", f"/repos/{REPO}/pulls/{number}", {"state": "closed"}, accept_status=(403, 404))
 
 
@@ -62,7 +75,8 @@ def main():
                    f"on `main`, and CI now reproduces the environment it needed (a global "
                    f"`core.hooksPath`), so a regression would fail the `hermeticity` check rather "
                    f"than go unnoticed.\n\n"
-                   f"If you believe this PR does something different, say so and it will be reopened.")
+                   f"If you believe this PR does something different, say so and it will be reopened."
+                   + AGENT_GUIDANCE)
         print("closed: known noise")
         return
 
@@ -76,7 +90,7 @@ def main():
                        f"**Closed automatically — duplicate of #{other['number']}.**\n\n"
                        f"Both change exactly `{', '.join(sorted(key))}`. Matched on changed files "
                        f"rather than title, since the same change gets worded differently each "
-                       f"attempt.\n\nContinue the work in #{other['number']}.")
+                       f"attempt.\n\nContinue the work in #{other['number']}." + AGENT_GUIDANCE)
             print(f"closed: duplicate of #{other['number']}")
             return
 

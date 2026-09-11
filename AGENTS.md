@@ -80,3 +80,35 @@ docguard diagnose              # guard → emit AI fix prompts
 - Never add a runtime dependency without explicit justification.
 - Documentation changes must pass `docguard guard` before commit.
 - Never commit without explicit approval.
+
+## Automated agents (Jules, Dependabot, and any other bot opening PRs)
+
+This repo receives agent-authored PRs continuously. Follow these rules or the PR will be closed
+automatically by `.github/workflows/bot-triage.yml`.
+
+**Before opening a PR, search open AND closed PRs for the same change.** One failing test produced
+79 open PRs here across two months, ~27 of them the same one-line edit worded differently each time.
+Duplicates are detected by changed-file overlap, not by title, so rewording does not help.
+
+**Only open a PR for a genuinely new finding, backed by evidence:**
+- a defect → a failing test that demonstrates it
+- a false positive → the input that triggers it, plus the expected output
+- a performance claim → a measurement on a real workload
+
+**If the test suite fails for you but CI is green, the difference is your environment, not the code.**
+Say so in an issue rather than opening a PR. This was the exact cause of the 27-PR cluster: the suite
+was not hermetic against a global `core.hooksPath`, which agent sandboxes set and GitHub runners do
+not — so CI could never reproduce or confirm the fix. That defect is fixed (bug-217) and CI now has a
+`hermeticity` job that manufactures the hostile config, so a real regression fails there.
+
+**What merges without a human** (`.github/scripts/triage.py` is the authority):
+- docs-only changes
+- test changes that are **purely additive** — a diff that deletes or rewrites an existing assertion
+  is a change to the detection contract and always gets a human
+- dependabot patch/minor bumps confined to its own ecosystems' paths
+
+**What never merges automatically:** anything under `src/`, `.github/`, packaging files, instruction
+files (`AGENTS.md`, `CLAUDE.md`), binaries, or any major version bump.
+
+**Never lower `MIN_TESTS` in `.github/workflows/ci.yml` to make a PR pass.** That floor exists
+because a deleted test makes this suite greener *and* faster, so nothing else catches it.
