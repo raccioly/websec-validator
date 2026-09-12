@@ -35,6 +35,7 @@ ACCEPT_SVG = re.compile(r"image/svg\+xml|['\"]svg['\"]", re.I)
 # Prometheus `res.set('Content-Type', registry.contentType)` (the /metrics endpoint), both FPs.
 SERVE_FILE = re.compile(r"res\.sendFile|\.sendFile\s*\(|\.getObject\s*\(|createReadStream|proxyMedia"
                         r"|streamObject|\.pipe\s*\(\s*res\b|fs\.createReadStream", re.I)
+STATIC_SERVE = re.compile(r"res\.sendFile\s*\([^;]{0,100}['\"](?:[^'\"]*?\.(?:html?|css|js|map|txt|ico|png|jpe?g|svg|woff2?|ttf|eot)|[^'\"]*?(?:public|build|dist|static|client)[/\\])['\"][^;]{0,100}\)", re.I)
 NOSNIFF = re.compile(r"nosniff", re.I)
 # `Content-Disposition: attachment` fully defeats the MIME-sniff→stored-XSS vector (the browser
 # downloads instead of rendering), so a serve site that sets it is SAFE even without nosniff.
@@ -76,7 +77,7 @@ class UploadSecurityExtractor(Extractor):
                     findings.append({"severity": "MEDIUM", "kind": "upload-accepts-svg", "file": rel,
                                      "detail": "`image/svg+xml` is accepted — SVG can carry inline <script> and renders "
                                                "as HTML. Drop SVG from the allow-list, or sanitize + serve as attachment."})
-            if SERVE_FILE.search(text) and not NOSNIFF.search(text) and not ATTACHMENT.search(text):
+            if SERVE_FILE.search(text) and not STATIC_SERVE.search(text) and not NOSNIFF.search(text) and not ATTACHMENT.search(text):
                 serve_files.append(rel)
                 findings.append({"severity": "HIGH", "kind": "serve-no-nosniff", "file": rel,
                                  "detail": "A stored/proxied file is served with no `X-Content-Type-Options: nosniff` "
