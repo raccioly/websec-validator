@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- `upload_security`: Tighten `SERVE_FILE` regex to eliminate false positive `serve-no-nosniff` detections on generic backend stream/S3 methods that do not pipe to a web response.
+
 ## [0.13.0] — 2026-09-11
 
 ### Fixed

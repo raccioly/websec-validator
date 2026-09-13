@@ -33,8 +33,9 @@ ACCEPT_SVG = re.compile(r"image/svg\+xml|['\"]svg['\"]", re.I)
 # file-serving: streaming a STORED/PROXIED object back to the client. Tightened to genuine
 # file-bytes sinks — the old rule matched a bare `getObject` token (a local coercion helper) and a
 # Prometheus `res.set('Content-Type', registry.contentType)` (the /metrics endpoint), both FPs.
-SERVE_FILE = re.compile(r"res\.sendFile|\.sendFile\s*\(|\.getObject\s*\(|createReadStream|proxyMedia"
-                        r"|streamObject|\.pipe\s*\(\s*res\b|fs\.createReadStream", re.I)
+SERVE_FILE = re.compile(r"(?:res|reply|response|ctx)\.sendFile\b|\.sendFile\s*\("
+                        r"|\.pipe\s*\(\s*(?:res|reply|response|ctx)\b|\b(?:res|reply|response|ctx)\.download\b"
+                        r"|FileResponse\s*\(|\bsend_file\s*\(", re.I)
 NOSNIFF = re.compile(r"nosniff", re.I)
 # `Content-Disposition: attachment` fully defeats the MIME-sniff→stored-XSS vector (the browser
 # downloads instead of rendering), so a serve site that sets it is SAFE even without nosniff.
