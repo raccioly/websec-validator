@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+- Improved `ssrf` and `ssrf-outbound-http` extraction patterns to correctly detect variable argument usage in outbound HTTP clients like `needle`, `superagent`, and `undici`.
+
 
 ## [0.13.0] — 2026-09-11
 
