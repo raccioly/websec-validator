@@ -4,22 +4,84 @@
   "title": "websec-validator FACTS.json",
   "description": "Structured recon output. Each extractor contributes one top-level key; the set grows as extractors are added, so additionalProperties is permitted. Versioned in lockstep with formats.SCHEMA_VERSION.",
   "type": "object",
-  "required": ["tool", "version", "target", "stack"],
+  "required": [
+    "tool",
+    "version",
+    "target",
+    "stack",
+    "schema_version",
+    "coverage"
+  ],
   "additionalProperties": true,
   "properties": {
-    "schema_version": {"type": "string"},
-    "tool": {"const": "websec-validator"},
-    "version": {"type": "string"},
-    "target": {"type": "string", "description": "Absolute path of the scanned repo."},
-    "files_scanned": {"type": "integer"},
-    "files_truncated": {"type": "boolean", "description": "True if the MAX_FILES cap was hit — recon is PARTIAL."},
-    "file_cap": {"type": "integer"},
-    "stack": {"type": "object", "properties": {"languages": {"type": "array"}, "frameworks": {"type": "array"}, "datastores": {"type": "array"}}},
-    "routes": {"type": "object", "properties": {"count": {"type": "integer"}, "endpoints": {"type": "array"}, "targeting": {"type": "object"}}},
-    "auth": {"type": "object"},
-    "authz": {"type": "object"},
-    "tenant": {"type": "object"},
-    "surface": {"type": "object"},
-    "transport_security": {"type": "object"}
+    "schema_version": {
+      "const": "2.0"
+    },
+    "tool": {
+      "const": "websec-validator"
+    },
+    "version": {
+      "type": "string"
+    },
+    "target": {
+      "type": "string",
+      "description": "Absolute path of the scanned repo."
+    },
+    "files_scanned": {
+      "type": "integer"
+    },
+    "files_truncated": {
+      "type": "boolean",
+      "description": "True if the MAX_FILES cap was hit \u2014 recon is PARTIAL."
+    },
+    "file_cap": {
+      "type": "integer"
+    },
+    "stack": {
+      "type": "object",
+      "properties": {
+        "languages": {
+          "type": "array"
+        },
+        "frameworks": {
+          "type": "array"
+        },
+        "datastores": {
+          "type": "array"
+        }
+      }
+    },
+    "routes": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "endpoints": {
+          "type": "array"
+        },
+        "targeting": {
+          "type": "object"
+        }
+      }
+    },
+    "auth": {
+      "type": "object"
+    },
+    "authz": {
+      "type": "object"
+    },
+    "tenant": {
+      "type": "object"
+    },
+    "surface": {
+      "type": "object"
+    },
+    "transport_security": {
+      "type": "object"
+    },
+    "coverage": {
+      "$ref": "coverage.schema.json"
+    }
   }
 }

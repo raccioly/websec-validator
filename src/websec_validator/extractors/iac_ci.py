@@ -16,9 +16,11 @@ from .base import Extractor, RepoContext
 UNTRUSTED = re.compile(
     r"\$\{\{\s*github\.(?:head_ref|event\.(?:pull_request|issue|comment|review|"
     r"head_commit|workflow_run)[^}]*|event\.[^}]*\.(?:title|body|name|email|ref|label|message)[^}]*)\s*\}\}")
-# A context that resolves to a commit SHA / git ref is hex-constrained by GitHub, so it is NOT
-# free-text shell-injectable — when EVERY flagged context is SHA/ref-typed, drop to INFO.
-SHA_CONTEXT = re.compile(r"\.(?:head_sha|base\.sha|after|before|merge_commit_sha|[\w.]*\bsha\b)\b", re.I)
+# Only exact documented numeric properties are constrained. A larger expression
+# containing one may still evaluate to attacker-controlled text.
+NUMERIC_CONTEXT = re.compile(r"\$\{\{\s*github\.event\.(?:issue|pull_request)\.number\s*\}\}")
+EXACT_SHA_CONTEXT = re.compile(
+    r"\$\{\{\s*github\.event\.(?:pull_request\.(?:head|base)\.sha|pull_request\.merge_commit_sha|workflow_run\.head_sha|head_commit\.id)\s*\}\}")
 USES = re.compile(r"uses:\s*([^\s@#]+)@([^\s#'\"]+)")
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 
@@ -94,11 +96,12 @@ class IacCiExtractor(Extractor):
         for wf in ctx.glob(".github/workflows/*.yml") + ctx.glob(".github/workflows/*.yaml"):
             rel, text = ctx.rel(wf), ctx.text(wf)
             # Only contexts that land inside a `run:` script body are shell-injection sinks.
-            contexts = sorted(set(UNTRUSTED.findall(_gha_run_bodies(text))))
+            contexts = sorted({context for context in UNTRUSTED.findall(_gha_run_bodies(text))
+                               if not NUMERIC_CONTEXT.fullmatch(context)})
             if contexts:
-                sha_only = all(SHA_CONTEXT.search(c) for c in contexts)
+                sha_only = all(EXACT_SHA_CONTEXT.fullmatch(c) for c in contexts)
                 sev = "LOW" if sha_only else "HIGH"
-                extra = (" — all flagged contexts are SHA/ref-typed (hex-constrained by GitHub, not "
+                extra = (" — all flagged contexts are exact commit-SHA properties (hex-constrained by GitHub, not "
                          "free-text injectable); verify, low exploitability" if sha_only else "")
                 findings.append({"severity": sev, "kind": "gha-script-injection", "file": rel,
                                  "detail": "untrusted context interpolated into a run: step — "

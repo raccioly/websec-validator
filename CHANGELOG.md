@@ -7,6 +7,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-09-14
+
+Migration: [0.14.0 migration guide](docs/MIGRATING-0.14.0.md). Facts, ledger and envelope move to
+schema 2.0; complete execution is distinct from complete protection.
+
+### Security
+- Reject nested output `runs` symlinks and non-directories before analysis or dynamic probes;
+  preserve explicit operator-selected output-base aliases while retaining stable-tree assumptions.
+- Refuse foreign agent skill files and ambiguous managed blocks before install/uninstall writes;
+  preserve surrounding text, historical generated CRLF headers and existing user policy.
+- Select agent-review artifacts from this invocation's JSON envelope, rejecting symlink aliases and
+  stale `latest` fallback. Guidance preserves partial execution, provenance and evidence uncertainty
+  and no longer silently installs or upgrades the engine.
+- Evaluate credential equality at the comparison, including reversed operands; unrelated
+  constant-time helpers cannot hide a raw comparison. Distinguish literal presence/type checks
+  from nonempty hardcoded credentials, keeping timing behavior an unverified LOW advisory.
+- Isolate hook imports from target source, preserve foreign shell hooks, and keep accepted gate
+  baselines separate from advisory/failed attempts. Changed severity/scanner policy triggers a full gate.
+- Pass Action inputs through environment/argv, install its trusted source checkout and upload only
+  the current attempt's SARIF; incomplete execution cannot select an older `latest` artifact.
+- Bound retained source payloads to 64 MiB per context, preserve hashes for every analyzed symlink
+  alias, and keep `.local` private regardless of case. Byte-budget losses make execution incomplete;
+  the payload budget is not a process-memory limit.
+- Validate imported SARIF rule/component references, invocation outcomes, kind/level pairs and
+  lexical paths; cap expanded traces and metadata as well as input bytes. Never load referenced
+  source, remote properties, fixes or commands. Ambiguous producer fingerprints stay report-bound.
+- Keep cookie flags attached to each setter and PII controls attached to the returned value;
+  comments, sibling handlers, ambiguous spreads and unused helpers cannot establish protection.
+- Scope unsafe decoder decisions to executable authentication code and nosniff checks to browser
+  responses; ZIP error text and non-response file streams no longer create those leads. GitHub
+  expression checks exempt only exact documented numeric identifiers, retaining text/unknown inputs.
+- Reject contradictory repair/proof completion evidence, serialize intelligence publication and
+  compare each feed's publication date before accepting an update or reassessment.
+- Bind sanitizer, redirect, token-cap and approval evidence to individual expressions and values;
+  comments, unrelated calls, hoisted no-op helpers and inverted/reassigned approvals no longer hide
+  unsafe sinks. Add Vue/Svelte/HTML template and module-variant intake with distinct sink occurrences.
+- Keep service-specific guard evidence, routes and inventory joins scoped to the matching service;
+  same-path sibling endpoints and ambiguous dynamic observations cannot inherit another service's result.
+- Constrain repository reads to the selected root, apply exclusions consistently, prune private
+  `.local` and skipped trees, reject special files, and disclose read/cap losses. Safe in-root file
+  symlinks remain supported; directory symlinks are not traversed. POSIX descriptor-relative reads
+  and pinned root identity narrow replacement races; stable checkout assumptions still apply.
+- Require bearer authentication for loopback-only MCP HTTP, validate Host/Origin and request framing,
+  cap request bodies/workers, enforce an absolute receive deadline, and recheck approved root identity.
+- Preserve uncertainty in dynamic/DAST/calibration evidence. Status-only candidates and scanner silence
+  cannot become confirmed findings or false-positive labels; quarantine legacy unproven samples.
+
+### Added
+- Bounded Python request-to-query assignment analysis with aliases, branch joins, matched tuple
+  unpacking and separate SQLAlchemy bound-value evidence. Parse/work limits and later-loop-iteration
+  gaps stay visible; no target execution, cross-function or fixed-point coverage is claimed.
+- Opt-in pre-commit manifest and local/PR/weekly CI examples around existing entrypoints, with
+  isolated trusted engine execution, separate target checkout, read-only permissions and current
+  attempt artifacts. No hooks or schedules are activated by the examples.
+- `research catalog` and `research evaluate --suite control-scope` expose all three shipped
+  proposals/24 authored cases, aggregate and individual metrics, consistent detector revision and
+  explicit human-review-only eligibility; empty/failed/inconsistent suites cannot pass.
+- Bounded, data-only Django URL parsing for supported local mounts and view references; unresolved
+  dynamic mounts remain attributed candidates with explicit gaps, never executed Python settings.
+  Converter parameters use the existing path-parameter contract through CLI targeting and inventory.
+- Manifest-aware framework/package-manager inventory across service roots, including Rust workspaces;
+  dependency metadata is a stack hint, not deployment proof. React/native JSX alone does not imply
+  a browser renderer; mixed browser services retain header-review coverage.
+- Offline SARIF 2.1.0 import through repeatable `--sarif REPORT`: native tool/rule namespaces,
+  fingerprints, ordered traces, suppressions, status and report SHA provenance survive into artifacts.
+  Source freshness remains unverified; imported absence cannot prove a repair.
+- Optional Bandit execution with built-in configuration, target configuration discovery disabled,
+  inline `nosec` ignored, and native confidence/CWE/location preserved independently of severity.
+- Nine named language/configuration profiles with manifest service boundaries, explicit completed/
+  unknown/manual checks and an offline `capabilities` catalog. Synthetic paired controls describe
+  narrow supported syntax; native memory-safety remains manual.
+- Validated, dated FIRST EPSS/CISA KEV snapshots through explicit `intel refresh`, offline status and
+  known-CVE reassessment with stable IDs and reopening events. Core scans never refresh implicitly.
+- Data-only research proposal evaluation with development/holdout metrics and human-review promotion;
+  corpus commit pins and revision mismatch diagnostics improve reproducibility without renewing old scores.
+- Execution and scope manifests in `coverage.json`, facts, ledger, envelope, SARIF, and reports;
+  `--require-complete` and severity gates return exit 2 for incomplete requested execution.
+- Unique run directories with atomic publication of only completed executions to `latest`.
+- Versioned semantic finding identities, legacy aliases, acknowledgement expiry, lifecycle events,
+  and build-bound repair plans with offline `repair-verify` evidence validation.
+
+### Changed
+- Preserve CVE occurrences by manifest, package ecosystem and installed version, including advisory
+  aliases and explicit false KEV values. Checkov resource IDs distinguish same-line findings, and
+  native error/summary contradictions remain incomplete even when a usable partial report exists.
+- Facts/ledger/envelope schema version is 2.0. Baseline disappearance is “no longer observed”,
+  with deprecated `fixed_count` remaining zero. New, reopened, and changed findings gate baselines.
+- Ignore policy defaults to the target only. Explicit invalid baselines/graphs and invalid or oversized
+  scanner output are visible incomplete checks. Full scanner rule namespaces and native occurrence IDs
+  survive normalization and de-duplication.
+
 ## [0.13.0] — 2026-09-11
 
 ### Fixed
@@ -683,7 +774,8 @@ The initial public line. Highlights across 0.2.1–0.2.9:
 ### Fixed
 - Scanner-contamination and rate-limit fixes (agent-wallet dogfood).
 
-[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/raccioly/websec-validator/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/raccioly/websec-validator/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/raccioly/websec-validator/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/raccioly/websec-validator/compare/v0.10.0...v0.11.0

@@ -112,13 +112,15 @@ class EnrichTests(unittest.TestCase):
         out = graph_enrich.enrich_ledger(ledger, self.target)
         self.assertEqual(out["findings"][0]["graph"]["blast_radius"], 0)
 
-    def test_malformed_graph_is_noop(self):
+    def test_malformed_graph_is_disclosed_without_changing_findings(self):
         gp = self.target / "graphify-out" / "graph.json"
         gp.parent.mkdir(parents=True, exist_ok=True)
         gp.write_text("{ this is not json")
         ledger = self._ledger("src/a.js")
         out = graph_enrich.enrich_ledger(ledger, self.target)
-        self.assertNotIn("graph_enrichment", out)
+        self.assertFalse(out["graph_enrichment"]["available"])
+        self.assertEqual(out["findings"], [{"title": "t", "location": "src/a.js", "severity": "HIGH"}])
+        self.assertNotIn("graph", out["findings"][0])
 
     def test_suffix_match_when_paths_anchored_differently(self):
         nodes = [{"id": "h", "label": "helper.js", "source_file": "pkg/src/helper.js"},

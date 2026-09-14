@@ -1,0 +1,11 @@
+- id: websec-security
+  name: websec-validator complete security review
+  description: Scan the repository with a trusted installed engine; incomplete execution or high findings fail.
+  entry: python -I -m websec_validator.cli run .
+  language: python
+  minimum_pre_commit_version: "3.2.0"
+  args: [--require-complete, --fail-on, high, --out, websec-out]
+  pass_filenames: false
+  always_run: true
+  require_serial: true
+  stages: [pre-commit, pre-push, manual]

@@ -13,6 +13,7 @@ from collections import Counter
 from pathlib import Path
 
 from .base import Extractor, RepoContext
+from .syntax import direct_call, expression_end, in_literal, js_functions, split_arguments, without_comments
 
 WEBHOOK_PATH = re.compile(r"webhook|/hook|/callback|/inbound", re.I)
 # A STRONG webhook path (explicit /webhook(s) or a provider webhook route) is unambiguous — flag it on
@@ -157,6 +158,80 @@ SECRET_FETCH = re.compile(
     r"|read_secret|kv\.get|getSecretString)\s*\(\s*\{?[^)]*?['\"]([^'\"]+)['\"]", re.I)
 
 
+def _webhook_scope(source: str, endpoint: dict) -> dict | None:
+    """Resolve an ordinary inline route callback, or a unique exported method.
+
+    Middleware/delegated/typed routes not represented here remain unverified.
+    No control from another route or function is borrowed for an unknown handler.
+    """
+    scopes = js_functions(source)
+    method = str(endpoint.get("method", "")).lower()
+    path = str(endpoint.get("path", ""))
+    candidates = []
+    route = re.compile(r"\." + re.escape(method) + r"\s*\(\s*(['\"])" + re.escape(path) + r"\1\s*,")
+    for match in route.finditer(source):
+        if in_literal(source, match.start()):
+            continue
+        opening = source.find("(", match.start())
+        end = expression_end(source, opening, closing=")")
+        inside = [scope for scope in scopes if match.end() <= scope["start"] < scope["end"] < end]
+        if inside:
+            outer = min(inside, key=lambda scope: scope["start"])
+            if not source[match.end():outer["start"]].strip():
+                candidates.append(outer)
+    if not candidates:
+        candidates = [scope for scope in scopes if scope["name"] == method.upper()
+                      and re.search(r"\bexport\s+(?:async\s+)?$", source[max(0, scope["start"]-30):scope["start"]])]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _webhook_verified(scope: dict, source: str) -> bool:
+    if not scope["params"] or not scope["simple_params"]:
+        return False
+    request = scope["params"][0]
+    body = scope["body"].strip()
+    if js_functions(body) or re.search(r"\b(?:try|catch)\b", body):
+        return False  # caught verification errors or nested bindings are uncertain
+    request_data = re.escape(request) + r"\.(?:body|rawBody)"
+    def request_written(tail):
+        writes = re.finditer(r"\b" + re.escape(request)
+                             + r"(?:\s*\.\s*[\w$]+|\s*\[[^\]\r\n]{1,100}\])*\s*(?:=(?!=)|\+=|-=|\+\+|--)", tail)
+        return (any(not in_literal(tail, item.start()) for item in writes)
+                or bool(re.search(r"\bObject\.assign\(\s*" + re.escape(request) + r"\b|\bdelete\s+"
+                                  + re.escape(request) + r"\b", tail)))
+    # Stripe's constructor throws before the handler can process an unsigned
+    # event. Merely reading a header or calling an arbitrary verify helper does not.
+    match = re.match(r"(?:const|let)\s+([\w$]+)\s*=\s*stripe\.webhooks\.constructEvent\s*\(", body)
+    if match:
+        opening = body.find("(", match.start())
+        end = expression_end(body, opening, closing=")")
+        arguments = split_arguments(body[opening+1:end-1])
+        if (len(arguments) == 3 and re.fullmatch(request_data, arguments[0])
+                and re.fullmatch(re.escape(request) + r"\.headers\[['\"]stripe-signature['\"]\]", arguments[1])
+                and re.fullmatch(r"[\w$]+(?:\.[\w$]+)*", arguments[2])
+                and arguments[2].split(".")[0] != request
+                and not re.search(r"\b(?:function|class)\s+stripe\b|\bstripe(?:\.[\w$]+)*\s*=(?!=)", source)
+                and not request_written(body[end:])):
+            return True
+    # Preserve the existing direct HMAC + rejecting status idiom. This checks
+    # signature enforcement only; timing-safe comparison is a separate review.
+    hmac = re.match(r"const\s+([\w$]+)\s*=\s*crypto\.createHmac\(\s*['\"]sha256['\"]\s*,\s*([\w$.]+)\s*\)"
+                    r"\.update\(\s*" + request_data + r"\s*\)\.digest\(\s*['\"]hex['\"]\s*\)\s*;", body)
+    if hmac and hmac[2].split(".")[0] != request and len(scope["params"]) > 1:
+        # The historical Node require idiom is supported, but a locally replaced
+        # crypto object/method or hoisted fake implementation is not a primitive.
+        bindings = re.sub(r"\bconst\s+crypto\s*=\s*require\(\s*['\"](?:node:)?crypto['\"]\s*\)\s*;", "", source)
+        if (re.search(r"\bfunction\s+require\b|\brequire\s*=(?!=)", source)
+                or not direct_call("crypto.createHmac('sha256'," + hmac[2] + ")", r"crypto\.createHmac", program=bindings)):
+            return False
+        tail = body[hmac.end():].lstrip()
+        reject = (r"if\s*\(\s*" + re.escape(hmac[1]) + r"\s*!==\s*" + re.escape(request)
+                  + r"\.headers\[['\"][\w-]*signature['\"]\]\s*\)\s*(?:\{\s*)?return\s+"
+                  + re.escape(scope["params"][1]) + r"\.status\(\s*(?:400|401|403)\s*\)\.(?:end|send)\(\s*\)\s*;")
+        return bool(re.match(reject, tail)) and not request_written(tail)
+    return False
+
+
 class IntegrationsExtractor(Extractor):
     name = "integrations"
     category = "surface"
@@ -173,12 +248,15 @@ class IntegrationsExtractor(Extractor):
             text = ctx.text(Path(cp)) if cp else ""
             if not text:
                 continue                                     # unanalyzable — don't guess it's unsigned
-            if OAUTH_CALLBACK.search(text) or WEBHOOK_MGMT.search(text):
+            source = without_comments(text, Path(cp).suffix)
+            scope = _webhook_scope(source, e)
+            handler = scope["body"] if scope else ""
+            if handler and (OAUTH_CALLBACK.search(handler) or WEBHOOK_MGMT.search(handler)):
                 continue                                     # OAuth callback / mgmt CRUD — not a signed receiver
-            if not WEBHOOK_STRONG.search(e.get("path", "")) and not WEBHOOK_RECEIVER.search(text):
+            if not WEBHOOK_STRONG.search(e.get("path", "")) and not WEBHOOK_RECEIVER.search(handler):
                 continue                                     # WEAK webhook path + no receiver evidence → not a webhook
-            if SIG_VERIFY.search(text) or VERIFY_HELPER_CALL.search(text):
-                continue                                     # verifies inline OR via an imported helper
+            if scope and _webhook_verified(scope, source):
+                continue
             unverified.append(f"{e['method']} {e['path']}  ({ctx.rel(Path(cp)) if cp else '?'})")
 
         # #5 outbound-action endpoints + #6 redundant secret fetches + entitlement-trust (one code walk)

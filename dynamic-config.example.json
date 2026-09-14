@@ -1,13 +1,48 @@
 {
-  "_comment": "Copy to dynamic-config.json (gitignored), fill in your TEST target + role creds, then: websec dynamic --config dynamic-config.json --facts websec-out/FACTS.json. Never point this at production. v1 is read-only (cross-tenant BOLA on GET endpoints).",
-  "target": "https://your-TEST-host.example.com",
+  "_comment": "Copy to dynamic-config.json (gitignored), replace values with your authorized isolated TEST fixture, then websec dynamic --config dynamic-config.json --facts websec-out/latest/FACTS.json. Missing/mismatched controls leave results inconclusive.",
+  "target": "http://127.0.0.1:8765",
   "login_path": "/api/auth/login",
   "token_json_path": "tokens.accessToken",
   "user_json_path": "user",
   "tenant_field": "groupIds",
   "tenant_path_param": "groupId",
   "roles": {
-    "agentA": { "email": "agent-a@example.com", "password": "REDACTED" },
-    "agentB": { "email": "agent-b@example.com", "password": "REDACTED" }
-  }
+    "agentA": {
+      "email": "agent-a@example.com",
+      "password": "REDACTED"
+    },
+    "agentB": {
+      "email": "agent-b@example.com",
+      "password": "REDACTED"
+    }
+  },
+  "application_id": "example-test-application",
+  "build_id": "example-test-build-1",
+  "bola_controls": {
+    "expected_policy": "tenant-isolated",
+    "identity_path": "/identity",
+    "identities": {
+      "agentA": {
+        "json_path": "id",
+        "value": "example-agent-a"
+      },
+      "agentB": {
+        "json_path": "id",
+        "value": "example-agent-b"
+      }
+    },
+    "resources": {
+      "/groups/{groupId}/records": {
+        "agentA": {
+          "json_path": "items.0.id",
+          "value": "example-private-record-a"
+        },
+        "agentB": {
+          "json_path": "items.0.id",
+          "value": "example-private-record-b"
+        }
+      }
+    }
+  },
+  "_controls_comment": "Provision distinct private records owned by each test identity. The identity endpoint must return the declared identity; each owner read must expose its marker and anonymous reads must deny access. Supply the actual deployed application/build identity. Empty bodies or status differences alone do not confirm a vulnerability."
 }

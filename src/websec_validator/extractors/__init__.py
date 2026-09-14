@@ -64,12 +64,13 @@ REGISTRY: list[Extractor] = [
 
 
 def run_all(root: Path, version: str, excludes: list | None = None,
-            include_fixtures: bool = False) -> dict:
+            include_fixtures: bool = False, *,
+            expected_root: tuple[Path, int, int] | None = None) -> dict:
     """Walk the repo once, run every extractor, return the merged FACTS dict."""
-    ctx = RepoContext(root, excludes, include_fixtures=include_fixtures)
+    ctx = RepoContext(root, excludes, include_fixtures=include_fixtures, expected_root=expected_root)
     facts: dict = {
         "tool": "websec-validator",
-        "schema_version": "1.0",   # lockstep with formats.SCHEMA_VERSION + schemas/facts.schema.json
+        "schema_version": "2.0",   # lockstep with formats.SCHEMA_VERSION + schemas/facts.schema.json
         "version": version,
         "target": str(root.resolve()),
         "files_scanned": len(ctx.code_files),
@@ -78,9 +79,23 @@ def run_all(root: Path, version: str, excludes: list | None = None,
         "files_truncated": bool(getattr(ctx, "truncated", False)),
         "file_cap": MAX_FILES,
     }
+    outcomes = {}
     for ext in REGISTRY:
         try:
             facts[ext.name] = ext.extract(ctx, facts)
+            outcomes[ext.name] = {"outcome": "error" if facts[ext.name].get("error") else "completed"}
         except Exception as e:  # one extractor must never sink the whole run
             facts[ext.name] = {"error": f"{type(e).__name__}: {e}"}
+            outcomes[ext.name] = {"outcome": "error", "error": type(e).__name__}
+    from .. import coverage, openapi
+    try:
+        facts["openapi"] = openapi.analyze(facts, root, context=ctx)
+        outcomes["openapi"] = {"outcome": "error" if facts["openapi"].get("unreadable") else "completed"}
+    except Exception as e:
+        facts["openapi"] = {"error": type(e).__name__}
+        outcomes["openapi"] = {"outcome": "error", "error": type(e).__name__}
+    facts["files_truncated"] = ctx.truncated
+    facts["coverage"] = coverage.from_context(ctx, outcomes)
+    coverage.add_profiles(facts)
+    coverage.add_routes(facts)
     return facts

@@ -1,0 +1,125 @@
+{
+  "results": [
+    {
+      "name": "VAmPI",
+      "status": "analyzed",
+      "revision_status": "pinned-verified",
+      "actual_revision": "f16052dce83f05847133ec98f01c5193a41de7d8",
+      "execution_complete": true,
+      "execution_errors": [],
+      "unknown_labels": 2,
+      "endpoints": 14,
+      "vulns": "OWASP API Top 10 \u2014 BOLA, mass-assignment, JWT weaknesses, excessive data exposure",
+      "checks": [
+        {
+          "check": "frameworks \u2287 expected",
+          "pass": true,
+          "got": [
+            "flask"
+          ]
+        },
+        {
+          "check": "endpoints \u2265 10",
+          "pass": true,
+          "got": 14
+        },
+        {
+          "check": "auth ~ 'jwt'",
+          "pass": true,
+          "got": "jwt (bearer)"
+        },
+        {
+          "check": "IDOR candidates found",
+          "pass": true,
+          "got": 5
+        }
+      ],
+      "passed": 4,
+      "total": 4,
+      "score": 1.0
+    },
+    {
+      "name": "NodeGoat",
+      "status": "analyzed",
+      "revision_status": "pinned-verified",
+      "actual_revision": "c5cb68a7084e4ae7dcc60e6a98768720a81841e8",
+      "execution_complete": true,
+      "execution_errors": [],
+      "unknown_labels": 3,
+      "endpoints": 20,
+      "vulns": "OWASP Top 10 \u2014 injection, broken auth, IDOR (allocations), access control",
+      "checks": [
+        {
+          "check": "frameworks \u2287 expected",
+          "pass": true,
+          "got": [
+            "express"
+          ]
+        },
+        {
+          "check": "endpoints \u2265 8",
+          "pass": true,
+          "got": 20
+        },
+        {
+          "check": "auth ~ 'session'",
+          "pass": true,
+          "got": "session-cookie"
+        },
+        {
+          "check": "IDOR candidates found",
+          "pass": true,
+          "got": 2
+        }
+      ],
+      "passed": 4,
+      "total": 4,
+      "score": 1.0
+    },
+    {
+      "name": "DVGA",
+      "status": "analyzed",
+      "revision_status": "pinned-verified",
+      "actual_revision": "a961308c02d1fb462b192681c336b0739e432da7",
+      "execution_complete": true,
+      "execution_errors": [],
+      "unknown_labels": 2,
+      "endpoints": 14,
+      "vulns": "GraphQL \u2014 introspection, injection, DoS (batching/aliasing), info disclosure",
+      "checks": [
+        {
+          "check": "frameworks \u2287 expected",
+          "pass": true,
+          "got": [
+            "flask"
+          ]
+        },
+        {
+          "check": "GraphQL detected",
+          "pass": true,
+          "got": true
+        }
+      ],
+      "passed": 2,
+      "total": 2,
+      "score": 1.0
+    }
+  ],
+  "limitation": "Recon coverage checks are not vulnerability precision or exploit confirmation. Unavailable applications are excluded from the numeric check denominator and reported separately.",
+  "aggregate": {
+    "apps": 3,
+    "analyzed_apps": 3,
+    "completed_apps": 3,
+    "incomplete_apps": 0,
+    "unavailable_apps": 0,
+    "unknown_labels": 7,
+    "failed_checks": 0,
+    "unknown_checks": 0,
+    "overall_coverage": 1.0,
+    "checks_passed": 10,
+    "checks_total": 10
+  },
+  "validated_wheel_sha256": "207c6da97ca95a2d7422294679148b52e23e6e82a9d6d937bb24335c46b4083f",
+  "detector_revision": "sha256:e115caaaa8cf9e0a2a3b286a3dfcb91e1acfd041244ae6de2d7afc96fc51bc4c",
+  "artifact_note": "Temporary checkout paths removed; scores, revisions and execution evidence unchanged."
+}

@@ -20,6 +20,8 @@ from __future__ import annotations
 import re
 
 from .base import Extractor, RepoContext, is_script_file, is_test_file
+from .profiles import manifest_paths, node_metadata, service_for
+from .syntax import call_expression, in_literal, js_functions, split_arguments, without_comments
 
 CSP_ANY = re.compile(r"Content-Security-Policy|contentSecurityPolicy|helmet[\s\S]{0,40}?\bcsp\b"
                      r"|useCspNonce|cspDirectives", re.I)
@@ -36,7 +38,7 @@ HSTS_PRELOAD = re.compile(r"\bpreload\b", re.I)
 # A file that looks like it serves the API surface (vs the HTML/document/app shell). Used only to
 # spot the "HSTS on /api but not the page" partial-coverage smell — heuristic, framed as "verify".
 API_SCOPED = re.compile(r"(?:^|/)(?:api|routes?|server|lambda|handler|functions?|controllers?)(?:/|\.|$)", re.I)
-HTML_SURFACE = re.compile(r"\.(?:html|tsx|jsx|vue|svelte|astro)$|_document|app/layout|index\.html", re.I)
+HTML_SURFACE = re.compile(r"\.(?:html|vue|svelte|astro)$|index\.html", re.I)
 # HTML built/served in CODE (a Worker / server-rendered app emitting template-literal HTML) — so CSP
 # applies even with no frontend framework. This is the gap that missed a Cloudflare Worker's CSP.
 HTML_CONTENT = re.compile(r"<!DOCTYPE\s+html|<html[\s>]|text/html|res\.send\(\s*[`'\"]\s*<|c\.html\(", re.I)
@@ -44,23 +46,14 @@ HTML_CONTENT = re.compile(r"<!DOCTYPE\s+html|<html[\s>]|text/html|res\.send\(\s*
 # This is what separates a real browser-facing surface from a Python/CLI report generator — the latter
 # emits `<!DOCTYPE html>` into a file with no serving verb, so it must NOT trigger CSP/clickjacking leads.
 SERVE_VERB = re.compile(
-    r"new\s+Response\s*\(|res\.(?:send|write|end|render|type)\b|reply\.(?:send|type|code|header)"
-    r"|HttpResponse\s*\(|make_response\s*\(|self\.wfile\.write|start_response|sendFile|context\.res\b"
-    r"|addEventListener\(\s*['\"]fetch|export\s+default\s*\{[^}]*\bfetch\b", re.I)
-FRONTEND_FW = {"react", "next", "nextjs", "vue", "nuxt", "svelte", "sveltekit", "angular", "astro", "remix", "solid"}
-# Cookie hardening — "report the PASS" (HttpOnly+Secure+SameSite ✓ builds trust + is a regression
-# assertion) and flag the gap. Flags are matched per cookie-setting file (lenient — a positive lead).
-SET_COOKIE = re.compile(r"set-?cookie|res\.cookie\(|cookies\.set\(|\.setCookie\(|c\.cookie\(", re.I)
-CK_HTTPONLY = re.compile(r"httponly", re.I)
-# `secure` set literally OR via the idiomatic conditional (`secure: isProduction()`, `secure: !dev`,
-# `secure: process.env.NODE_ENV === 'production'`, `secure: config.secureCookies`) — the conditional
-# forms were read as "Secure missing" before (the conditional `secure: isProduction()` FP).
-CK_SECURE = re.compile(
-    r";\s*secure\b|\bsecure\s*[:=]\s*true|\bsecure\s*:\s*!|"
-    r"\bsecure\s*:\s*(?:is[A-Z]\w*|process\.env|config\.|env\.|ctx\.|opts?\.|options\.|settings\.|"
-    r"[A-Za-z_$][\w$.]*\s*[=!]==|[A-Za-z_$][\w$.]*\s*\?|[A-Za-z_$][\w$.]*\([^)]*\))", re.I)
-CK_SAMESITE = re.compile(r"samesite", re.I)
-
+    r"\b(?:new\s+Response|res\.(?:send|write|end|render|type)|reply\.(?:send|type|code|header)"
+    r"|HttpResponse|make_response|self\.wfile\.write|start_response|sendFile|c\.html)\s*\(", re.I)
+# React/JSX can render native views or be a reusable library. Browser renderer
+# dependencies are separate evidence; neither dependency presence nor a DOM call
+# proves that the repository is deployed as a website.
+FRONTEND_FW = {"next", "nextjs", "vue", "nuxt", "svelte", "sveltekit", "angular", "astro", "remix", "solid"}
+BROWSER_RENDERERS = {"react-dom", "react-native-web"}
+BROWSER_DOM = re.compile(r"\bdocument\.(?:getElementById|querySelector(?:All)?|createElement|write)\s*\(")
 # CORS misconfiguration — the high-impact form is an Allow-Origin that REFLECTS the request Origin (or
 # `*`) TOGETHER with Allow-Credentials:true, which lets any site read authenticated responses.
 CORS_REFLECT = re.compile(
@@ -88,6 +81,97 @@ CSRF_LIB = re.compile(
     r"CsrfViewMiddleware|csrf_protect|protect_from_forgery|X-CSRF-Token|X-XSRF-TOKEN|SameSite\s*=\s*Strict", re.I)
 
 
+def _literal(value: str) -> str | None:
+    value = value.strip()
+    if (len(value) >= 2 and value[0] in "\"'" and value[-1] == value[0]
+            and "\\" not in value[1:-1] and value[0] not in value[1:-1]):
+        return value[1:-1]
+    return None
+
+
+def _cookie_options(expression: str) -> dict | None:
+    expression = expression.strip()
+    if not expression.startswith("{") or not expression.endswith("}"):
+        return None
+    options = {}
+    for field in split_arguments(expression[1:-1]):
+        if not field:
+            continue
+        match = re.fullmatch(r"(?:([\w$]+)|['\"]([\w$]+)['\"])\s*:\s*(.+)", field, re.S)
+        if not match or (match[1] or match[2]) in options:
+            return None  # spreads, shorthand and conflicting keys cannot prove flags
+        options[match[1] or match[2]] = match[3].strip()
+    return options
+
+
+def _header_cookie(value: str | None) -> tuple[str, dict]:
+    flags = {key: None for key in ("httponly", "secure", "samesite")}
+    if value is None:
+        return "unknown", flags
+    fields = [part.strip().lower() for part in value.split(";")]
+    return fields[0].split("=", 1)[0], {
+        "httponly": "httponly" in fields, "secure": "secure" in fields,
+        "samesite": any(field in {"samesite=lax", "samesite=strict"} for field in fields)}
+
+
+def _cookie_sites(source: str, rel: str, inventory: list) -> list[dict]:
+    """Known cookie setters and Set-Cookie header calls, evaluated independently."""
+    sites = []
+    calls = re.compile(r"\b[\w$]+(?:\.[\w$]+)*\.(?:cookie|setCookie|set|append|setHeader|header)\s*\(")
+    for match in calls.finditer(source):
+        if in_literal(source, match.start()):
+            continue
+        expression = call_expression(source, match.start())
+        if not expression.endswith(")"):
+            continue
+        callee = expression[:expression.find("(")].strip()
+        args = split_arguments(expression[expression.find("(")+1:-1])
+        header = bool(args and (_literal(args[0]) or "").lower() == "set-cookie")
+        setter = callee.endswith((".cookie", ".setCookie", "cookies.set"))
+        if not header and not setter:
+            continue
+        flags = {key: None for key in ("httponly", "secure", "samesite")}
+        name = "unknown"
+        if header:
+            value = _literal(args[1]) if len(args) > 1 else None
+            name, flags = _header_cookie(value)
+        else:
+            object_form = len(args) == 1 and args[0].strip().startswith("{")
+            options = _cookie_options(args[0] if object_form else args[2] if len(args) > 2 else "{}")
+            name = (_literal(options.get("name", "")) if object_form and options else
+                    _literal(args[0]) if args else None) or "unknown"
+            if options is not None:
+                for flag, key in (("httponly", "httpOnly"), ("secure", "secure")):
+                    value = options.get(key, "false")
+                    flags[flag] = True if value == "true" else False if value == "false" else None
+                value = options.get("sameSite")
+                flags["samesite"] = (False if value is None or value == "false" else
+                                     True if value == "true" or (_literal(value) or "").lower() in {"lax", "strict"} else
+                                     False if (_literal(value) or "").lower() == "none" else None)
+        sites.append({"file": rel, "line": source.count("\n", 0, match.start()) + 1,
+                      "service_id": service_for(inventory, rel).get("id", "."), "name": name,
+                      **flags, "verified": all(value is True for value in flags.values()),
+                      "basis": "literal flags on this setter; dynamic values unverified"})
+    # Header maps and subscript assignments were supported by the old broad
+    # Set-Cookie signal. Preserve them without borrowing flags from other text.
+    for key in re.finditer(r"(['\"])Set-Cookie\1\s*(?::|\]\s*=)", source, re.I):
+        if key.start() and in_literal(source, key.start() - 1):
+            continue
+        before = source[max(0, key.start() - 160):key.start()]
+        assignment = bool(re.search(r"\b[\w$.]+\.headers\s*\[\s*$", before))
+        header_map = bool(re.search(r"\bheaders\s*:\s*\{[^{}]*$", before))
+        if not assignment and not header_map:
+            continue
+        tail = source[key.end():].lstrip()
+        literal = re.match(r'''(?:"[^"\\]*"|'[^'\\]*')(?=\s*(?:[,};\n]|$))''', tail)
+        name, flags = _header_cookie(_literal(literal[0]) if literal else None)
+        sites.append({"file": rel, "line": source.count("\n", 0, key.start()) + 1,
+                      "service_id": service_for(inventory, rel).get("id", "."), "name": name,
+                      **flags, "verified": all(value is True for value in flags.values()),
+                      "basis": "Set-Cookie header map or assignment; dynamic values unverified"})
+    return sites
+
+
 class TransportSecurityExtractor(Extractor):
     name = "transport_security"
     category = "exposure"
@@ -95,18 +179,26 @@ class TransportSecurityExtractor(Extractor):
     def extract(self, ctx: RepoContext, facts: dict) -> dict:
         frameworks = {f.lower() for f in (facts.get("stack") or {}).get("frameworks", [])}
         has_routes = bool((facts.get("routes") or {}).get("endpoints"))
+        renderers = set()
+        for path in manifest_paths(ctx):
+            if path.name == "package.json":
+                renderers.update(node_metadata(ctx.text(path))["dependencies"] & BROWSER_RENDERERS)
+        frontend_hint = bool(frameworks & FRONTEND_FW or renderers)
 
         csp_present = csp_self = csp_nonce = csp_unsafe = False
         hsts_present = hsts_sub = hsts_preload = False
         clickjack_guard = False        # X-Frame-Options / CSP frame-ancestors / helmet frameguard anywhere
         csrf_plumbing = False          # a CSRF token lib / middleware / field present anywhere in the repo
         server_actions = False         # Next.js `'use server'` — Server Actions carry a built-in Origin CSRF check
-        html_surface = bool(frameworks & FRONTEND_FW)
-        serves_html = bool(frameworks & FRONTEND_FW)   # HTML actually SERVED over HTTP (vs an HTML string written to a file)
+        html_surface = frontend_hint
+        serves_html = frontend_hint
         inline_handlers = []
         sets_cookie = ck_httponly = ck_secure = ck_samesite = False
         hsts_files, hsts_api_only, hsts_html = [], True, False
         extra_findings: list = []     # CORS / SRI / next-config — emitted alongside the CSP/HSTS set
+        cookie_sites = []
+        default_auth_handlers: dict[str, set[str]] = {}
+        inventory = (facts.get("stack") or {}).get("service_inventory", [])
 
         # config manifests carry headers too (next.config, vercel.json, netlify.toml, _headers)
         manifests = "\n".join(ctx.manifest(n) for n in
@@ -116,13 +208,52 @@ class TransportSecurityExtractor(Extractor):
         for _p, rel, text in ctx.iter_code():
             if is_test_file(rel) or is_script_file(rel):
                 continue
-            if HTML_SURFACE.search(rel) or HTML_CONTENT.search(text):
-                html_surface = True
-                # a frontend file (.tsx/.vue/.html) IS the served shell; HTML in code counts only if a
-                # serving verb (new Response / res.send / HttpResponse …) actually returns it over HTTP.
-                if HTML_SURFACE.search(rel) or SERVE_VERB.search(text):
-                    serves_html = True
+            code = without_comments(text, _p.suffix)
+            browser_dom = any(not in_literal(code, match.start()) for match in BROWSER_DOM.finditer(code))
+            if browser_dom:
+                html_surface = serves_html = True
+            # Response prose and unrelated HTML strings cannot combine into a
+            # browser surface. Require HTML evidence in the actual bounded call.
+            response_html = any(
+                not in_literal(code, match.start())
+                and HTML_CONTENT.search(call_expression(code, match.start()))
+                for match in SERVE_VERB.finditer(code))
+            if HTML_SURFACE.search(rel) or response_html:
+                html_surface = serves_html = True
             blob = text
+            cookie_sites.extend(_cookie_sites(code, rel, inventory))
+            # Auth.js/NextAuth's own default cookie policy is relevant only where
+            # initialized, and never establishes flags for manually created cookies.
+            imports = list(re.finditer(r"\bimport\s+NextAuth\s+from\s+['\"]next-auth['\"]", code))
+            auth_import = any(not in_literal(code, item.start()) for item in imports)
+            scopes = js_functions(code) if auth_import else []
+            for init in re.finditer(r"\bNextAuth\s*\(", code):
+                if (auth_import and not in_literal(code, init.start())
+                        and not any(scope["start"] <= init.start() < scope["end"] for scope in scopes)):
+                    call = call_expression(code, init.start())
+                    options = _cookie_options(call[call.find("(") + 1:-1])
+                    if options is not None and "cookies" not in options and not re.search(
+                            r"\b(?:function|class|const|let|var)\s+NextAuth\b|\bNextAuth\s*=", code):
+                        # Initialization alone does not own any HTTP route. Require
+                        # a direct method export or an explicit handler re-export.
+                        prefix = code[:init.start()]
+                        binding = re.search(r"\b(export\s+)?const\s+([\w$]+)\s*=\s*$", prefix)
+                        methods = set()
+                        if binding:
+                            name = binding[2]
+                            if binding[1] and name in {"GET", "POST"}:
+                                methods.add(name)
+                            if len(re.findall(r"\b" + re.escape(name) + r"\s*=(?!=)", code)) == 1:
+                                for export in re.finditer(r"\bexport\s*\{([^{}]+)\}\s*;?", code):
+                                    if not in_literal(code, export.start()):
+                                        for entry in split_arguments(export[1]):
+                                            renamed = re.fullmatch(re.escape(name) + r"\s+as\s+(GET|POST)", entry)
+                                            if renamed:
+                                                methods.add(renamed[1])
+                        elif re.search(r"\bexport\s+default\s*$", prefix) and re.search(
+                                r"(?:^|/)pages/api/auth/", rel):
+                            methods.update({"GET", "POST"})
+                        default_auth_handlers.setdefault(rel, set()).update(methods)
             # CORS misconfig — reflected/wildcard Allow-Origin together with credentials = any site
             # reads authed responses (CWE-942). Server-side only.
             if CORS_CREDS.search(blob) and (CORS_REFLECT.search(blob) or CORS_WILDCARD.search(blob)):
@@ -170,11 +301,6 @@ class TransportSecurityExtractor(Extractor):
                     hsts_html = True
                 elif not API_SCOPED.search(rel):
                     hsts_api_only = False   # a non-API, non-HTML place (e.g. global edge middleware)
-            if SET_COOKIE.search(blob):
-                sets_cookie = True
-                ck_httponly = ck_httponly or bool(CK_HTTPONLY.search(blob))
-                ck_secure = ck_secure or bool(CK_SECURE.search(blob))
-                ck_samesite = ck_samesite or bool(CK_SAMESITE.search(blob))
             if not clickjack_guard and CLICKJACK_GUARD.search(blob):
                 clickjack_guard = True
             if not csrf_plumbing and CSRF_LIB.search(blob):
@@ -221,12 +347,9 @@ class TransportSecurityExtractor(Extractor):
                                        "clickjacking/XSS-defense headers (verify against the live response if the edge sets some)."})
 
         strict_csp = bool(csp_present and csp_self and csp_nonce and not csp_unsafe)
-        # A SERVED web app has HTTP routes OR a recognized web/frontend framework. Without either, a
-        # repo that merely emits an HTML string (a Python CLI / data tool writing a report) is NOT a
-        # browser-facing surface — flagging CSP/HSTS/clickjacking on it is noise (real-repo FP:
-        # a real CLI, a real repo). We accept a rare FN (a framework-less, route-less static
-        # site) to kill the dominant non-web FP; the edge/CDN owns those headers anyway.
-        served_web = has_routes or bool(frameworks) or serves_html
+        # Only HTTP routes or browser/serving hints enable the baseline. General
+        # framework labels cannot turn a library's generated HTML into a website.
+        served_web = has_routes or serves_html
         html_surface = html_surface and served_web
         web_surface = served_web and (html_surface or has_routes)
         findings = list(extra_findings)
@@ -302,7 +425,19 @@ class TransportSecurityExtractor(Extractor):
         # NextAuth/Auth.js default the session cookie to SameSite=Lax (a source grep can't see the
         # framework default), and Next.js Server Actions carry a built-in Origin==Host CSRF check — so
         # neither is the classic ambient-cookie CSRF this flags (real-repo FPs: a real Next.js app, a real repo).
-        nextauth_default = ("nextauth" in frameworks or str(auth.get("scheme", "")).startswith("nextauth"))
+        sets_cookie = bool(cookie_sites)
+        ck_httponly = bool(cookie_sites) and all(row["httponly"] is True for row in cookie_sites)
+        ck_secure = bool(cookie_sites) and all(row["secure"] is True for row in cookie_sites)
+        ck_samesite = bool(cookie_sites) and all(row["samesite"] is True for row in cookie_sites)
+        routes = (facts.get("routes") or {}).get("endpoints", [])
+        nextauth_default = not cookie_sites and bool(routes) and all(
+            row.get("method", "").upper() in default_auth_handlers.get(row.get("code_path"), set())
+            and re.match(r"^/(?:api/)?auth(?:/|$)", row.get("path", "")) for row in routes)
+        # A library mention or another service's Server Action does not establish
+        # CSRF enforcement for an explicitly observed custom cookie.
+        if cookie_sites and not ck_samesite:
+            csrf_plumbing = False
+            server_actions = False
         if (web_surface and has_routes and cookie_auth and not csrf_plumbing and not ck_samesite
                 and not nextauth_default and not server_actions):
             findings.append({"severity": "LOW", "kind": "no-csrf-protection", "attack_class": "csrf",
@@ -315,25 +450,33 @@ class TransportSecurityExtractor(Extractor):
         # 0.6.2: report the cookie-hardening PASS (✓ builds trust + is a regression assertion), or flag the gap.
         passes, cookie_security = [], None
         if sets_cookie:
-            cookie_security = {"httponly": ck_httponly, "secure": ck_secure, "samesite": ck_samesite}
+            cookie_security = {key: (False if any(row[key] is False for row in cookie_sites) else
+                                    None if any(row[key] is None for row in cookie_sites) else True)
+                               for key in ("httponly", "secure", "samesite")}
             if ck_httponly and ck_secure and ck_samesite:
                 passes.append("cookies set HttpOnly + Secure + SameSite (checked ✓)")
             else:
-                miss = [n for n, ok in (("HttpOnly", ck_httponly), ("Secure", ck_secure),
-                                        ("SameSite", ck_samesite)) if not ok]
-                findings.append({"severity": "LOW", "kind": "cookie-flags", "attack_class": "insecure-cookie",
-                                 "detail": f"A cookie is set without {', '.join(miss)} — an auth/session cookie should be "
+                for row in cookie_sites:
+                    if row["verified"]:
+                        continue
+                    miss = [key for key in ("httponly", "secure", "samesite") if row[key] is not True]
+                    findings.append({"severity": "LOW", "kind": "cookie-flags", "attack_class": "insecure-cookie",
+                                 "file": row["file"], "line": row["line"], "service_id": row["service_id"],
+                                 "detail": f"Cookie {row['name']} has missing, false or unverified {', '.join(miss)} flags on this setter — an auth/session cookie should be "
                                            "HttpOnly (no JS read), Secure (HTTPS-only), and SameSite=Lax/Strict (CSRF). "
                                            "Verify against the live Set-Cookie."})
 
         return {
             "web_surface": web_surface, "html_surface": html_surface,
+            "browser_renderers": sorted(renderers),
+            "surface_note": "Static browser/HTTP hints, not proof of deployment. React or JSX alone does not establish a browser renderer.",
             "csp_present": csp_present, "strict_csp": strict_csp, "csp_has_unsafe": csp_unsafe,
             "hsts_present": hsts_present, "hsts_includes_subdomains": hsts_sub, "hsts_preload": hsts_preload,
             "hsts_files": sorted(set(hsts_files))[:20],
             "clickjacking_protected": clickjack_guard, "csrf_plumbing_present": csrf_plumbing,
             "inline_event_handlers": sorted(set(inline_handlers)),
             "cookie_security": cookie_security,
+            "cookie_occurrences": cookie_sites,
             "passes": passes,
             "findings": findings,
             "note": ("CSP/HSTS baseline audit — these are the enabling controls for the client trust boundary. "

@@ -28,6 +28,8 @@ from __future__ import annotations
 import re
 
 from .base import Extractor, RepoContext, is_client_file, is_script_file, is_test_file
+from .syntax import (without_comments, call_expression, direct_options, expression_end,
+                     direct_call, server_file, split_arguments)
 
 # LLM SDK call sites (Vercel AI SDK, OpenAI, Anthropic, LangChain, litellm, Bedrock, Gemini).
 LLM_CALL = re.compile(
@@ -74,11 +76,87 @@ FAIL_OPEN = re.compile(
 
 
 def _llm_call_without(text: str, guard_rx: re.Pattern) -> bool:
-    """True if an LLM call appears in `text` and `guard_rx` is absent within ~400 chars after it."""
-    for m in LLM_CALL.finditer(text):
-        window = text[m.start():m.start() + 600]
-        if not guard_rx.search(window):
+    for match in LLM_CALL.finditer(text):
+        options = direct_options(call_expression(text, match.start()))
+        if not any(guard_rx.fullmatch(key) and re.fullmatch(r"[1-9]\d*", value.strip())
+                   for key, value in options.items()):
             return True
+    return False
+
+
+def _references(expression: str) -> str:
+    # Literal prompt prose such as "Context:" is not a variable named context.
+    def replace(match):
+        value = match[0]
+        if value.startswith("`"):
+            return " ".join(re.findall(r"\$\{([^}]*)\}", value))
+        return " "
+    return re.sub(r"`(?:\\.|[^`])*`|\"(?:\\.|[^\"])*\"|'(?:\\.|[^'])*'", replace, expression)
+
+
+def _untrusted_value(expression: str, prefix: str, depth: int = 0) -> bool:
+    references = _references(expression)
+    if UNTRUSTED_VAR.search(references):
+        return True
+    if depth >= 8:
+        return True  # unresolved deep alias chain cannot establish a trusted prompt value
+    for name in re.findall(r"\b[A-Za-z_$]\w*\b", references):
+        assignments = list(re.finditer(r"\b(?:const|let|var)?\s*" + re.escape(name)
+                                      + r"\s*=(?!=)\s*([^;\n]+)", prefix))
+        if any(_untrusted_value(item[1], prefix[:item.start()], depth + 1) for item in assignments):
+            return True
+    return False
+
+
+def _untrusted_prompt(text: str) -> bool:
+    for match in PROMPT_SINK.finditer(text):
+        expression = text[match.end():expression_end(text, match.end())].strip()
+        # prompt: inside options ends at an outer comma; other object fields are unrelated.
+        expression = split_arguments(expression)[0]
+        if UNTRUSTED_VAR.search(_references(expression)):
+            if not direct_call(expression, SANITIZER.pattern, text[:match.start()], program=text):
+                return True
+        # One immutable local binding is supported; reassignment/alias chains remain unresolved.
+        for name in re.findall(r"\b[A-Za-z_$]\w*\b", _references(expression)):
+            assignments = list(re.finditer(r"\b(?:const|let|var)?\s*" + re.escape(name)
+                                          + r"\s*=(?!=)\s*([^;\n]+)", text[:match.start()]))
+            if not assignments:
+                continue
+            if len(assignments) > 1 and any(_untrusted_value(item[1], text[:item.start()]) for item in assignments):
+                return True  # conflicting or shadowed bindings remain unresolved
+            value = assignments[-1][1]
+            if _untrusted_value(value, text[:assignments[-1].start()]):
+                immutable = assignments[-1][0].lstrip().startswith("const ") and len(assignments) == 1
+                if not immutable or not direct_call(value.strip(), SANITIZER.pattern, text[:assignments[-1].start()], program=text):
+                    return True
+    return False
+
+
+def _human_gated(text: str, position: int) -> bool:
+    # Credit only an action nested in the positive branch of an explicit approval predicate.
+    # A guard helper declaration, an unchecked call, or a branch around another action is unverified.
+    for match in re.finditer(r"\bif\s*\(", text):
+        end = expression_end(text, text.find("(", match.start()), closing=")")
+        condition = text[text.find("(", match.start()) + 1:end - 1]
+        opening = end
+        while opening < len(text) and text[opening].isspace():
+            opening += 1
+        if opening >= len(text) or text[opening] != "{":
+            continue
+        body_end = expression_end(text, opening, closing="}")
+        if opening < position < body_end and not re.search(r"!|\|\||\bor\b", condition):
+            gate = HUMAN_GATE.search(condition)
+            if gate is None:
+                continue
+            guard_call = call_expression(condition, gate.start())
+            action_call = call_expression(text, position)
+            guard_args = split_arguments(guard_call[guard_call.find("(") + 1:-1])
+            action_args = split_arguments(action_call[action_call.find("(") + 1:-1])
+            if (guard_args and guard_args[0] and guard_args == action_args
+                    and text[opening + 1:position].strip() in ("", "await", "return", "return await")
+                    and re.sub(r"^\s*await\s+", "", condition).strip() == guard_call.strip()
+                    and direct_call(guard_call, HUMAN_GATE.pattern, text[:match.start()], program=text)):
+                return True
     return False
 
 
@@ -98,9 +176,10 @@ class LlmSecurityExtractor(Extractor):
             findings.append({"severity": sev, "kind": kind, "attack_class": attack,
                              "file": rel, "detail": detail})
 
-        for _p, rel, text in ctx.iter_code():
+        for _p, rel, raw in ctx.iter_code():
+            text = without_comments(raw, _p.suffix.lower())
             # tests, browser code, and build/CLI scripts are not the runtime agentic surface
-            if is_test_file(rel) or is_client_file(rel, text) or is_script_file(rel):
+            if is_test_file(rel) or not server_file(rel, text, is_client_file(rel, text)) or is_script_file(rel):
                 continue
             has_llm = bool(LLM_CALL.search(text))
             has_prompt = bool(PROMPT_SINK.search(text))
@@ -108,7 +187,7 @@ class LlmSecurityExtractor(Extractor):
                 llm_files.append(rel)
 
             # LLM10 — unbounded generation (no output-token cap on the call)
-            if has_llm and not TOKEN_CAP.search(text):
+            if has_llm and _llm_call_without(text, TOKEN_CAP):
                 no_timeout = not TIMEOUT.search(text)
                 add("MEDIUM", "llm-unbounded-generation", "llm-unbounded", rel,
                     "An LLM call has no output-token cap (maxTokens/maxOutputTokens)"
@@ -129,7 +208,7 @@ class LlmSecurityExtractor(Extractor):
 
             # LLM01 — untrusted retrieved/tool content into a prompt with no sanitizer/fence. Require
             # the file to actually build AND call a model (has_llm + a prompt sink) to stay precise.
-            if has_llm and has_prompt and UNTRUSTED_VAR.search(text) and not SANITIZER.search(text):
+            if has_llm and has_prompt and _untrusted_prompt(text):
                 verbatim = bool(VERBATIM_URL.search(text))
                 add("MEDIUM" if verbatim else "LOW", "llm-indirect-prompt-injection",
                     "llm-prompt-injection", rel,
@@ -142,7 +221,7 @@ class LlmSecurityExtractor(Extractor):
                       "allow-list any URL host/scheme before emitting it. VERIFY the data's trust level.")
 
             # LLM06/08 — a DEFINED agent tool that takes a state-changing action with no human gate
-            if TOOL_DEF.search(text) and ACTION_TOOL.search(text) and not HUMAN_GATE.search(text):
+            if TOOL_DEF.search(text) and any(not _human_gated(text, m.start()) for m in ACTION_TOOL.finditer(text)):
                 add("LOW", "llm-excessive-agency", "excessive-agency", rel,
                     "A state-changing/side-effecting action (send/delete/transfer/exec/grant/…) appears in "
                     "an agent tool surface with no visible human-confirmation gate (LLM06/LLM08 excessive "
@@ -156,6 +235,9 @@ class LlmSecurityExtractor(Extractor):
                     "rather than blocking, so an attacker who stalls or floods the guard disables it while the "
                     "model keeps answering. Fail CLOSED for sensitive turns (return the refusal on guard error) "
                     "and alert when the guard is unavailable.")
+
+        for finding in findings:
+            finding["control_scope"] = "per invocation/expression; named controls without a proven relation remain unverified"
 
         by_sev: dict = {}
         for f in findings:

@@ -1,0 +1,12 @@
+{
+  "application_id": "synthetic-app",
+  "build_id": "before",
+  "source_digest": "sha256:5c14fbe925637eb6ab312606364f4d98115634f74646ab5df901faeea3b92fa0",
+  "plan_id": "48321ecb70e9adf99622b23a6c9694b6e5d84dc1e28124c013b88794d9adbf07",
+  "finding_id": "b940bc21e6ff9fc4",
+  "test_id": "synthetic-negative",
+  "kind": "negative",
+  "status": "failed",
+  "test_count": 1,
+  "failed": 1
+}

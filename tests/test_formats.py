@@ -35,6 +35,28 @@ LEDGER = {
 
 
 class SarifTests(unittest.TestCase):
+    def test_source_suffixes_become_regions_without_corrupting_paths_or_routes(self):
+        for location, path, line, column in [
+            ('mobile/AndroidManifest.xml:7','mobile/AndroidManifest.xml',7,None),
+            ('src/app.py:L12:4','src/app.py',12,4),
+            ('C:\\project\\app.cs:9','C:/project/app.cs',9,None),
+        ]:
+            with self.subTest(location=location):
+                finding = {**LEDGER['findings'][0], 'location':location}
+                result = formats.to_sarif({'findings':[finding]})['runs'][0]['results'][0]
+                physical = result['locations'][0]['physicalLocation']
+                self.assertEqual(physical['artifactLocation']['uri'], path)
+                self.assertEqual(physical['region']['startLine'], line)
+                self.assertEqual(physical['region'].get('startColumn'), column)
+        route = {**LEDGER['findings'][0], 'location':'/api/records:7'}
+        result = formats.to_sarif({'findings':[route]})['runs'][0]['results'][0]
+        self.assertNotIn('locations', result)
+        self.assertEqual(result['properties']['locationHint'], '/api/records:7')
+        route.update(file='src/routes.py', line=23)
+        result = formats.to_sarif({'findings':[route]})['runs'][0]['results'][0]
+        self.assertEqual(result['locations'][0]['physicalLocation']['region']['startLine'], 23)
+        self.assertEqual(result['locations'][0]['physicalLocation']['artifactLocation']['uri'], 'src/routes.py')
+
     def setUp(self):
         self.sarif = formats.to_sarif(LEDGER, {"target": "/x"}, "0.10.0")
         self.run = self.sarif["runs"][0]
@@ -59,9 +81,27 @@ class SarifTests(unittest.TestCase):
 
     def test_fingerprint_present(self):
         self.assertIn("websecFingerprintV1", self.run["results"][0]["partialFingerprints"])
+        self.assertEqual(self.run["results"][0]["partialFingerprints"]["websecFingerprintV2"],
+                         baseline.fingerprint(LEDGER["findings"][0]))
+
+    def test_lifecycle_changes_map_to_legal_sarif_states(self):
+        import copy
+        for state in ("reopened", "changed"):
+            ledger = copy.deepcopy(LEDGER)
+            ledger["findings"][0]["baseline_state"] = state
+            result = formats.to_sarif(ledger)["runs"][0]["results"][0]
+            self.assertEqual(result["baselineState"], "updated")
+            self.assertEqual(result["properties"]["lifecycleState"], state)
 
 
 class JsonEnvelopeTests(unittest.TestCase):
+    def test_published_ledger_schema_accepts_internal_lifecycle_states(self):
+        schema = json.loads((ROOT / 'src/websec_validator/schemas/ledger.schema.json').read_text())
+        allowed = schema['definitions']['finding']['properties']['baseline_state']['enum']
+        self.assertEqual(schema['properties']['schema_version']['const'], formats.SCHEMA_VERSION)
+        for state in ('new', 'unchanged', 'changed', 'reopened'):
+            self.assertIn(state, allowed)
+
     def test_envelope(self):
         env = formats.to_json(LEDGER, {"target": "/x"}, "0.10.0", "ts-1")
         self.assertEqual(env["schema_version"], formats.SCHEMA_VERSION)

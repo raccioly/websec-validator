@@ -17,10 +17,15 @@ def build(facts: dict, ledger: dict | None = None) -> list:
     integ = facts.get("integrations", {})
     tenant = facts.get("tenant", {})
 
-    # endpoints with a dynamically-confirmed access-control finding → VIOLATED
-    violated = {f["location"] for f in (ledger or {}).get("findings", [])
-                if f.get("category") == "access-control"
-                and any(e.get("layer") == "dynamic" for e in f.get("evidence", []))}
+    # Only confirmed missing-auth evidence can violate the authentication principle.
+    # BOLA concerns authorization between identities and does not prove unauthenticated access.
+    from .findings import route_scope_matches, unique_route_association
+    confirmed = [finding for finding in (ledger or {}).get("findings", [])
+                 if finding.get("category") == "access-control" and finding.get("attack_class") == "missing-auth"
+                 and finding.get("verification_state") == "confirmed-vulnerable"
+                 and finding.get("evidence_verified") is True
+                 and any(row.get("layer") == "dynamic" and row.get("confirmed") is True
+                         for row in finding.get("evidence", []))]
 
     inv = []
 
@@ -35,7 +40,11 @@ def build(facts: dict, ledger: dict | None = None) -> list:
         n += 1
         if n > 40:
             continue
-        status = "VIOLATED" if eg.get("path") in violated else "VERIFY"
+        violated = any(finding.get("method") == eg.get("method") and finding.get("location") == eg.get("path")
+                       and route_scope_matches(finding, eg)
+                       and unique_route_association(finding, eg, authz.get("endpoint_guards", []))
+                       for finding in confirmed)
+        status = "VIOLATED" if violated else "VERIFY"
         add("Authentication", f"Given no auth token, When `{eg['method']} {eg['path']}`, Then 401/403 "
             f"(no body, no mutation)", eg.get("code_path", "recon"), status)
     if n > 40:

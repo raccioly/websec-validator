@@ -528,9 +528,9 @@ class CsrfBaselineTests(unittest.TestCase):
         self.assertIn("no-csrf-protection", [f["kind"] for f in out["findings"]])
 
     def test_nextauth_default_not_flagged(self):
-        # NextAuth defaults SameSite=Lax — the classic ambient-cookie CSRF doesn't apply
+        # NextAuth's defaults do not establish policy for a custom Express cookie.
         out = self._run(["next", "nextauth"], {"app.js": "app.post('/x',(req,res)=>{res.cookie('sid',t)});\n"})
-        self.assertNotIn("no-csrf-protection", [f["kind"] for f in out["findings"]])
+        self.assertIn("no-csrf-protection", [f["kind"] for f in out["findings"]])
 
     def test_server_actions_not_flagged(self):
         out = self._run(["next"], {"actions.ts": "'use server'\nexport async function save(fd){ /* mutate */ }\n"})
@@ -552,8 +552,8 @@ class CalibrationTests(unittest.TestCase):
                  {"class": "mass-assignment", "location_contains": "register"}]
         self.assertTrue(calibration.is_real("missing-auth", "/anything", truth))   # wildcard
         self.assertTrue(calibration.is_real("mass-assignment", "/users/v1/register", truth))
-        self.assertFalse(calibration.is_real("mass-assignment", "/login", truth))  # location mismatch
-        self.assertFalse(calibration.is_real("ssrf", "/x", truth))                 # class mismatch ⇒ FP
+        self.assertIsNone(calibration.is_real("mass-assignment", "/login", truth))  # unreviewed location
+        self.assertIsNone(calibration.is_real("ssrf", "/x", truth))                 # unreviewed class
 
     def _table(self):
         labeled = ([{"attack_class": "missing-auth", "confidence": "MEDIUM", "is_real": True}] * 6 +
@@ -575,22 +575,19 @@ class CalibrationTests(unittest.TestCase):
         self.assertEqual(calibration.apply("x", "HIGH", t)["basis"], "prior (uncalibrated)")  # no HIGH data
         self.assertEqual(calibration.apply("x", "MEDIUM", None)["basis"], "prior (uncalibrated)")  # no table
 
-    def test_samples_from_dynamic_oracle(self):
+    def test_status_only_dynamic_observations_never_become_labels(self):
         dyn = {"write_auth_enforcement": {"results": [
                   {"verdict": "EXECUTED-UNAUTH"}, {"verdict": "auth-enforced"},
                   {"verdict": "no-auth-gate (reached handler/validation)"}, {"verdict": "http-500"}]},
                "cross_tenant_bola": {"leaks": [{"path": "/x"}]}}
         s = calibration.samples_from_dynamic(dyn)
-        ma = [x for x in s if x["attack_class"] == "missing-auth"]
-        self.assertEqual(len(ma), 3)                       # executed + no-auth-gate + auth-enforced; http-* skipped
-        self.assertEqual(sum(x["is_real"] for x in ma), 2)  # auth-enforced is a confirmed FALSE positive
-        self.assertTrue(any(x["attack_class"] == "bola" and x["is_real"] for x in s))
+        self.assertEqual(s, [])  # Legacy status-only records carry no build or control evidence.
 
     def test_merge_sums_counts_and_personalizes(self):
         shipped = {"meta": {"caveat": "base"},
                    "by_class_label": {"missing-auth|MEDIUM": {"n": 41, "k": 27, "p": 0.659, "ci": [0.5, 0.78]}},
                    "by_label": {"MEDIUM": {"n": 41, "k": 27}}, "prior": calibration.PRIOR}
-        local = {"meta": {"samples": 3}, "by_class_label": {"missing-auth|MEDIUM": {"n": 3, "k": 2}},
+        local = {"schema_version": 2, "meta": {"samples": 3}, "by_class_label": {"missing-auth|MEDIUM": {"n": 3, "k": 2}},
                  "by_label": {"MEDIUM": {"n": 3, "k": 2}}}
         m = calibration._merge(shipped, local)
         self.assertEqual(m["by_class_label"]["missing-auth|MEDIUM"]["n"], 44)   # counts summed
@@ -602,8 +599,13 @@ class CalibrationTests(unittest.TestCase):
         saved = calibration.LOCAL_PATH
         try:
             calibration.LOCAL_PATH = Path(tempfile.mkdtemp()) / "local.json"
-            calibration.record_samples([{"attack_class": "missing-auth", "confidence": "MEDIUM", "is_real": True},
-                                        {"attack_class": "missing-auth", "confidence": "MEDIUM", "is_real": False}])
+            calibration.record_samples([
+                {"attack_class": "missing-auth", "confidence": "MEDIUM", "is_real": True,
+                 "evidence_verified": True, "sample_id": "fixture-positive",
+                 "provenance": {"source": "reviewed-fixture", "application_id": "test", "build_id": "rev"}},
+                {"attack_class": "missing-auth", "confidence": "MEDIUM", "is_real": False,
+                 "evidence_verified": True, "sample_id": "fixture-negative",
+                 "provenance": {"source": "reviewed-fixture", "application_id": "test", "build_id": "rev"}}])
             loc = calibration.load_local()
             self.assertEqual(loc["by_label"]["MEDIUM"], {"n": 2, "k": 1})
             self.assertEqual(loc["meta"]["samples"], 2)
@@ -673,10 +675,13 @@ class FailOpenGuardTests(unittest.TestCase):
     def test_fail_open_not_escalated(self):
         f = self._ledger(True)
         self.assertNotEqual(f["severity"], "CRITICAL")                       # not escalated
-        self.assertTrue(any("UNTRUSTWORTHY" in e["detail"] for e in f["evidence"]))
+        self.assertTrue(any("fail-open suspected" in e["detail"] for e in f["evidence"]))
 
-    def test_healthy_env_still_escalates(self):
-        self.assertEqual(self._ledger(False)["severity"], "CRITICAL")        # regression guard
+    def test_status_success_without_controls_stays_a_static_lead(self):
+        finding = self._ledger(False)
+        self.assertEqual(finding["severity"], "HIGH")
+        self.assertEqual(finding["confidence"], "MEDIUM")
+        self.assertFalse(finding["dynamic_observation"]["confirmed"])
 
 
 class ProbeStagingTests(unittest.TestCase):
@@ -1036,8 +1041,8 @@ class LedgerTests(unittest.TestCase):
             {"method": "PUT", "path": "/api/settings/config", "status": 200, "verdict": "EXECUTED-UNAUTH"}]}}
         led2 = findings.build_ledger(facts, None, dyn, [])
         cfg = next(f for f in led2["findings"] if "config" in f["title"])
-        self.assertEqual(cfg["confidence"], "HIGH")             # dynamic confirmation escalates
-        self.assertEqual(cfg["severity"], "CRITICAL")
+        self.assertEqual(cfg["confidence"], "MEDIUM")           # status-only response cannot prove bypass
+        self.assertEqual(cfg["severity"], "HIGH")
         self.assertEqual(len(cfg["evidence"]), 2)               # recon + dynamic evidence chain
         self.assertIn("CWE-862 Missing Authorization", cfg["standards"]["cwe"])
         self.assertTrue(cfg["remediation"])
@@ -1343,8 +1348,10 @@ class Wave1FalsePositiveTests(unittest.TestCase):
         (d / "s.ts").write_text("res.cookie('t', v, { httpOnly: true, secure: isProduction(), sameSite: 'lax' });")
         out = TransportSecurityExtractor().extract(
             RepoContext(d), {"stack": {"frameworks": []}, "routes": {"endpoints": [{"method": "GET", "path": "/x"}]}})
-        self.assertTrue(out["cookie_security"]["secure"])
-        self.assertFalse([f for f in out["findings"] if f["kind"] == "cookie-flags"])
+        # The option is configured, but a custom helper's result is unverified.
+        self.assertIsNone(out["cookie_security"]["secure"])
+        self.assertTrue([f for f in out["findings"] if f["kind"] == "cookie-flags"])
+        self.assertEqual(out["passes"], [])
 
 
 class Wave2DetectorTests(unittest.TestCase):
@@ -1587,11 +1594,11 @@ class Wave3DeferredDetectorTests(unittest.TestCase):
                                   "if (lvl !== 'full') return new Response('forbidden', { status: 403 });"})
         self.assertIn("unsigned-cookie-authz", self._akinds(out))
 
-    def test_cookie_authz_with_jwt_verify_not_flagged(self):
+    def test_cookie_authz_unrelated_jwt_verify_does_not_protect_cookie(self):
         out = self._adf({"mw.ts": "const lvl = req.cookies.get('twin-access-level');\n"
                                   "const ok = await jwtVerify(req.cookies.get('twin-token'), key);\n"
                                   "if (lvl !== 'full') return new Response('forbidden', { status: 403 });"})
-        self.assertNotIn("unsigned-cookie-authz", self._akinds(out))
+        self.assertIn("unsigned-cookie-authz", self._akinds(out))
 
     def test_claim_based_authz_flagged(self):
         out = self._adf({"acl.ts": "export function canAccessDocument(ctx, doc){ "
@@ -1761,7 +1768,7 @@ class LogInjectionTests(unittest.TestCase):
         d = Path(tempfile.mkdtemp())
         (d / "app.py").write_text("def h():\n    logging.info(f\"x={request.args.get('x')}\")\n")
         cli = SurfaceExtractor().extract(RepoContext(d), {"stack": {"languages": ["python"], "frameworks": []}})
-        self.assertNotIn("log-injection", cli["sinks"])
+        self.assertIn("log-injection", cli["sinks"])  # Explicit request data survives coarse stack gaps.
         web = SurfaceExtractor().extract(RepoContext(d), {"stack": {"languages": ["python"], "frameworks": ["flask"]}})
         self.assertIn("log-injection", web["sinks"])
 
@@ -1902,7 +1909,7 @@ class DynamicCorrelationTests(unittest.TestCase):
             {"path": "/api/admin/users", "status": 401, "verdict": "protected"}]}}
         titles = self._titles(dyn)
         self.assertTrue(any("POST" in t for t in titles), f"POST finding was dropped: {titles}")
-        self.assertFalse(any("GET" in t for t in titles))     # the GET really is protected
+        self.assertTrue(any("GET" in t for t in titles))      # retain static lead with scoped denial observation
 
     def test_open_GET_does_not_escalate_the_POST_on_evidence_that_never_tested_it(self):
         dyn = {"unauth_reachability": {"results": [
@@ -1911,7 +1918,7 @@ class DynamicCorrelationTests(unittest.TestCase):
                 if "POST" in f["title"]][0]
         self.assertEqual(post["confidence"], "MEDIUM")        # recon-level, not dynamically confirmed
 
-    def test_redirect_and_soft_deny_verdicts_count_as_protected(self):
+    def test_redirect_and_soft_deny_observations_do_not_erase_static_leads(self):
         # mirror of bug-208: the classifier's input gained values its branches didn't cover, so a
         # route dynamically PROVEN gated still emitted "Missing authorization".
         for verdict in ("redirect (likely to login)",
@@ -1919,24 +1926,18 @@ class DynamicCorrelationTests(unittest.TestCase):
             dyn = {"unauth_reachability": {"results": [
                 {"path": "/api/admin/users", "status": 307, "verdict": verdict}]}}
             titles = self._titles(dyn)
-            self.assertFalse(any(t.startswith("Missing authorization: GET") for t in titles), verdict)
+            self.assertTrue(any(t.startswith("Missing authorization: GET") for t in titles), verdict)
 
-    def test_every_gated_status_maps_to_a_ledger_protected_verdict(self):
-        # Guard against dynamic.py and findings.py drifting apart again — that drift IS bug-208's
-        # shape. Drive REAL verdict strings out of unauth_reachability for every gated status code
-        # and assert the ledger recognises each one as protection.
+    def test_gated_status_observations_remain_scoped_evidence(self):
         from websec_validator import dynamic
-
-        def _verdict_for(status):
-            with mock.patch.object(dynamic, "_request", lambda *a, **k: (status, "")):
-                r = dynamic.unauth_reachability(
-                    "http://t", {"routes": {"endpoints": [{"method": "GET", "path": "/x"}]}})
-            return r["results"][0]["verdict"]
-
         for status in sorted(dynamic._GATED_CODES):
-            v = _verdict_for(status)
-            recognised = v in findings._DYNAMIC_PROTECTED or v.startswith(
-                findings._DYNAMIC_PROTECTED_PREFIXES)
-            self.assertTrue(recognised,
-                            f"HTTP {status} → dynamic verdict {v!r} is NOT recognised as protected "
-                            "by the ledger — a gated route would emit a false missing-auth finding")
+            with mock.patch.object(dynamic, "_request", lambda *a, **k: (status, "")):
+                observations = dynamic.unauth_reachability("http://t", {"routes": {"endpoints": [
+                    {"method": "GET", "path": "/api/admin/users"}]}})
+            ledger = findings.build_ledger(self.FACTS, None, {"unauth_reachability": observations}, [])
+            get = next(row for row in ledger["findings"] if row["method"] == "GET")
+            post = next(row for row in ledger["findings"] if row["method"] == "POST")
+            self.assertEqual(get["dynamic_observation"]["status"], status)
+            self.assertFalse(get["dynamic_observation"]["confirmed"])
+            self.assertEqual(get["confidence"], "MEDIUM")
+            self.assertNotIn("dynamic_observation", post)

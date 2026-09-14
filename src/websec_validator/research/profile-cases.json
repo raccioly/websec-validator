@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "scope": "synthetic named-check controls; not production recall",
+  "provenance": "Authored regression evaluation cases, distinct from development fixtures. Not statistically independent or real-world vulnerability labels.",
+  "cases": [
+    {"id":"java-heldout-risk","rule_id":"java-direct-command","expected_findings":1,"files":{"Search.java":"class Search { void run() { new ProcessBuilder(req.getHeader(\"X-Worker\")).start(); } }"}},
+    {"id":"java-heldout-control","rule_id":"java-direct-command","expected_findings":0,"files":{"Search.java":"class Search { void run() { new ProcessBuilder(\"date\", \"-u\").start(); } }"}},
+    {"id":"dotnet-heldout-risk","rule_id":"dotnet-direct-query","expected_findings":1,"files":{"Export.cs":"var rows = db.ExecuteSqlRaw(\"DELETE FROM cache WHERE key=\" + HttpContext.Request.Query[\"key\"]);"}},
+    {"id":"dotnet-heldout-control","rule_id":"dotnet-direct-query","expected_findings":0,"files":{"Export.cs":"var rows = db.ExecuteSqlRaw(\"DELETE FROM cache WHERE key={0}\", HttpContext.Request.Query[\"key\"]);"}},
+    {"id":"go-heldout-risk","rule_id":"go-direct-query","expected_findings":1,"files":{"worker.go":"package main\nfunc serve() { db.QueryRowContext(ctx, \"SELECT owner FROM files WHERE id=\" + req.URL.Query().Get(\"file\")) }"}},
+    {"id":"go-heldout-control","rule_id":"go-direct-query","expected_findings":0,"files":{"worker.go":"package main\nfunc serve() { db.QueryRowContext(ctx, \"SELECT owner FROM files WHERE id=$1\", req.URL.Query().Get(\"file\")) }"}},
+    {"id":"ruby-heldout-risk","rule_id":"ruby-direct-query","expected_findings":1,"files":{"export.rb":"Archive.find_by_sql(\"SELECT * FROM archive WHERE token=#{params[:token]}\")"}},
+    {"id":"ruby-heldout-control","rule_id":"ruby-direct-query","expected_findings":0,"files":{"export.rb":"Archive.find_by_sql([\"SELECT * FROM archive WHERE token=?\", params[:token]])"}},
+    {"id":"php-heldout-risk","rule_id":"php-direct-query","expected_findings":1,"files":{"export.php":"<?php mysqli_query($conn, \"SELECT * FROM invoice WHERE ref=\" . $_POST['ref']);"}},
+    {"id":"php-heldout-control","rule_id":"php-direct-query","expected_findings":0,"files":{"export.php":"<?php mysqli_query($conn, \"SELECT * FROM invoice LIMIT 5\");"}},
+    {"id":"android-heldout-risk","rule_id":"android-explicit-cleartext","expected_findings":1,"files":{"client/AndroidManifest.xml":"<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"><application android:label=\"Atlas\" android:usesCleartextTraffic=\"true\" android:networkSecurityConfig=\"@xml/policy\" /></manifest>"}},
+    {"id":"android-heldout-control","rule_id":"android-explicit-cleartext","expected_findings":0,"files":{"client/AndroidManifest.xml":"<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"><application android:label=\"Atlas\" android:usesCleartextTraffic=\"false\" /></manifest>"}},
+    {"id":"ios-heldout-risk","rule_id":"ios-explicit-ats-exception","expected_findings":1,"files":{"Atlas/Info.plist":"<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoadsInWebContent</key><true/></dict></dict></plist>"}},
+    {"id":"ios-heldout-control","rule_id":"ios-explicit-ats-exception","expected_findings":0,"files":{"Atlas/Info.plist":"<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoadsInWebContent</key><false/></dict></dict></plist>"}},
+    {"id":"rust-heldout-risk","rule_id":"rust-reqwest-invalid-certificates","expected_findings":1,"files":{"relay.rs":"fn main() { let http = reqwest::Client::builder().tls_danger_accept_invalid_certs( true ).build(); }"}},
+    {"id":"rust-heldout-control","rule_id":"rust-reqwest-invalid-certificates","expected_findings":0,"files":{"relay.rs":"fn main() { let http = reqwest::Client::builder().tls_danger_accept_invalid_certs( false ).build(); }"}},
+    {"id":"native-heldout-manual","rule_id":"native-memory-review","expected_findings":0,"files":{"copy.cpp":"void copy(char *to, const char *from) { strcpy(to, from); }"}}
+  ]
+}

@@ -91,6 +91,76 @@ class InventoryTests(unittest.TestCase):
         self.assertIn("| `POST /w` |", md)
         self.assertIn("Why test it", md)
 
+    def test_same_path_services_keep_independent_guards(self):
+        endpoints = [{"service_id": service, "method": "POST", "path": "/sensitive", "code_path": service + "/api.js"}
+                     for service in ("billing", "admin")]
+        guards = [{**endpoint, "guarded": endpoint["service_id"] == "admin", "analyzed": True} for endpoint in endpoints]
+        for ordered in (guards, list(reversed(guards))):
+            result = inventory.build(_facts(endpoints, ordered))
+            self.assertEqual({"billing": "UNGUARDED", "admin": "guarded"},
+                             {row["service_id"]: row["auth"] for row in result["endpoints"]})
+            self.assertEqual(1, result["summary"]["unguarded_writes"])
+            self.assertIn("`billing`", inventory.render_md(result))
+
+    def test_same_service_different_source_does_not_share_guard(self):
+        endpoints = [{"service_id": "api", "method": "POST", "path": "/same", "code_path": path}
+                     for path in ("first.js", "second.js")]
+        guards = [{**endpoints[0], "guarded": True, "analyzed": True},
+                  {**endpoints[1], "guarded": False, "analyzed": True}]
+        rows = inventory.build(_facts(endpoints, guards))["endpoints"]
+        self.assertEqual({"first.js": "guarded", "second.js": "UNGUARDED"}, {r["handler"]: r["auth"] for r in rows})
+
+    def test_ambiguous_legacy_guard_is_unknown_for_every_service(self):
+        endpoints = [{"service_id": service, "method": "GET", "path": "/same", "code_path": service + "/api.js"}
+                     for service in ("one", "two")]
+        rows = inventory.build(_facts(endpoints, [{"method": "GET", "path": "/same", "guarded": True, "analyzed": True}]))["endpoints"]
+        self.assertEqual(["unknown", "unknown"], [r["auth"] for r in rows])
+
+    def test_conflicting_known_service_cannot_fallback_by_path(self):
+        endpoints = [{"service_id": "one", "method": "GET", "path": "/same", "code_path": "api.js"}]
+        guards = [{"service_id": "two", "method": "GET", "path": "/same", "code_path": "api.js", "guarded": True, "analyzed": True}]
+        self.assertEqual("unknown", inventory.build(_facts(endpoints, guards))["endpoints"][0]["auth"])
+
+    def test_absolute_guard_source_joins_relative_endpoint(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            endpoints = [{"method": "GET", "path": "/same", "code_path": "api.js"}]
+            guards = [{"method": "GET", "path": "/same", "code_path": str(Path(directory) / "api.js"), "guarded": True, "analyzed": True}]
+            self.assertEqual("guarded", inventory.build(_facts(endpoints, guards, target=directory))["endpoints"][0]["auth"])
+
+    def test_noir_absolute_source_and_fallback_share_service_identity(self):
+        import json
+        import tempfile
+        from unittest.mock import patch
+        from websec_validator.extractors.base import RepoContext
+        from websec_validator.extractors.stack import StackExtractor
+        from websec_validator.extractors.routes import RoutesExtractor
+        from websec_validator.extractors.authz import AuthzExtractor
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for service, framework, source in (
+                    ("a", "fastify", 'fastify.addHook("onRequest", authenticate); fastify.post("/sensitive", handler);'),
+                    ("b", "express", 'app.post("/sensitive", handler);')):
+                (root / service).mkdir()
+                (root / service / "package.json").write_text(json.dumps({"dependencies": {framework: "1"}}))
+                (root / service / "server.js").write_text(source)
+            context = RepoContext(root)
+            facts = {"target": str(root), "stack": StackExtractor().extract(context, {})}
+            # Include equivalent absolute/relative Noir rows and rely on the existing
+            # heuristic for the other service, exactly as the real integration does.
+            noir = [{"method": "POST", "path": "/sensitive", "details": {"code_paths": [{"path": path}]}}
+                    for path in (str((root / "b/server.js").resolve()), "b/server.js")]
+            with patch("websec_validator.extractors.routes._noir_scan", return_value=noir):
+                facts["routes"] = RoutesExtractor().extract(context, facts)
+            facts["authz"] = AuthzExtractor().extract(context, facts)
+            self.assertEqual(2, len(facts["routes"]["endpoints"]))
+            self.assertEqual({"a", "b"}, {row["service_id"] for row in facts["routes"]["endpoints"]})
+            for endpoints in (facts["routes"]["endpoints"], list(reversed(facts["routes"]["endpoints"]))):
+                facts["routes"]["endpoints"] = endpoints
+                rows = inventory.build(facts)["endpoints"]
+                self.assertEqual({"a": "guarded", "b": "UNGUARDED"}, {row["service_id"]: row["auth"] for row in rows})
+                self.assertEqual({"a/server.js", "b/server.js"}, {row["handler"] for row in rows})
+
 
 
 

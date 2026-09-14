@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 
 from .base import Extractor, RepoContext, is_client_file, is_test_file
+from .syntax import call_expression, direct_call, in_literal, js_functions, split_arguments, without_comments
 
 UPLOAD_MARK = re.compile(r"\bmulter\b|req\.files?\b|multipart/form-data|formidable|busboy|fileFilter"
                          r"|uploadMedia|presignedPost|\.upload\s*\(", re.I)
@@ -28,7 +29,7 @@ ALLOW_LIST = re.compile(r"isAllowedMediaType|allowedMimeTypes|allow[_-]?list|whi
 KEY_FROM_NAME = re.compile(r"(?:Key|key|path|filename|filepath|destination|filename\s*\()\s*[:=(][^;\n]{0,90}"
                            r"\b(?:originalname|originalName|file\.name)\b"
                            r"|`[^`]*\$\{[^}]*\boriginalname\b[^}]*\}[^`]*`", re.I)
-TRUST_CLIENT_MIME = re.compile(r"(?:req\.files?\.[\w$.]*\.|\bfile\.)mimetype\b|headers\[['\"]content-type['\"]\]", re.I)
+TRUST_CLIENT_MIME = re.compile(r"(?:\b(?:req|request)\.files?(?:\.[\w$]+)*|\bfile)\.mimetype\b|headers\[['\"]content-type['\"]\]", re.I)
 ACCEPT_SVG = re.compile(r"image/svg\+xml|['\"]svg['\"]", re.I)
 # file-serving: streaming a STORED/PROXIED object back to the client. Tightened to genuine
 # file-bytes sinks — the old rule matched a bare `getObject` token (a local coercion helper) and a
@@ -39,6 +40,133 @@ NOSNIFF = re.compile(r"nosniff", re.I)
 # `Content-Disposition: attachment` fully defeats the MIME-sniff→stored-XSS vector (the browser
 # downloads instead of rendering), so a serve site that sets it is SAFE even without nosniff.
 ATTACHMENT = re.compile(r"attachment\s*;|disposition[^,;]{0,30}attachment|['\"]attachment['\"]|buildContentDisposition", re.I)
+
+
+def _response_file_sites(source: str) -> list[dict]:
+    """Find concrete response operations, not standalone filesystem/object reads."""
+    sites = []
+    sink = re.compile(r"\b([\w$]+)\.(sendFile|send)\s*\(|\.pipe\s*\(\s*(res|response)\b|\bnew\s+Response\s*\(")
+    byte_source = re.compile(r"createReadStream|\breadFile(?:Sync)?\s*\(|\.getObject\s*\(|\bstreamObject\s*\(")
+    for match in sink.finditer(source):
+        if in_literal(source, match.start()):
+            continue
+        expression = call_expression(source, match.start())
+        if match[2] == "send" or match[0].startswith("new"):
+            args = split_arguments(expression[expression.find("(") + 1:-1])
+            body = args[0] if args else ""
+            if not any(not in_literal(body, item.start()) for item in byte_source.finditer(body)):
+                continue
+        sites.append({"start": match.start(), "expression": expression,
+                      "kind": match[2] or ("pipe" if match[3] else "response"),
+                      "receiver": match[1] or match[3] or ""})
+    return sites
+
+
+def _object_properties(value: str, *, header_names: bool = False) -> dict | None:
+    """Read direct object fields only; ambiguous spreads/duplicates stay unknown."""
+    value = value.strip()
+    if not value.startswith("{") or not value.endswith("}"):
+        return None
+    properties = {}
+    for field in split_arguments(value[1:-1]):
+        if not field:
+            continue
+        match = re.fullmatch(r'''(?:([\w$]+)|"([^"\\]+)"|'([^'\\]+)')\s*:\s*(.+)''', field, re.S)
+        if not match:
+            return None
+        key = match[1] or match[2] or match[3]
+        key = key.lower() if header_names else key
+        if key in properties:
+            return None
+        properties[key] = match[4].strip()
+    return properties
+
+
+def _response_header_control(source: str, site: dict, scopes: list[dict]) -> bool:
+    """Accept literal headers on this response or a straight header-only prefix."""
+    expression = site["expression"]
+
+    def protected(key, value):
+        return ((key.lower() == "x-content-type-options" and value.lower() == "nosniff")
+                or (key.lower() == "content-disposition" and re.match(r"attachment(?:\s*;|$)", value, re.I)))
+
+    arguments = split_arguments(expression[expression.find("(") + 1:-1]) if expression.endswith(")") else []
+    if len(arguments) > 1 and site["kind"] in {"sendFile", "response"}:
+        options = _object_properties(arguments[1])
+        if options is None:
+            return False
+        if "headers" in options:
+            headers = _object_properties(options["headers"], header_names=True)
+            if headers is None:
+                return False
+            # Only the direct response options.headers field controls this sink.
+            # A headers object in the file-read argument or a nested unused option
+            # is not response policy. Unknown values cannot prove protection.
+            return any(re.fullmatch(r'''"[^"\\]*"|'[^'\\]*' ''', value, re.X)
+                       and protected(key, value[1:-1]) for key, value in headers.items())
+    scopes_here = [scope for scope in scopes if scope["body_start"] <= site["start"] < scope["end"]]
+    scope = min(scopes_here, key=lambda row: row["end"] - row["start"]) if scopes_here else None
+    start = scope["body_start"] if scope else 0
+    # Everything before this statement must be a same-receiver header setter.
+    prefix = source[start:site["start"]]
+    prefix = prefix[:prefix.rfind(";") + 1].strip()
+    if not prefix or not site["receiver"]:
+        return False
+    values = {}
+    while prefix:
+        setter = re.match(re.escape(site["receiver"]) + r"\.(?:setHeader|set|header)\s*\(", prefix)
+        if not setter:
+            return False
+        call = call_expression(prefix, 0)
+        args = split_arguments(call[call.find("(") + 1:-1])
+        if len(args) != 2 or any(not re.fullmatch(r'''"[^"\\]*"|'[^'\\]*' ''', arg, re.X) for arg in args):
+            return False
+        values[args[0][1:-1].lower()] = args[1][1:-1]
+        prefix = prefix[len(call):].lstrip()
+        if not prefix.startswith(";"):
+            return False
+        prefix = prefix[1:].lstrip()
+    return any(protected(key, value) for key, value in values.items())
+
+
+def _byte_allowlist(scope: dict | None, file_object: str, source: str) -> bool:
+    """A narrow detected-byte allowlist that rejects before processing this upload.
+
+    Named predicates, imports and unrelated sniff calls remain unverified. The
+    buffer must belong to the same file whose declared MIME is being consumed.
+    """
+    if not scope or not file_object or js_functions(scope["body"]):
+        return False
+    body = scope["body"].strip()
+    sniff = re.match(r"const\s+([\w$]+)\s*=\s*await\s+fileTypeFromBuffer\(\s*"
+                     + re.escape(file_object) + r"\.buffer\s*\)\s*;", body)
+    if not sniff:
+        return False
+    if not direct_call("fileTypeFromBuffer(" + file_object + ".buffer)", "fileTypeFromBuffer", program=source):
+        return False
+    tail = body[sniff.end():].lstrip()
+    guard = re.match(r"if\s*\(\s*" + re.escape(sniff[1])
+                     + r"\??\.mime\s*!==\s*(['\"])(image/(?:png|jpeg|webp)|application/pdf)\1\s*\)\s*", tail)
+    if not guard:
+        return False
+    stop = tail[guard.end():].lstrip()
+    reject = re.match(r"(?:\{\s*)?return(?:\s+(?:false|null)|\s+[\w$]+\.status\(\s*(?:400|415)\s*\)\.(?:end|send)\(\s*\))?\s*;", stop)
+    if not reject:
+        return False
+    # Mutating the file/detected object after the check breaks this simple proof.
+    after = stop[reject.end():]
+    roots = {file_object.split(".")[0], sniff[1]}
+    for root in roots:
+        if re.search(r"\b" + re.escape(root) + r"(?:\.[\w$]+)*\s*=(?!=)", after):
+            return False
+    return True
+
+
+def _mime_unsafe(source: str, match, scopes: list[dict]) -> bool:
+    containing = [scope for scope in scopes if scope["body_start"] <= match.start() < scope["end"]]
+    scope = min(containing, key=lambda item: item["end"]-item["start"]) if containing else None
+    file_match = re.search(r"([\w$]+(?:\.[\w$]+)*)\.mimetype", match[0])
+    return not _byte_allowlist(scope, file_match[1] if file_match else "", source)
 
 
 class UploadSecurityExtractor(Extractor):
@@ -57,7 +185,13 @@ class UploadSecurityExtractor(Extractor):
             is_upload = bool(UPLOAD_MARK.search(text))
             if is_upload:
                 upload_files.append(rel)
-                if DENY_LIST.search(text) and not ALLOW_LIST.search(text):
+                source = without_comments(text, _p.suffix)
+                scopes = js_functions(source)
+                mime_sites = [match for match in TRUST_CLIENT_MIME.finditer(source)
+                              if not in_literal(source, match.start())]
+                unsafe_mime = [match for match in mime_sites if _mime_unsafe(source, match, scopes)]
+                deny_sites = [match for match in DENY_LIST.finditer(source) if not in_literal(source, match.start())]
+                if deny_sites and (unsafe_mime or not mime_sites):
                     findings.append({"severity": "MEDIUM", "kind": "upload-denylist-only", "file": rel,
                                      "detail": "Upload handler blocks a deny-list but has no positive allow-list by "
                                                "SNIFFED magic bytes — a payload that sniffs to octet-stream/unknown "
@@ -68,22 +202,32 @@ class UploadSecurityExtractor(Extractor):
                                                "(`originalname`) — a polyglot named `Jpg.php` with valid image magic "
                                                "bytes is stored executable. Derive the stored name/extension from the "
                                                "DETECTED type, never the upload filename."})
-                if TRUST_CLIENT_MIME.search(text) and not ALLOW_LIST.search(text):
+                if unsafe_mime:
                     findings.append({"severity": "MEDIUM", "kind": "upload-trusts-client-mime", "file": rel,
+                                     "line": source.count("\n", 0, unsafe_mime[0].start()) + 1,
                                      "detail": "Storage/validation decision uses the client-supplied `mimetype`/"
-                                               "Content-Type, which is attacker-controlled. Sniff the bytes instead."})
+                                               "Content-Type, which is attacker-controlled. No supported enforcing "
+                                               "byte-type allowlist was found for that file in the same handler; "
+                                               "named helpers and complex controls remain unverified. Sniff the bytes instead."})
                 if ACCEPT_SVG.search(text):
                     findings.append({"severity": "MEDIUM", "kind": "upload-accepts-svg", "file": rel,
                                      "detail": "`image/svg+xml` is accepted — SVG can carry inline <script> and renders "
                                                "as HTML. Drop SVG from the allow-list, or sanitize + serve as attachment."})
-            if SERVE_FILE.search(text) and not NOSNIFF.search(text) and not ATTACHMENT.search(text):
-                serve_files.append(rel)
-                findings.append({"severity": "HIGH", "kind": "serve-no-nosniff", "file": rel,
-                                 "detail": "A stored/proxied file is served with no `X-Content-Type-Options: nosniff` "
-                                           "and no `Content-Disposition: attachment` — the browser MIME-sniffs the body "
-                                           "and can render a stored file as HTML same-origin (stored XSS). Always send "
-                                           "nosniff, and force any browser-executable type (html/svg/xml/js) to "
-                                           "`application/octet-stream` + attachment."})
+            if SERVE_FILE.search(text) or "Response" in text or ".send(" in text:
+                source = without_comments(text, _p.suffix)
+                sites = _response_file_sites(source)
+                scopes = js_functions(source) if sites else []
+                for site in sites:
+                    if not _response_header_control(source, site, scopes):
+                        serve_files.append(rel)
+                        findings.append({"severity": "HIGH", "kind": "serve-no-nosniff", "file": rel,
+                                         "line": source.count("\n", 0, site["start"]) + 1,
+                                         "control_scope": "response operation; complex header flow unverified",
+                                         "detail": "A file response has no supported literal nosniff or attachment "
+                                                   "control bound to this operation. Verify its origin, content type "
+                                                   "and headers before concluding stored XSS is reachable. Send "
+                                                   "X-Content-Type-Options: nosniff and serve browser-executable "
+                                                   "uploads as application/octet-stream with attachment disposition."})
 
         by_sev: dict = {}
         for f in findings:

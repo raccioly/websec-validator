@@ -5,13 +5,13 @@ STRICTLY ADDITIVE — they attach metadata and annotate the human-readable title
 finding's severity, NEVER drop a finding, and NEVER add one. So they can only sharpen triage, never
 reintroduce a false positive (the no-regression bar).
 
-  - reachability : for a dependency CVE, is the vulnerable PACKAGE actually imported in first-party
-                   source? "declared-only" (in the lockfile but never imported) is the industry's #1
-                   noise class (Snyk/Endor/Semgrep converge here). Name-based + offline: a real
-                   call-graph is out of model; this is the cheap, honest approximation.
+  - reachability : records whether a package-name import was found in bounded first-party source.
+                   Import absence does not establish runtime unreachability; dynamic imports,
+                   transitive calls, unsupported languages and omitted files remain outside this evidence.
   - exploitability : join each CVE against a LOCAL cache of FIRST.org EPSS (exploit probability) +
                    CISA KEV (known-exploited). The "priority score" commercial tools sell, minus the
-                   cloud. Cache is refreshed by scripts/refresh-epss-kev.sh; absent cache → skipped.
+                   cloud. Explicit `websec intel refresh` validates snapshots; legacy cache data is
+                   marked unverified. Absent cache → skipped.
 
 Stdlib only. No network here — the EPSS/KEV *refresh* is a separate opt-in step; this module only
 READS whatever cache is already on disk.
@@ -20,12 +20,14 @@ READS whatever cache is already on disk.
 from __future__ import annotations
 
 import csv
+import io
 import json
+import math
 import os
 import re
 from pathlib import Path
 
-from .extractors.base import RepoContext
+from .extractors.base import RepoContext, read_artifact
 
 # ── reachability ────────────────────────────────────────────────────────────────────────────────
 # Ecosystems whose imports we can parse. A CVE in a go/cargo/etc. package is tagged "n/a" (we make
@@ -138,13 +140,13 @@ def enrich_reachability(findings: list, target: "Path | str | None") -> dict:
             if "declared-only" not in f.get("title", ""):
                 f["title"] = f.get("title", "") + (
                     f" — declared-only (no import of `{pkg}` found in first-party source; "
-                    "likely unreachable — verify before deprioritizing)")
+                    "import search is incomplete evidence; runtime reachability is unknown)")
     return {"analyzed": len(sca), "imported": imported,
             "declared_only": declared_only, "not_analyzed": not_analyzed}
 
 
 # ── exploitability (EPSS + CISA KEV) ────────────────────────────────────────────────────────────
-# Local cache location. Refreshed by scripts/refresh-epss-kev.sh (the only network step); this module
+# Local cache location. Refreshed by explicit `websec intel refresh`; this module
 # is read-only/offline. Override with WEBSEC_ENRICH_DIR for tests / custom caches.
 def _cache_dir() -> Path:
     env = os.environ.get("WEBSEC_ENRICH_DIR")
@@ -164,14 +166,16 @@ def _load_epss(cache: Path) -> dict:
     if not f.is_file():
         return out
     try:
-        with f.open(newline="") as fh:
+        with io.StringIO(read_artifact(f)) as fh:
             reader = csv.reader(fh)
             for row in reader:
                 if not row or row[0].startswith("#") or row[0].lower() == "cve":
                     continue
                 if len(row) >= 3 and _CVE_RE.match(row[0]):
                     try:
-                        out[row[0].upper()] = (float(row[1]), float(row[2]))
+                        values = (float(row[1]), float(row[2]))
+                        if all(math.isfinite(v) and 0 <= v <= 1 for v in values):
+                            out[row[0].upper()] = values
                     except ValueError:
                         continue
     except Exception:
@@ -185,7 +189,7 @@ def _load_kev(cache: Path) -> set:
     if not f.is_file():
         return set()
     try:
-        data = json.loads(f.read_text())
+        data = json.loads(read_artifact(f))
         return {v.get("cveID", "").upper() for v in (data.get("vulnerabilities") or [])
                 if v.get("cveID")}
     except Exception:
@@ -196,14 +200,21 @@ def enrich_exploitability(findings: list, cache_dir: "Path | str | None" = None)
     """Join CVE findings against the local EPSS + KEV cache. Tags `epss`, `epss_pct`, `kev` and
     annotates the title. ADDITIVE — never changes severity. Skipped (available=False) if no cache."""
     cache = Path(cache_dir) if cache_dir else _cache_dir()
-    epss, kev = _load_epss(cache), _load_kev(cache)
+    from . import intel
+    snapshot = intel.load_snapshot(cache)
+    provenance = intel.status(cache)
+    if snapshot:
+        epss, kev = snapshot["epss"], set(snapshot["kev"])
+    else:
+        epss, kev = _load_epss(cache), _load_kev(cache)
     if not epss and not kev:
-        return {"available": False, "kev": 0, "high_epss": 0}
+        return {"available": False, "kev": 0, "high_epss": 0, "intel": provenance}
     kev_n = high_epss = 0
     for f in findings:
         cve = (f.get("cve") or f.get("key") or "").upper()
         if not _CVE_RE.match(cve):
             continue
+        f["intel"] = provenance
         notes = []
         if cve in kev:
             f["kev"] = True
@@ -220,4 +231,4 @@ def enrich_exploitability(findings: list, cache_dir: "Path | str | None" = None)
                 notes.append(f"EPSS {prob:.1%}")
         if notes and "EPSS" not in f.get("title", "") and "KEV" not in f.get("title", ""):
             f["title"] = f.get("title", "") + " — " + "; ".join(notes)
-    return {"available": True, "kev": kev_n, "high_epss": high_epss}
+    return {"available": True, "kev": kev_n, "high_epss": high_epss, "intel": provenance}

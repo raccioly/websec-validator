@@ -57,9 +57,12 @@ def _location_file(location: str) -> str:
     return loc
 
 
-def load_graph(graph_path: Path) -> dict | None:
+def load_graph(graph_path: Path, *, context=None) -> dict | None:
+    from .extractors.base import RepoContext
+    graph_path = Path(graph_path).absolute()
+    ctx = context or RepoContext(graph_path.parent, walk=False)
     try:
-        data = json.loads(graph_path.read_text(encoding="utf-8"))
+        data = json.loads(ctx.text(graph_path))
     except (OSError, ValueError):
         return None
     if not isinstance(data, dict) or "nodes" not in data:
@@ -132,17 +135,26 @@ def _blast_radius(seed_ids: list[str], reverse: dict[str, list[str]], node_by_id
     return len(dependents), sample, truncated
 
 
-def enrich_ledger(ledger: dict, target: Path, graph_path: Path | None = None) -> dict:
+def enrich_ledger(ledger: dict, target: Path, graph_path: Path | None = None, *, excludes=None) -> dict:
     """Attach a `graph` block to each finding whose location maps to a graph node, plus a ledger-level
     `graph_enrichment` summary. No-op (ledger returned unchanged) when no graph is present.
 
     Callers should still wrap this in try/except — enrichment must never fail a run.
     """
-    gp = graph_path or (target / "graphify-out" / "graph.json")
+    from .extractors.base import RepoContext
+    gp = Path(graph_path).absolute() if graph_path else Path(target) / "graphify-out" / "graph.json"
     if not gp.exists():
         return ledger
-    graph = load_graph(gp)
+    ctx = RepoContext(gp.parent if graph_path else target, excludes, walk=False)
+    graph = load_graph(gp, context=ctx)
+    if ledger.get("coverage") is not None:
+        from . import coverage
+        prefix = f"external-graph:{gp.parent}:" if graph_path is not None else ""
+        coverage.include_reads(ledger["coverage"], ctx, input_prefix=prefix)
     if graph is None:
+        ledger["graph_enrichment"] = {"available": False, "input": str(gp),
+                                      "explicit_input": graph_path is not None,
+                                      "reason": "unreadable, excluded, out of scope or invalid graph"}
         return ledger
 
     file_to_nodes, reverse, node_by_id = _build_index(graph)
@@ -168,6 +180,8 @@ def enrich_ledger(ledger: dict, target: Path, graph_path: Path | None = None) ->
         any_truncated = any_truncated or truncated
 
     ledger["graph_enrichment"] = {
+        "available": True,
+        "explicit_input": graph_path is not None,
         "graph": str(gp),
         "built_at_commit": graph.get("built_at_commit"),
         "nodes": len(node_by_id),

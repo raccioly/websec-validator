@@ -58,8 +58,33 @@ def build(facts: dict) -> dict:
     routes = facts.get("routes", {}) or {}
     targeting = routes.get("targeting", {}) or {}
     target = facts.get("target")
-    guards = {(g.get("method"), g.get("path")): g
-              for g in (facts.get("authz", {}) or {}).get("endpoint_guards", []) or []}
+    endpoints = routes.get("endpoints", []) or []
+    guards = (facts.get("authz", {}) or {}).get("endpoint_guards", []) or []
+    endpoint_groups, guard_groups = {}, {}
+    for index, endpoint in enumerate(endpoints):
+        endpoint_groups.setdefault((endpoint.get("method", "GET"), endpoint.get("path", "")), []).append(index)
+    for guard in guards:
+        guard_groups.setdefault((guard.get("method"), guard.get("path")), []).append(guard)
+
+    def compatible(endpoint, guard):
+        for key in ("service_id", "code_path"):
+            left, right = endpoint.get(key), guard.get(key)
+            if key == "code_path":
+                left, right = _rel(left, target), _rel(right, target)
+            if left and right and left != right:
+                return False
+        return True
+
+    def guard_for(index, endpoint):
+        key = (endpoint.get("method", "GET"), endpoint.get("path", ""))
+        candidates = [guard for guard in guard_groups.get(key, []) if compatible(endpoint, guard)]
+        if len(candidates) != 1:
+            return {}
+        guard = candidates[0]
+        # Legacy rows without a service/source may be used only for a unique route.
+        # Do not fan a single guard out to several same-path service registrations.
+        matches = [other for other in endpoint_groups[key] if compatible(endpoints[other], guard)]
+        return guard if matches == [index] else {}
     # sink class → set of files containing it
     sink_files: dict = {}
     for cls, info in ((facts.get("surface", {}) or {}).get("sinks", {}) or {}).items():
@@ -67,11 +92,11 @@ def build(facts: dict) -> dict:
             sink_files.setdefault(str(f).replace("\\", "/"), set()).add(cls)
 
     rows = []
-    for ep in routes.get("endpoints", []) or []:
+    for index, ep in enumerate(endpoints):
         method = ep.get("method", "GET")
         path = ep.get("path", "")
         rel = _rel(str(ep.get("code_path", "")), target)
-        g = guards.get((method, path), {})
+        g = guard_for(index, ep)
         guarded = g.get("guarded")
         analyzed = bool(g.get("analyzed"))
         public_hint = bool(g.get("public_hint"))
@@ -82,7 +107,7 @@ def build(facts: dict) -> dict:
         hot_sinks = [s for s in sinks if s in _HIGH_RISK_SINKS]
 
         # auth verdict: only claim UNGUARDED when the analyzer actually looked and found no guard
-        if not analyzed:
+        if not analyzed or guarded not in (True, False):
             auth = "unknown"
         elif guarded:
             auth = "guarded"
@@ -126,6 +151,7 @@ def build(facts: dict) -> dict:
 
         rows.append({
             "method": method, "path": path, "handler": rel,
+            "service_id": ep.get("service_id") or g.get("service_id") or "",
             "technology": ep.get("technology", ""), "auth": auth,
             "path_params": path_params,
             "params": [p.get("name") for p in params if p.get("name")],
@@ -134,7 +160,7 @@ def build(facts: dict) -> dict:
         })
 
     # rank: highest risk first, then writes, then path for stable output
-    rows.sort(key=lambda r: (-r["risk"], not r["is_write"], r["path"], r["method"]))
+    rows.sort(key=lambda r: (-r["risk"], not r["is_write"], r["path"], r["method"], r["service_id"], r["handler"]))
     summary = {
         "endpoints": len(rows),
         "unguarded": sum(1 for r in rows if r["auth"] == "UNGUARDED"),
@@ -158,13 +184,13 @@ def render_md(inv: dict, limit: int = 25) -> str:
             "_Sinks are attributed per FILE (not per handler function) — several endpoints can share a "
             "file and only one may hold the sink. Treat it as \"look here\", not \"this endpoint is "
             "vulnerable\"._\n\n"
-            "| # | Endpoint | Auth | Handler file | Sinks (in file) | Risk | Why test it |\n"
-            "|---|---|---|---|---|---|---|\n")
+            "| # | Endpoint | Service | Auth | Handler file | Sinks (in file) | Risk | Why test it |\n"
+            "|---|---|---|---|---|---|---|---|\n")
     body = []
     for i, r in enumerate(rows[:limit], 1):
         why = "; ".join(r["why"]) or "—"
         sinks = ", ".join(r["sinks"]) or "—"
-        body.append(f"| {i} | `{r['method']} {r['path']}` | {r['auth']} | `{r['handler'] or '?'}` | "
+        body.append(f"| {i} | `{r['method']} {r['path']}` | `{r.get('service_id') or '?'}` | {r['auth']} | `{r['handler'] or '?'}` | "
                     f"{sinks} | **{r['risk']}** | {why} |")
     more = (f"\n\n_…{len(rows) - limit} more in `attack-surface.json`._" if len(rows) > limit else "")
     return head + "\n".join(body) + more

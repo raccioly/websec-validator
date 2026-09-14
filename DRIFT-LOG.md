@@ -7,20 +7,30 @@
 
 ## Active Drift
 
-_None._ The canonical docs in `docs-canonical/` were re-synced to the shipped **v0.9.1** tree
-(2026-07-02) — extractor inventory (20, adds `webext`), test count (238), and version markers updated
-to match code, so code and canonical intent are currently aligned. When code must deviate, add a
-`# DRIFT: reason` comment at the site and a row here.
+Canonical security, execution-accounting and evidence contracts were updated alongside the
+approved hardening batch on 2026-09-12. Remaining feature and validation documentation is finalized
+with its corresponding implementation; historical benchmark numbers are not treated as current proof.
 
-| ID | File | Line | Canonical Doc | Deviation | Reason | Date |
-|----|------|------|---------------|-----------|--------|------|
-| —  | —    | —    | —             | —         | —      | —    |
+The continued 2026-09-14 review adds bounded source caching, native scanner diagnostics and offline
+SARIF evidence contracts. These are approved source changes, not claims about an existing release
+tag. The reviewed checkpoint passed 983 application tests on Python 3.14 and 3.12 plus 41 automation
+tests; isolated-wheel smoke checks also passed. Local-hook and Action documentation is finalized
+with its separate integration review; distribution examples remain an explicit next phase.
 
 ## Resolved Drift
 
 | ID | Resolution | Date |
 |----|------------|------|
-| —  | —          | —    |
+| review-root-boundary | Shared contained read policy now covers code/config/auxiliary inputs; documented stable-checkout and external-scanner limits. | 2026-09-12 |
+| review-mcp-boundary | Replaced unauthenticated/LAN HTTP guidance with authenticated loopback-only transport and approved roots. | 2026-09-12 |
+| review-coverage | Schema 2.0 exposes execution gaps and scope; `latest` denotes last completed execution. | 2026-09-12 |
+| review-evidence | Replaced status/silence-as-proof and unmatched-as-false assumptions with evidence-backed labels and explicit unknowns. | 2026-09-12 |
+| review-lifecycle | Disappearance is no longer observed; repair validation requires bound before/after evidence. | 2026-09-12 |
+| review-external-analysis | SARIF import reuses specialist reports without executing target builds; freshness remains unverified and imported repair completion unsupported. | 2026-09-14 |
+| review-source-budget | Aggregate retained payload budget and case-insensitive private paths are disclosed; alias hashes and read policy participate in evidence accounting. | 2026-09-14 |
+| review-scanner-contracts | Native errors/contradictory counts prevent complete execution; manifest/version/resource identities and intelligence metadata survive normalization. | 2026-09-14 |
+| review-control-scope | Cookie flags and PII/webhook/upload/extension controls require evidence tied to the affected value or response. | 2026-09-14 |
+| review-continuous-gates | Accepted hook baselines advance only on successful policy-matched gates; isolated imports and trusted Action inputs/current artifacts replace implicit trust in target paths and latest output. | 2026-09-14 |
 
 ## Accepted Tool Meta-False-Positives
 
@@ -48,3 +58,26 @@ when it sounds impressive.
 | **`gitleaks --log-opts=--all`** (scan all refs for secrets) | The premise was false. `gitleaks detect` (without `--no-git`) already walks the commit graph across ALL refs — proven with a secret committed on a side branch and found from another branch with the file absent from HEAD and the working tree. The flag would have been a no-op. The real gap it exposed (a secret whose file is already deleted is still leaked) shipped instead as the HISTORY-ONLY annotation. | 2026-07-19 |
 | **cppcheck / SpotBugs+FindSecBugs adapters** | cppcheck is noisy without heavy per-check tuning, and SpotBugs needs compiled bytecode — which breaks websec's "never build the target" guarantee. If added later they must be gated behind an explicit `--deep` opt-in, never the default pass. | 2026-07-19 |
 | **Broad FuzzDB payload-corpus import** | Bulk payload data inflates the staged-probe surface without improving *detection* precision. The targeted, per-endpoint probe commands in briefing §5b already carry the payload shapes that matter, each with a confirm/disconfirm oracle. | 2026-07-19 |
+
+
+## 2026-09-14 — framework and adoption contracts reconciled
+
+Approved source expansion adds bounded Django route declarations, shared manifest/service metadata,
+scoped credential comparisons and preserved agent instructions. Canonical docs now distinguish
+route candidates from resolved paths, native React from browser renderer hints, and current-attempt
+artifacts from older latest output. The isolated wheel found a Django converter parameter-shape
+mismatch; normalization to the existing `where: path` contract plus an actual CLI regression closed
+it before phase completion. Final validation is 1046 application tests and 11 isolated-wheel commands;
+historical wheel/proof results remain dated separately. No runtime dependency or target execution
+was introduced. The CI remediation text now directs restoration/investigation, never lowering the floor.
+
+
+## 2026-09-14 — fourth-phase scope and adoption reconciliation
+
+Approved work adds bounded Python assigned-query flow, rejects statically redirected output runs,
+exposes the shipped control-scope research suite, and provides opt-in pre-commit/PR/weekly examples.
+The examples reuse existing entrypoints and were not activated. Native/hosted/staged coverage limits,
+read-only token scope, independent engine provenance and incomplete execution are documented.
+The new synthetic SQL scope explicitly excludes fixed-point/interprocedural guarantees. Final
+validation passed 1082 application tests, 41 automation tests and 15 isolated-wheel commands;
+1046/983 checkpoints and the public corpus score remain historical.

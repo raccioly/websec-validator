@@ -34,7 +34,7 @@ FACTS = {"routes": {"endpoints": [
 def _fake_request(method, url, token=None, timeout=20, data=None, cookie=None):
     authed = bool(token or cookie)
     if url.endswith("/api/bypass"):
-        return (400 if authed else 401), "x"      # forged token reaches handler
+        return (200 if authed else 401), "x"      # success-status difference is a candidate, not proof
     if url.endswith("/api/safe"):
         return 401, "x"                            # forged token still rejected
     if url.endswith("/api/ratelimited"):
@@ -103,11 +103,12 @@ class _DrainingHandler(http.server.BaseHTTPRequestHandler):
 
 
 class ForgedTokenBypassTests(unittest.TestCase):
-    def test_detects_only_the_real_bypass(self):
+    def test_retains_forged_token_response_candidate(self):
         with mock.patch.object(dynamic, "_request", _fake_request):
             r = dynamic.forged_token_bypass("http://t", FACTS)
-        paths = [b["path"] for b in r["bypassed"]]
-        self.assertEqual(paths, ["/api/bypass"])          # exactly the one that reached the handler
+        paths = [b["path"] for b in r["candidates"]]
+        self.assertEqual(paths, ["/api/bypass"])          # status change remains actionable evidence
+        self.assertEqual(r["bypassed"], [])               # protected behavior is not established
         self.assertEqual(r["tested"], 3)                  # public route skipped (baseline 200)
 
     def test_rate_limited_is_not_a_bypass(self):
@@ -122,13 +123,15 @@ class ForgedTokenBypassTests(unittest.TestCase):
 
 
 class LedgerForgedBypassTests(unittest.TestCase):
-    def test_bypass_becomes_critical(self):
+    def test_legacy_status_bypass_is_an_unconfirmed_lead(self):
         dyn = {"forged_token_bypass": {"bypassed": [
             {"method": "GET", "path": "/api/x", "baseline": 401, "forged": 400, "via": "Authorization: Bearer"}]}}
         led = findings.build_ledger({}, None, dyn, [])
-        hit = [f for f in led["findings"] if "forged unsigned token" in f["title"]]
+        hit = [f for f in led["findings"] if "forged-token response" in f["title"]]
         self.assertEqual(len(hit), 1)
-        self.assertEqual(hit[0]["severity"], "CRITICAL")
+        self.assertEqual(hit[0]["severity"], "HIGH")
+        self.assertEqual(hit[0]["confidence"], "LOW")
+        self.assertEqual(hit[0]["verification_state"], "unconfirmed")
         self.assertEqual(hit[0]["attack_class"], "unsafe-auth-decoder")
 
 
@@ -404,14 +407,16 @@ class WriteAuthEnforcement500Tests(unittest.TestCase):
         self.assertEqual(r["no_auth_gate"], [])                       # so it feeds no missing-auth finding
         self.assertEqual(calibration.samples_from_dynamic({"write_auth_enforcement": r}), [])  # oracle clean
 
-    def test_400_still_no_auth_gate(self):  # regression guard: real reached-handler codes unaffected
+    def test_400_validation_does_not_prove_missing_auth(self):
         facts = {"routes": {"endpoints": [{"method": "POST", "path": "/api/y"}]}}
 
         def fake(method, url, token=None, timeout=20, data=None, cookie=None):
             return 400, "bad"
         with mock.patch.object(dynamic, "_request", fake):
             r = dynamic.write_auth_enforcement("http://t", facts)
-        self.assertTrue(r["results"][0]["verdict"].startswith("no-auth-gate"))
+        self.assertEqual(r["results"][0]["state"], "inconclusive")
+        self.assertEqual(r["no_auth_gate"], [])
+        self.assertEqual(calibration.samples_from_dynamic({"write_auth_enforcement": r}), [])
 
 
 class ProbeRegistrationTests(unittest.TestCase):
@@ -527,8 +532,9 @@ class CookieCoverageTests(unittest.TestCase):
             return 401, "x"                            # no-auth baseline (gated)
         with mock.patch.object(dynamic, "_request", fake):
             r = dynamic.forged_token_bypass("http://t", facts, cookie_names=["sess"])
-        self.assertEqual([b["path"] for b in r["bypassed"]], ["/api/cookieonly"])
-        self.assertTrue(r["bypassed"][0]["via"].startswith("cookie:"))
+        self.assertEqual([b["path"] for b in r["candidates"]], ["/api/cookieonly"])
+        self.assertTrue(r["candidates"][0]["via"].startswith("cookie:"))
+        self.assertEqual(r["bypassed"], [])
 
 
 class NonWebAppFPTests(unittest.TestCase):
@@ -788,7 +794,7 @@ class RedirectAuthJudgmentTests(unittest.TestCase):
         facts = {"routes": {"endpoints": [{"method": "POST", "path": "/api/users"}]}}
         r = dynamic.write_auth_enforcement(base, facts)
         self.assertEqual(r["executed_unauth"], [])           # was a CRITICAL false positive
-        self.assertEqual(r["results"][0]["verdict"], "auth-enforced")
+        self.assertEqual(r["results"][0]["verdict"], "redirect (auth enforcement unverified)")
 
     def test_forged_token_redirect_is_not_a_bypass(self):
         base = self._server()
@@ -856,9 +862,10 @@ class AuthVerdictMatrixTests(unittest.TestCase):
         base = self._server()
         facts = {"routes": {"endpoints": [{"method": "POST", "path": p} for p in self.PATHS]}}
         by = {r["path"]: r for r in dynamic.write_auth_enforcement(base, facts)["results"]}
-        self.assertEqual(by["/api/public-data"]["verdict"], "EXECUTED-UNAUTH")  # TRUE positive kept
+        self.assertEqual(by["/api/public-data"]["verdict"], "candidate unauthenticated response")
+        self.assertFalse(by["/api/public-data"]["evidence_verified"])  # public response is not proof of missing auth
         self.assertEqual(by["/api/protected"]["verdict"], "auth-enforced")
-        self.assertEqual(by["/api/redirected"]["verdict"], "auth-enforced")     # bug-208
+        self.assertEqual(by["/api/redirected"]["verdict"], "redirect (auth enforcement unverified)")     # bug-208
         self.assertTrue(by["/api/flaky"]["verdict"].startswith("http-"))        # 500 NOT "no gate"
         self.assertTrue(by["/api/throttled"]["verdict"].startswith("http-"))
 
@@ -922,7 +929,8 @@ class DynamicVerdictHardeningTests(unittest.TestCase):
         facts = {"routes": {"endpoints": [{"method": "GET", "path": "/api/redirected"}]}}
         r = dynamic.forged_token_bypass(base, facts)
         self.assertEqual(r["tested"], 1)
-        self.assertFalse(r["inconclusive"])
+        self.assertTrue(r["inconclusive"])  # redirect destination/policy is not proven
+        self.assertEqual(r["bypassed"], [])
 
     def test_nothing_gated_reports_inconclusive_not_pass(self):
         base = self._server()

@@ -26,6 +26,29 @@ import tempfile
 from pathlib import Path
 
 from .base import SKIP_DIRS, Extractor, RepoContext, is_test_file, path_in_skip_dir
+from .profiles import service_for
+from .django_urls import analyze as analyze_django_urls
+
+
+def _route_key(ctx, row: dict) -> tuple:
+    service = service_for(getattr(ctx, "stack", {}).get("service_inventory", []),
+                          _route_source(ctx, row.get("code_path", "")))
+    return (service.get("id", "."), row["method"], row["path"])
+
+
+def _route_source(ctx, value: str) -> str:
+    if not value:
+        return ""
+    path = Path(value)
+    relative = ctx.rel(path)
+    if Path(relative).is_absolute():
+        # macOS /var and /private/var can spell the same authorized root. This is
+        # path normalization only; the shared reader still enforces containment.
+        try:
+            relative = path.relative_to(ctx.root.resolve()).as_posix()
+        except ValueError:
+            pass
+    return relative.replace("\\", "/")
 
 # Noir is a subprocess that scans the raw tree — it does NOT know the walker's SKIP_DIRS,
 # so without this it grinds through (and emits routes from) build output (.next, cdk.out,
@@ -433,7 +456,7 @@ def _fallback(ctx: RepoContext) -> list:
         r["path"] = _clean_path(r["path"])
         if _is_noise(r["path"]):
             continue
-        k = (r["method"], r["path"])
+        k = _route_key(ctx, r)
         if k not in seen:
             seen.add(k)
             out.append(r)
@@ -526,6 +549,16 @@ class RoutesExtractor(Extractor):
         eps = _noir_scan(ctx.root, getattr(ctx, "excludes", None))
         if eps:                                    # noir ran AND found routes
             routes, spec_derived = _normalize_noir(eps)
+            for row in routes + spec_derived:
+                row["code_path"] = _route_source(ctx, row.get("code_path", ""))
+            seen_sources = set()
+            normalized = []
+            for row in routes:
+                key = (*_route_key(ctx, row), row["code_path"])
+                if key not in seen_sources:
+                    seen_sources.add(key)
+                    normalized.append(row)
+            routes = normalized
             engine = "noir"
             # An app's OWN implemented OpenAPI spec (connexion / spec-first, e.g. VAmPI) IS its route
             # list — SPEC_PATH excludes it by the openapi/swagger filename, but when the spec is the ONLY
@@ -566,7 +599,7 @@ class RoutesExtractor(Extractor):
         # collapses hand-rolled routers (itty/Hono/Workers) to ~1 endpoint, so without this the entire
         # dynamic half no-ops. (The fallback path already includes the heuristic.) Dedupe on (method,path).
         if eps:
-            existing = {(r["method"], r["path"]) for r in routes}
+            existing = {_route_key(ctx, r) for r in routes}
             _excl = getattr(ctx, "excludes", None)
             for r in _router_calls(ctx):
                 r["path"] = _clean_path(r["path"])
@@ -574,18 +607,18 @@ class RoutesExtractor(Extractor):
                     continue
                 if _excl and ctx._excluded(r.get("code_path", "")):
                     continue
-                k = (r["method"], r["path"])
+                k = _route_key(ctx, r)
                 if k not in existing:
                     existing.add(k)
                     routes.append(r)
 
         # Supabase Edge Functions (Deno.serve) — synthesize /functions/v1/<name> routes in EVERY
         # engine path (noir-found, noir-zero, noir-absent), since none of them model Deno.serve.
-        edge_existing = {(r["method"], r["path"]) for r in routes}
+        edge_existing = {_route_key(ctx, r) for r in routes}
         for r in _supabase_edge_routes(ctx):
             if getattr(ctx, "excludes", None) and ctx._excluded(r.get("code_path", "")):
                 continue
-            k = (r["method"], r["path"])
+            k = _route_key(ctx, r)
             if k not in edge_existing:
                 edge_existing.add(k)
                 routes.append(r)
@@ -594,12 +627,12 @@ class RoutesExtractor(Extractor):
 
         # AWS SAM / serverless — Api/HttpApi events + Function URLs → real HTTP routes (none of the
         # engines above model template.yaml). Deduped on (method, path); a Function-URL AuthType is kept.
-        sam_existing = {(r["method"], r["path"]) for r in routes}
+        sam_existing = {_route_key(ctx, r) for r in routes}
         sam_public = 0
         for r in _sam_routes(ctx):
             if getattr(ctx, "excludes", None) and ctx._excluded(r.get("code_path", "")):
                 continue
-            k = (r["method"], r["path"])
+            k = _route_key(ctx, r)
             if k in sam_existing:
                 continue
             sam_existing.add(k)
@@ -612,20 +645,40 @@ class RoutesExtractor(Extractor):
         # Raw non-framework HTTP servers (node:http createServer / Bun.serve / python http.server) —
         # invisible to Noir + the framework regexes. Raw routes carry method "ANY", so dedup on PATH
         # (a framework GET /x already covers the raw server's /x). Respects --exclude + SKIP_DIRS.
-        raw_existing_paths = {r["path"] for r in routes}
+        raw_existing_paths = {(_route_key(ctx, r)[0], r["path"]) for r in routes}
         raw_server_count = 0
         for r in _raw_server_routes(ctx):
             if getattr(ctx, "excludes", None) and ctx._excluded(r.get("code_path", "")):
                 continue
             if _in_skip_dir(r.get("code_path", ""), ctx.root):
                 continue
-            if r["path"] in raw_existing_paths:
+            raw_key = (_route_key(ctx, r)[0], r["path"])
+            if raw_key in raw_existing_paths:
                 continue
-            raw_existing_paths.add(r["path"])
+            raw_existing_paths.add(raw_key)
             routes.append(r)
             raw_server_count += 1
             if engine.startswith(("noir (0 routes)", "regex-fallback")):
                 engine += " + raw-server"
+
+        existing = {_route_key(ctx, r) for r in routes}
+        for row in (facts.get("stack", {}).get("profiles") or {}).get("routes", []):
+            if _route_key(ctx, row) not in existing:
+                existing.add(_route_key(ctx, row))
+                routes.append(row)
+        django = analyze_django_urls(ctx, facts)
+        # ANY represents unresolved HTTP methods. If Noir already mapped a path
+        # in this service, retain its method evidence without a duplicate ANY row.
+        django_existing = {(_route_key(ctx, row)[0], row["path"]) for row in routes}
+        for row in django["routes"]:
+            key = (_route_key(ctx, row)[0], row["path"])
+            if key not in django_existing:
+                routes.append(row)
+                django_existing.add(key)
+        if django["routes"] or django["candidates"]:
+            engine += " + django-ast"
+        for row in routes:
+            row["service_id"] = _route_key(ctx, row)[0]
 
         # Fixture/example endpoints are NOT the app's attack surface — split them out of routes,
         # targeting, probes and findings, but KEEP them in FACTS (visible + auditable, so "0
@@ -651,6 +704,9 @@ class RoutesExtractor(Extractor):
                                 "handler-ish function(s) — route discovery is likely INCOMPLETE (a hand-rolled or "
                                 "dynamic router the engine can't follow). Treat empty §3 candidate lists as "
                                 "\"couldn't map\", NOT \"nothing there\" — map routes by hand before trusting the probes.")
+        if not coverage_warning and (django["gaps"] or django["errors"]):
+            coverage_warning = (f"Django URL discovery has {len(django['candidates'])} unresolved candidate(s); "
+                                "review routes.django gaps and errors before assuming mounts or HTTP methods.")
         out = {
             "engine": engine,
             "count": len(routes),
@@ -663,6 +719,7 @@ class RoutesExtractor(Extractor):
             "client_routes_excluded": _client_excluded,
             "serverless_public_endpoints": sam_public,   # Function URLs with AuthType: NONE (unauthenticated)
             "raw_server_endpoints": raw_server_count,    # non-framework http.createServer/Bun.serve/http.server
+            "django": django,
         }
         if spec_derived:
             from collections import Counter

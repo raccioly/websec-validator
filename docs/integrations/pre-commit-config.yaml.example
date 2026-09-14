@@ -1,0 +1,17 @@
+# Opt-in local configuration for a reviewed 0.14.0-or-later source checkout.
+# Replace the absolute Python path with a trusted venv containing your reviewed engine.
+# Do not use the target repository's Python, editable package, or setup/install scripts.
+# This placeholder is intentionally not runnable until configured.
+minimum_pre_commit_version: "3.2.0"
+repos:
+  - repo: local
+    hooks:
+      - id: websec-security
+        name: websec-validator complete security review
+        entry: '"/ABSOLUTE/PATH/TO/TRUSTED/WEBSEC-VENV/bin/python" -I -m websec_validator.cli run .'
+        language: system
+        args: [--require-complete, --fail-on, high, --out, websec-out]
+        pass_filenames: false
+        always_run: true
+        require_serial: true
+        stages: [pre-commit, pre-push, manual]

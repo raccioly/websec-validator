@@ -10,8 +10,8 @@ interval**. With a small corpus the INTERVAL is the headline — a wide CI means
 WHAT THIS IS NOT: calibrated on *deliberately-vulnerable* apps, so the rates skew
 OPTIMISTIC for normal/clean code (real repos have a far lower base rate of true vulns).
 Every per-finding estimate carries the sample size `n` and a `basis` so the consumer
-can see how much to trust it; a finding that doesn't match a documented vuln is counted
-as a false positive (the corpus is well-documented, so unlisted findings are noise).
+can see how much to trust it. Unmatched findings are unknown, never synthetic negatives.
+The existing shipped table retains its original corpus caveat until explicitly rebuilt.
 
 No ML, no deps — binomial proportion + Wilson interval (stdlib `math`). The cell
 structure upgrades cleanly to isotonic regression if a large labeled set ever exists.
@@ -60,33 +60,37 @@ def _cell(k: int, n: int) -> dict:
             "ci": [round(lo, 3), round(hi, 3)]}
 
 
-def is_real(attack_class: str, location: str, truth: list) -> bool:
-    """A finding is REAL iff it matches a documented truth entry, else a false positive.
+def is_real(attack_class: str, location: str, truth: list) -> bool | None:
+    """Match explicit corpus ground truth; absence of a label means unknown.
 
-    (Conservative rule, per design decision: on a well-documented vuln app, a finding
-    that isn't on the known-vuln list is treated as noise.)
+    Entries default to positive documented vulnerabilities. Explicit ``is_real: false`` entries
+    provide reviewed negative controls. Conflicting matching truth entries remain unknown.
     """
+    outcomes = set()
     loc = (location or "").lower()
-    for t in (truth or []):
-        if t.get("class") != attack_class:
+    for entry in truth or []:
+        if entry.get("class") != attack_class:
             continue
-        sub = (t.get("location_contains") or "").lower()
+        sub = (entry.get("location_contains") or "").lower()
         if not sub or sub == "*" or sub in loc:
-            return True
-    return False
+            label = entry.get("is_real", True)
+            if isinstance(label, bool):
+                outcomes.add(label)
+    return next(iter(outcomes)) if len(outcomes) == 1 else None
 
 
 def fit(labeled: list, corpus_names: list, researched_classes: set | None = None) -> dict:
     """labeled: list of {attack_class, confidence, is_real}. Returns the calibration table.
 
-    `researched_classes`: classes for which the corpus has actual ground truth. Per-class
-    cells are published ONLY for these — a class we never researched would otherwise emit a
-    misleading p=0 (every finding auto-counted FP). Such findings still count as FP in the
-    per-label aggregate (conservative), but at runtime fall back to that aggregate.
+    Unknown labels are excluded from every count, including per-label aggregates.
+    ``researched_classes`` limits published class-specific cells to reviewed classes.
     """
     by_cl: dict = {}
     by_l: dict = {}
+    unknown = sum(not isinstance(row.get("is_real"), bool) for row in labeled)
     for r in labeled:
+        if not isinstance(r.get("is_real"), bool):
+            continue
         cl = f"{r['attack_class']}|{r['confidence']}"
         by_cl.setdefault(cl, [0, 0])
         by_l.setdefault(r["confidence"], [0, 0])
@@ -100,9 +104,9 @@ def fit(labeled: list, corpus_names: list, researched_classes: set | None = None
         rc = set(researched_classes)
         cells = {k: c for k, c in cells.items() if k.split("|", 1)[0] in rc}
     return {
-        "meta": {"corpus": corpus_names, "n_total": len(labeled),
+        "meta": {"corpus": corpus_names, "n_total": len(labeled) - unknown, "n_unknown": unknown,
                  "method": "binomial proportion + Wilson 95% CI", "min_n": MIN_N,
-                 "unmatched_rule": "unmatched finding = false positive",
+                 "unmatched_rule": "unmatched finding = unknown (excluded from calibration)",
                  "researched_classes": sorted(researched_classes) if researched_classes is not None else None,
                  "caveat": CAVEAT},
         "by_class_label": cells,
@@ -115,7 +119,12 @@ def load_shipped() -> dict | None:
     """Load the shipped, public, corpus-based calibration.json (best-effort)."""
     try:
         p = resources.files("websec_validator").joinpath("calibration.json")
-        return json.loads(p.read_text())
+        historical = json.loads(p.read_text())
+        if historical.get("meta", {}).get("evidence_status") == "historical-unverified" or "= false positive" in historical.get("meta", {}).get("unmatched_rule", ""):
+            return {"meta": {"n_total": 0, "historical_uncertain_samples": historical.get("meta", {}).get("n_total", 0),
+                             "evidence_status": "historical-quarantined", "caveat": "Historical public corpus labels used unmatched=false and unpinned revisions; retained for audit, excluded from measured probabilities."},
+                    "by_class_label": {}, "by_label": {}, "prior": PRIOR, "legacy_uncertain": historical}
+        return historical
     except Exception:
         return None
 
@@ -140,6 +149,7 @@ def _merge(shipped: dict | None, local: dict | None) -> dict | None:
     base.setdefault("prior", PRIOR)
     base.setdefault("meta", {})
     if local:
+        local = _upgrade_local(local)
         for grp in ("by_class_label", "by_label"):
             merged = dict(base.get(grp, {}))
             for key, lc in (local.get(grp, {}) or {}).items():
@@ -147,10 +157,13 @@ def _merge(shipped: dict | None, local: dict | None) -> dict | None:
                 merged[key] = _cell(sc.get("k", 0) + lc.get("k", 0), sc.get("n", 0) + lc.get("n", 0))
             base[grp] = merged
         ls = (local.get("meta", {}) or {}).get("samples", 0)
-        base["meta"]["personalized"] = True
+        base["meta"]["personalized"] = bool(ls)
         base["meta"]["local_samples"] = ls
+        legacy = local.get("legacy_uncertain", {}).get("meta", {}).get("samples", 0)
+        base["meta"]["legacy_uncertain_samples"] = legacy
         base["meta"]["caveat"] = (base["meta"].get("caveat", CAVEAT)
-                                  + f" · +{ls} confirmed local sample(s) folded in (personalized to your apps)")
+                                  + f" · +{ls} evidence-backed local sample(s) folded in (personalized to your apps)"
+                                  + (f" · {legacy} legacy sample(s) quarantined pending review" if legacy else ""))
     return base
 
 
@@ -159,61 +172,81 @@ def load() -> dict | None:
     return _merge(load_shipped(), load_local())
 
 
-def record_samples(labeled: list, runs: int = 1) -> dict | None:
-    """Fold confirmed labeled samples into the LOCAL overlay (best-effort; user-global, gitignored).
+def _upgrade_local(local: dict) -> dict:
+    """Retain pre-evidence history for review, excluding it from measured probabilities."""
+    local = json.loads(json.dumps(local))
+    if local.get("schema_version") == 2:
+        return local
+    return {"schema_version": 2,
+            "meta": {"source": "local evidence overlay", "samples": 0, "runs": 0},
+            "by_class_label": {}, "by_label": {}, "observations": {},
+            "legacy_uncertain": local}
 
-    `labeled`: list of {attack_class, confidence, is_real}. Returns the updated overlay, or None
-    if there was nothing to record / the write failed (never raises — calibration is non-critical).
+
+def record_samples(labeled: list, runs: int = 1) -> dict | None:
+    """Persist and deduplicate verified evidence; preserve weak historical labels for review.
+
+    Reimporting the same build/fixture observation does not inflate confidence. Samples without
+    explicit evidence and provenance remain in legacy_uncertain and never enter the active table.
     """
     if not labeled:
         return None
     try:
-        local = load_local() or {"meta": {"source": "local self-improving overlay", "samples": 0, "runs": 0},
-                                 "by_class_label": {}, "by_label": {}}
-        for r in labeled:
-            for grp, key in (("by_class_label", f"{r['attack_class']}|{r['confidence']}"),
-                             ("by_label", r["confidence"])):
+        local = _upgrade_local(load_local() or {})
+        added = 0
+        for row in labeled:
+            verified = (row.get("evidence_verified") is True and row.get("sample_id")
+                        and isinstance(row.get("provenance"), dict)
+                        and isinstance(row.get("is_real"), bool))
+            if not verified:
+                archive = local.setdefault("legacy_uncertain", {})
+                archive.setdefault("pending_review", []).append(row)
+                meta = archive.setdefault("meta", {})
+                meta["samples"] = meta.get("samples", 0) + 1
+                continue
+            observations = local.setdefault("observations", {})
+            if row["sample_id"] in observations:
+                continue
+            observations[row["sample_id"]] = row
+            for grp, key in (("by_class_label", f"{row['attack_class']}|{row['confidence']}"),
+                             ("by_label", row["confidence"])):
                 cell = local.setdefault(grp, {}).setdefault(key, {"n": 0, "k": 0})
                 cell["n"] += 1
-                cell["k"] += 1 if r.get("is_real") else 0
-        local["meta"]["samples"] = local["meta"].get("samples", 0) + len(labeled)
-        local["meta"]["runs"] = local["meta"].get("runs", 0) + runs
+                cell["k"] += int(row["is_real"])
+            added += 1
+        local["meta"]["samples"] = local["meta"].get("samples", 0) + added
+        local["meta"]["runs"] = local["meta"].get("runs", 0) + (runs if added else 0)
         LOCAL_PATH.parent.mkdir(parents=True, exist_ok=True)
-        LOCAL_PATH.write_text(json.dumps(local, indent=2) + "\n")
+        # Atomic replacement avoids a truncated JSON overlay if the process is interrupted.
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode="w", dir=LOCAL_PATH.parent, delete=False) as handle:
+            temp = Path(handle.name)
+            json.dump(local, handle, indent=2)
+            handle.write("\n")
+        try:
+            temp.replace(LOCAL_PATH)
+        finally:
+            temp.unlink(missing_ok=True)
         return local
     except Exception:
         return None
 
 
 def samples_from_dynamic(dynamic: dict) -> list:
-    """Turn a dynamic run into confirmed calibration samples — dynamic is an ORACLE.
-
-    Write-verb auth enforcement is unambiguous: a write that EXECUTED unauthenticated (or reached
-    the handler past the auth gate) is a real missing-auth; one that's auth-enforced is a recon
-    FALSE POSITIVE (recon flagged it, the live app actually blocks it). Cross-tenant LEAKs are
-    confirmed BOLA. (Unauth GET reachability is excluded — a public endpoint reached without auth
-    may be intended, so it's not a clean label.)
-    """
-    # NEVER learn from an untrustworthy run. dynamic.py computes fail_open_suspected (auth provider
-    # not resolving → everything looks unauthenticated) and target_unreachable (nothing was contacted)
-    # precisely to say "these results are meaningless" — the ledger already honors them, but this
-    # oracle did not, and its samples are written to a PERSISTENT, CROSS-REPO overlay. One run against
-    # a misconfigured test env would permanently inflate P(real) for missing-auth on every project.
-    _wae = (dynamic or {}).get("write_auth_enforcement", {}) or {}
-    _uar = (dynamic or {}).get("unauth_reachability", {}) or {}
-    if (_wae.get("fail_open_suspected") or _uar.get("fail_open_suspected")
-            or _wae.get("target_unreachable") or _uar.get("target_unreachable")):
+    """Learn only from verified, build-bound controls; HTTP status observations are not labels."""
+    sections = [((dynamic or {}).get(key) or {}) for key in
+                ("write_auth_enforcement", "unauth_reachability", "cross_tenant_bola")]
+    if any(s.get("fail_open_suspected") or s.get("target_unreachable") for s in sections):
         return []
-
     out = []
-    for r in (((dynamic or {}).get("write_auth_enforcement", {}) or {}).get("results", []) or []):
-        v = r.get("verdict", "")
-        if v == "auth-enforced":
-            out.append({"attack_class": "missing-auth", "confidence": "MEDIUM", "is_real": False})
-        elif v == "EXECUTED-UNAUTH" or v.startswith("no-auth-gate"):
-            out.append({"attack_class": "missing-auth", "confidence": "MEDIUM", "is_real": True})
-    for _lk in (((dynamic or {}).get("cross_tenant_bola", {}) or {}).get("leaks", []) or []):
-        out.append({"attack_class": "bola", "confidence": "MEDIUM", "is_real": True})
+    # Current write probes only observe statuses, so they intentionally cannot label missing-auth.
+    for row in sections[2].get("leaks", []) or []:
+        if (row.get("state") == "confirmed-vulnerable" and row.get("evidence_verified") is True
+                and row.get("sample_id") and row.get("provenance")
+                and all(row.get("controls", {}).get(key) is True for key in ("identity", "owner", "private"))):
+            out.append({"attack_class": "bola", "confidence": "MEDIUM", "is_real": True,
+                        "sample_id": row["sample_id"], "provenance": row["provenance"],
+                        "evidence_verified": True})
     return out
 
 

@@ -58,7 +58,11 @@ websec install status         # show what's installed
 websec install codex --uninstall
 ```
 
-It only ever touches its own marked region, so your existing `AGENTS.md` content is preserved.
+Shared instructions preserve text outside a complete managed block. Install/uninstall refuses
+ambiguous markers and foreign dedicated skill files; resolve ownership manually before retrying.
+The generated instructions select `websec-out/runs/<generated>/` from the current JSON envelope,
+keep incomplete results visible, and reject stale `latest` or symlink aliases. The engine and plugin
+are separate trusted inputs; neither is silently upgraded by the skill.
 
 ➡️ **Want the reasoning behind every check?** Read **[docs/METHODOLOGY.md](docs/METHODOLOGY.md)** — what each test does and why.
 
@@ -126,7 +130,7 @@ Other AI security tools make the LLM do the review from scratch (nondeterministi
 
 Now the agent knows your routes, auth model, tenant boundary, unguarded write endpoints, and dangerous sinks *before its first turn* — no LLM, same output every run. (`--markdown` prints the raw block for other harnesses.)
 
-> That's the whole user surface: **`run`** (plus the optional, advanced **`dynamic`** live-probing step below). `recon`/`proof`/`calibrate` exist for developing the tool itself and are hidden from `--help` — you never need them.
+> Start with **`run`**. The optional workbench commands below expose capabilities, explicit threat-feed refresh, offline reassessment and research evaluation; **`dynamic`** performs authorized live testing. `recon`/`proof`/`calibrate` remain development commands.
 
 ## Scoping & suppression — keep the signal about *your* code
 
@@ -167,9 +171,9 @@ signal commercial tools sell, minus the cloud:
   of model; unparsed ecosystems (Go, Rust…) are tagged `n/a` rather than guessed.
 - **Exploitability** — each CVE is joined against a **local cache** of [FIRST.org EPSS](https://www.first.org/epss/)
   (exploit-probability) + [CISA KEV](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)
-  (known-exploited-in-the-wild). A `⚠ CISA KEV` or `EPSS 90%` beats a raw CVSS score every time.
-  Refresh the cache with `bash scripts/refresh-epss-kev.sh` (the *only* network step — the scan itself
-  stays offline; no cache → the feature skips cleanly with a one-line hint).
+  (known exploitation reports). These are prioritization inputs alongside application context.
+  `websec intel refresh` explicitly downloads public feeds without sending project data. Snapshots
+  record source hashes/dates and freshness; consumers remain offline. Legacy flat caches are unverified.
 
 Both are **strictly additive**: they annotate and re-rank, but never change a finding's severity, drop
 one, or add one — so they can only sharpen triage, never reintroduce a false positive.
@@ -197,7 +201,7 @@ websec knows it statically, so it aims them:
 
 | | Dimension | Notable output |
 |---|---|---|
-| stack | languages, frameworks, datastores | monorepo-aware (aggregates every manifest) |
+| stack | languages, frameworks, datastores | manifest-aware service inventory, including Rust workspaces; declared hints do not prove deployment |
 | routes | every endpoint via **OWASP Noir** (+ Supabase-edge, **AWS SAM / Function-URL**, **raw `http.createServer`/`Bun.serve`/py `http.server`**) | method · path · typed params · code path · **AuthType:NONE public endpoints**; **fixture/example routes split out of the attack surface** |
 | auth | scheme + login surface + **insecure-default signing secrets** + **broken-auth backdoors** | multi-scheme; flags a hard-coded `JWT_SECRET \|\| 'dev-secret'` fallback (forgeable JWT), a **`dev-`token / accept-any-password backdoor** (total bypass, CRITICAL), and a **fail-open** `if(env.SECRET)` signature check |
 | **authz** | access-control map | guard coverage (incl. **router-mount auth**) + **write endpoints with no visible guard** + roles |
@@ -260,48 +264,84 @@ non-Claude agents. All stdlib, no new dependency.
 finding lands **inline on the PR diff** and in the **Security tab**, ranked by a security-severity band,
 with its CWE/ASVS/OWASP citation and remediation.
 
-**Gate the build.** `--fail-on {critical,high,medium,low}` exits non-zero when a finding at or above that
-severity remains — a real CI gate, report-only by default.
+**Gate the build.** `--fail-on {critical,high,medium,low}` exits 1 for matching findings and 2 when
+requested execution is incomplete. `--require-complete` gates execution without a severity threshold.
+Extractor failures, source read loss/caps, invalid scanner reports, timeouts, and explicitly selected
+missing scanners remain visible in `coverage.json`; partial artifacts are preserved. Optional missing
+unselected scanners are reported as unavailable. `--scanners` requires `--scan`.
 
-**Only fail on what the PR introduced.** `--baseline <prior findings-ledger.json>` marks every finding
-`new` / `unchanged` / `fixed` (a stable per-finding fingerprint, surfaced as SARIF `baselineState`), and
-`--fail-on` then counts **only the new ones** — so a legacy backlog doesn't block every PR, but a newly
-introduced SSRF does.
+Every attempt receives a unique directory under `websec-out/runs/`. The atomic `latest` pointer
+advances only after a completed execution has written its artifacts; a partial attempt retains its
+own directory and leaves the previous completed scan selected. Completed execution describes the
+requested checks, not complete protection against vulnerabilities.
 
-**Drop-in GitHub Action** ([`action.yml`](action.yml)):
-
-```yaml
-# .github/workflows/security.yml
-name: security
-on: [pull_request]
-permissions:
-  contents: read
-  security-events: write        # required to upload SARIF to Code Scanning
-jobs:
-  websec:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: raccioly/websec-validator@v0.10.0   # pin to a release tag
-        with:
-          path: .
-          fail-on: high         # block the PR on a new HIGH+ (omit for report-only)
-          # baseline: .websec/baseline-ledger.json   # optional: gate only on NEW findings
-```
-
-**Local guardrail — `websec hooks`.** Same baseline-diff, run from git instead of CI, so a new lead is
-caught before it ever reaches a PR:
+**Reuse specialist analysis (0.14.0).** Import existing SARIF without executing
+the analyzer or loading any source path/URL referenced by its report:
 
 ```bash
-websec hooks install              # advisory post-commit: prints "baseline: N new" after each commit (~1s, never blocks)
-websec hooks install --pre-push   # blocking gate: fails `git push` on a NEW finding at/above $WEBSEC_HOOK_FAIL_ON (default high)
-websec hooks status               # show what's installed
+websec run ./my-app --sarif ./codeql.sarif --sarif ./other-analysis.sarif --require-complete
+websec run ./my-python-app --scan --scanners bandit --fail-on high
+```
+
+SARIF 2.1.0 import preserves native tool/rule identities, traces and report hashes in
+`sarif-imports.json` and the unified ledger. Safe relative paths are supported; unknown analyzer
+execution, malformed references and caps are visible incomplete checks. Native suppressions remain
+metadata until locally acknowledged. Source freshness stays unverified, and imported absence cannot
+verify a repair. Unique producer fingerprints remain stable; collisions are deliberately report-bound.
+
+Bandit is an optional preinstalled executable. The adapter uses built-in defaults, bypasses target
+configuration and ignores `nosec`; its native confidence and CWE remain separate from severity.
+Source-cache payloads have a 64 MiB per-context budget, with read loss visible in coverage. These
+budgets constrain input retention, not the entire Python process's memory usage.
+
+**Review changes against a baseline.** `--baseline <prior findings-ledger.json>` tracks new,
+unchanged, changed, reopened, and no-longer-observed findings using versioned semantic identities.
+New, changed, and reopened findings participate in the severity gate. Disappearance means only
+“no longer observed”; it does not prove a repair. Expired or malformed dated acknowledgements reopen
+for review. Legacy fingerprints remain migration aliases; ambiguous aliases cannot hide distinct
+occurrences. A malformed or unreadable supplied baseline makes requested execution incomplete.
+
+`repair-plans.json` binds each remediation plan to its original application, source digest, finding,
+and detector scope. This command validates operator-supplied positive and negative reports:
+
+```bash
+websec repair-verify --plan plan.json --record record.json --rerun findings-ledger.json --evidence-root ./evidence
+```
+
+Verification requires a
+hashed failing negative report for the original build. Reports must identify the same plan, finding,
+test and intended build; the rerun must be complete with unchanged review scope. The command validates
+artifacts offline and never executes their commands. Acceptance is evidence validation, not independent
+execution of tests by websec. See the [validated evidence examples](docs/security-review/examples/README.md)
+for exact dynamic, DAST and repair artifact fields.
+
+**GitHub Action** ([`action.yml`](action.yml), 0.14.0): the action installs
+its own trusted checkout, passes inputs as data and uploads the exact current attempt's SARIF,
+including incomplete attempts. `require-complete` defaults to true; `scanners` names explicitly
+required tools when `scan: true`. Outputs expose `run-directory`, `sarif-file` and `execution-complete`.
+Keep the reviewed action checkout separate from untrusted target source. Pin a reviewed 0.14.0-or-later commit when adopting these changes; the historical v0.13.0 tag
+does not include them.
+
+**Local guardrail — `websec hooks`.** Advisory and gating runs have separate responsibilities:
+
+```bash
+websec hooks install              # advisory post-commit; prints outcome and current artifact path
+websec hooks install --pre-push   # severity gate (default high) plus complete-execution check
+websec hooks status
 websec hooks uninstall
 ```
 
-The hook appends to (and cleanly removes from) any existing hook, pins its interpreter so it works
-under pipx/uv isolation, and honors `WEBSEC_SKIP_HOOK=1` for a one-off override. `WEBSEC_HOOK_SCAN=1`
-runs the full static scanners in the hook (slower); the default is fast recon-only.
+A successful pre-push gate accepts a ledger under its severity/scanner policy. Advisory runs and
+failed gates never advance that accepted baseline. The first gate, or a changed policy, checks all
+current findings; later gates compare against the accepted ledger. Retrying an unchanged failed gate
+continues to fail. `WEBSEC_HOOK_FAIL_ON` changes the threshold; `WEBSEC_HOOK_SCAN=1` executes scanners,
+and `WEBSEC_HOOK_SCANNERS` selects required adapters. The default is recon-only.
+
+Hooks launch isolated Python bound to the trusted installed package path, including editable source
+installs. They preserve existing shell hooks and refuse automatic insertion into non-shell hooks.
+`WEBSEC_SKIP_HOOK=1` is an explicit one-off override. Native hooks inspect the current working tree,
+not immutable snapshots of every pushed Git object. A missing runtime or concurrent incomplete gate
+blocks pre-push; post-commit remains advisory.
 
 **MCP server (any agent, not just Claude Code).** `websec mcp` speaks the Model Context Protocol over
 stdio, exposing typed tools — `websec_recon`, `websec_findings`, `websec_sarif`, `websec_briefing` — so
@@ -312,10 +352,18 @@ Register it in your MCP client:
 { "mcpServers": { "websec": { "command": "websec", "args": ["mcp"] } } }
 ```
 
-Or serve it over **HTTP** so a whole team points one URL at the recon tools (stdlib only — no extra
-dependency): `websec mcp --http` (binds `127.0.0.1:8733`; `GET /health` for a load balancer, `POST`
-JSON-RPC for calls). It reads local paths and runs recon on them, so it binds to localhost by
-default — only expose it (`--host 0.0.0.0`) on a trusted network.
+The optional HTTP transport is loopback-only and requires `WEBSEC_MCP_TOKEN` at startup:
+
+```bash
+# Supply WEBSEC_MCP_TOKEN through your local secret environment.
+websec mcp --http --allow-root /absolute/path/to/project
+```
+
+Repeat `--allow-root` for additional projects; otherwise the startup directory is the allowed root.
+JSON-RPC requests require the bearer token. Host/Origin validation, framing and body limits, bounded
+workers, and an absolute receive deadline constrain the HTTP boundary. `GET /health` remains a
+minimal liveness endpoint. Non-loopback binding is refused. Stdio uses the launching process's trust
+and filesystem permissions.
 
 **Blast-radius from a knowledge graph (opt-in, zero-dep).** If your repo has a
 [`graphify`](https://github.com/Graphify-Labs/graphify) graph at `graphify-out/graph.json` (or you
@@ -330,16 +378,66 @@ websec run . --scan     # auto-detects graphify-out/graph.json if present
 Each mapped finding gains a `graph` block (`blast_radius`, a `dependents` sample, `community`) in
 `findings-ledger.json`, and the ledger a `graph_enrichment` summary. It reads the graph as plain
 JSON — it never imports tree-sitter, so websec stays **stdlib-only, zero runtime deps** — and a
-missing, malformed, or oversized graph is silently skipped, never failing the run.
+missing implicit graph is optional. Invalid implicit graphs produce a visible diagnostic; an explicitly
+requested malformed, unreadable, excluded, or oversized graph makes requested execution incomplete.
 
 **Versioned contract.** `FACTS.json`, `findings-ledger.json`, and `findings.envelope.json` all carry a
-`schema_version`; the JSON Schemas ship in the package (`schemas/facts.schema.json`,
-`schemas/ledger.schema.json`) so downstream tooling can validate against a stable shape.
+`schema_version: "2.0"`; JSON Schemas ship in the package (`schemas/facts.schema.json`,
+`schemas/ledger.schema.json`, `schemas/coverage.schema.json`). Coverage is embedded in facts, ledger,
+and envelope, with SARIF execution status reflecting partial checks. Fingerprint V2 preserves V1
+migration aliases. SARIF lifecycle states use its legal enum and retain richer lifecycle metadata in
+properties. `.websec-ignore` is read from the selected target by default, through the same contained
+read policy; an unrelated working directory no longer contributes implicit suppressions.
+
+## Named profiles and the research workbench
+
+```bash
+websec capabilities                                  # offline profile/check/limitation matrix
+websec intel status                                  # offline freshness and provenance
+websec intel refresh                                 # explicit public FIRST/CISA downloads
+websec intel reassess --ledger prior-ledger.json --out reassessment.json
+websec research catalog                             # discover shipped suites without evaluating
+websec research evaluate --suite control-scope --out suite-evaluation.json
+websec research example --out proposal.json           # current detector-bound synthetic example
+websec research evaluate --proposal proposal.json --out evaluation.json
+```
+
+`--out` writes a new JSON file and refuses existing files. Intel commands accept `--cache-dir`;
+status and reassessment never fetch automatically. Reassessment updates known CVEs while preserving
+source evidence and finding identities. Newly exploited or materially higher-risk acknowledged CVEs
+can reopen for review. A detector change requests a source rescan; stale/unavailable intelligence
+remains explicit and reassessment exits 2. Discovering new dependency CVEs requires a fresh inventory
+and advisory scan; unchanged-source reassessment is not such a scan.
+
+The capability matrix exposes nine bounded profiles:
+
+| Profile | Named checks | Main limits |
+|---|---|---|
+| Java/Spring | Direct request-to-command/query syntax; literal Spring routes | No binding resolution, aliases or cross-function flow |
+| .NET | Direct command/raw-query syntax; literal ASP.NET routes | No framework convention or route-group resolution |
+| Go | Direct command/query arguments, including context variants | No indirect request aliases or full data flow |
+| Ruby | Direct command/raw-query syntax with parameterized forms distinguished | No whole-Rails authorization or dynamic metaprogramming analysis |
+| PHP | Direct command/query request reads | No whole-application flow analysis |
+| Android | Explicit manifest cleartext setting | Network-security configuration, manifest merges and API levels need review |
+| iOS | Explicit ATS exception keys | Scope and OS precedence need review; not proof of an insecure connection |
+| Rust | Explicit reqwest invalid-certificate acceptance | Receiver/binding and runtime reachability remain unverified |
+| C/C++ | Source inventory and manual memory-safety review | No automated memory-safety analysis |
+
+Nearest manifest boundaries identify services and keep their route/datastore evidence separate.
+Coverage records each selected check as completed, unknown or manual, with examined counts and
+limitations. Invalid analyzed configuration is an execution error. A language label or a completed
+no-match check does not mean comprehensive support or a secure service.
+
+Research proposals are data-only, provenance-described candidates evaluated against an allowlist of
+shipped detectors. Source snippets become disposable text fixtures and are never executed. Results
+separate development/holdout TP/FN/TN/FP/unknown counts. Passing means **eligible for human review**,
+not automatic detector promotion. The authored synthetic holdout is regression evidence, not a
+statistically independent production benchmark or proof of competitor superiority.
 
 ## Proof harness
 
 `websec proof` clones a vuln-app corpus (VAmPI, NodeGoat, DVGA) and scores whether recon surfaces
-each app's documented attack surface — a deterministic, CI-trackable proxy (currently **10/10**).
+each app's documented attack surface — a deterministic, CI-trackable proxy (historical **10/10**, not rerun for this detector revision).
 The real kill-criterion (does the briefing lift an agent's bug-finding vs a generic prompt?) is the
 manual A/B in [`corpus/PROOF-PROTOCOL.md`](corpus/PROOF-PROTOCOL.md). Full methodology, calibrated
 precision numbers, and the competitor-comparison protocol: [`BENCHMARKS.md`](BENCHMARKS.md).
@@ -350,20 +448,20 @@ precision numbers, and the competitor-comparison protocol: [`BENCHMARKS.md`](BEN
 *(attack-class, confidence)* bucket is a **real** documented vuln, and writes `calibration.json`
 (shipped + applied at runtime). Each finding then carries `P(real)` with a **95% Wilson confidence
 interval** and the sample size `n` — so "MEDIUM" stops being a vibe and becomes "real ~57% of the
-time on the corpus (CI 43–70%, n=51)". A finding that matches no documented vuln counts as a false
-positive (the corpus is well-documented). **Honest caveats:** the corpus is *deliberately
+time on the historical corpus (CI 43–70%, n=51)". Unmatched findings now remain **unknown**,
+unless explicit negative evidence labels them false. Historical measurements using unmatched-as-false
+labels are not a fresh measurement of this detector revision. **Honest caveats:** the corpus is *deliberately
 vulnerable*, so the rates skew **optimistic** for clean production code, and small samples mean
 **wide intervals** — the CI is the headline, not the point estimate, and both tighten as the corpus
 grows. With thin data a bucket falls back to the per-label aggregate, then to a clearly-flagged
 uncalibrated prior. No ML, no deps — binomial proportion + Wilson interval; the structure upgrades to
 isotonic regression if a large labeled set ever exists.
 
-**It self-improves.** `websec dynamic` is an *oracle*: a write that executes unauthenticated is a
-confirmed real vuln, and a recon-flagged endpoint that turns out auth-enforced is a confirmed false
-positive. Every dynamic run folds those confirmed labels into a **local overlay** (`~/.cache/websec-validator/`,
-gitignored, never shipped) that's merged on top of the public table — so the numbers **personalize to
-your apps** the more you run it, with no extra step and nothing leaving your machine. To label by hand
-instead, feed a `{attack_class, confidence, is_real}` file to `websec calibrate --ingest`.
+**Evidence controls learning.** Dynamic status codes and scanner silence are observations, not
+truth labels. Only evidence-backed labels are admitted to the local calibration overlay; legacy
+unproven samples are quarantined. Unknown-only input reports no successful measurement and leaves
+existing fitted calibration unchanged. A DAST hit may confirm a scoped lead; absence from a report
+cannot refute it. Manual labels should include reviewer/evidence provenance, not only a boolean.
 
 ## Dynamic phase (v2 — read-only so far)
 
@@ -373,7 +471,7 @@ GET endpoints recon discovered.
 
 ```bash
 cp dynamic-config.example.json dynamic-config.json    # TEST target + role creds (gitignored)
-websec run ./my-app                                    # static recon → websec-out/FACTS.json
+websec run ./my-app                                    # static recon → websec-out/latest/FACTS.json
 websec dynamic --config dynamic-config.json --facts websec-out/FACTS.json
 # → "14/14 cross-tenant GET reads blocked — all isolated"   (or 🚨 LEAK with the exact endpoint)
 ```
@@ -390,54 +488,41 @@ upload, cross-tenant BOLA, role/authz gaps).
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests    # stdlib only, no Noir/network — 324 tests
+python3 -m unittest discover -s tests    # stdlib only; synthetic/local-loopback tests, no public network
 ```
 
 ## Releasing (maintainer)
 
-Published to PyPI via **Trusted Publishing** (OIDC — no API token in the repo). To cut a release:
+The release train is PR-driven. Keep the version in `pyproject.toml` as the single source of truth,
+add the matching dated changelog and migration guidance, and validate the combined release branch.
+In the 0.x series, feature additions or incompatible contracts increment the minor version.
 
-```bash
-# 1. bump the version in pyproject.toml (e.g. 0.2.1 → 0.2.2)
-# 2. tag it and push — the tag must match pyproject's version (CI verifies):
-git tag v0.2.2 && git push origin v0.2.2
-# → publish.yml builds, INSTALLS + smoke-tests the wheel (version match,
-#   calibration ships, a real `websec run`), then publishes. A bad build fails
-#   CI instead of reaching PyPI — so you never have to yank after the fact.
-```
+After reviewing current main and overlapping PRs, merge the approved release PR only after its
+required CI checks pass. The resulting main commit subject must be `release: v0.14.0` for this
+release. [release-tag.yml](.github/workflows/release-tag.yml) validates that subject against the
+package version, creates the matching tag/GitHub Release, and explicitly dispatches
+[publish.yml](.github/workflows/publish.yml) at that tag. A version edit alone does not publish.
 
-One-time PyPI setup (before the first release): on pypi.org → **Account → Publishing → Add a pending
-publisher** with project `websec-validator`, owner `raccioly`, repo `websec-validator`, workflow
-`publish.yml`, environment `pypi`. The project is created on the first successful publish.
+The publish workflow builds and installs the wheel, verifies its version and smoke test, then uses
+PyPI Trusted Publishing through the `pypi` environment. Verify the completed workflow, tag,
+GitHub Release and PyPI artifact before reporting publication success. Do not bypass failed checks
+with manual tags, and do not describe a locally built wheel as published.
 
-> Two independent channels, two update mechanisms: the **CLI** ships to **PyPI** (semver releases,
-> `pip install --upgrade`); the **Claude Code plugin** ships from **git** (tracks latest commit,
-> refreshed via `/plugin marketplace update`).
+The CLI and Claude plugin have separate delivery paths: the CLI uses PyPI semver releases; the
+plugin uses reviewed Git content and explicit marketplace refresh. Plugin manifests deliberately
+omit an independent version field. Check both sources when diagnosing stale instructions.
 
 ## Status / roadmap
 
-**Done:** 20-extractor recon (incl. a **WebExtension client-trust extractor** — client-side entitlement
-gate / over-broad host permissions / `world:"MAIN"` / unvalidated external messages — a
-**license/entitlement verification-trust** pass — revocation-bypass + no per-license usage cap, provider-
-agnostic — **Deno/Supabase-edge + Chrome-extension** stack & route modeling, an **authz-correctness data-flow extractor** — unsigned-cookie /
-claim-keyed authz / transaction-local RLS — plus **CORS-misconfig**, **SRI**, **host-header
-open-redirect** and **SSRF-redirect-hardening** classes, schema/entity → mass-assignment targeting, the **AWS-CDK /
-managed-AppSync / VTL boundary**, **upload-security** + **PII-output-boundary** + **redirect-SSRF**
-+ **password-reuse** classes, a **man-in-the-browser / tamperable-display** class, an **LLM / AI-agent
-extractor** (OWASP LLM Top 10 — prompt injection / insecure output / excessive agency / unbounded
-generation / guardrail fail-open), a **crypto-usage extractor** (weak password hash / jwtVerify-without-
-algorithms / predictable principal), **docker-compose host-takeover** + **`.gitleaksignore`
-secret-suppression** audits, and a **reverse-proxy prefix-escape** detector), cross-tool de-dup +
-**bundled Semgrep rules**, **router-mount-auth modeling** (cuts the dominant Express-monorepo
-missing-auth false positive), tailored probe staging, agent briefing, traceable findings ledger with
-**calibrated confidence (CJE — Wilson CIs)**, proof harness, test suite (285), **Docker bundle** (all
-scanners + Noir, arch-aware), **dynamic phase v1** (authenticated read-only cross-tenant BOLA —
-validated live, reproduced a hand-pentest's 14/14). Validated against the **REF-PENTEST pen test +
-retest** and re-validated on a large real-world LLM-agent monorepo (HIGH-finding noise 178 → 15, AI +
-crypto surfaces newly covered).
-**Next:** dynamic write-verb BOLA + JWT/auth probes + ZAP/Nuclei two-role diff (gated, they mutate),
-calibration on hand-labeled real repos (more representative base rate), ASVS index lookup, optional
-model-SDK adapters for no-agent fallback.
+Version 0.14.0 provides 22 recon extractors, ten optional scanner entries, nine named profiles,
+SARIF import/export, bounded source/query analysis, explicit coverage and lifecycle evidence,
+intelligence/research commands, and opt-in agent/hook/CI adoption. These are scoped review tools;
+manual profiles, unknown routes, dynamic behavior and unsupported syntax remain limitations.
+
+The [migration guide](docs/MIGRATING-0.14.0.md) explains schema 2.0 and gate/artifact changes.
+The [remaining-work specification](specs/001-continuous-security-improvement/spec.md) consolidates
+unresolved gaps and acceptance tests so overlapping old-base PRs do not become competing roadmaps.
+Existing runtime probes are opt-in; their earlier isolated results are not current deployment proofs.
 
 ## Using it as a Claude Code skill / plugin
 
@@ -458,7 +543,8 @@ works the findings with you. For other agents the universal interface is unchang
 - The install id is `plugin@marketplace` — `websec-validator@websec-plugins` (the marketplace name
   from `.claude-plugin/marketplace.json`), **not** `@websec-validator` (the repo).
 - The plugin only delivers the *instructions*; the actual scanning is a **separate Python CLI**
-  (`websec`). The skill's Step 0 installs it (`pipx install websec-validator`) if it's missing.
+  (`websec`). The skill checks the selected engine's version/source and reports a missing engine;
+  installation or upgrades require an operator-selected trusted source.
 - **`/plugin …` only works in the terminal CLI.** In the Claude **app / Agent SDK** (no `/plugin`),
   configure it in `.claude/settings.json` instead:
   ```json
@@ -481,3 +567,38 @@ This tool productizes that hand-written methodology into something an AI agent c
 ## License
 
 [MIT](LICENSE) © Ricardo Accioly
+
+## Latest source review and adoption
+
+The [upstream overlap review](docs/security-review/upstream-overlap-review.md) compares selected
+open PRs at exact heads with the working implementation. Recompare both target and PR heads before
+future integration, then rerun combined checks; overlapping old-base PRs are not automatically safe
+to apply. No PR was merged as part of that review.
+
+Django URL discovery parses supported declarations and local include bindings without importing
+settings or executing target code. Unknown mounts remain route candidates with explicit uncertainty.
+A scoped read of pinned Linkding produced 53 candidates and one dynamic mount gap, not 53 confirmed
+HTTP paths. Framework metadata, native React views and browser renderers are distinguished; actual
+browser/HTTP hints remain review scope rather than proof of deployment. See the dated
+[validation record](docs/security-review/validation.md) for snapshot-bound results.
+
+
+Opt-in [pre-commit and PR/weekly workflow examples](docs/integrations/README.md) reuse the existing
+CLI, native post-commit/pre-push hooks and composite Action. The local example requires an explicit
+trusted Python environment; the hosted example requires a reviewed engine commit and keeps target
+code separate. The examples do not install hooks or activate a hosted schedule. Validation covers
+actual isolated CLI arguments and limited configuration structure, not a full pre-commit/YAML or
+hosted workflow lifecycle.
+
+`research catalog` discovers the shipped `control-scope` suite; `research evaluate --suite
+control-scope` evaluates all three proposals and 24 authored cases. Aggregate and per-proposal
+results retain exact detector revision, partition metrics and uncertainty. An empty, regressed or
+revision-inconsistent suite exits 2. Eligibility means human review, not installation, independent
+real-project validation or measured vulnerability recall.
+
+
+Assigned Python SQL query review now follows supported local assignments and branch joins to the
+query sink, preserving source traces and separate bound-value controls. Loops and cross-function
+behavior remain limited and disclosed. The [final fourth-phase validation](docs/security-review/validation.md)
+records 1082 tests across two Python versions and 15 isolated-wheel checks; historical corpus
+scores remain separate and do not establish full protection.

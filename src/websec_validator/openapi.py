@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from .extractors.base import MAX_WALK_FILES, RepoContext
 
 _SPEC_NAMES = re.compile(r"(openapi|swagger)[\w.-]*\.(json|ya?ml)$", re.I)
 _HTTP_METHODS = ("get", "post", "put", "patch", "delete", "head", "options")
@@ -35,25 +36,21 @@ _YAML_SCHEMES = re.compile(r"^\s*(securitySchemes|securityDefinitions)\s*:", re.
 _HTTP_SERVER = re.compile(r"url\s*:\s*[\"']?(http://[^\s\"',]+)", re.I)
 
 
-def find_specs(target: Path, limit: int = 10) -> list:
+def find_specs(target: Path, limit: int = 10, *, context: RepoContext | None = None) -> list:
     """Locate OpenAPI/Swagger specs in the repo (bounded, skips vendored/dep dirs)."""
     out = []
-    skip = {"node_modules", ".git", "dist", "build", "vendor", ".venv", "venv", "websec-out"}
-    try:
-        for p in Path(target).rglob("*"):
-            if len(out) >= limit:
-                break
-            if not p.is_file() or not _SPEC_NAMES.search(p.name):
-                continue
-            if any(part in skip for part in p.parts):
-                continue
-            out.append(p)
-    except OSError:
-        pass
+    ctx = context or RepoContext(Path(target))
+    for p in ctx.glob("**/*", MAX_WALK_FILES):
+        if not _SPEC_NAMES.search(p.name):
+            continue
+        if len(out) >= limit:
+            ctx.glob_truncated.append({"pattern": "OpenAPI/Swagger specs", "limit": limit})
+            break
+        out.append(p)
     return out
 
 
-def parse(path: Path) -> dict:
+def parse(path: Path, *, context: RepoContext | None = None) -> dict:
     """→ {ok, mode, paths:{path:[methods]}, ops_without_security, has_schemes, insecure_servers}.
 
     `ok=False` (with `reason`) when the file is NOT usable as a contract — unreadable, not valid
@@ -65,9 +62,10 @@ def parse(path: Path) -> dict:
     res = {"file": str(path), "ok": False, "reason": "", "mode": "", "paths": {},
            "ops_without_security": [], "has_schemes": False, "insecure_servers": [],
            "global_security": False}
-    try:
-        text = path.read_text(errors="ignore")
-    except OSError:
+    path = Path(path).absolute()
+    ctx = context or RepoContext(path.parent, walk=False)
+    text = ctx.text(path)
+    if not text:
         res["reason"] = "unreadable"
         return res
     if path.suffix.lower() == ".json":
@@ -146,9 +144,10 @@ def _norm(p: str) -> str:
     return s.lower()
 
 
-def analyze(facts: dict, target) -> dict:
+def analyze(facts: dict, target, *, context: RepoContext | None = None) -> dict:
     """→ {specs:[…], shadow:[…], stale:[…], hygiene:[…], summary:{…}}."""
-    parsed = [parse(p) for p in find_specs(Path(target))]
+    ctx = context or RepoContext(Path(target), (facts.get("coverage") or {}).get("files", {}).get("excludes"))
+    parsed = [parse(p, context=ctx) for p in find_specs(Path(target), context=ctx)]
     specs = [s for s in parsed if s["ok"]]
     # Files that LOOK like a spec by filename but aren't usable. Disclosed, never silently ignored —
     # if the only spec in a repo is unreadable, "0 undocumented endpoints" would be a false all-clear.

@@ -66,9 +66,77 @@ _VENDOR_HOST = re.compile(
     r"^https?://(?:[a-z0-9-]+\.)*(?:anthropic\.com|openai\.com|openai\.azure\.com|openrouter\.ai)(?:[:/]|$)", re.I)
 
 # MCP server launched via an unpinned package runner — dependency-confusion / rug-pull surface. Mirrors
-# iac_ci's gha-unpinned-action logic. A pin (`@1.2.3`, `==1.2`, a git sha) or a local path exempts it.
+# iac_ci's gha-unpinned-action logic. Only the selected package specs establish pins;
+# paths and version-looking strings passed to the server cannot establish provenance.
 _LAUNCHER = {"npx", "uvx", "pipx", "pip", "pip3", "bunx"}
-_PINNED = re.compile(r"@\d|==\d|@[0-9a-f]{7,40}\b")
+
+
+def _package_state(spec: str, launcher: str) -> str:
+    if spec.startswith(("./", "../", "/", "file:")):
+        return "local"
+    git_ref = r"#[0-9a-fA-F]{40}$" if launcher in {"npx", "bunx"} else r"@[0-9a-fA-F]{40}$"
+    if spec.startswith(("git+https://", "git+ssh://", "git://", "github:")) and re.search(git_ref, spec):
+        return "exact"  # full Git object ID, never a moving branch or abbreviated ID
+    if launcher in {"npx", "bunx"}:
+        exact = r"(?:@[\w.-]+/)?[\w.-]+@\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?"
+    else:
+        # Python equality without wildcards/ranges. uv's @ syntax denotes an exact
+        # version; npm's @1/@1.2 instead denote mutable semver ranges.
+        exact = r"[\w.-]+(?:\[[\w.,-]+\])?(?:==|@)\d+(?:\.\d+)*(?:(?:a|b|rc|post|dev)\d+)?"
+    return "exact" if re.fullmatch(exact, spec) else "unresolved"
+
+
+def _launch_packages(launcher: str, args: list) -> tuple[list[str], bool]:
+    """Selected packages and whether this bounded launcher grammar was understood.
+
+    Stop at the tool command: its flags, roots and version strings are tool data.
+    Unknown runner options remain review leads instead of being guessed safe.
+    """
+    if not all(isinstance(arg, str) for arg in args):
+        return [], False
+    args = list(args)
+    if launcher == "pipx":
+        if not args or args.pop(0) != "run":
+            return [], False
+    if launcher in {"pip", "pip3"}:
+        return [], False  # install/requirements/subcommand semantics not modeled
+    packages = []
+    selected = False
+    flags = {"-y", "--yes", "--no", "--quiet", "-q"} if launcher in {"npx", "bunx"} else {
+        "--isolated", "--no-cache", "--no-progress", "--quiet", "-q", "--verbose", "-v"}
+    selectors = ({"--package", "-p"} if launcher in {"npx", "bunx"} else
+                 {"--from"} if launcher == "uvx" else {"--spec"})
+    extras = {"--with"} if launcher == "uvx" else set()
+    values = ({"--cache", "--registry", "--userconfig"} if launcher == "npx" else
+              {"--python", "--index-url", "--default-index", "--index"} if launcher == "uvx" else
+              {"--python", "--index-url"} if launcher == "pipx" else set())
+    while args:
+        arg = args.pop(0)
+        key, equal, value = arg.partition("=")
+        if key in selectors | extras | values:
+            if not equal:
+                if not args or args[0].startswith("-"):
+                    return packages, False
+                value = args.pop(0)
+            if not value:
+                return packages, False
+            if key in selectors | extras:
+                packages.append(value)
+            if key in selectors:
+                selected = True
+            continue
+        if arg in flags:
+            continue
+        if arg == "--":
+            if not args:
+                return packages, False
+            arg = args.pop(0)
+        elif arg.startswith("-"):
+            return packages, False
+        if not selected:
+            packages.append(arg)
+        return packages, bool(packages)
+    return packages, False
 
 # A LITERAL secret value committed in an MCP server's env/headers. Keys on well-known credential
 # SHAPES (never on the key NAME alone — an `API_KEY: "${MY_KEY}"` env-ref is the SAFE, common case and
@@ -122,13 +190,7 @@ def _mcp_env_secrets(data) -> list[tuple[str, str]]:
 
 def _read(ctx: RepoContext, rel: str) -> str:
     """Read one allow-listed file directly off the root, byte-capped, never raising (untrusted input)."""
-    p = ctx.root / rel
-    try:
-        if not p.is_file() or p.stat().st_size > _MAX_FILE_BYTES:
-            return ""
-        return p.read_text(errors="ignore")
-    except Exception:
-        return ""
+    return ctx.text(ctx.root / rel, max_bytes=_MAX_FILE_BYTES)
 
 
 def _gather(ctx: RepoContext) -> list[tuple[str, str]]:
@@ -138,19 +200,19 @@ def _gather(ctx: RepoContext) -> list[tuple[str, str]]:
         t = _read(ctx, rel)
         if t:
             out.append((rel, t))
-    rules_dir = ctx.root / _CURSOR_RULES_DIR
-    try:
-        if rules_dir.is_dir():
-            for p in sorted(rules_dir.rglob("*")):
-                if len(out) - len(_TEXT_TARGETS) >= _MAX_CURSOR_RULES:
-                    break
-                if p.is_file() and p.suffix.lower() in (".md", ".mdc", ".txt"):
-                    rel = ctx.rel(p)
-                    t = _read(ctx, rel)
-                    if t:
-                        out.append((rel, t))
-    except Exception:
-        pass
+    rules = []
+    for extension in ("md", "mdc", "txt"):
+        suffix = "".join(f"[{letter}{letter.upper()}]" for letter in extension)
+        rules.extend(ctx.glob(f"{_CURSOR_RULES_DIR}/**/*.{suffix}", _MAX_CURSOR_RULES))
+    if len(rules) > _MAX_CURSOR_RULES:
+        cap = {"pattern": f"{_CURSOR_RULES_DIR}/**/*", "limit": _MAX_CURSOR_RULES}
+        if cap not in ctx.glob_truncated:
+            ctx.glob_truncated.append(cap)
+    for p in sorted(rules)[:_MAX_CURSOR_RULES]:
+        rel = ctx.rel(p)
+        t = _read(ctx, rel)
+        if t:
+            out.append((rel, t))
     return out
 
 
@@ -189,14 +251,21 @@ def _mcp_servers(data) -> list[dict]:
             if not isinstance(spec, dict):
                 continue
             cmd = str(spec.get("command", ""))
-            args = spec.get("args", []) if isinstance(spec.get("args"), list) else []
+            raw_args = spec.get("args", [])
+            args = raw_args if isinstance(raw_args, list) else []
             joined = " ".join([cmd] + [str(a) for a in args]).strip()
             launcher = cmd.split("/")[-1].lower()
-            local = any(str(a).startswith((".", "/")) for a in args) or cmd.startswith((".", "/"))
-            unpinned = launcher in _LAUNCHER and not _PINNED.search(joined) and not local
+            packages, understood = _launch_packages(launcher, args) if launcher in _LAUNCHER else ([], True)
+            understood = understood and isinstance(raw_args, list)
+            states = [_package_state(package, launcher) for package in packages]
+            status = ("not-package-runner" if launcher not in _LAUNCHER else
+                      "unknown" if not understood else "unresolved" if "unresolved" in states else
+                      "local" if all(state == "local" for state in states) else "exact")
             servers.append({"name": str(name), "command": joined[:200],
-                            "pinned": not unpinned if launcher in _LAUNCHER else True,
-                            "remote": launcher in _LAUNCHER and not local})
+                            "pinned": status in {"exact", "local", "not-package-runner"},
+                            "pin_status": status, "package_specs": packages,
+                            "remote": launcher in _LAUNCHER and (not understood or any(
+                                state != "local" for state in states))})
     return servers
 
 

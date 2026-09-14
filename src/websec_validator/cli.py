@@ -13,11 +13,44 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import stat
+import tempfile
+import uuid
 import sys
 from pathlib import Path
 
 from . import (__version__, baseline, briefing, calibration, constitution, diffscope, dynamic, findings,
-               formats, fpfilter, inventory, probes, proof, recon, report, scanners)
+               coverage, formats, fpfilter, inventory, probes, proof, recon, report, scanners)
+
+MAX_SARIF_TOTAL_BYTES = 32 * 1024 * 1024
+
+
+def _sarif_imports(paths, target, *, excludes=(), include_fixtures=False):
+    """Bound cumulative expanded evidence, retaining honest failures for every requested input."""
+    from . import sarif_ingest
+    bundles, retained, exhausted = [], 0, False
+    for path in paths:
+        bundle = None if exhausted else sarif_ingest.load_report(Path(path).expanduser(), target,
+                      excludes=excludes, include_fixtures=include_fixtures)
+        size = len(json.dumps(bundle, ensure_ascii=True).encode("utf-8")) if bundle is not None else 0
+        if exhausted or retained + size > MAX_SARIF_TOTAL_BYTES:
+            original = bundle["report"] if bundle is not None else {}
+            report = {key: original.get(key) for key in ("sha256", "bytes", "version")}
+            report.update(path=str(Path(path).expanduser().absolute()), import_complete=False,
+                          analysis_outcome=original.get("analysis_outcome", "unknown"), execution_complete=False,
+                          source_freshness="unverified", tool_scope=[], scope={"aggregate_budget": MAX_SARIF_TOTAL_BYTES},
+                          counts={"findings": 0, "observations": 0, "omitted": len((bundle or {}).get("findings", []))
+                                  + len((bundle or {}).get("observations", []))},
+                          gaps=[{"kind": "sarif_aggregate_limit", "execution": True,
+                                 "detail": "Combined expanded SARIF evidence budget exceeded; this requested import was not retained."}],
+                          limits={"aggregate_bytes": MAX_SARIF_TOTAL_BYTES},
+                          source_references_read=False, commands_executed=False, references_fetched=False)
+            bundle, exhausted = {"findings": [], "observations": [], "report": report}, True
+        else:
+            retained += size
+        bundles.append(bundle)
+    return bundles
 
 
 def _resolve_target(raw: str) -> Path:
@@ -53,21 +86,38 @@ def _default_out(target: Path, out: str | None) -> Path:
 
 
 def _new_run_dir(out: str | None) -> tuple:
-    """Create an immutable timestamped run dir and point `latest` at it. Returns (run_dir, ts).
-    Every run is preserved — nothing is overwritten."""
+    """Reserve below a real runs directory; publish latest only after artifacts exist.
+
+    The explicitly selected base may resolve through an operator-provided alias.
+    Nested runs symlinks are not an authorization to write somewhere else. This
+    check does not make subsequent path-based writes race-proof against a process
+    concurrently replacing the output tree.
+    """
     import datetime
-    base = Path(out).expanduser().resolve() if out else Path.cwd() / "websec-out"
-    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    run = base / "runs" / ts
-    run.mkdir(parents=True, exist_ok=True)
-    latest = base / "latest"
+    base = (Path(out).expanduser() if out else Path.cwd() / "websec-out").resolve()
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    base.mkdir(parents=True, exist_ok=True)
+    runs = base / "runs"
     try:
-        if latest.is_symlink() or latest.exists():
-            latest.unlink()
-        latest.symlink_to(Path("runs") / ts, target_is_directory=True)
-    except Exception:
-        pass
-    return run, ts
+        info = runs.lstat()
+    except FileNotFoundError:
+        runs.mkdir(exist_ok=True)
+        info = runs.lstat()
+    if not stat.S_ISDIR(info.st_mode):
+        raise ValueError("output runs path must be a real directory, not a symlink or other file: " + str(runs))
+    run = Path(tempfile.mkdtemp(prefix=stamp + "-", dir=runs))
+    return run, run.name
+
+
+def _publish_run(run: Path) -> None:
+    """Atomically replace the latest symlink; a failed run leaves its predecessor intact."""
+    base = run.parent.parent
+    temporary = base / (".latest-" + uuid.uuid4().hex)
+    try:
+        temporary.symlink_to(Path("runs") / run.name, target_is_directory=True)
+        os.replace(temporary, base / "latest")
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def cmd_doctor(args) -> int:
@@ -129,6 +179,7 @@ def _security_context_md(facts: dict, ledger: dict) -> str:
         top = ledger["findings"][:5]
         lines.append("- Top recon findings: " + "; ".join(
             f"[{f['severity']}] {f['title'][:70]}" for f in top))
+    lines.append(coverage.render_md(facts))
     lines.append("- When editing this repo: treat the unguarded write endpoints + IDOR/SSRF targets "
                  "as the highest-risk surface. Run `websec run . --scan` for the full briefing + probes.")
     return "\n".join(lines)
@@ -153,8 +204,24 @@ def cmd_emit_context(args) -> int:
 
 
 def cmd_run(args) -> int:
+    if len(getattr(args, "sarif", []) or []) > 8:
+        print("error: at most 8 explicit --sarif reports are supported per run", file=sys.stderr)
+        return 2
+    if getattr(args, "scanners", None) and not args.scan:
+        print("error: --scanners requires --scan", file=sys.stderr)
+        return 2
+    if getattr(args, "scanners", None) and not any(key.strip() for key in args.scanners.split(",")):
+        print("error: --scanners requires at least one scanner key", file=sys.stderr)
+        return 2
+    if getattr(args, "verify_secrets", False) and not args.scan:
+        print("error: --verify-secrets requires --scan", file=sys.stderr)
+        return 2
     target = _resolve_target(args.target)
-    out, ts = _new_run_dir(args.out)
+    try:
+        out, ts = _new_run_dir(args.out)
+    except (OSError, ValueError) as error:
+        print(f"error: cannot reserve output run: {error}", file=sys.stderr)
+        return 2
 
     # In a machine-output mode (sarif/json) keep STDOUT pure for piping — route human progress to
     # stderr. `websec run app --format sarif > results.sarif` then Just Works in a pipeline.
@@ -166,8 +233,7 @@ def cmd_run(args) -> int:
     # 1. recon
     facts = recon.build_facts(target, __version__, args.exclude,
                               include_fixtures=getattr(args, "include_fixtures", False))
-    recon.write_facts(facts, out / "FACTS.json")
-    langs = facts["stack"]["languages"]
+    langs = facts.get("stack", {}).get("languages", [])
     _print_facts_summary(facts, log)
 
     # 2. scanners: detect, optionally run
@@ -176,7 +242,7 @@ def cmd_run(args) -> int:
     unified = None
     if args.scan:
         log("\n  running available static scanners (read-only)…")
-        only = args.scanners.split(",") if args.scanners else None
+        only = [key.strip() for key in args.scanners.split(",") if key.strip()] if args.scanners else None
         scan_results = scanners.run_available(target, out, langs, excludes=args.exclude, only=only,
                                              verify_secrets=getattr(args, 'verify_secrets', False))
         for r in scan_results:
@@ -200,17 +266,34 @@ def cmd_run(args) -> int:
         _rx = unified.get('reachability') or {}
         if _rx.get('declared_only'):
             log(f"    reachability: {_rx.get('imported', 0)} imported · "
-                f"{_rx['declared_only']} declared-only (pkg not imported → likely unreachable)")
+                f"{_rx['declared_only']} declared-only (import not observed; reachability unproven)")
         _ex = unified.get('exploitability') or {}
         if _ex.get('available') and (_ex.get('kev') or _ex.get('high_epss')):
             log(f"    exploitability: {_ex.get('kev', 0)} CISA-KEV (known-exploited) · "
                 f"{_ex.get('high_epss', 0)} high-EPSS")
         elif _ex and not _ex.get('available') and unified.get('by_category', {}).get('sca'):
-            log("    exploitability: EPSS/KEV cache absent — run scripts/refresh-epss-kev.sh to "
+            log("    exploitability: EPSS/KEV snapshot unavailable or unverified — run websec intel refresh to "
                 "prioritize CVEs by real-world exploit likelihood")
     else:
         log(f"\n  scanners available: {', '.join(s['name'] for s in det['available']) or 'none'}"
             "  (add --scan to execute them)")
+
+    only = [key.strip() for key in args.scanners.split(",") if key.strip()] if args.scanners else None
+    coverage.add_scanners(facts, det, scan_results, unified, scan=args.scan, only=only,
+                          verify_secrets=getattr(args, "verify_secrets", False))
+    imported = []
+    if getattr(args, "sarif", None):
+        imported = _sarif_imports(args.sarif, target, excludes=args.exclude or (),
+                                 include_fixtures=getattr(args, "include_fixtures", False))
+        coverage.add_imports(facts, [bundle["report"] for bundle in imported])
+        unified = findings.merge_imports(unified, [row for bundle in imported for row in bundle["findings"]])
+        (out / "sarif-imports.json").write_text(json.dumps(imported, indent=2))
+        if not args.scan:
+            (out / "findings.json").write_text(json.dumps(unified["all"], indent=2))
+        log(f"  imported {len(imported)} SARIF report(s): {sum(len(bundle['findings']) for bundle in imported)} findings; source freshness unverified")
+    facts["coverage"]["build_id"] = ts
+    recon.write_facts(facts, out / "FACTS.json")
+    (out / "coverage.json").write_text(json.dumps(facts["coverage"], indent=2))
 
     # 2c. SBOM (opt-in) — offline CycloneDX/SPDX via Trivy, alongside the other machine artifacts.
     sbom = None
@@ -220,6 +303,7 @@ def cmd_run(args) -> int:
             log(f"  SBOM ({sbom['format']}): {sbom['components']} components → {sbom['path']}")
         else:
             log(f"  SBOM skipped: {sbom.get('reason', 'unavailable')}")
+            coverage.add_gap(facts, "sbom", sbom.get("reason", "unavailable"))
 
     # 2d. Attack-surface inventory — the ranked per-endpoint planning table (also rendered in §3a of
     # the briefing, and the substrate for the DAST-prediction + pentest-plan sections).
@@ -240,6 +324,9 @@ def cmd_run(args) -> int:
     suppressions = findings.load_suppressions(target)
     acks = findings.load_acknowledgements(target)
     ledger = findings.build_ledger(facts, unified, None, suppressions, acks)
+    ledger["coverage"] = facts["coverage"]
+    ledger["target"] = facts["target"]
+    ledger["build_id"] = ts
     baseline.annotate(ledger)          # stable per-finding fingerprints (baseline + SARIF tracking)
     if ledger.get("acknowledged_n"):
         log(f"  acknowledged: {ledger['acknowledged_n']} known finding(s) shown but not gating "
@@ -254,12 +341,15 @@ def cmd_run(args) -> int:
     if graph_path or (target / "graphify-out" / "graph.json").exists():
         try:
             from . import graph_enrich
-            graph_enrich.enrich_ledger(ledger, target, graph_path)
+            graph_enrich.enrich_ledger(ledger, target, graph_path, excludes=args.exclude)
             ge = ledger.get("graph_enrichment")
-            if ge:
+            if ge and ge.get("available", True):
                 log(f"\n  graph: {ge['mapped']} finding(s) mapped to {ge['nodes']} nodes · "
                     f"max blast-radius {ge['max_blast_radius']} (source: {ge['graph']})")
+            if ge and not ge.get("available", True):
+                coverage.add_gap(facts, "graph", ge.get("reason", "unavailable"), execution=bool(graph_path))
         except Exception as e:  # enrichment is best-effort — never fail the run over it
+            coverage.add_gap(facts, "graph", type(e).__name__, execution=bool(graph_path))
             log(f"\n  graph: enrichment skipped ({type(e).__name__}: {e})")
 
     # 4a1. FP pre-pass: tag (never drop) findings a reviewer/LLM-reviewer would routinely filter,
@@ -280,21 +370,31 @@ def cmd_run(args) -> int:
              "files": {f: [list(r) for r in rs] for f, rs in (diff_scope.get("files") or {}).items()},
              "counts": diff_counts}, indent=2))
         if diff_scope.get("error"):
+            coverage.add_gap(facts, "diff", diff_scope["error"])
             log(f"  ⚠ --diff {args.diff}: {diff_scope['error']} — running UNSCOPED (whole repo)")
         else:
             log(f"  diff scope: {diff_counts['changed_files']} changed file(s) vs {diff_scope['base']} · "
                 f"{diff_counts['in_changed_file']} finding(s) in changed files "
                 f"({diff_counts['untouched']} pre-existing) → diff-scope.json")
 
+    ledger["verification_context"] = {"application_id": getattr(args, "application_id", None) or str(target),
+                                       "build_id": getattr(args, "build_id", None) or facts["coverage"]["analyzed_input_digest"],
+                                       "source_digest": facts["coverage"]["analyzed_input_digest"]}
     # 4b. baseline / diff — only NEW findings gate CI when a baseline is supplied
     diff = None
     if getattr(args, "baseline", None):
         base_fps = baseline.load_baseline(Path(args.baseline).expanduser())
+        for error in getattr(base_fps, "errors", []):
+            coverage.add_gap(facts, "baseline", error)
         diff = baseline.diff(ledger, base_fps)
         log(f"\n  baseline: {diff['new_count']} new · {diff['unchanged_count']} unchanged · "
-            f"{diff['fixed_count']} fixed (vs {args.baseline})")
+            f"{diff.get('no_longer_observed_count', 0)} no longer observed (vs {args.baseline})")
 
+    recon.write_facts(facts, out / "FACTS.json")
+    (out / "coverage.json").write_text(json.dumps(facts["coverage"], indent=2))
     (out / "findings-ledger.json").write_text(json.dumps(ledger, indent=2))
+    from . import repairs
+    (out / "repair-plans.json").write_text(json.dumps(repairs.build(ledger), indent=2))
     (out / "CONSTITUTION.md").write_text(constitution.render(constitution.build(facts, ledger)))
     if ledger["total"]:
         log(f"\n  ledger: {ledger['total']} finding(s) · {ledger['by_severity']} · confidence {ledger['by_confidence']}"
@@ -310,19 +410,26 @@ def cmd_run(args) -> int:
     # drop the full `all` finding list from the manifest — it's a duplicate of findings.json
     manifest_summary = {k: v for k, v in unified.items() if k != "all"} if unified else None
     (out / "manifest.json").write_text(json.dumps(
-        {"facts": "FACTS.json", "scanners": det, "scan_results": scan_results,
+        {"facts": "FACTS.json", "coverage": "coverage.json", "scanners": det, "scan_results": scan_results,
+         "sarif_imports": "sarif-imports.json" if imported else None,
          "findings_summary": manifest_summary, "ledger": {"total": ledger["total"], "by_severity": ledger["by_severity"]},
          "sarif": "results.sarif", "sbom": sbom, "attack_surface": "attack-surface.json",
          "attack_surface_summary": inv.get("summary", {}),
          "probes": manifest, "timestamp": ts}, indent=2))
 
+    if facts["coverage"].get("execution_complete"):
+        _publish_run(out)
+    log(coverage.render_md(facts))
     log(f"\n✓ run {ts} saved (immutable — nothing overwritten):\n    {out}")
     log("    REPORT.md          — full historical record")
     log("    AGENT-BRIEFING.md  — hand this to your AI coding agent")
     log("    results.sarif      — SARIF 2.1.0 for CI / GitHub Code Scanning")
     if sbom and sbom.get("available"):
         log(f"    {sbom['path']}   — {sbom['format']} SBOM ({sbom['components']} components)")
-    log(f"  latest → {out.parent.parent / 'latest'}    ·    add `websec-out/` to .gitignore")
+    if facts["coverage"].get("execution_complete"):
+        log(f"  latest → {out.parent.parent / 'latest'}    ·    add `websec-out/` to .gitignore")
+    else:
+        log(f"  partial attempt retained at {out}; latest completed scan unchanged")
 
     # emit the requested machine format on STDOUT (for piping); default 'briefing' emits nothing extra
     if fmt == "sarif":
@@ -332,6 +439,10 @@ def cmd_run(args) -> int:
 
     # 6. CI gate — exit non-zero if findings at/above --fail-on remain (only NEW ones when a baseline
     # is supplied). Default (no --fail-on) never fails the build.
+    if ((getattr(args, "fail_on", None) or getattr(args, "require_complete", False))
+            and not facts["coverage"].get("execution_complete")):
+        log("\n✗ requested security checks did not complete; partial artifacts saved (exit 2).")
+        return 2
     if getattr(args, "fail_on", None):
         # --diff narrows the gate to findings in CHANGED files (PR semantics: don't fail a PR on
         # pre-existing debt it didn't touch). Only when scoping actually succeeded.
@@ -339,7 +450,7 @@ def cmd_run(args) -> int:
         _scoped = bool(diff_scope and not diff_scope.get("error"))
         if _scoped:
             _gate_ledger = dict(ledger, findings=[f for f in ledger.get("findings", [])
-                                                  if f.get("diff_state") == "in-changed-file"])
+                                                  if f.get("diff_state") in {"in-changed-file", "in-changed-hunk"}])
         n = baseline.gate_count(_gate_ledger, args.fail_on, new_only=bool(diff))
         if n:
             log(f"\n✗ --fail-on {args.fail_on}: {n} finding(s) at or above threshold"
@@ -354,11 +465,15 @@ def cmd_run(args) -> int:
 
 def cmd_dynamic(args) -> int:
     base = Path(args.out).expanduser().resolve() if args.out else Path.cwd() / "websec-out"
-    # resolve BEFORE _new_run_dir repoints `latest` (else the symlink moves under us)
+    # Resolve the previous complete run before reserving the dynamic run directory.
     facts_path = (Path(args.facts).expanduser() if args.facts else base / "latest" / "FACTS.json").resolve()
     if not facts_path.is_file():
         sys.exit(f"error: FACTS.json not found at {facts_path} — run `websec run <repo>` first (or pass --facts)")
-    out, ts = _new_run_dir(args.out)
+    try:
+        out, ts = _new_run_dir(args.out)
+    except (OSError, ValueError) as error:
+        print(f"error: cannot reserve output run: {error}", file=sys.stderr)
+        return 2
     dyn: dict = {}
 
     if args.unauth:
@@ -379,16 +494,15 @@ def cmd_dynamic(args) -> int:
         if ftb:
             print(f"\n  forged-token (unverified-signature) → {ftb['summary']}")
             for r in ftb.get("results", []):
-                if r["verdict"] == "BYPASS":
-                    print(f"    🚨 BYPASS  {r['baseline']}→{r['forged']}  {r['method']} {r['path']}  (via {r['via']})")
+                if r["verdict"] != "rejected":
+                    print(f"    · {r['verdict']}  {r['baseline']}→{r['forged']}  {r['method']} {r['path']}  (via {r['via']})")
         if args.probe_writes:
             w = dyn["write_auth_enforcement"]
             print(f"\n  write-verb auth enforcement → {w['summary']}")
             if w.get("warning"):
                 print(f"\n  {w['warning']}\n")
             for r in w["results"]:
-                mark = "🔓" if r["verdict"] != "auth-enforced" and not r["verdict"].startswith("http-") else " ·"
-                print(f"    {mark} {str(r['status']):>4}  {r['verdict']:42} {r['method']} {r['path']}")
+                print(f"     · {str(r['status']):>4}  {r['verdict']:42} {r['method']} {r['path']}")
     elif args.config:
         cfg = Path(args.config).expanduser().resolve()
         if not cfg.is_file():
@@ -398,10 +512,10 @@ def cmd_dynamic(args) -> int:
         ct = dyn.get("cross_tenant_bola", {})
         if ct.get("error"):
             print("  ERROR:", ct["error"])
-            return 1
-        print(f"  agentA {ct['agentA']['email']} (tenant {ct['agentA']['tenant']}) · "
-              f"agentB {ct['agentB']['email']} (tenant {ct['agentB']['tenant']})")
-        print(f"  → {ct['summary']}")
+        else:
+            print(f"  agentA {ct['agentA']['email']} (tenant {ct['agentA']['tenant']}) · "
+                  f"agentB {ct['agentB']['email']} (tenant {ct['agentB']['tenant']})")
+            print(f"  → {ct['summary']}")
         for lk in ct.get("leaks", []):
             print(f"     🚨 LEAK {lk['direction']} {lk['path']} → HTTP {lk['status']}")
     else:
@@ -409,10 +523,19 @@ def cmd_dynamic(args) -> int:
 
     # merge dynamic evidence into the traceable ledger + write the immutable run report
     facts_dict = json.loads(facts_path.read_text())
+    coverage.add_dynamic(facts_dict, dyn)
     _root = Path(facts_dict.get("target", "."))
     ledger = findings.build_ledger(facts_dict, None, dyn,
                                    findings.load_suppressions(_root),
                                    findings.load_acknowledgements(_root))
+    ledger["coverage"] = facts_dict["coverage"]
+    ledger["target"] = str(_root)
+    ledger["build_id"] = ts
+    ledger["verification_context"] = {
+        "application_id": str(_root),
+        "build_id": facts_dict["coverage"].get("analyzed_input_digest", ""),
+        "source_digest": facts_dict["coverage"].get("analyzed_input_digest", ""),
+    }
     (out / "findings-ledger.json").write_text(json.dumps(ledger, indent=2))
     (out / "CONSTITUTION.md").write_text(constitution.render(constitution.build(facts_dict, ledger)))
     (out / "REPORT.md").write_text(
@@ -428,15 +551,128 @@ def cmd_dynamic(args) -> int:
         print(f"  calibration: folded {len(samples)} confirmed sample(s) ({nr} real / {len(samples) - nr} FP) "
               f"into your local overlay → {rec['meta']['samples']} total; confidence now personalizes to your apps")
 
+    recon.write_facts(facts_dict, out / "FACTS.json")
+    (out / "coverage.json").write_text(json.dumps(facts_dict.get("coverage", {}), indent=2))
+    if (facts_dict.get("coverage") or {}).get("execution_complete"):
+        _publish_run(out)
     print(f"  ✓ run {ts} saved (immutable): {out}")
+    if not (facts_dict.get("coverage") or {}).get("execution_complete"):
+        print("  Requested checks incomplete; latest completed scan unchanged.")
+        return 2
     return 1 if ledger["by_severity"].get("CRITICAL") else 0
 
 
 def cmd_mcp(args) -> int:
     from . import mcp_server
     if getattr(args, "http", False):
-        return mcp_server.serve_http(args.host, args.port)
+        try:
+            return mcp_server.serve_http(args.host, args.port, allowed_roots=getattr(args, "allow_root", None))
+        except (ValueError, OSError) as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 2
     return mcp_server.serve()
+
+
+def _load_json_artifact(path: str):
+    from .extractors.base import read_artifact
+    return json.loads(read_artifact(Path(path).expanduser()))
+
+
+def cmd_repair_verify(args) -> int:
+    """Validate supplied test evidence; never execute commands from artifacts."""
+    from . import repairs
+    try:
+        plans = _load_json_artifact(args.plan)
+        if isinstance(plans, list):
+            selected = [p for p in plans if isinstance(p, dict) and p.get("plan_id") == args.plan_id]
+            if args.plan_id is None and len(plans) == 1:
+                selected = plans
+            if len(selected) != 1:
+                raise ValueError("select exactly one repair plan with --plan-id")
+            plan = selected[0]
+        else:
+            plan = plans
+        record = _load_json_artifact(args.record)
+        rerun = _load_json_artifact(args.rerun)
+        if not all(isinstance(data, dict) for data in (plan, record, rerun)):
+            raise ValueError("plan, verification record and rerun must be JSON objects")
+        result = repairs.validate_verification(plan, record, rerun, rerun.get("coverage") or {},
+                                               evidence_root=Path(args.evidence_root).expanduser())
+    except (OSError, ValueError, TypeError) as error:
+        result = {"accepted": False, "state": "verification-rejected", "errors": [str(error)],
+                  "tests_executed_by_websec": False}
+    print(json.dumps(result, indent=2))
+    return 0 if result.get("accepted") else 2
+
+
+def _emit_json_result(result: dict, output: str | None = None) -> None:
+    content = json.dumps(result, indent=2)
+    if output:
+        destination = Path(output).expanduser()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        # An explicit analysis result must never overwrite an input or prior evidence.
+        with destination.open("x", encoding="utf-8") as stream:
+            stream.write(content + "\n")
+    print(content)
+
+
+def cmd_capabilities(args) -> int:
+    from .extractors.profiles import capabilities
+    _emit_json_result(capabilities())
+    return 0
+
+
+def cmd_intel(args) -> int:
+    from . import intel
+    try:
+        if args.action == "refresh":
+            result = intel.refresh(args.cache_dir)
+            code = 0 if (result.get("last_refresh") or {}).get("outcome") == "success" else 2
+        elif args.action == "status":
+            result, code = intel.status(args.cache_dir), 0
+        else:
+            ledger = _load_json_artifact(args.ledger)
+            if (not isinstance(ledger, dict) or not isinstance(ledger.get("findings"), list)
+                    or not all(isinstance(row, dict) for row in ledger["findings"])):
+                raise ValueError("ledger must be a JSON object containing a findings list")
+            result = intel.reassess(ledger, args.cache_dir)
+            code = 0 if result["intel"].get("freshness") == "fresh" and not result.get("blocked_findings") else 2
+        _emit_json_result(result, getattr(args, "out", None))
+        return code
+    except (OSError, ValueError, TypeError) as error:
+        print(json.dumps({"error": str(error)}, indent=2))
+        return 2
+
+
+def cmd_research(args) -> int:
+    from . import research
+    try:
+        if args.action == "example":
+            result, code = research.example(), 0
+        elif args.action == "catalog":
+            result, code = research.catalog(), 0
+        elif getattr(args, "suite", None):
+            if args.cases is not None:
+                raise ValueError("--cases requires --proposal and cannot be used with --suite")
+            result = research.evaluate_suite(args.suite)
+            code = 0 if result.get("promotion_eligible") else 2
+        else:
+            document = _load_json_artifact(args.proposal)
+            if args.cases is not None:
+                proposal, cases = document, _load_json_artifact(args.cases)
+            elif isinstance(document, dict):
+                proposal, cases = document.get("proposal"), document.get("cases")
+            else:
+                raise ValueError("supply a proposal/cases bundle or --cases JSON")
+            if not isinstance(proposal, dict) or not isinstance(cases, list):
+                raise ValueError("proposal must be an object and cases must be an array")
+            result = research.evaluate(proposal, cases)
+            code = 0 if result.get("promotion_eligible") else 2
+        _emit_json_result(result, args.out)
+        return code
+    except (OSError, ValueError, TypeError) as error:
+        print(json.dumps({"error": str(error)}, indent=2))
+        return 2
 
 
 def cmd_hooks(args) -> int:
@@ -478,20 +714,39 @@ def cmd_proof(args) -> int:
     workdir = (Path(args.workdir).expanduser().resolve() if args.workdir
                else Path.home() / ".cache" / "websec-corpus")
     print(f"websec proof — recon coverage vs vuln-app corpus\n  corpus:  {corpus_path}\n  workdir: {workdir}\n")
-    res = proof.run_proof(corpus_path, workdir)
-    for r in res["results"]:
-        if r.get("score") is None:
-            print(f"  {r['name']:12} — {r.get('status', 'no checks')}")
-            continue
-        print(f"  {r['name']:12} {r['passed']}/{r['total']} checks · {r.get('endpoints', '?')} endpoints · {r.get('vulns', '')[:55]}")
-        for c in r.get("checks", []):
-            print(f"       {'✓' if c['pass'] else '✗'} {c['check']:22} got={c['got']}")
-    agg = res["aggregate"]
-    print(f"\n  OVERALL recon coverage: {agg.get('overall_coverage')} "
-          f"({agg['checks_passed']}/{agg['checks_total']} checks, {agg['apps']} apps)")
-    print("  NOTE: PROXY metric (does recon surface the known-vuln surface?). The full agent-lift")
-    print("  kill-criterion is the manual A/B in corpus/PROOF-PROTOCOL.md.")
-    return 0
+    try:
+        res = proof.run_proof(corpus_path, workdir)
+    except (OSError, ValueError, TypeError) as error:
+        print(f"  Proof could not complete: {type(error).__name__}: {error}")
+        return 2
+    for row in res["results"]:
+        revision = row.get("revision_status", "unreported")
+        actual = row.get("actual_revision")
+        print(f"  {row['name']:12} — {row.get('status', 'unknown')} · revision {revision}" + (f" ({actual})" if actual else ""))
+        if row.get("status") == "analyzed":
+            print(f"    execution: {'complete' if row.get('execution_complete') is True else 'incomplete'} · "
+                  f"{row.get('passed', 0)}/{row.get('total', 0)} evaluated checks · "
+                  f"{row.get('unknown_checks', 0)} unknown checks · {row.get('unknown_labels', 0)} unknown truth labels")
+        for check in row.get("checks", []):
+            marker = "?" if check.get("pass") is None else "✓" if check["pass"] else "✗"
+            print(f"       {marker} {check['check']:22} got={check.get('got')}")
+        for error in row.get("execution_errors", []):
+            print(f"       incomplete: {error}")
+    aggregate = res["aggregate"]
+    analyzed = aggregate.get("analyzed_apps", 0)
+    completed = aggregate.get("completed_apps", sum(row.get("status") == "analyzed" and row.get("execution_complete") is True for row in res["results"]))
+    incomplete = aggregate.get("incomplete_apps", analyzed - completed)
+    unavailable = aggregate.get("unavailable_apps", aggregate["apps"] - analyzed)
+    print(f"\n  Evaluated recon-check coverage: {aggregate.get('overall_coverage')} "
+          f"({aggregate['checks_passed']}/{aggregate['checks_total']} evaluated checks)")
+    print(f"  Applications: {completed} completed · {incomplete} incomplete · {unavailable} unavailable "
+          f"({analyzed} analyzed / {aggregate['apps']} requested)")
+    print(f"  Unknown: {aggregate.get('unknown_checks', 0)} checks · {aggregate.get('unknown_labels', 0)} truth labels "
+          "(excluded from calibration; not false labels)")
+    print("  NOTE: Recon surface checks are a proxy, not vulnerability precision or agent-lift evidence.")
+    if incomplete or unavailable or aggregate.get("unknown_checks", 0) or not aggregate["checks_total"]:
+        return 2
+    return 1 if aggregate.get("failed_checks", aggregate["checks_total"] - aggregate["checks_passed"]) else 0
 
 
 def cmd_calibrate(args) -> int:
@@ -516,13 +771,13 @@ def cmd_calibrate(args) -> int:
         if not res["labels"]:
             print("websec calibrate --ingest-dast: no DAST-predictable findings in the ledger matched "
                   f"the scan (blind-spot findings skipped: {res['skipped_blind']}). Nothing to fold.")
-            return 0
+            return 2
         rec = calibration.record_samples(res["labels"])
         if not rec:
             sys.exit("error: nothing ingested (local overlay not writable)")
         nc, nr, nu = len(res["confirmed"]), len(res["refuted"]), len(res.get("unjudged", []))
         print(f"websec calibrate --ingest-dast: the scan CONFIRMED {nc} finding(s) and REFUTED {nr} "
-              f"(scanner ran those rules and stayed silent); {nu} left UNJUDGED (this scan shows no "
+              f"(explicit location-scoped negative evidence); {nu} left UNJUDGED (this scan shows no "
               f"evidence it ran those rules — e.g. a passive-only baseline cannot test SQLi, so its "
               f"silence proves nothing); {res['skipped_blind']} blind-spot finding(s) unscored. "
               f"Folded {len(res['labels'])} sample(s) into {calibration.LOCAL_PATH} → "
@@ -536,14 +791,20 @@ def cmd_calibrate(args) -> int:
             sys.exit(f"error: --ingest file not found: {src}")
         data = json.loads(src.read_text())
         rows = data.get("findings", data) if isinstance(data, dict) else data
-        labeled = [{"attack_class": r.get("attack_class", ""), "confidence": r.get("confidence", "MEDIUM"),
-                    "is_real": bool(r.get("is_real"))} for r in rows]
+        labeled = [{**r, "attack_class": r.get("attack_class", ""), "confidence": r.get("confidence", "MEDIUM"),
+                    "is_real": r.get("is_real") if isinstance(r.get("is_real"), bool) else None}
+                   for r in rows if isinstance(r, dict)]
         rec = calibration.record_samples(labeled)
         if not rec:
             sys.exit("error: nothing ingested (empty file, or local overlay not writable)")
-        nr = sum(1 for s in labeled if s["is_real"])
-        print(f"websec calibrate --ingest: folded {len(labeled)} hand-labeled sample(s) "
-              f"({nr} real / {len(labeled) - nr} FP) into {calibration.LOCAL_PATH} → {rec['meta']['samples']} total.")
+        verified = [s for s in labeled if s.get("evidence_verified") is True and s.get("sample_id")
+                    and isinstance(s.get("provenance"), dict) and isinstance(s.get("is_real"), bool)]
+        if not verified:
+            print(f"websec calibrate --ingest: {len(labeled)} unverified/unknown rows retained for review; no measured samples added.")
+            return 2
+        nr = sum(1 for s in verified if s["is_real"] is True)
+        print(f"websec calibrate --ingest: processed {len(verified)} evidence-backed sample(s) "
+              f"({nr} real / {len(verified) - nr} FP) into {calibration.LOCAL_PATH} → {rec['meta']['samples']} total.")
         return 0
 
     corpus_path = (Path(args.corpus).expanduser().resolve() if args.corpus
@@ -578,7 +839,7 @@ def cmd_calibrate(args) -> int:
             real = calibration.is_real(f.get("attack_class", ""), f.get("location", ""), truth)
             labeled.append({"attack_class": f.get("attack_class", ""),
                             "confidence": f["confidence"], "is_real": real})
-            n_real += int(real)
+            n_real += int(real is True)
         used.append(entry["name"])
         print(f"  {entry['name']:12} {len(ledger['findings'])} findings · {n_real} matched a documented vuln")
 
@@ -588,6 +849,10 @@ def cmd_calibrate(args) -> int:
 
     researched = {t.get("class") for entry in corpus for t in (entry.get("truth") or [])}
     table = calibration.fit(labeled, used, researched)
+    print(f"  calibration labels: {table['meta']['n_total']} scored · {table['meta'].get('n_unknown', 0)} unknown")
+    if not table["meta"]["n_total"]:
+        print("No verified corpus labels matched; calibration was not replaced.")
+        return 2
     out_path.write_text(json.dumps(table, indent=2) + "\n")
     print(f"\n  fitted {table['meta']['n_total']} findings across {len(used)} app(s) → {out_path}")
     for k, v in table["by_label"].items():
@@ -634,11 +899,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=f"websec-validator {__version__}")
     # metavar lists only the user-facing commands; recon/proof/calibrate still work but are
     # omitted (they get no `help=`, so argparse leaves them out of the listing entirely).
-    sub = p.add_subparsers(dest="cmd", required=True, metavar="{run,doctor,dynamic,mcp,install,hooks}")
+    sub = p.add_subparsers(dest="cmd", required=True,
+                          metavar="{run,doctor,dynamic,mcp,capabilities,intel,research,repair-verify,install,hooks}")
 
     r = sub.add_parser("run", help="full pipeline → briefing + tailored probes")
     r.add_argument("target")
     r.add_argument("--scan", action="store_true", help="also execute available static scanners")
+    r.add_argument("--sarif", action="append", metavar="REPORT", help="import an explicit offline SARIF 2.1.0 report (repeatable, maximum 8); source freshness unverified")
     r.add_argument("--out", help="output dir (default: ./websec-out)")
     r.add_argument("--exclude", action="append", metavar="PATH",
                    help="exclude a path/glob from recon + scanners (repeatable; e.g. --exclude 'docs/**')")
@@ -648,7 +915,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--verify-secrets", action="store_true", dest="verify_secrets",
                    help="opt in to TruffleHog LIVE VERIFICATION of discovered secrets. ⚠ this sends "
                         "each candidate credential to its provider's API (a third party) to test if "
-                        "it is live — the only step in websec that leaves your machine. Off by default.")
+                        "it is live. Off by default; provider traffic is separate from public-feed refresh.")
     r.add_argument("--sbom", nargs="?", const="cyclonedx", choices=["cyclonedx", "spdx"], metavar="FMT",
                    help="also emit a Software Bill of Materials (default cyclonedx → sbom.cdx.json) via "
                         "Trivy — offline, for CI/compliance (SLSA, EO 14028)")
@@ -659,13 +926,16 @@ def build_parser() -> argparse.ArgumentParser:
                         "results.sarif is ALWAYS written to the run dir regardless.")
     r.add_argument("--fail-on", choices=["critical", "high", "medium", "low"], dest="fail_on",
                    help="exit 1 if any finding at/above this severity remains (CI gate). With --baseline, "
-                        "only NEW findings count.")
+                        "new, changed and reopened findings count; incomplete execution exits 2.")
+    r.add_argument("--require-complete", action="store_true", help="exit 2 when requested checks cannot complete")
+    r.add_argument("--application-id", help="stable application identity for repair verification (default: target path)")
+    r.add_argument("--build-id", help="reviewed build identity (default: analyzed input digest)")
     r.add_argument("--diff", metavar="REF",
                    help="scope to what changed vs REF (e.g. --diff main): tags findings "
                         "in-changed-file, emits exact hunk line ranges to diff-scope.json, and "
                         "narrows --fail-on to changed files (PR/CI review mode)")
     r.add_argument("--baseline", metavar="LEDGER.json",
-                   help="a prior findings-ledger.json — mark findings new/unchanged/fixed and gate only on NEW")
+                   help="prior ledger for new/unchanged/changed/reopened/no-longer-observed lifecycle")
     r.add_argument("--graph", metavar="GRAPH.json",
                    help="a graphify graph.json for blast-radius enrichment "
                         "(auto-detected at <target>/graphify-out/graph.json if present)")
@@ -714,17 +984,52 @@ def build_parser() -> argparse.ArgumentParser:
     dyn.add_argument("--unauth", action="store_true", help="STRICT read-only: GET each data-read endpoint with NO auth (needs --target)")
     dyn.add_argument("--probe-writes", action="store_true", help="also test write-verb auth enforcement (LOCALHOST-only, non-destructive)")
     dyn.add_argument("--target", help="target base URL (for --unauth)")
-    dyn.add_argument("--facts", help="FACTS.json from a prior run (default: ./websec-out/FACTS.json)")
+    dyn.add_argument("--facts", help="FACTS.json from a prior run (default: ./websec-out/latest/FACTS.json)")
     dyn.add_argument("--out", help="output dir (default: ./websec-out)")
     dyn.set_defaults(func=cmd_dynamic)
 
-    mc = sub.add_parser("mcp", help="run as an MCP server (typed recon tools for any MCP client): stdio, or --http for a team-shared URL")
+    mc = sub.add_parser("mcp", help="typed recon tools over stdio or authenticated loopback HTTP")
     mc.add_argument("--http", action="store_true",
-                    help="serve over HTTP (JSON-RPC POST) instead of stdio — one URL for a team (stdlib only)")
+                    help="serve authenticated loopback HTTP (JSON-RPC POST) instead of stdio")
     mc.add_argument("--host", default="127.0.0.1",
-                    help="HTTP bind host (default 127.0.0.1; use 0.0.0.0 to expose on a TRUSTED network only)")
+                    help="HTTP bind host (default 127.0.0.1; loopback only; WEBSEC_MCP_TOKEN required)")
     mc.add_argument("--port", type=int, default=8733, help="HTTP port (default 8733)")
+    mc.add_argument("--allow-root", action="append", metavar="PATH", help="allowed HTTP scan root (repeatable; default: startup directory)")
     mc.set_defaults(func=cmd_mcp)
+
+    verify = sub.add_parser("repair-verify", help="validate offline repair evidence without executing tests")
+    verify.add_argument("--plan", required=True, help="repair plan JSON or repair-plans.json")
+    verify.add_argument("--plan-id", help="plan identifier when the artifact contains multiple plans")
+    verify.add_argument("--record", required=True, help="operator-supplied verification record JSON")
+    verify.add_argument("--rerun", required=True, help="findings ledger from the fixed build")
+    verify.add_argument("--evidence-root", required=True, help="directory containing referenced test reports")
+    verify.set_defaults(func=cmd_repair_verify)
+
+    capabilities = sub.add_parser("capabilities", help="show offline named security checks and profile limitations")
+    capabilities.set_defaults(func=cmd_capabilities)
+
+    intelligence = sub.add_parser("intel", help="explicit public threat-feed refresh and offline known-CVE reassessment")
+    intel_actions = intelligence.add_subparsers(dest="action", required=True)
+    for action in ("refresh", "status", "reassess"):
+        item = intel_actions.add_parser(action)
+        item.add_argument("--cache-dir", help="local intelligence snapshot directory")
+        item.add_argument("--out", help="write JSON result to a new file (existing files refused)")
+        if action == "reassess":
+            item.add_argument("--ledger", required=True, help="existing findings ledger; input is never overwritten")
+        item.set_defaults(func=cmd_intel)
+
+    research = sub.add_parser("research", help="evaluate data-only proposals against shipped detectors offline")
+    research_actions = research.add_subparsers(dest="action", required=True)
+    for action in ("example", "catalog", "evaluate"):
+        item = research_actions.add_parser(action)
+        item.add_argument("--out", help="write JSON result to a new file (existing files refused)")
+        if action == "evaluate":
+            selection = item.add_mutually_exclusive_group(required=True)
+            selection.add_argument("--proposal", help="proposal object or proposal/cases bundle JSON")
+            from .research import SUITES
+            selection.add_argument("--suite", choices=SUITES, help="evaluate every proposal in a shipped regression suite")
+            item.add_argument("--cases", help="separate synthetic cases JSON when proposal is unbundled")
+        item.set_defaults(func=cmd_research)
 
     from . import install as _install
     ins = sub.add_parser("install",
@@ -748,7 +1053,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-_COMMANDS = {"run", "recon", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks"}
+_COMMANDS = {"run", "recon", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks", "repair-verify", "capabilities", "intel", "research"}
 
 
 def main(argv=None) -> int:

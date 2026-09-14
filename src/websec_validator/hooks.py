@@ -1,24 +1,17 @@
-"""websec hooks — install a git hook that turns websec into a local continuous guardrail.
+"""Local advisory and pre-push security guardrails.
 
-`websec run --baseline <prev-ledger> --fail-on <sev>` already gates on *new* findings only. This
-module wires that into git so it runs automatically:
+The launcher pins this explicitly installed package and uses isolated Python, so
+repository-local modules and PYTHONPATH cannot replace the validator. Editable
+installs deliberately trust their installed source path. Existing shell hooks are
+preserved; non-shell hooks require explicit chaining rather than text insertion.
 
-  * post-commit (default) — advisory. After each commit, run recon against the repo, diff against the
-    previous run's ledger, and print a one-line "N new finding(s)" heads-up. Never blocks the commit
-    (a post-commit hook can't), and recon-only keeps it ~1s.
-  * pre-push (--pre-push) — a gate. Before a push, run the same diff with --fail-on and block the push
-    (non-zero exit) if new findings at/above the threshold were introduced.
-
-Safety, adapted from graphify's hook installer:
-  * the interpreter is pinned at install time (sys.executable) so the hook works under pipx/uv venv
-    isolation where the `websec` launcher may not be on git's PATH; the pinned path is run through a
-    character allowlist so nothing shell-injectable reaches the generated script.
-  * install/uninstall are marker-delimited — an existing hook is appended to, and uninstall strips
-    only our section, never the user's own hook content.
-  * the hooks dir is resolved via `git rev-parse --git-path hooks`, so linked worktrees and a custom
-    core.hooksPath (Husky etc.) are handled correctly.
-
-Stdlib only.
+Post-commit scans are advisory. Pre-push gates compare with an atomically stored
+ledger accepted by a previous successful gate under the same severity/scanner
+policy. Failed or advisory scans never accept findings. With no matching accepted
+baseline, all current findings are gated. These native hooks inspect the current
+working tree, not snapshots of the pushed commits. WEBSEC_SKIP_HOOK is an explicit
+operator override. The runner retains bounded recent artifacts and preserves the
+latest completed attempt plus the independent accepted state.
 """
 
 from __future__ import annotations
@@ -33,7 +26,7 @@ MARKER_END = "# <<< websec-validator guardrail <<<"
 
 # Only characters valid in a plain filesystem path (incl. ':' and '\' for Windows). Anything else in
 # the pinned interpreter path means we drop the pin rather than risk shell injection into the hook.
-_PATH_ALLOWED = re.compile(r"[^a-zA-Z0-9/_.@:\\-]")
+_PATH_ALLOWED = re.compile(r"[^a-zA-Z0-9/_.@:\\ -]")
 
 
 def _safe_pinned_python() -> str:
@@ -68,86 +61,171 @@ def _hooks_dir(root: Path) -> Path:
     return d
 
 
-# The guardrail body, parameterized only by the pinned interpreter (via __PINNED_PYTHON__) and the
-# per-hook RUN_ARGS/GATE lines (via __RUN_TAIL__). Must stay POSIX sh. It:
-#   1. locates an interpreter with websec_validator importable (pinned → websec launcher → python3),
-#   2. copies the previous run's ledger to a stable baseline path (latest is repointed at run start),
-#   3. runs `websec run` into the guardrail dir with that baseline,
-#   4. surfaces the one-line "baseline: N new" summary, and prunes old run dirs.
-_BODY = """\
-[ "${WEBSEC_SKIP_HOOK:-0}" = "1" ] && exit 0
-
-# Skip mid-rebase/merge/cherry-pick so we don't stall `git --continue`.
-_GIT_DIR=${GIT_DIR:-$(git rev-parse --git-dir 2>/dev/null)}
-[ -d "$_GIT_DIR/rebase-merge" ] && exit 0
-[ -d "$_GIT_DIR/rebase-apply" ] && exit 0
-[ -f "$_GIT_DIR/MERGE_HEAD" ] && exit 0
-[ -f "$_GIT_DIR/CHERRY_PICK_HEAD" ] && exit 0
-
-_PROBE='import importlib.util,sys; sys.exit(0 if importlib.util.find_spec("websec_validator") else 1)'
-_PINNED='__PINNED_PYTHON__'
-RUN=""
-if [ -n "$_PINNED" ] && [ -x "$_PINNED" ] && "$_PINNED" -c "$_PROBE" 2>/dev/null; then
-    RUN="$_PINNED -m websec_validator.cli"
-elif command -v websec >/dev/null 2>&1; then
-    RUN="websec"
-elif command -v python3 >/dev/null 2>&1 && python3 -c "$_PROBE" 2>/dev/null; then
-    RUN="python3 -m websec_validator.cli"
+def _script(pre_push: bool) -> str:
+    """Isolated launch of this explicitly installed package; never import from the target cwd."""
+    import shlex
+    package_parent = str(Path(__file__).resolve().parent.parent)
+    entry = ("import sys\nsys.path.insert(0, " + repr(package_parent) + ")\n"
+             "try:\n from websec_validator.hooks import run_guardrail\n"
+             "except Exception as error:\n print('websec runtime unavailable: ' + str(error), file=sys.stderr); sys.exit(2)\n"
+             f"sys.exit(run_guardrail(pre_push={pre_push!r}))")
+    pinned = shlex.quote(_safe_pinned_python())
+    missing_rc = 2 if pre_push else 0
+    # The subshell's exit never skips another installed hook's body. The parent
+    # propagates only a failed gate before continuing the original shell hook.
+    return f"""{MARKER_START}
+(
+[ "${{WEBSEC_SKIP_HOOK:-0}}" = "1" ] && exit 0
+_PINNED={pinned}
+if [ -n "$_PINNED" ] && [ -x "$_PINNED" ]; then
+    _PYTHON="$_PINNED"
+elif command -v python3 >/dev/null 2>&1; then
+    _PYTHON=$(command -v python3)
 else
-    echo "[websec hook] websec not found — run 'websec hooks install' from the env where websec lives." >&2
-    exit 0
+    echo "[websec hook] Python unavailable; security execution incomplete." >&2
+    exit {missing_rc}
 fi
-
-_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo ".")
-GUARD="$_GIT_DIR/websec-guardrail"
-mkdir -p "$GUARD"
-BASEARG=""
-if [ -f "$GUARD/latest/findings-ledger.json" ]; then
-    cp "$GUARD/latest/findings-ledger.json" "$GUARD/prev-ledger.json" 2>/dev/null
-    BASEARG="--baseline $GUARD/prev-ledger.json"
+# The trusted runner invokes websec_validator.cli using argument arrays.
+# {"Blocking policy: --fail-on and --require-complete." if pre_push else "Advisory execution; accepted gate baseline is unchanged."}
+"$_PYTHON" -I -c {shlex.quote(entry)}
+_WEBSEC_RC=$?
+if [ "$_WEBSEC_RC" -ne 0 ]; then
+    echo "[websec hook] security check did not pass (exit $_WEBSEC_RC)." >&2
 fi
-SCANARG=""
-[ "${WEBSEC_HOOK_SCAN:-0}" = "1" ] && SCANARG="--scan"
-
-__RUN_TAIL__
-
-# Keep only the 5 most recent guardrail runs (each `run` is an immutable dir).
-ls -1dt "$GUARD"/runs/*/ 2>/dev/null | tail -n +6 | while read -r _d; do rm -rf "$_d"; done
+{"exit $_WEBSEC_RC" if pre_push else "exit 0"}
+)
+_WEBSEC_RC=$?
+if [ "$_WEBSEC_RC" -ne 0 ]; then exit "$_WEBSEC_RC"; fi
+{MARKER_END}
 """
 
-# post-commit: advisory. Run, echo the baseline summary line, always exit 0.
-_RUN_TAIL_ADVISORY = """\
-$RUN run "$_ROOT" --out "$GUARD" $BASEARG $SCANARG --format json >/dev/null 2>"$GUARD/hook.log"
-_SUMMARY=$(grep -i "baseline:" "$GUARD/hook.log" 2>/dev/null | tail -1 | sed 's/^[[:space:]]*//')
-[ -n "$_SUMMARY" ] && echo "[websec guardrail] $_SUMMARY"
-exit 0"""
 
-# pre-push: gate. Fail the push if NEW findings at/above the threshold were introduced.
-_RUN_TAIL_GATE = """\
-_FAILON=${WEBSEC_HOOK_FAIL_ON:-high}
-$RUN run "$_ROOT" --out "$GUARD" $BASEARG $SCANARG --fail-on "$_FAILON" --format json >/dev/null 2>"$GUARD/hook.log"
-_RC=$?
-_SUMMARY=$(grep -i "baseline:" "$GUARD/hook.log" 2>/dev/null | tail -1 | sed 's/^[[:space:]]*//')
-[ -n "$_SUMMARY" ] && echo "[websec guardrail] $_SUMMARY" >&2
-if [ "$_RC" -ne 0 ]; then
-    echo "[websec guardrail] new finding(s) at/above '$_FAILON' — push blocked. Set WEBSEC_SKIP_HOOK=1 to override." >&2
-fi
-exit $_RC"""
+def _invoke(root: Path, guard: Path, args: list[str]) -> tuple[int, Path | None, dict]:
+    """Capture the exact invocation's output; latest may still name a previous run."""
+    import contextlib
+    import io
+    import json
+    from .cli import main
+    capture = io.StringIO()
+    with (guard / "hook.log").open("w", encoding="utf-8") as log:
+        with contextlib.redirect_stdout(capture), contextlib.redirect_stderr(log):
+            rc = main(["run", str(root), "--out", str(guard), "--format", "json", *args])
+    try:
+        envelope = json.loads(capture.getvalue())
+        name = envelope["generated"]
+        if not isinstance(name, str) or Path(name).name != name or name in {".", ".."}:
+            raise ValueError("invalid run identity")
+        attempt = guard / "runs" / name
+        if not attempt.is_dir() or attempt.is_symlink():
+            raise ValueError("run artifact unavailable")
+        return rc, attempt, envelope
+    except (ValueError, KeyError, TypeError):
+        return 2, None, {}
 
 
-def _script(pre_push: bool) -> str:
-    tail = _RUN_TAIL_GATE if pre_push else _RUN_TAIL_ADVISORY
-    body = _BODY.replace("__RUN_TAIL__", tail).replace("__PINNED_PYTHON__", _safe_pinned_python())
-    return f"{MARKER_START}\n{body}\n{MARKER_END}\n"
+def run_guardrail(*, pre_push: bool = False) -> int:
+    """Gate the current checkout; only a successful gate accepts a policy-bound baseline.
+
+    This checks the working tree, not an immutable snapshot of every pushed Git object.
+    Advisory observations and failed/partial gates cannot approve existing findings.
+    """
+    import json
+    import os
+    import shutil
+    import tempfile
+    root = _git_root(Path.cwd())
+    failure = 2 if pre_push else 0
+    if root is None:
+        print("[websec hook] repository unavailable; execution incomplete", file=sys.stderr)
+        return failure
+    try:
+        res = subprocess.run(["git", "-C", str(root), "rev-parse", "--absolute-git-dir"],
+                             capture_output=True, text=True, timeout=5, input="")
+        if res.returncode or not res.stdout.strip():
+            raise ValueError("Git metadata directory unavailable")
+        git_dir = Path(res.stdout.strip())
+        if not git_dir.is_absolute():
+            raise ValueError("Git metadata path is not absolute")
+        if any((git_dir / name).exists() for name in ("rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD")):
+            print("[websec hook] operation in progress; check deferred", file=sys.stderr)
+            return failure if pre_push else 0
+        guard = git_dir / "websec-guardrail"
+        guard.mkdir(parents=True, exist_ok=True)
+        lock = guard / "running.lock"
+        try:
+            lock.mkdir()
+        except FileExistsError:
+            raise ValueError("another guardrail is running (or running.lock needs operator cleanup)")
+        try:
+            threshold = os.environ.get("WEBSEC_HOOK_FAIL_ON", "high")
+            scan = os.environ.get("WEBSEC_HOOK_SCAN") == "1"
+            selected = os.environ.get("WEBSEC_HOOK_SCANNERS", "")
+            if threshold not in {"critical", "high", "medium", "low"} or (selected and not scan):
+                raise ValueError("invalid gate severity or scanners selected without WEBSEC_HOOK_SCAN=1")
+            policy = {"fail_on": threshold, "scan": scan, "scanners": sorted(filter(None, (s.strip() for s in selected.split(","))))}
+            accepted = guard / "accepted-ledger.json"
+            state_path = guard / "accepted-state.json"
+            args = ["--require-complete"]
+            if scan:
+                args.append("--scan")
+            if selected:
+                args.extend(["--scanners", selected])
+            if pre_push:
+                args.extend(["--fail-on", threshold])
+                if state_path.exists():
+                    try:
+                        state = json.loads(state_path.read_text(encoding="utf-8"))
+                        if not isinstance(state, dict) or not isinstance(state.get("ledger"), dict):
+                            raise ValueError("invalid accepted state")
+                    except (ValueError, OSError):
+                        raise ValueError("accepted gate policy is unreadable")
+                    if state.get("policy") == policy:
+                        accepted.write_text(json.dumps(state["ledger"]), encoding="utf-8")
+                        args.extend(["--baseline", str(accepted)])
+            rc, attempt, envelope = _invoke(root, guard, args)
+            complete = (envelope.get("coverage") or {}).get("execution_complete") is True
+            if rc == 0 and not complete:
+                rc = 2
+            if pre_push and rc == 0 and attempt:
+                state = {"policy": policy, "ledger": json.loads((attempt / "findings-ledger.json").read_text(encoding="utf-8"))}
+                fd, temporary = tempfile.mkstemp(prefix=".accept-", dir=guard)
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                        json.dump(state, stream)
+                    os.replace(temporary, state_path)
+                finally:
+                    Path(temporary).unlink(missing_ok=True)
+            if attempt:
+                print(f"[websec guardrail] exit {rc}; current attempt: {attempt}", file=sys.stderr)
+            if rc:
+                print("[websec guardrail] findings or incomplete execution; accepted baseline unchanged.", file=sys.stderr)
+            runs = guard / "runs"
+            if runs.is_dir():
+                candidates = sorted((p for p in runs.iterdir() if p.is_dir() and not p.is_symlink()),
+                                    key=lambda p: p.stat().st_mtime_ns, reverse=True)
+                latest = (guard / "latest").resolve() if (guard / "latest").exists() else None
+                for old in candidates[5:]:
+                    if old != latest and old != attempt:
+                        shutil.rmtree(old)
+            return rc if pre_push else 0
+        finally:
+            lock.rmdir()
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        print(f"[websec hook] execution incomplete: {error}", file=sys.stderr)
+        return failure
 
 
 def _write_hook(hooks_dir: Path, name: str, script: str) -> str:
     hook_path = hooks_dir / name
     if hook_path.exists():
         content = hook_path.read_text(encoding="utf-8")
+        first = content.splitlines()[0] if content else ""
+        if content.strip() and not re.fullmatch(r"#!\s*(?:/bin/(?:ba)?sh|/usr/bin/(?:ba)?sh|/usr/bin/env (?:ba)?sh)", first):
+            raise RuntimeError(f"refusing to modify non-shell hook {hook_path}; chain websec explicitly")
         if MARKER_START in content:  # replace our section in place (idempotent)
             content = _strip_section(content)
-        merged = content.rstrip() + "\n\n" + script if content.strip() else "#!/bin/sh\n" + script
+        lines = content.splitlines(keepends=True)
+        merged = lines[0].rstrip("\r\n") + "\n" + script + "".join(lines[1:]) if lines else "#!/bin/sh\n" + script
         hook_path.write_text(merged, encoding="utf-8", newline="\n")
         hook_path.chmod(0o755)
         return f"updated {name} hook at {hook_path}"

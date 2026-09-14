@@ -53,11 +53,12 @@ it safe to run anywhere.
                                                            confidence)                run record
                                                                   │
                  ┌──── optional, needs a LIVE test target + creds + your OK ────┐
-                 5. DYNAMIC PHASE  ──▶  confirms/escalates ledger findings  ──▶  feeds calibration (self-improving)
+                 5. DYNAMIC PHASE  ──▶  scoped observations/evidence  ──▶  evidence-backed calibration only
 ```
 
 Every `run` is written to an **immutable, timestamped directory** (`websec-out/runs/<ts>/`) with a
-`latest` symlink — nothing is ever overwritten, so you keep a full historical record of every pass.
+`latest` symlink that advances only after completed execution. Each partial attempt keeps its own
+unique directory and coverage manifest; completed checks do not establish complete protection.
 
 ---
 
@@ -68,8 +69,8 @@ extractors over it. Each answers one question a pentester asks first. The output
 
 | # | Extractor | What it asks | Why it matters (the security reasoning) |
 |---|---|---|---|
-| 1 | **stack** | What languages, frameworks, datastores? Monorepo? | Everything downstream is stack-aware. The datastore class also tells the agent which static alerts are likely noise (e.g. on a NoSQL/JSON API, most SQLi alerts are false positives). |
-| 2 | **routes** | What are all the HTTP endpoints? | The endpoint inventory *is* the attack surface. Powered by [OWASP Noir](https://github.com/owasp-noir/noir) (50+ frameworks) with a regex fallback. Every probe targets a real route. |
+| 1 | **stack** | What languages, frameworks, datastores? Monorepo? | Everything downstream is stack-aware. Datastore metadata guides review scope; each injection or PII lead still needs source-to-sink and policy analysis, without blanket database exemptions. |
+| 2 | **routes** | What are all the HTTP endpoints? | The endpoint inventory *is* the attack surface. Powered by [OWASP Noir](https://github.com/owasp-noir/noir) (50+ frameworks) with a regex fallback. Candidate and unresolved routes must be confirmed before active probes. |
 | 3 | **auth** | What scheme, where's the token — and is the signing secret hard-coded? | You cannot reason about "who can do what" without knowing how identity is established. Detects all schemes and picks a primary; also flags an **insecure default signing secret** (`JWT_SECRET \|\| 'dev-secret'`) — if that fallback is reached at runtime, anyone who reads the source can forge tokens (a Critical the pen test found). |
 | 4 | **authz** | Which endpoints have a visible auth guard, which don't? | **Broken access control is the #1 web risk (OWASP A01).** Builds the per-endpoint guard map and flags write endpoints with no visible guard. Models **router-mount auth** — `app.use('/x', authMiddleware, createXRouter())` — by resolving the mounted router factory to its file and walking the local-import graph, so an Express monorepo that splits routing from handlers isn't reported as one giant missing-auth cluster (the dominant false positive); also recognizes custom auth helpers (`getRequest*Auth`) and one-hop delegated guards in thin Next route handlers. |
 | 5 | **tenant** | Is this multi-tenant, and what field isolates one customer from another? | The tenant boundary (`groupId`, `orgId`, `tenantId`…) is what every cross-tenant BOLA probe depends on, and the easiest thing to get subtly wrong. |
@@ -186,17 +187,15 @@ something you can act on.
   how sure we are." The math is a Wilson score interval (binomial proportion) — deliberately *not*
   isotonic regression, which would overfit at this sample size. The structure upgrades to isotonic
   cleanly if a large labeled set ever exists.
-- **The honest caveats, baked in.** A finding that matches no documented vuln is counted as a false
-  positive (the corpus is well-documented, so unlisted = noise — conservative on purpose). And
-  because the corpus is *deliberately vulnerable*, the rates **skew optimistic for clean production
-  code** — every number is flagged as such, and to be conservative you threshold on the CI lower
-  bound. A class we never researched falls back to the per-label aggregate rather than emitting a
-  misleading `p=0`.
-- **It self-improves.** `websec dynamic` is an *oracle*: a write that executes unauthenticated is a
-  confirmed real vuln; a recon-flagged endpoint that turns out auth-enforced is a confirmed false
-  positive. Every dynamic run folds those confirmed labels into a **local overlay**
-  (`~/.cache/websec-validator/`, gitignored, never shipped) merged on top of the public table — so
-  the numbers **personalize to your apps** the more you run it, and nothing leaves your machine.
+- **Evidence and uncertainty.** Unmatched corpus findings remain unknown unless explicit negative
+  evidence labels them false. HTTP status changes and DAST silence are insufficient truth labels.
+  The deliberately vulnerable corpus skews optimistic for production code; every rate must identify
+  its detector revision, reviewed labels, sample size and interval. Historical unmatched-as-false
+  measurements are legacy data, not a fresh precision estimate for the current detector.
+- **Learning is gated by evidence.** Only scoped evidence-backed labels enter the local calibration
+  overlay (`~/.cache/websec-validator/`). Legacy unproven records are quarantined. Unknown-only input
+  reports no successful measurement and leaves fitted calibration unchanged. Evidence may support a
+  specific request/property without proving the entire endpoint or attack class safe.
 
 This is the deterministic realization of the **CJE (Calibrated Judge Evaluation)** idea from the
 AITPG/TRACE research: the tool emits the evidence + citation + a calibrated confidence; the agent
@@ -216,21 +215,22 @@ it (🔴 VIOLATED) with a probe. It reframes the findings as testable guarantees
 ## Layer 4 — The dynamic phase (optional, live, gated)
 
 When you have a **running TEST instance + test credentials**, `websec dynamic` runs the probes the
-static recon pointed at. This is where a lead becomes a confirmed finding. It is deliberately
+static recon pointed at. This can add evidence to a lead; status changes alone remain candidates. It is deliberately
 conservative:
 
 - **Authenticated cross-tenant BOLA** (`--config`) — logs in as two test accounts in different
   tenants and checks whether account A can read account B's data via the group-scoped GET endpoints
-  recon found. **Read-only.** A leak is unambiguous proof of broken object-level authorization.
+  recon found. **Read-only.** Response similarity requires content, identity and ownership evidence
+  before concluding that protected cross-tenant data leaked.
 - **Unauthenticated reachability** (`--unauth`) — GETs each data-read endpoint with no auth to see
   what's reachable. **GET-only**, and trigger-style paths (cron/scrape/generate…) are excluded
   because *a GET can still be side-effecting*.
-- **Write-verb auth enforcement** (`--probe-writes`) — **localhost-only**, non-destructive (empty
-  bodies / dummy ids). Classifies each write as `auth-enforced` (good), `no-auth-gate`, or
-  `EXECUTED-UNAUTH` (a real, critical missing-auth).
+- **Write-verb auth enforcement** (`--probe-writes`) — **localhost-only**, empty bodies / dummy ids.
+  Successful responses are candidates until protected behavior or state change is verified. Redirects
+  leave auth enforcement unverified. Even empty requests may change state; isolate the test target.
 
 **The safety model is explicit and non-negotiable:** read-only by default; write probes are
-localhost-only; nothing destructive; and **production is out of scope without written
+localhost-only; isolated test targets; and **production is out of scope without written
 authorization.** The tool refuses write probes against non-localhost targets, and the human owns
 every credential and authorizes every live run.
 
@@ -349,3 +349,83 @@ map into a full ASVS index lookup.)
 - **What this tool is not:** an autonomous scanner, a SaaS, or a replacement for a human reviewer.
   It is the precise front-half that makes the agent + human dramatically more effective — and it
   tells you, with a calibrated and clearly-caveated number, how much to trust each lead.
+
+## Coverage and Repair Evidence Contracts
+
+`coverage.json` records requested extractor/scanner execution separately from scope exclusions,
+unsupported inputs and optional unavailable tools. Read failures, file/report caps, parse errors,
+timeouts and missing explicitly selected tools cannot silently produce a clean completed gate.
+`--require-complete` and `--fail-on` return exit 2 on these execution gaps and preserve partial output.
+The analyzed-input digest hashes the successfully read source/config content; detector revision hashes
+actual implementation/rule data, so a dirty checkout is distinguishable from the package version.
+
+A baseline records semantic identity across title/line changes and distinguishes new, changed,
+reopened, unchanged and no-longer-observed findings. A disappeared finding remains unverified until
+its original plan is tied to a complete fixed-build rerun and positive/negative evidence.
+`repair-verify` checks hashes, contexts, unchanged detector/scope/policy, and a failing negative test
+from the original build matching the passing fixed-build test. It executes no commands and identifies
+its result as validation of operator-supplied evidence.
+
+## Reusing Specialist Analysis Without Executing the Target
+
+Offline SARIF ingestion brings existing CodeQL and other specialist reports into the same ledger,
+scope accounting and remediation workflow. The import does not run those analyzers, compile the
+application, inspect referenced source or fetch external property files. Its value is preserving
+native rule identity and ordered source-to-sink evidence while exposing exactly what was supplied.
+
+Producer execution success does not establish that the report describes the current source.
+Report SHA provenance is therefore separate from the analyzed-source digest. Unknown invocation
+outcomes, malformed references and exhausted input/expansion budgets are execution gaps. Native
+suppression and absence are observations, not local approval or a verified fix. Colliding producer
+fingerprints become report-bound so result reordering cannot move an acknowledgement to another site.
+Unique producer fingerprints retain continuity across ordinary line and wording edits.
+
+The protocol follows the [OASIS SARIF 2.1.0 model](https://docs.oasis-open.org/sarif/sarif/v2.1.0/os/sarif-v2.1.0-os.html).
+Parser tests use authored fixtures and adversarial pairs, including small inputs whose shared traces
+would otherwise expand dramatically. This establishes bounded protocol handling, not native analyzer
+accuracy. Imported repair completion is currently unsupported because freshness is unbound.
+
+## Scoped Controls and Public-Source Precision
+
+Controls are evidence only when connected to the affected expression or response. Cookie options
+belong to individual setters; unknown spreads and duplicate/conflicting options do not establish
+secure flags. PII masking must affect the actual returned value, and unused or ambiguous helpers
+leave a review lead. Webhook validation, upload sniffing, hashing and extension-message checks use
+the same value/scope discipline with conservative fallback when the syntax is unsupported.
+
+Public-source review yielded three narrow precision corrections: authentication decoder checks need
+an executable decision in the relevant function; nosniff checks require a browser-response sink,
+not merely a file read stream; and GitHub script expressions exempt exact documented numeric IDs
+while retaining arbitrary text and unknown expressions. Paired safe/unsafe regressions support these
+specific rules. They do not adjudicate every remaining public-project lead or prove those projects safe.
+
+## Scoped framework and adoption evidence
+
+Manifest declarations are framework/package-manager hints, not deployed behavior. Service roots
+include Rust workspace members; native React or reusable JSX alone does not establish a browser
+renderer. Browser renderer dependencies, supported DOM operations, HTTP routes and served HTML are
+separate static hints. Native sibling services must not suppress review of a real web service.
+
+Django route discovery reads bounded syntax and local bindings without importing application
+modules. Supported root/include composition can resolve literal paths. Unknown roots, dynamic
+prefixes, cycles and parser budgets remain visible gaps or candidates; documented/source route
+uncertainty must survive downstream review.
+
+Secret equality is a LOW review lead at its own operands. Literal presence/type checks differ from
+credential comparisons; a safe helper elsewhere cannot protect the site. This is not a timing
+measurement or a proof that surrounding code is constant-time. Language syntax outside the bounded
+analysis remains a limitation, including ambiguous regular-expression literals.
+
+Agent instructions select the exact current run from the JSON envelope and preserve its exit code.
+They do not substitute older `latest` evidence on failure. Foreign dedicated skills and ambiguous
+shared markers must be preserved; ownership is based on known generated provenance or a complete
+managed region. Runtime/source identity, scan scope, uncertainty and before/after repair evidence
+matter more than a version label or HTTP status alone.
+
+
+Assigned Python SQL query detection follows supported local request-derived expressions through
+assignment and branch joins to an actual query argument. Constant queries and separate bound
+values do not become tainted merely because a nearby value is untrusted; matched tuple unpacking
+preserves that distinction. Unknown wrappers retain provenance rather than certifying sanitization.
+Source/assignment traces and analysis work are bounded. Later loop iterations and unsupported
+interprocedural behavior remain explicit limitations, not complete dataflow coverage.

@@ -1,0 +1,19 @@
+{
+  "dast_context": {
+    "application_id": "synthetic-app",
+    "build_id": "synthetic-build-1",
+    "identity": "anonymous",
+    "origin": "http://127.0.0.1:8765",
+    "endpoint": "/search",
+    "method": "GET",
+    "parameter": "q"
+  },
+  "findings": [
+    {
+      "attack_class": "sqli",
+      "confidence": "MEDIUM",
+      "location": "src/search.py",
+      "title": "Synthetic SQL injection lead"
+    }
+  ]
+}
