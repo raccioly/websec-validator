@@ -53,3 +53,6 @@ WORKDIR /scan
 USER websec
 ENTRYPOINT ["websec"]
 CMD ["--help"]
+
+# Suppress IaC missing-healthcheck finding; tool does not run a server
+HEALTHCHECK NONE

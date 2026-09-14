@@ -62,3 +62,8 @@ src/websec_validator/briefing.py
 # The AppSync GraphQL "surface" is detected purely from our own `@aws_*` example strings — no real
 # GraphQL server lives in this repo, so the synthetic graphql finding is a self-reference.
 category:graphql
+
+# This repo is a CLI tool and does not expose a web service. The transport extractor finds its own
+# regex patterns and trips the web_surface detection logic, causing transport findings
+# (e.g., missing-csp) to fire on the repo itself; suppress transport/header findings.
+category:transport
