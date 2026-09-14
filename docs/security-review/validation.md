@@ -19,6 +19,22 @@ The eight adoption tests were repeated successfully (1.343s). The full source ma
 from the earlier 0.13.0 checkpoint. No dependencies were installed or remote publication performed
 by this local validation. GitHub release/PyPI publication must be verified by the release workflow.
 
+### Current 0.14.0 corpus proof
+
+The [sanitized two-mode proof record](public-proof-0.14.0.json) verifies the same wheel hash above
+and the same three pinned corpus revisions, with detector revision
+`sha256:df28604778bd5f93459683703c9bfef831d57148739a324a9383a575b3401e9f`.
+
+| Route tooling | Completed projects | Surface checks | Unknown truth labels | Unavailable projects |
+|---|---|---|---|---|
+| Minimal PATH, Noir absent | 3/3 | 8/10 | 7 | 0 |
+| Noir 1.1.0 present | 3/3 | 10/10 | 7 | 0 |
+
+Both runs had `scan_requested=false`; optional static scanner execution was not requested. Target
+setup, imports, tests and hooks were not executed. Noir resolved VAmPI routes absent from the
+fallback. These are source-recon surface checks, not vulnerability recall or exploit confirmation.
+Temporary checkout/engine paths are omitted from the public artifact.
+
 ## Final fourth-phase validation — 2026-09-14
 
 | Check | Result |
@@ -75,7 +91,7 @@ is not yet resolved by the fallback; it is retained as W20 in the
 The historical 10/10 record below did not retain optional-tool availability metadata. A normal
 operator PATH contained Noir, which is consistent with the difference but does not establish its
 cause. Neither score measures vulnerability recall; the new 8/10 result must not be hidden by the
-historical score. The forthcoming 0.14.0 wheel requires its own validation record.
+historical score. The separate 0.14.0 wheel record above now supplies both tool configurations.
 
 ## Third-phase checkpoint — 2026-09-14 (historical)
 
