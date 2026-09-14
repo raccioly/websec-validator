@@ -1,0 +1,24 @@
+{
+  "plan_id": "48321ecb70e9adf99622b23a6c9694b6e5d84dc1e28124c013b88794d9adbf07",
+  "original": {
+    "application_id": "synthetic-app",
+    "build_id": "before",
+    "source_digest": "sha256:5c14fbe925637eb6ab312606364f4d98115634f74646ab5df901faeea3b92fa0"
+  },
+  "target": {
+    "application_id": "synthetic-app",
+    "build_id": "after",
+    "source_digest": "sha256:8c487b8283be8cd426254144ced69e2d72d096a50840ec10e44d0ca6ed60dbab"
+  },
+  "rerun_ledger_sha256": "38b9cdea9d371431824079b05ecc2aaa75225fdfaccd583a61613889050e9c45",
+  "tests": [
+    {
+      "artifact": "positive.json",
+      "sha256": "68b8ad6b040577c87e9094767589cb179dd62c53b412e10f4e16f237ffd2ce50"
+    },
+    {
+      "artifact": "negative.json",
+      "sha256": "dc207f551214e40e18c7e4b40211c56bc118cffbefc3dc66541e732ff77c012f"
+    }
+  ]
+}

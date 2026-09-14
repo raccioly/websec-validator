@@ -1,0 +1,16 @@
+{
+  "application_id": "synthetic-app",
+  "build_id": "after",
+  "source_digest": "sha256:8c487b8283be8cd426254144ced69e2d72d096a50840ec10e44d0ca6ed60dbab",
+  "plan_id": "48321ecb70e9adf99622b23a6c9694b6e5d84dc1e28124c013b88794d9adbf07",
+  "finding_id": "b940bc21e6ff9fc4",
+  "test_id": "synthetic-negative",
+  "kind": "negative",
+  "status": "passed",
+  "test_count": 1,
+  "failed": 0,
+  "before": {
+    "artifact": "before.json",
+    "sha256": "19dbde609b0e2e74b0cf1d496e29b04861955c4f5feb3816094de6c9396f52b1"
+  }
+}

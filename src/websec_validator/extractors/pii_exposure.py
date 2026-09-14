@@ -20,6 +20,7 @@ from __future__ import annotations
 import re
 
 from .base import Extractor, RepoContext, is_test_file
+from .syntax import call_expression, in_literal, js_functions, split_arguments, without_comments
 
 # helper/permission DEFINITIONS (function/arrow/def) — not variable assignments to a call result
 MASK_DEF = re.compile(
@@ -46,7 +47,31 @@ TESTFILE = re.compile(r"(?:^|/)(?:tests?|__tests__|spec)/|\.(?:test|spec)\.", re
 SECRET_MASKER = re.compile(r"(?:mask|redact|scrub)\w*(?:Url|Uri|Dsn|Database|Conn|Connection|Secret|Password|Passwd|Token|Key|Cred)\w*", re.I)
 # inline object-projection (`.map(x => ({...}))` / a returned object literal) IS a serializer — a
 # raw-entity finding on a file that projects fields before responding is a false positive.
-PROJECTION = re.compile(r"=>\s*\(\s*\{|\.map\s*\(\s*[\w$]*\s*=>|\bselect\s*:\s*\{|\binterface\s+\w+|\btype\s+\w+\s*=\s*\{", re.I)
+def _projected_binding(code: str, position: int, argument: str, scopes: list[dict]) -> bool:
+    """Recognize a local explicit object projection used only by this response.
+
+    Aliases, spreads, mutation, nested bindings and unknown calls remain review
+    leads. This proves a small projection idiom, not authorization or PII policy.
+    """
+    if not re.fullmatch(r"[A-Za-z_$][\w$]*", argument):
+        return False
+    containing = [scope for scope in scopes if scope["body_start"] <= position < scope["end"]]
+    if not containing:
+        return False
+    scope = min(containing, key=lambda row: row["end"] - row["body_start"])
+    if not scope.get("complete", True):
+        return False
+    body = code[scope["body_start"]:scope["end"]]
+    name = re.escape(argument)
+    if len(re.findall(r"\b" + name + r"\b", body)) != 2:
+        return False
+    prefix = code[scope["body_start"]:position]
+    binding = re.search(r"\bconst\s+" + name + r"\s*=\s*(\{[^{};]*\})\s*;\s*$", prefix)
+    if not binding or in_literal(prefix, binding.start()):
+        return False
+    fields = split_arguments(binding[1][1:-1])
+    return bool(fields) and all(re.fullmatch(r"[\w$]+\s*:\s*[\w$.]+", field)
+                               and not PII_FIELD.search(field) for field in fields)
 
 
 class PiiExposureExtractor(Extractor):
@@ -89,23 +114,31 @@ class PiiExposureExtractor(Extractor):
         for rel, text in texts:
             if is_test_file(rel):
                 continue
-            # an admin/auth-gated route is not reachable by a "non-privileged caller"; an inline field
-            # projection IS a serializer — both were the raw-entity false positives.
-            if "/admin/" in rel.replace("\\", "/") or PROJECTION.search(text):
-                continue
             # A `phone`/`email` mention that is NOT customer-PII-in-a-response: a Zod/Joi/Yup validator,
             # a type/interface field decl, or the CALLER's own identity in audit metadata (actorEmail /
             # req.user.email / createdBy). Blank those out first, then require a REMAINING PII field — so a
             # Tag/Role/config entity that merely logs the actor's email no longer false-fires (the 76%
             # a real monorepo outlier: 5 non-PII entities flagged raw-entity-pii).
             scrubbed = PII_NONCARRIER.sub("  ", text)
-            if PII_FIELD.search(scrubbed) and RES_RAW.search(text) and not MASK_CALL_NEAR.search(text):
-                if len(raw_leaks) < 30:
+            if not PII_FIELD.search(scrubbed):
+                continue
+            code = without_comments(text)
+            scopes = js_functions(code)
+            for response in RES_RAW.finditer(code):
+                if len(raw_leaks) >= 30:
+                    break
+                if in_literal(code, response.start()):
+                    continue
+                expression = call_expression(code, response.start())
+                argument = expression[expression.find("(") + 1:-1].strip()
+                if not _projected_binding(code, response.start(), argument, scopes):
                     raw_leaks.append(rel)
                     findings.append({"severity": "MEDIUM", "kind": "raw-entity-pii-response", "file": rel,
+                                     "line": code.count("\n", 0, response.start()) + 1,
+                                     "control_scope": "response expression; unrelated controls unverified",
                                      "detail": "A handler returns a raw entity (`res.json(entity)`) in a file that "
-                                               "handles PII fields, with no DTO/serializer/masker — phone/email likely "
-                                               "ship in cleartext. Mask at ONE output boundary (a DTO), gated by a "
+                                               "handles PII fields; no supported projection is bound to this response. "
+                                               "Review whether phone/email reach the caller. Mask at ONE output boundary (a DTO), gated by a "
                                                "permission. VERIFY BY VALUE SHAPE (no phone/email value in the JSON), "
                                                "not field name — indirect carriers (composed IDs, denormalized fields) "
                                                "leak too (the `providerMessageId`-embeds-the-phone class, #8)."})

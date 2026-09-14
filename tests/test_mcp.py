@@ -3,10 +3,8 @@
 import json
 import sys
 import threading
-import time
 import unittest
 import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,34 +67,33 @@ class ProcessTests(unittest.TestCase):
 class HttpTransportTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        # Grab a free port, then hand it to serve_http.
-        probe = ThreadingHTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler)
-        cls.port = probe.server_address[1]
-        probe.server_close()
-        cls.thread = threading.Thread(
-            target=mcp_server.serve_http, kwargs={"host": "127.0.0.1", "port": cls.port}, daemon=True)
+        cls.server = mcp_server.make_http_server(
+            port=0, token="test-mcp-token", allowed_roots=[FIXTURE])
+        cls.port = cls.server.server_address[1]
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
-        cls._wait_ready()
 
     @classmethod
-    def _wait_ready(cls):
-        for _ in range(50):
-            try:
-                urllib.request.urlopen(f"http://127.0.0.1:{cls.port}/health", timeout=1).read()
-                return
-            except OSError:
-                time.sleep(0.05)
-        raise RuntimeError("HTTP server did not come up")
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join(timeout=5)
+
+    def _headers(self):
+        return {"Content-Type": "application/json", "Authorization": "Bearer test-mcp-token",
+                "Accept": "application/json, text/event-stream",
+                "MCP-Protocol-Version": mcp_server.PROTOCOL_VERSION}
 
     def _rpc(self, payload: dict):
         req = urllib.request.Request(
             f"http://127.0.0.1:{self.port}/", data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"}, method="POST")
+            headers=self._headers(), method="POST")
         with urllib.request.urlopen(req, timeout=10) as r:
             return r.status, (json.loads(r.read() or b"null"))
 
     def test_health(self):
-        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/health", timeout=5) as r:
+        with urllib.request.urlopen(urllib.request.Request(
+                f"http://127.0.0.1:{self.port}/health", headers=self._headers()), timeout=5) as r:
             body = json.loads(r.read())
         self.assertEqual(body["name"], "websec-validator")
         self.assertEqual(body["transport"], "http")
@@ -116,20 +113,21 @@ class HttpTransportTests(unittest.TestCase):
         req = urllib.request.Request(
             f"http://127.0.0.1:{self.port}/",
             data=json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}).encode(),
-            headers={"Content-Type": "application/json"}, method="POST")
+            headers=self._headers(), method="POST")
         with urllib.request.urlopen(req, timeout=5) as r:
             self.assertEqual(r.status, 202)
 
     def test_malformed_json_is_parse_error(self):
         req = urllib.request.Request(
             f"http://127.0.0.1:{self.port}/", data=b"{not json",
-            headers={"Content-Type": "application/json"}, method="POST")
+            headers=self._headers(), method="POST")
         try:
             urllib.request.urlopen(req, timeout=5)
             self.fail("expected HTTP 400")
         except urllib.error.HTTPError as e:
-            self.assertEqual(e.code, 400)
-            self.assertEqual(json.loads(e.read())["error"]["code"], -32700)
+            with e:
+                self.assertEqual(e.code, 400)
+                self.assertEqual(json.loads(e.read())["error"]["code"], -32700)
 
 
 if __name__ == "__main__":

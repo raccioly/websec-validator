@@ -21,6 +21,7 @@ Config (JSON):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import urllib.error
@@ -205,55 +206,113 @@ def _tenant_only_get_endpoints(facts: dict, param: str) -> list:
     return sorted(set(out))
 
 
+def _marker_matches(body, marker) -> bool:
+    """Match an explicit JSON fixture marker without persisting response contents."""
+    if not isinstance(marker, dict) or not marker.get("json_path") or "value" not in marker:
+        return False
+    if marker["value"] in (None, "", [], {}):
+        return False
+    try:
+        value = json.loads(body)
+        for part in marker["json_path"].split("."):
+            value = value[int(part)] if isinstance(value, list) else value[part]
+        return type(value) is type(marker["value"]) and value == marker["value"]
+    except (ValueError, TypeError, KeyError, IndexError):
+        return False
+
+
 def cross_tenant_bola(cfg: dict, facts: dict) -> dict:
-    """For each tenant-scoped GET list endpoint, try to read the OTHER tenant's data."""
+    """Compare tenant reads, confirming leakage only with explicit private fixture controls.
+
+    Optional ``bola_controls`` declares expected_policy=tenant-isolated, identity_path,
+    identities={agentA: {json_path, value}, agentB: ...}, and resources={route_template:
+    {agentA: {json_path, value}, agentB: ...}}. Both authenticated identity controls must
+    pass. The owner must read the victim marker, an anonymous request must be denied,
+    and two attacker reads must return that marker before a LEAK is confirmed.
+    """
     param = cfg.get("tenant_path_param", "groupId")
     a, b = mint(cfg, "agentA"), mint(cfg, "agentB")
     if not a.get("token") or not b.get("token"):
-        return {"error": "could not mint both agent tokens", "agentA": a.get("error"), "agentB": b.get("error")}
-    if a.get("tenant") == b.get("tenant") or not (a.get("tenant") and b.get("tenant")):
-        return {"error": f"agents are not in two distinct tenants (A={a.get('tenant')}, B={b.get('tenant')})"}
+        return {"error": "could not mint both agent tokens", "state": "inconclusive",
+                "agentA": a.get("error"), "agentB": b.get("error")}
+    if (a.get("tenant") == b.get("tenant") or a["token"] == b["token"]
+            or any(x.get("tenant") is None for x in (a, b))):
+        return {"error": "agents are not in two distinct tenants", "state": "inconclusive"}
+    controls = cfg.get("bola_controls") or {}
+    identity_path = controls.get("identity_path", "")
+    identities = controls.get("identities") or {}
+    identity_ok = False
+    if (controls.get("expected_policy") == "tenant-isolated" and identity_path.startswith("/")
+            and not identity_path.startswith("//") and "{" not in identity_path
+            and not SIDE_EFFECTING.search(identity_path)
+            and isinstance(identities.get("agentA"), dict) and isinstance(identities.get("agentB"), dict)
+            and identities["agentA"].get("json_path") == identities["agentB"].get("json_path")
+            and identities["agentA"].get("value") != identities["agentB"].get("value")):
+        passes = []
+        for agent, name in ((a, "agentA"), (b, "agentB")):
+            code, body = _request("GET", cfg["target"] + identity_path, agent["token"])
+            passes.append(code == 200 and _marker_matches(body, identities.get(name)))
+        identity_ok = all(passes)
 
     endpoints = _tenant_only_get_endpoints(facts, param)
     results = []
     for path in endpoints:
-        # attacker A tries to read B's tenant data, and vice-versa
-        for atk, vic, direction in ((a, b, "A→B"), (b, a, "B→A")):
-            # str(): a tenant id is often numeric (auto-increment) — str.replace's 2nd arg must be a
-            # str, so a JSON int would crash this (uncaught) authenticated path.
+        markers = (controls.get("resources") or {}).get(path) or {}
+        for atk, vic, victim_name, direction in ((a, b, "agentB", "A→B"), (b, a, "agentA", "B→A")):
             url = cfg["target"] + path.replace("{" + param + "}", str(vic["tenant"]))
+            marker = markers.get(victim_name)
+            owner_ok, private_ok = False, False
+            if identity_ok and marker and markers.get("agentA") != markers.get("agentB"):
+                owner_code, owner_body = _request("GET", url, vic["token"])
+                owner_ok = owner_code == 200 and _marker_matches(owner_body, marker)
+                anon_code, _ = _request("GET", url, None)
+                private_ok = anon_code in (401, 403, 404)
             code, body = _request("GET", url, atk["token"])
+            controlled = identity_ok and owner_ok and private_ok
+            state, verdict = "inconclusive", "investigate"
             if code in (401, 403, 404):
                 verdict = "blocked"
+                state = "blocked" if controlled else "inconclusive"
             elif code in (200, 206) and body is None:
-                # the read FAILED — we do not know whether the other tenant's data came back.
-                # Never let "unknown" collapse into "blocked-empty": that would report a possible
-                # cross-tenant LEAK (the most severe verdict here) as safe.
                 verdict = "investigate (200 but response body unreadable — re-run)"
+            elif code in (200, 206) and controlled and _marker_matches(body, marker):
+                # A verified private marker outweighs heuristic denial/empty-body wrappers.
+                repeat_code, repeat_body = _request("GET", url, atk["token"])
+                if repeat_code in (200, 206) and _marker_matches(repeat_body, marker):
+                    state, verdict = "confirmed-vulnerable", "LEAK"
+                else:
+                    verdict = "candidate cross-tenant data (repeat inconclusive)"
             elif code in (200, 206) and _looks_like_denial(body):
-                # a 200 that SAYS "forbidden"/"not authenticated" is a refusal. Scoring it a LEAK
-                # emitted a CRITICAL BOLA finding AND fed the calibration oracle is_real=True.
                 verdict = "blocked (200 soft-deny)"
+                state = "blocked" if controlled else "inconclusive"
             elif code in (200, 206):
-                verdict = "blocked-empty" if _no_records(body) else "LEAK"  # structural, not string-match
-            else:
-                verdict = "investigate"
-            results.append({"path": path, "direction": direction, "status": code, "verdict": verdict})
-
-    blocked = sum(1 for r in results if r["verdict"].startswith("blocked"))
-    leaks = [r for r in results if r["verdict"] == "LEAK"]
-    return {
-        "target": cfg["target"],
-        "tenant_param": param,
-        "agentA": {"email": a.get("email"), "tenant": a.get("tenant")},
-        "agentB": {"email": b.get("email"), "tenant": b.get("tenant")},
-        "endpoints_tested": len(endpoints),
-        "checks": len(results),
-        "blocked": blocked,
-        "leaks": leaks,
-        "results": results,
-        "summary": f"{blocked}/{len(results)} cross-tenant GET reads blocked" + (f" — {len(leaks)} LEAK(S)!" if leaks else " — all isolated"),
-    }
+                verdict = "blocked-empty" if _no_records(body) else "candidate cross-tenant data"
+                if _no_records(body) and controlled:
+                    state = "blocked"
+            row = {"path": path, "direction": direction, "status": code, "verdict": verdict,
+                   "state": state, "evidence_verified": state == "confirmed-vulnerable",
+                   "controls": {"identity": identity_ok, "owner": owner_ok, "private": private_ok}}
+            if state == "confirmed-vulnerable" and cfg.get("application_id") and cfg.get("build_id"):
+                provenance = {"source": "dynamic-bola", "application_id": cfg["application_id"],
+                              "build_id": cfg["build_id"], "endpoint": path, "method": "GET",
+                              "direction": direction,
+                              "fixture_digest": hashlib.sha256(json.dumps(marker, sort_keys=True).encode()).hexdigest()}
+                row["provenance"] = provenance
+                row["sample_id"] = hashlib.sha256(json.dumps(provenance, sort_keys=True).encode()).hexdigest()
+            results.append(row)
+    blocked = sum(r["state"] == "blocked" for r in results)
+    leaks = [r for r in results if r["state"] == "confirmed-vulnerable"]
+    inconclusive = sum(r["state"] == "inconclusive" for r in results)
+    state = ("not-tested" if not results else "confirmed-vulnerable" if leaks else
+             "inconclusive" if inconclusive else "blocked")
+    return {"target": cfg["target"], "tenant_param": param,
+            "agentA": {"email": a.get("email"), "tenant": a.get("tenant")},
+            "agentB": {"email": b.get("email"), "tenant": b.get("tenant")},
+            "endpoints_tested": len(endpoints), "checks": len(results), "blocked": blocked,
+            "leaks": leaks, "results": results, "state": state, "inconclusive": inconclusive,
+            "summary": ("No eligible cross-tenant reads tested" if not results else
+                        f"{blocked}/{len(results)} controlled reads blocked · {len(leaks)} confirmed leak(s) · "
+                        f"{inconclusive} inconclusive (conclusions apply only to these identities and fixtures)")}
 
 
 # GET endpoints that are NOT safe to hit even read-only — they trigger real work
@@ -320,7 +379,9 @@ def unauth_reachability(target: str, facts: dict, max_endpoints: int = 50) -> di
             verdict = "404"
         else:
             verdict = f"http-{code}"
-        results.append({"path": path, "status": code, "bytes": n, "verdict": verdict})
+        results.append({"path": path, "status": code, "bytes": n, "verdict": verdict,
+                        "state": "observed" if code in (200, 206, 401, 403) and body is not None else "inconclusive",
+                        "evidence_verified": False})
 
     openish = [r for r in results if r["verdict"] == "OPEN-no-auth"]
     protected = [r for r in results if r["verdict"] in ("protected", "redirect (likely to login)")]
@@ -334,20 +395,22 @@ def unauth_reachability(target: str, facts: dict, max_endpoints: int = 50) -> di
         "target": target,
         "mode": "STRICT read-only · unauthenticated · GET-only · side-effecting paths skipped",
         "tested": len(results),
+        "state": "not-tested" if not results else "observed" if all(r["state"] == "observed" for r in results) else "inconclusive",
         "skipped_side_effecting": sorted(set(skipped)),
         "open_no_auth": openish,
         "results": results,
         "endpoints_over_cap": over_cap,
         "target_unreachable": unreachable,
         "fail_open_suspected": fail_open,
-        "authn_trustworthy": not (fail_open or unreachable),
+        "authn_trustworthy": bool(results) and not (fail_open or unreachable or over_cap)
+                               and all(r["state"] == "observed" for r in results),
         "warning": (f"⚠ TARGET UNREACHABLE — every request to {target} failed at the transport layer. "
                     "This is NOT a clean result: nothing was tested. Check the URL/port and that the "
                     "app is running." if unreachable else (FAIL_OPEN_WARNING if fail_open else "")),
         "summary": ("⚠ TARGET UNREACHABLE — 0 endpoints actually tested; this is NOT an all-clear"
                     if unreachable else
                     f"{len(openish)}/{len(results)} data-read GET endpoints reachable WITHOUT auth"
-                    + (" — review whether these should be public" if openish else " — all gated"))
+                    + (" — review whether these should be public" if openish else " — no unauthenticated data observed; errors and untested routes remain inconclusive"))
                    + (f"  ·  ⚠ {over_cap} more over the {max_endpoints}-endpoint cap NOT tested" if over_cap else "")
                    + ("  ·  ⚠ FAIL-OPEN SUSPECTED (nothing enforced auth — results untrustworthy)" if fail_open else ""),
     }
@@ -357,12 +420,11 @@ WRITE_VERBS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
 def write_auth_enforcement(target: str, facts: dict, max_endpoints: int = 80) -> dict:
-    """LOCALHOST-ONLY. Does each write endpoint ENFORCE auth? Sends the write verb
-    UNAUTHENTICATED with an empty `{}` body and dummy IDs in path params, then reads
-    the status: 401/403 = auth enforced (good); 400/422/404/405 = reached the
-    handler/validation with no auth gate (auth likely MISSING — verify); 2xx =
-    executed unauthenticated (critical). Empty body + dummy id keep it
-    non-destructive (validation rejects before any real mutation)."""
+    """Observe unauthenticated write responses on an explicitly authorized localhost target.
+
+    Empty bodies and dummy ids reduce impact but cannot guarantee a handler will not mutate.
+    Neither validation errors nor successful HTTP responses alone confirm missing authentication.
+    """
     eps = []
     for e in (facts.get("routes") or {}).get("endpoints", []):
         p = e.get("path", "")
@@ -375,16 +437,14 @@ def write_auth_enforcement(target: str, facts: dict, max_endpoints: int = 80) ->
     results = []
     for method, path in eps:
         url = target + re.sub(r"\{[^}]+\}", "websec-nonexistent-id", path)
-        code, _ = _request(method, url, token=None, data=b"{}")
+        code, body = _request(method, url, token=None, data=b"{}")
         if code in (401, 403):
             verdict = "auth-enforced"
         elif code in (301, 302, 303, 307, 308):
-            # a redirect (typically → /login) means the write was BOUNCED, not executed — auth is
-            # enforced. Since _request no longer follows redirects, this is now reachable instead of
-            # the login page's 200 being misread as EXECUTED-UNAUTH (critical FP).
-            verdict = "auth-enforced"
+            # The redirect was not followed; its destination and policy remain unverified.
+            verdict = "redirect (auth enforcement unverified)"
         elif code in (200, 201, 204):
-            verdict = "EXECUTED-UNAUTH"
+            verdict = "soft-deny" if _looks_like_denial(body) else "candidate unauthenticated response"
         elif code in (404, 405):
             # NOT evidence of a missing auth gate. A 405 comes from the ROUTER, before any auth
             # middleware — it proves the method isn't routed, nothing about authorization. A 404 is
@@ -393,7 +453,7 @@ def write_auth_enforcement(target: str, facts: dict, max_endpoints: int = 80) ->
             # sample. unauth_reachability already gives 404 a neutral verdict; match it.
             verdict = f"http-{code} (route/method not present — inconclusive, not an auth signal)"
         elif code in (400, 422, 409, 415):
-            verdict = "no-auth-gate (reached handler/validation)"
+            verdict = f"http-{code} (validation response — auth enforcement inconclusive)"
         else:
             # 500 (and any other code) is INCONCLUSIVE: a 500 may be the auth layer itself throwing,
             # not the handler running unauthenticated — so it must NOT become a no-auth-gate verdict
@@ -401,37 +461,41 @@ def write_auth_enforcement(target: str, facts: dict, max_endpoints: int = 80) ->
             # with a confirmed-real sample). Matches the forged-token engine, which also excludes 500
             # from "reached handler".
             verdict = f"http-{code}"
-        results.append({"method": method, "path": path, "status": code, "verdict": verdict})
+        results.append({"method": method, "path": path, "status": code, "verdict": verdict,
+                        "state": "blocked" if code in (401, 403) else "inconclusive",
+                        "evidence_verified": False})
 
-    missing = [r for r in results if r["verdict"] != "auth-enforced" and not r["verdict"].startswith("http-")]
-    executed = [r for r in results if r["verdict"] == "EXECUTED-UNAUTH"]
+    missing = []  # Status alone never proves an authentication bypass.
+    candidates = [r for r in results if r["verdict"] == "candidate unauthenticated response"]
+    executed = []  # Retained output field; execution requires evidence beyond HTTP status.
     enforced = sum(1 for r in results if r["verdict"] == "auth-enforced")
-    fail_open = len(results) >= 3 and enforced == 0
+    fail_open = len(results) >= 3 and enforced == 0 and bool(candidates)
+    unreachable = bool(results) and all(r["status"] is None for r in results)
     return {
-        "note": "Heuristic: a protected route returns 401/403 BEFORE validation; a 400/404 unauth means "
-                "the request reached the handler with no auth gate. VERIFY each — but inconsistency vs "
-                "sibling routes is high-signal. Empty body + dummy ids keep this non-destructive.",
+        "note": "Status observations only: validation can precede authentication and a 2xx may be public or "
+                "a soft denial. Confirm expected policy and actual protected behavior before labeling a vulnerability.",
         "tested": len(results),
+        "state": "not-tested" if not results else "blocked" if all(r["state"] == "blocked" for r in results) else "inconclusive",
         "auth_enforced": enforced,
         "no_auth_gate": missing,
+        "candidates": candidates,
+        "target_unreachable": unreachable,
         "executed_unauth": executed,
         "results": results,
         "endpoints_over_cap": over_cap,
         "fail_open_suspected": fail_open,
-        "authn_trustworthy": not fail_open,
+        "authn_trustworthy": bool(results) and not (fail_open or unreachable) and all(r["state"] == "blocked" for r in results),
         "warning": FAIL_OPEN_WARNING if fail_open else "",
         "summary": f"{enforced}/{len(results)} write endpoints enforce auth · "
-                   f"{len(missing)} reached with no auth gate · {len(executed)} executed unauthenticated"
+                   f"{len(candidates)} unauthenticated response candidate(s) · "
+                   f"{sum(r['state'] == 'inconclusive' for r in results)} inconclusive"
                    + (f"  ·  ⚠ {over_cap} more over the {max_endpoints}-endpoint cap NOT tested" if over_cap else "")
                    + ("  ·  ⚠ FAIL-OPEN SUSPECTED — results untrustworthy" if fail_open else ""),
     }
 
 
-# Codes that mean "the request reached the handler/validation" — i.e. auth PASSED. Used to
-# judge a forged-token attempt. Deliberately EXCLUDES 401/403 (blocked), 429 (rate-limited —
-# would otherwise be a false bypass), 5xx and 000/None (ambiguous/transport). A gated route
-# (401/403 with no token) that returns one of these WITH a forged token = signature not verified.
-_REACHED_HANDLER = {200, 201, 202, 203, 204, 206, 400, 404, 405, 409, 413, 415, 422}
+# Successful status changes merit investigation, but do not alone prove signature acceptance.
+_REACHED_HANDLER = {200, 201, 202, 203, 204, 206}
 
 
 def _forge_jwt(payload: dict, alg: str = "RS256") -> str:
@@ -448,16 +512,11 @@ def _forge_jwt(payload: dict, alg: str = "RS256") -> str:
 
 def forged_token_bypass(target: str, facts: dict, cookie_names=None,
                         probe_writes: bool = False, max_endpoints: int = 60) -> dict:
-    """Does the app actually VERIFY JWT signatures? Forge a token with a far-future `exp` and a
-    BOGUS signature, present it to each route that is GATED without auth, and compare. A route
-    that answers 401/403 with NO token but REACHES THE HANDLER with the forged token is trusting
-    an unverified token = authentication bypass (CWE-347 / OWASP API2:2023) — the dynamic verdict
-    on the `decodeJwtPayloadUnsafe`/`jwt.decode(verify=False)` hypothesis.
+    """Compare gated requests with forged-token responses, recording candidates and uncertainty.
 
-    GET reads by default (read-safe); write verbs (empty body, dummy ids — non-destructive) only
-    when `probe_writes`. Tries `Authorization: Bearer` (universal) plus any `cookie_names` given,
-    since apps read tokens from different locations. 429/5xx are treated as inconclusive, never
-    a bypass, so an aggressive rate limiter can't manufacture a false positive."""
+    Status changes alone do not prove a signature bypass: validate legitimate identities and
+    protected resource behavior before confirmation. GET-only unless explicitly enabled for writes.
+    """
     forged = _forge_jwt({"sub": "websec-forged", "email": "websec-forged@example.com",
                          "role": "admin", "roles": ["admin"], "exp": 9999999999})
     cookie_names = list(cookie_names or [])
@@ -473,7 +532,7 @@ def forged_token_bypass(target: str, facts: dict, cookie_names=None,
     targets = _all_targets[:max_endpoints]
     over_cap = max(0, len(_all_targets) - max_endpoints)
 
-    results, bypassed = [], []
+    results, bypassed, candidates = [], [], []
     for method, path in targets:
         url = target + path
         body = b"{}" if method in WRITE_VERBS else None
@@ -483,42 +542,49 @@ def forged_token_bypass(target: str, facts: dict, cookie_names=None,
         # Bearer first (cheapest, most universal); only forge into each known auth cookie if
         # Bearer didn't reach the handler — short-circuits to keep request volume (and
         # rate-limiter pressure) down. cookie_names is what catches cookie-ONLY session apps.
-        hit, bearer_code = None, _request(method, url, token=forged, data=body)[0]
-        if bearer_code in _REACHED_HANDLER:
+        hit = None
+        bearer_code, bearer_body = _request(method, url, token=forged, data=body)
+        attempt_codes = [bearer_code]
+        if bearer_code in _REACHED_HANDLER and bearer_body is not None and not _looks_like_denial(bearer_body):
             hit = ("Authorization: Bearer", bearer_code)
         else:
             for cn in (cookie_names or []):
-                cc = _request(method, url, token=None, data=body, cookie=f"{cn}={forged}")[0]
-                if cc in _REACHED_HANDLER:
+                cc, cb = _request(method, url, token=None, data=body, cookie=f"{cn}={forged}")
+                attempt_codes.append(cc)
+                if cc in _REACHED_HANDLER and cb is not None and not _looks_like_denial(cb):
                     hit = (f"cookie:{cn}", cc)
                     break
         via, fcode = hit if hit else ("Authorization: Bearer", bearer_code)
         row = {"method": method, "path": path, "baseline": base_code, "forged": fcode,
-               "via": via, "verdict": "BYPASS" if hit else "rejected"}
+               "via": via, "verdict": "candidate-bypass" if hit else
+               "rejected" if all(c in (401, 403) for c in attempt_codes) else "inconclusive",
+               "evidence_verified": False}
         results.append(row)
         if hit:
-            bypassed.append(row)
+            candidates.append(row)
 
     return {
         "target": target,
         "mode": "present an UNSIGNED/bogus-sig JWT (far-future exp) to each gated route; "
-                "reached-handler = signature not verified",
+                "response difference is a lead; verify protected behavior and legitimate identity controls",
         "token_locations": ["Authorization: Bearer"] + [f"cookie:{c}" for c in cookie_names],
         "tested": len(results),
         "bypassed": bypassed,
+        "candidates": candidates,
         "results": results,
         "endpoints_over_cap": over_cap,
         # NOT_RUN is not a PASS. If no route presented a gated baseline there was nothing to forge
         # against, so "all rejected the forged token" would be an affirmative all-clear for a probe
         # that never ran (it read that way on every redirect-gated app before _GATED_CODES).
-        "inconclusive": not results,
+        "inconclusive": not results or bool(over_cap) or any(r["verdict"] != "rejected" for r in results),
         "summary": ("⚠ INCONCLUSIVE — no route returned a gated (401/403/3xx) baseline, so the "
                     "forged-token probe had nothing to test. This is NOT a pass: check the target is "
                     "up and that these routes really require auth."
                     if not results else
-                    f"{len(bypassed)}/{len(results)} gated route(s) accepted a forged unsigned token"
-                    + (" — ⚠ SIGNATURE NOT VERIFIED (CWE-347 auth bypass)" if bypassed
-                       else " — all rejected the forged token"))
+                    f"{len(candidates)}/{len(results)} forged-token response candidate(s) · "
+                    f"{sum(r['verdict'] == 'inconclusive' for r in results)} inconclusive"
+                    + (" — verify identity and protected behavior before confirming bypass" if candidates
+                       else " — no bypass confirmed"))
                    + (f"  ·  ⚠ {over_cap} more over the {max_endpoints}-endpoint cap NOT tested" if over_cap else ""),
     }
 

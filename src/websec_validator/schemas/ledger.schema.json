@@ -4,35 +4,195 @@
   "title": "websec-validator findings ledger",
   "description": "Schema for findings-ledger.json and the findings[] of findings.envelope.json. Versioned in lockstep with formats.SCHEMA_VERSION.",
   "type": "object",
-  "required": ["findings", "total"],
+  "required": [
+    "findings",
+    "total"
+  ],
   "properties": {
-    "schema_version": {"type": "string", "description": "Envelope schema version (SemVer-ish). Bumped on breaking shape changes."},
-    "total": {"type": "integer", "minimum": 0},
-    "suppressed": {"type": "integer", "minimum": 0},
-    "by_severity": {"type": "object", "additionalProperties": {"type": "integer"}},
-    "by_confidence": {"type": "object", "additionalProperties": {"type": "integer"}},
-    "dynamic_included": {"type": "boolean"},
-    "calibration": {"type": "object"},
-    "findings": {"type": "array", "items": {"$ref": "#/definitions/finding"}}
+    "schema_version": {
+      "const": "2.0"
+    },
+    "total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "suppressed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "by_severity": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer"
+      }
+    },
+    "by_confidence": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer"
+      }
+    },
+    "dynamic_included": {
+      "type": "boolean"
+    },
+    "calibration": {
+      "type": "object"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/finding"
+      }
+    },
+    "coverage": {
+      "$ref": "coverage.schema.json"
+    },
+    "verification_context": {
+      "type": "object"
+    }
   },
   "definitions": {
     "finding": {
       "type": "object",
-      "required": ["title", "attack_class", "severity", "confidence", "location"],
+      "required": [
+        "title",
+        "attack_class",
+        "severity",
+        "confidence",
+        "location"
+      ],
       "properties": {
-        "title": {"type": "string"},
-        "category": {"type": "string"},
-        "attack_class": {"type": "string", "description": "Stable key into the STANDARDS/REMEDIATION maps (e.g. 'ssrf', 'xss', 'clickjacking', 'csrf', 'missing-auth')."},
-        "severity": {"type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]},
-        "confidence": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
-        "location": {"type": "string", "description": "Repo-relative file path, or a prose placeholder like '(response headers)'."},
-        "fingerprint": {"type": "string", "description": "Stable 16-hex id (attack_class+location+title) for baseline/diff + SARIF tracking."},
-        "baseline_state": {"type": "string", "enum": ["new", "unchanged", "updated", "absent"]},
-        "evidence": {"type": "array", "items": {"type": "object", "properties": {"layer": {"type": "string"}, "detail": {"type": "string"}}}},
-        "standards": {"type": "object", "properties": {"cwe": {"type": "array", "items": {"type": "string"}}, "asvs": {"type": "string"}, "owasp_api": {"type": "array", "items": {"type": "string"}}}},
-        "remediation": {"type": "string"},
-        "status": {"type": "string"},
-        "calibrated": {"type": "object", "properties": {"p": {"type": ["number", "null"]}, "ci": {"type": ["array", "null"]}, "n": {"type": ["integer", "null"]}, "basis": {"type": "string"}}}
+        "title": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "attack_class": {
+          "type": "string",
+          "description": "Stable key into the STANDARDS/REMEDIATION maps (e.g. 'ssrf', 'xss', 'clickjacking', 'csrf', 'missing-auth')."
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "CRITICAL",
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "INFO"
+          ]
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW"
+          ]
+        },
+        "location": {
+          "type": "string",
+          "description": "Repo-relative file path, or a prose placeholder like '(response headers)'."
+        },
+        "fingerprint": {
+          "type": "string",
+          "description": "Canonical v2 semantic finding identifier; title and mutable intelligence are excluded."
+        },
+        "baseline_state": {
+          "type": "string",
+          "enum": [
+            "new",
+            "unchanged",
+            "changed",
+            "reopened"
+          ],
+          "description": "Internal lifecycle state; formats maps changed/reopened to the SARIF updated enum."
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "layer": {
+                "type": "string"
+              },
+              "detail": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "standards": {
+          "type": "object",
+          "properties": {
+            "cwe": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "asvs": {
+              "type": "string"
+            },
+            "owasp_api": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "remediation": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "calibrated": {
+          "type": "object",
+          "properties": {
+            "p": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "ci": {
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "n": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "basis": {
+              "type": "string"
+            }
+          }
+        },
+        "fingerprint_version": {
+          "const": 2
+        },
+        "fingerprint_aliases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sarif": {
+          "type": "object",
+          "description": "Untrusted native SARIF evidence; producer suppression, baseline and source freshness claims do not replace local policy."
+        },
+        "sarif_occurrences": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
       }
     }
   }

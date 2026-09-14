@@ -16,7 +16,9 @@
       "sqli",
       "ssti"
     ],
-    "caveat": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code"
+    "caveat": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code",
+    "evidence_status": "historical-unverified",
+    "limitation": "Historical unpinned corpus labels treated unmatched findings as false positives. Counts retained for audit only; runtime excludes these cells pending reviewed relabeling."
   },
   "by_class_label": {
     "command-injection|LOW": {

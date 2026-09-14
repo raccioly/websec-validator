@@ -3,47 +3,113 @@
     "name": "VAmPI",
     "repo": "https://github.com/erev0s/VAmPI",
     "language": "python",
-    "vulns": "OWASP API Top 10 — BOLA, mass-assignment, JWT weaknesses, excessive data exposure",
+    "vulns": "OWASP API Top 10 \u2014 BOLA, mass-assignment, JWT weaknesses, excessive data exposure",
     "expect": {
-      "frameworks": ["flask"],
+      "frameworks": [
+        "flask"
+      ],
       "min_endpoints": 10,
       "auth_scheme_contains": "jwt",
       "idor_present": true
     },
     "truth": [
-      {"class": "missing-auth", "location_contains": "*", "note": "VAmPI is a broken-object/function-level-authorization demo: its API endpoints are intentionally missing or mis-applying auth"},
-      {"class": "sqli", "location_contains": "*", "note": "raw SQL string interpolation in the vulnerable code path"}
-    ]
+      {
+        "class": "missing-auth",
+        "location_contains": "*",
+        "note": "VAmPI is a broken-object/function-level-authorization demo: its API endpoints are intentionally missing or mis-applying auth",
+        "review_status": "historical-class-level-unverified",
+        "is_real": null
+      },
+      {
+        "class": "sqli",
+        "location_contains": "*",
+        "note": "raw SQL string interpolation in the vulnerable code path",
+        "review_status": "historical-class-level-unverified",
+        "is_real": null
+      }
+    ],
+    "revision": "f16052dce83f05847133ec98f01c5193a41de7d8",
+    "revision_provenance": {
+      "source": "https://api.github.com/repos/erev0s/VAmPI/commits?per_page=1",
+      "retrieved_date": "2026-09-12",
+      "method": "read-only public GitHub API; revision pin only, labels not revalidated"
+    }
   },
   {
     "name": "NodeGoat",
     "repo": "https://github.com/OWASP/NodeGoat",
     "language": "node",
-    "vulns": "OWASP Top 10 — injection, broken auth, IDOR (allocations), access control",
+    "vulns": "OWASP Top 10 \u2014 injection, broken auth, IDOR (allocations), access control",
     "expect": {
-      "frameworks": ["express"],
+      "frameworks": [
+        "express"
+      ],
       "min_endpoints": 8,
       "auth_scheme_contains": "session",
       "idor_present": true
     },
     "truth": [
-      {"class": "missing-auth", "location_contains": "*", "note": "broken access control across allocation/admin routes"},
-      {"class": "command-injection", "location_contains": "*", "note": "SSJS injection via eval in the contributions handler"},
-      {"class": "ssti", "location_contains": "*", "note": "server-side template injection demo"}
-    ]
+      {
+        "class": "missing-auth",
+        "location_contains": "*",
+        "note": "broken access control across allocation/admin routes",
+        "review_status": "historical-class-level-unverified",
+        "is_real": null
+      },
+      {
+        "class": "command-injection",
+        "location_contains": "*",
+        "note": "SSJS injection via eval in the contributions handler",
+        "review_status": "historical-class-level-unverified",
+        "is_real": null
+      },
+      {
+        "class": "ssti",
+        "location_contains": "*",
+        "note": "server-side template injection demo",
+        "review_status": "historical-class-level-unverified",
+        "is_real": null
+      }
+    ],
+    "revision": "c5cb68a7084e4ae7dcc60e6a98768720a81841e8",
+    "revision_provenance": {
+      "source": "https://api.github.com/repos/OWASP/NodeGoat/commits?per_page=1",
+      "retrieved_date": "2026-09-12",
+      "method": "read-only public GitHub API; revision pin only, labels not revalidated"
+    }
   },
   {
     "name": "DVGA",
     "repo": "https://github.com/dolevf/Damn-Vulnerable-GraphQL-Application",
     "language": "python",
-    "vulns": "GraphQL — introspection, injection, DoS (batching/aliasing), info disclosure",
+    "vulns": "GraphQL \u2014 introspection, injection, DoS (batching/aliasing), info disclosure",
     "expect": {
-      "frameworks": ["flask"],
+      "frameworks": [
+        "flask"
+      ],
       "graphql_present": true
     },
     "truth": [
-      {"class": "graphql", "location_contains": "*", "note": "introspection + playground enabled, no depth/complexity limits"},
-      {"class": "command-injection", "location_contains": "*", "note": "OS command injection via the system-diagnostics resolver"}
-    ]
+      {
+        "class": "graphql",
+        "location_contains": "*",
+        "note": "introspection + playground enabled, no depth/complexity limits",
+        "review_status": "historical-class-level-unverified",
+        "is_real": null
+      },
+      {
+        "class": "command-injection",
+        "location_contains": "*",
+        "note": "OS command injection via the system-diagnostics resolver",
+        "review_status": "historical-class-level-unverified",
+        "is_real": null
+      }
+    ],
+    "revision": "a961308c02d1fb462b192681c336b0739e432da7",
+    "revision_provenance": {
+      "source": "https://api.github.com/repos/dolevf/Damn-Vulnerable-GraphQL-Application/commits?per_page=1",
+      "retrieved_date": "2026-09-12",
+      "method": "read-only public GitHub API; revision pin only, labels not revalidated"
+    }
   }
 ]

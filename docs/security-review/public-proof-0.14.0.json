@@ -1,0 +1,295 @@
+{
+  "wheel_sha256": "5047bfb98e40b52ec32b40d5c63c2d5debf0e96a7cd0de16cd958df959f2ebb0",
+  "source_only": true,
+  "target_setup_import_tests_hooks_executed": false,
+  "runs": {
+    "without_noir": {
+      "results": [
+        {
+          "name": "VAmPI",
+          "status": "analyzed",
+          "revision_status": "pinned-verified",
+          "actual_revision": "f16052dce83f05847133ec98f01c5193a41de7d8",
+          "execution_complete": true,
+          "execution_errors": [],
+          "unknown_labels": 2,
+          "endpoints": 0,
+          "vulns": "OWASP API Top 10 \u2014 BOLA, mass-assignment, JWT weaknesses, excessive data exposure",
+          "checks": [
+            {
+              "check": "frameworks \u2287 expected",
+              "pass": true,
+              "got": [
+                "flask"
+              ]
+            },
+            {
+              "check": "endpoints \u2265 10",
+              "pass": false,
+              "got": 0
+            },
+            {
+              "check": "auth ~ 'jwt'",
+              "pass": true,
+              "got": "jwt (bearer)"
+            },
+            {
+              "check": "IDOR candidates found",
+              "pass": false,
+              "got": 0
+            }
+          ],
+          "passed": 2,
+          "total": 4,
+          "score": 0.5
+        },
+        {
+          "name": "NodeGoat",
+          "status": "analyzed",
+          "revision_status": "pinned-verified",
+          "actual_revision": "c5cb68a7084e4ae7dcc60e6a98768720a81841e8",
+          "execution_complete": true,
+          "execution_errors": [],
+          "unknown_labels": 3,
+          "endpoints": 18,
+          "vulns": "OWASP Top 10 \u2014 injection, broken auth, IDOR (allocations), access control",
+          "checks": [
+            {
+              "check": "frameworks \u2287 expected",
+              "pass": true,
+              "got": [
+                "express"
+              ]
+            },
+            {
+              "check": "endpoints \u2265 8",
+              "pass": true,
+              "got": 18
+            },
+            {
+              "check": "auth ~ 'session'",
+              "pass": true,
+              "got": "session-cookie"
+            },
+            {
+              "check": "IDOR candidates found",
+              "pass": true,
+              "got": 1
+            }
+          ],
+          "passed": 4,
+          "total": 4,
+          "score": 1.0
+        },
+        {
+          "name": "DVGA",
+          "status": "analyzed",
+          "revision_status": "pinned-verified",
+          "actual_revision": "a961308c02d1fb462b192681c336b0739e432da7",
+          "execution_complete": true,
+          "execution_errors": [],
+          "unknown_labels": 2,
+          "endpoints": 12,
+          "vulns": "GraphQL \u2014 introspection, injection, DoS (batching/aliasing), info disclosure",
+          "checks": [
+            {
+              "check": "frameworks \u2287 expected",
+              "pass": true,
+              "got": [
+                "flask"
+              ]
+            },
+            {
+              "check": "GraphQL detected",
+              "pass": true,
+              "got": true
+            }
+          ],
+          "passed": 2,
+          "total": 2,
+          "score": 1.0
+        }
+      ],
+      "limitation": "Recon coverage checks are not vulnerability precision or exploit confirmation. Unavailable applications are excluded from the numeric check denominator and reported separately.",
+      "aggregate": {
+        "apps": 3,
+        "analyzed_apps": 3,
+        "completed_apps": 3,
+        "incomplete_apps": 0,
+        "unavailable_apps": 0,
+        "unknown_labels": 7,
+        "failed_checks": 2,
+        "unknown_checks": 0,
+        "overall_coverage": 0.8,
+        "checks_passed": 8,
+        "checks_total": 10
+      },
+      "environment": {
+        "PATH": "/usr/bin:/bin",
+        "tools": {
+          "noir": null,
+          "trivy": null,
+          "gitleaks": null,
+          "semgrep": null,
+          "checkov": null,
+          "prowler": null,
+          "bandit": null,
+          "git": "/usr/bin/git"
+        },
+        "noir_version": null,
+        "package_version": "0.14.0",
+        "detector_revision": "sha256:df28604778bd5f93459683703c9bfef831d57148739a324a9383a575b3401e9f",
+        "elapsed_seconds": 10.141,
+        "scan_requested": false
+      }
+    },
+    "with_noir": {
+      "results": [
+        {
+          "name": "VAmPI",
+          "status": "analyzed",
+          "revision_status": "pinned-verified",
+          "actual_revision": "f16052dce83f05847133ec98f01c5193a41de7d8",
+          "execution_complete": true,
+          "execution_errors": [],
+          "unknown_labels": 2,
+          "endpoints": 14,
+          "vulns": "OWASP API Top 10 \u2014 BOLA, mass-assignment, JWT weaknesses, excessive data exposure",
+          "checks": [
+            {
+              "check": "frameworks \u2287 expected",
+              "pass": true,
+              "got": [
+                "flask"
+              ]
+            },
+            {
+              "check": "endpoints \u2265 10",
+              "pass": true,
+              "got": 14
+            },
+            {
+              "check": "auth ~ 'jwt'",
+              "pass": true,
+              "got": "jwt (bearer)"
+            },
+            {
+              "check": "IDOR candidates found",
+              "pass": true,
+              "got": 5
+            }
+          ],
+          "passed": 4,
+          "total": 4,
+          "score": 1.0
+        },
+        {
+          "name": "NodeGoat",
+          "status": "analyzed",
+          "revision_status": "pinned-verified",
+          "actual_revision": "c5cb68a7084e4ae7dcc60e6a98768720a81841e8",
+          "execution_complete": true,
+          "execution_errors": [],
+          "unknown_labels": 3,
+          "endpoints": 20,
+          "vulns": "OWASP Top 10 \u2014 injection, broken auth, IDOR (allocations), access control",
+          "checks": [
+            {
+              "check": "frameworks \u2287 expected",
+              "pass": true,
+              "got": [
+                "express"
+              ]
+            },
+            {
+              "check": "endpoints \u2265 8",
+              "pass": true,
+              "got": 20
+            },
+            {
+              "check": "auth ~ 'session'",
+              "pass": true,
+              "got": "session-cookie"
+            },
+            {
+              "check": "IDOR candidates found",
+              "pass": true,
+              "got": 2
+            }
+          ],
+          "passed": 4,
+          "total": 4,
+          "score": 1.0
+        },
+        {
+          "name": "DVGA",
+          "status": "analyzed",
+          "revision_status": "pinned-verified",
+          "actual_revision": "a961308c02d1fb462b192681c336b0739e432da7",
+          "execution_complete": true,
+          "execution_errors": [],
+          "unknown_labels": 2,
+          "endpoints": 14,
+          "vulns": "GraphQL \u2014 introspection, injection, DoS (batching/aliasing), info disclosure",
+          "checks": [
+            {
+              "check": "frameworks \u2287 expected",
+              "pass": true,
+              "got": [
+                "flask"
+              ]
+            },
+            {
+              "check": "GraphQL detected",
+              "pass": true,
+              "got": true
+            }
+          ],
+          "passed": 2,
+          "total": 2,
+          "score": 1.0
+        }
+      ],
+      "limitation": "Recon coverage checks are not vulnerability precision or exploit confirmation. Unavailable applications are excluded from the numeric check denominator and reported separately.",
+      "aggregate": {
+        "apps": 3,
+        "analyzed_apps": 3,
+        "completed_apps": 3,
+        "incomplete_apps": 0,
+        "unavailable_apps": 0,
+        "unknown_labels": 7,
+        "failed_checks": 0,
+        "unknown_checks": 0,
+        "overall_coverage": 1.0,
+        "checks_passed": 10,
+        "checks_total": 10
+      },
+      "environment": {
+        "tools": {
+          "noir": "/opt/homebrew/bin/noir",
+          "trivy": "/opt/homebrew/bin/trivy",
+          "gitleaks": "/opt/homebrew/bin/gitleaks",
+          "semgrep": null,
+          "checkov": null,
+          "prowler": null,
+          "bandit": null,
+          "git": "/opt/homebrew/bin/git"
+        },
+        "noir_version": {
+          "exit_code": 0,
+          "stdout": "1.1.0",
+          "stderr": ""
+        },
+        "package_version": "0.14.0",
+        "detector_revision": "sha256:df28604778bd5f93459683703c9bfef831d57148739a324a9383a575b3401e9f",
+        "elapsed_seconds": 9.031,
+        "scan_requested": false,
+        "PATH_policy": "Inherited normal PATH; executable paths recorded separately. Full machine PATH omitted from release attachment.",
+        "PATH_sha256": "2acb2bf9310a94e24b1edd933f7875e13baed02954a3eb190c91736a4f36130c"
+      }
+    }
+  },
+  "same_checkout_paths_and_revisions": true,
+  "temporary_checkouts_removed": true,
+  "sanitization": "Temporary checkout and engine installation paths omitted; revisions, tool availability, detector and wheel hashes retained."
+}

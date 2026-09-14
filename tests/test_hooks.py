@@ -71,7 +71,9 @@ class HooksTests(unittest.TestCase):
     def test_install_pre_push_gate(self):
         hooks.install(self.root, pre_push=True)
         body = self._hook("pre-push").read_text()
-        self.assertIn("--fail-on", body)
+        # Runtime threshold and failure behavior are exercised by test_hooks_contracts.
+        self.assertIn("run_guardrail(pre_push=True)", body)
+        self.assertIn('"$_PYTHON" -I -c', body)
 
     def test_reinstall_idempotent(self):
         hooks.install(self.root)

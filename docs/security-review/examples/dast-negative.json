@@ -1,0 +1,21 @@
+{
+  "dast_context": {
+    "application_id": "synthetic-app",
+    "build_id": "synthetic-build-1",
+    "identity": "anonymous",
+    "origin": "http://127.0.0.1:8765",
+    "endpoint": "/search",
+    "method": "GET",
+    "parameter": "q"
+  },
+  "checks": [
+    {
+      "pluginid": "40018",
+      "attack_class": "sqli",
+      "completed": true,
+      "coverage_complete": true,
+      "auth_verified": true,
+      "outcome": "not-vulnerable"
+    }
+  ]
+}

@@ -104,7 +104,7 @@ jobs:
       contents: read
       actions: read      # reads this run's own job names to validate required-checks.json
     env:
-      MIN_TESTS: 555          # bump when adding tests; never lower it to make a PR pass
+      MIN_TESTS: 1082          # bump when adding tests; never lower it to make a PR pass
       # The suite runs in ~10s on CI. 300s would have been 30x nominal and useless: the known
       # failure in this class (docguard PR #328 — a test given "/" as its project dir walked the
       # whole filesystem) was a 7.6x blowup that stayed GREEN throughout, and 7.6x of 10s still
@@ -150,7 +150,7 @@ jobs:
 
           if [ "$count" -lt "$MIN_TESTS" ]; then
             echo "::error::test count $count is below the floor $MIN_TESTS — coverage was removed."
-            echo "::error::If intentional, lower MIN_TESTS in .github/workflows/ci.yml in the same PR."
+            echo "::error::Restore missing tests or investigate test collection; never lower MIN_TESTS to make this pass."
             exit 1
           fi
           if [ "$elapsed" -gt "$MAX_SECONDS" ]; then

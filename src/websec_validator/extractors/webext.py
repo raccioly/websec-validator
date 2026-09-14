@@ -25,6 +25,7 @@ import json
 import re
 
 from .base import Extractor, RepoContext
+from .syntax import expression_end, guarded_body, in_literal, js_functions, split_arguments, without_comments
 
 # extension storage a tier/plan can be (user-)read from
 EXT_STORAGE = re.compile(r"chrome\.storage\.(?:local|sync|managed)|browser\.storage\.(?:local|sync)|\blocalStorage\b")
@@ -37,9 +38,76 @@ ENTITLEMENT_GATE = re.compile(
 EXT_API = re.compile(r"\bchrome\.\w+|\bbrowser\.(?:runtime|storage|tabs)\b")
 # an externally-reachable message listener (web pages / other extensions) — the real trust boundary
 ON_MESSAGE_EXTERNAL = re.compile(r"\.onMessageExternal\.addListener")
-SENDER_CHECK = re.compile(r"\bsender\.(?:id|origin|url|tab)\b")
 # a host match pattern granting all-web access
 BROAD_HOST = re.compile(r"<all_urls>|\*://\*/\*|https?://\*/\*")
+
+
+def _sender_control(scope: dict) -> bool:
+    if len(scope["params"]) < 2:
+        return False
+    sender = scope["params"][1]
+    body = scope["body"]
+    # A check on an earlier value does not authorize a replaced sender object.
+    mutations = re.finditer(r"\b" + re.escape(sender) + r"(?:\.[\w$]+)?\s*(?:=(?!=)|\+\+|--)", body)
+    if any(not in_literal(body, match.start()) for match in mutations):
+        return False
+
+    def predicate(condition):
+        match = re.fullmatch(re.escape(sender) + r"\.(?:id|origin|url)\s*(===|!==)\s*(['\"])([^'\"]+)\2", condition)
+        if match and not any(char in match[3] for char in "*\\$`"):
+            return 1 if match[1] == "===" else -1
+        # Only a literal finite allowlist is resolved. A variable/helper called
+        # allowedOrigins does not establish the contents or runtime enforcement.
+        match = re.fullmatch(r"(!)?\s*(\[[^\[\]]+\])\.includes\(\s*" + re.escape(sender)
+                             + r"\.(?:id|origin|url)\s*\)", condition)
+        if match:
+            items = split_arguments(match[2][1:-1])
+            if items and all(re.fullmatch(r"(['\"])[^'\"*\\$`]+\1", item) for item in items):
+                return -1 if match[1] else 1
+        return 0
+
+    return guarded_body(body, predicate)
+
+
+def _external_listeners(text: str) -> list[tuple[int, bool]]:
+    source = without_comments(text)
+    scopes = js_functions(source)
+    listeners = []
+    for match in ON_MESSAGE_EXTERNAL.finditer(source):
+        if in_literal(source, match.start()):
+            continue
+        opening = match.end()
+        while opening < len(source) and source[opening].isspace():
+            opening += 1
+        if source[opening:opening+1] != "(":
+            continue
+        end = expression_end(source, opening, closing=")")
+        argument = source[opening+1:end-1].strip()
+        candidates = [scope for scope in scopes if opening < scope["start"] < end and scope["end"] <= end]
+        if re.fullmatch(r"[\w$]+", argument):
+            candidates = [scope for scope in scopes if scope["name"] == argument]
+            # Named declarations are supported only without any later replacement.
+            assignments = list(re.finditer(r"\b" + re.escape(argument) + r"\s*=(?!=)", source))
+            replaced = any(not in_literal(source, item.start()) and not (
+                len(candidates) == 1 and item.end() <= candidates[0]["start"]
+                and source[item.end():candidates[0]["start"]].strip() in {"", "async"}
+                and re.search(r"\b(?:const|let|var)\s*$", source[max(0, item.start()-20):item.start()]))
+                for item in assignments)
+            shadowed = any(scope["start"] < match.start() < scope["end"]
+                           and (not scope["simple_params"] or argument in scope["params"])
+                           for scope in scopes)
+            destructured = re.finditer(r"\b(?:const|let|var)\s*[\[{][^;=]{0,500}\b"
+                                       + re.escape(argument) + r"\b[^;=]{0,500}[\]}]\s*=", source)
+            shadowed = shadowed or any(not in_literal(source, item.start()) for item in destructured)
+            if replaced or shadowed:
+                candidates = []
+        else:
+            # The callback must be the whole first argument, with no wrapper call.
+            candidates = [scope for scope in candidates if not source[opening+1:scope["start"]].strip()
+                          or source[opening+1:scope["start"]].strip() == "async"]
+            candidates = [scope for scope in candidates if not source[scope["end"]:end-1].strip()]
+        listeners.append((match.start(), len(candidates) == 1 and _sender_control(candidates[0])))
+    return listeners
 
 
 class WebExtExtractor(Extractor):
@@ -85,14 +153,15 @@ class WebExtExtractor(Extractor):
                                   "narrow, audited page bridge, and never expose privileged capabilities through it."})
 
         gate_files: list = []
-        msg_files: list = []
+        message_leads: list = []
         for _p, rel, text in ctx.iter_code():
             if not EXT_API.search(text):
                 continue
             if EXT_STORAGE.search(text) and ENTITLEMENT_GATE.search(text):
                 gate_files.append(rel)
-            if ON_MESSAGE_EXTERNAL.search(text) and not SENDER_CHECK.search(text):
-                msg_files.append(rel)
+            for position, controlled in _external_listeners(text):
+                if not controlled:
+                    message_leads.append((rel, text.count("\n", 0, position) + 1))
 
         if gate_files:
             findings.append({
@@ -105,14 +174,16 @@ class WebExtExtractor(Extractor):
                           "feature that only runs in the browser can't be truly enforced — tie that tier's value to a "
                           "server-controlled benefit, or accept it as honor-system; don't sink time into client-side "
                           "obfuscation."})
-        if msg_files:
+        for rel, line in message_leads:
             findings.append({
                 "severity": "MEDIUM", "confidence": "LOW", "kind": "unvalidated-external-message",
-                "attack_class": "extension-message-trust", "file": sorted(msg_files)[0],
-                "detail": f"an onMessageExternal listener in {', '.join(sorted(set(msg_files))[:4])} doesn't check "
-                          "sender.id / sender.origin — any web page or other extension allowed to message it can "
+                "attack_class": "extension-message-trust", "file": rel, "line": line,
+                "control_scope": "listener callback; unresolved controls require review",
+                "detail": f"an onMessageExternal listener in {rel} has no supported enforcing sender allowlist "
+                          "in its own callback — any web page or other extension allowed to message it can "
                           "invoke privileged handlers. Validate the sender against an allowlist and scope "
-                          "externally_connectable narrowly."})
+                          "externally_connectable narrowly. Named helpers, aliases and complex branches remain "
+                          "unverified; this lead does not establish that validation is absent."})
 
         return {
             "is_extension": bool(manifests),

@@ -14,8 +14,10 @@ here — that is the dynamic phase, which v1 leaves to the agent + human.
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import json
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -23,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import enrichment
-from .extractors.base import SKIP_DIRS, is_test_file, path_in_skip_dir
+from .extractors.base import SKIP_DIRS, is_test_file, path_in_skip_dir, read_artifact
 
 
 @dataclass(frozen=True)
@@ -204,6 +206,18 @@ def _brakeman(target: Path, out: Path, excludes=()) -> list:
             "--no-exit-on-warn", "--no-exit-on-error", str(target)]
 
 
+def _bandit(target: Path, out: Path, excludes=()) -> list:
+    # An explicit empty INI bypasses Bandit's recursive target .bandit discovery.
+    # Without -c Bandit uses its built-in defaults, not target YAML/pyproject settings.
+    # Installed Bandit/plugins remain operator-trusted external executables.
+    cmd = ["bandit", "-r", str(target), "-f", "json", "-o", str(out),
+           "--ini", os.devnull, "--ignore-nosec"]
+    skipped = list(EXCLUDE_DIRS) + list(excludes)
+    if skipped:
+        cmd += ["--exclude", ",".join(skipped)]
+    return cmd
+
+
 REGISTRY: tuple = (
     Scanner("trivy", "Trivy", "sca", "trivy",
             install="brew install trivy  # pin by digest in CI", argv=_trivy),
@@ -214,7 +228,7 @@ REGISTRY: tuple = (
     Scanner("checkov", "Checkov", "iac", "checkov",
             install="pipx install checkov", argv=_checkov),
     Scanner("bandit", "Bandit", "sast", "bandit", languages=("python",),
-            install="pipx install bandit"),
+            install="pipx install bandit", argv=_bandit),
     Scanner("gosec", "gosec", "sast", "gosec", languages=("go",),
             install="brew install gosec  # Go SAST", argv=_gosec),
     Scanner("brakeman", "Brakeman", "sast", "brakeman", languages=("ruby",),
@@ -241,7 +255,8 @@ def detect(stack_languages: list | None = None) -> dict:
     for s in REGISTRY:
         if s.languages and not (set(s.languages) & langs):
             continue  # not relevant to this repo's stack
-        entry = {"key": s.key, "name": s.name, "category": s.category}
+        entry = {"key": s.key, "name": s.name, "category": s.category,
+                 "runnable": s.argv is not None}
         if shutil.which(s.binary):
             available.append(entry)
         else:
@@ -294,6 +309,8 @@ def run_available(target: Path, outdir: Path, stack_languages: list | None = Non
                     produced.replace(out_file)
             results.append({"key": s.key, "name": s.name, "category": s.category,
                             "exit_code": proc.returncode, "output": str(out_file),
+                            **({"configuration_policy": "built-in defaults; target .bandit/YAML/pyproject ignored",
+                                "suppression_policy": "inline nosec ignored"} if s.key == "bandit" else {}),
                             "findings": _count_findings(s.key, out_file)})
         except subprocess.TimeoutExpired:
             results.append({"key": s.key, "name": s.name, "status": "timeout"})
@@ -326,10 +343,13 @@ def write_sbom(target: Path, outdir: Path, fmt: str = "cyclonedx",
         if out_file.exists() and out_file.stat().st_size > 0:
             comps = 0
             try:
-                data = json.loads(out_file.read_text())
+                data = json.loads(read_artifact(out_file))
+                field = "components" if fmt == "cyclonedx" else "packages"
+                if not isinstance(data, dict) or not isinstance(data.get(field), list):
+                    raise ValueError("SBOM does not contain the requested component inventory")
                 comps = len(data.get("components") or data.get("packages") or [])
-            except Exception:
-                pass
+            except (OSError, ValueError) as error:
+                return {"available": False, "reason": f"invalid SBOM: {error}"}
             return {"available": True, "format": fmt, "path": fname, "components": comps}
         return {"available": False, "reason": f"trivy exit {proc.returncode}: {(proc.stderr or '')[:120]}"}
     except subprocess.TimeoutExpired:
@@ -345,9 +365,9 @@ def _count_findings(key: str, out_file: Path) -> int:
     # trufflehog emits JSON-LINES, not a JSON document — count before the whole-file parse below,
     # which would raise and silently report 0.
     if key == "trufflehog":
-        return sum(1 for ln in out_file.read_text().splitlines() if ln.strip().startswith("{"))
+        return sum(1 for ln in read_artifact(out_file).splitlines() if ln.strip().startswith("{"))
     try:
-        data = json.loads(out_file.read_text())
+        data = json.loads(read_artifact(out_file))
     except Exception:
         return 0
     if key == "trivy":
@@ -357,7 +377,7 @@ def _count_findings(key: str, out_file: Path) -> int:
                    for r in (data.get("Results") or []))
     if key == "gitleaks":
         return len(data) if isinstance(data, list) else 0
-    if key == "semgrep":
+    if key in {"semgrep", "bandit"}:
         return len(data.get("results", []) or [])
     if key == "checkov":
         return sum(len((b.get("results") or {}).get("failed_checks", []) or [])
@@ -551,6 +571,7 @@ def _norm_osv(data: dict) -> list:
                 out.append({"tool": "osv-scanner", "category": "sca", "severity": sev,
                             "key": cve, "file": r.get("source", {}).get("path", ""), "line": 0,
                             "pkg": name, "cve": cve, "installed": version, "fixed": "", "ecosystem": eco,
+                            "advisory_aliases": sorted({a for a in aliases if isinstance(a, str) and a}),
                             "title": f"{name} {version} — {cve} ({', '.join(i for i in ids if i != cve)[:60]})".rstrip(" ()"),
                             "fingerprint": f"cve|{name}|{cve}"})
     return out
@@ -608,14 +629,16 @@ def _norm_semgrep(data: dict) -> list:
     sevmap = {"ERROR": "HIGH", "WARNING": "MEDIUM", "INFO": "INFO"}
     out = []
     for r in (data.get("results") or []):
-        rule = (r.get("check_id", "")).split(".")[-1]
+        rule = r.get("check_id", "")
         path = r.get("path", "")
         line = (r.get("start") or {}).get("line", 0)
         sev = sevmap.get((r.get("extra") or {}).get("severity", "INFO"), "MEDIUM")
         out.append({"tool": "semgrep", "category": "sast", "severity": sev,
-                    "key": rule, "file": path, "line": line,
+                    "rule_id": r.get("check_id", ""),
+                    **({"semantic_id": r["match_based_id"]} if isinstance(r.get("match_based_id"), str) and r["match_based_id"] else {}),
+                    "key": rule.split(".")[-1], "file": path, "line": line,
                     "title": ((r.get("extra") or {}).get("message") or rule)[:90],
-                    "fingerprint": f"sast|{path}|{line}|{rule}"})
+                    "fingerprint": f"sast|{path}|{line}|{rule}|{r.get('match_based_id', '')}"})
     return out
 
 
@@ -637,6 +660,33 @@ def _norm_gosec(data: dict) -> list:
     return out
 
 
+def _norm_bandit(data: dict) -> list:
+    """Bandit AST findings; confidence is independent of issue severity."""
+    out, occurrences = [], {}
+    for issue in data["results"]:
+        path, rule = issue.get("filename", ""), issue.get("test_id", "")
+        line = issue.get("line_number", 0)
+        confidence = issue.get("issue_confidence")
+        confidence = confidence if isinstance(confidence, str) and confidence in {"LOW", "MEDIUM", "HIGH"} else "UNKNOWN"
+        cwe = (issue.get("issue_cwe") or {}).get("id")
+        cwe = f"CWE-{int(cwe)}" if not isinstance(cwe, bool) and re.fullmatch(r"[1-9][0-9]{0,5}", str(cwe)) else None
+        # Native code excerpts have numbered lines. Keep source text as an anchor,
+        # excluding shifting line labels; ordinals distinguish identical repeated sites.
+        code = str(issue.get("code") or "")
+        source = re.sub(r"(?m)^\s*\d+\s+", "", code).strip()
+        anchor = hashlib.sha256(source.encode()).hexdigest()[:20] if source else "unavailable"
+        key = (path, rule, anchor)
+        occurrences[key] = occurrences.get(key, 0) + 1
+        out.append({"tool": "bandit", "category": "sast", "severity": _sev(issue.get("issue_severity")),
+                    "confidence": confidence,
+                    "key": rule, "rule_id": rule, "file": path, "line": line,
+                    "cwe": cwe,
+                    "semantic_id": f"bandit:{anchor}:{occurrences[key]}",
+                    "title": (issue.get("issue_text") or issue.get("test_name") or rule)[:180],
+                    "fingerprint": f"sast|{path}|{rule}|{anchor}|{occurrences[key]}"})
+    return out
+
+
 # brakeman uses a 3-level confidence, not a severity — map it (High→HIGH … Weak→LOW).
 _BRAKEMAN_SEV = {"High": "HIGH", "Medium": "MEDIUM", "Weak": "LOW"}
 
@@ -650,6 +700,7 @@ def _norm_brakeman(data: dict) -> list:
         check = w.get("check_name", "")
         title = f"{w.get('warning_type', 'warning')}: {w.get('message', '')}"[:90]
         out.append({"tool": "brakeman", "category": "sast",
+                    **({"semantic_id": w["fingerprint"]} if isinstance(w.get("fingerprint"), str) and w["fingerprint"] else {}),
                     "severity": _BRAKEMAN_SEV.get(w.get("confidence", "Medium"), "MEDIUM"),
                     "key": check, "file": f, "line": line, "title": title,
                     # brakeman ships a stable per-warning fingerprint — reuse it so re-runs dedup.
@@ -672,20 +723,112 @@ def _norm_checkov(data) -> list:
             f = c.get("file_path", "") or c.get("repo_file_path", "")
             rng = c.get("file_line_range") or [0]
             out.append({"tool": "checkov", "category": "iac",
+                        **({"resource": c["resource"]} if isinstance(c.get("resource"), str) else {}),
                         "severity": _sev(c.get("severity") or "MEDIUM"),
                         "key": cid, "file": f, "line": (rng[0] if rng else 0),
                         "title": (c.get("check_name") or cid)[:90],
                         # include the LINE: a Terraform file with 12 unencrypted buckets is 12
                         # findings, not one. Without it they collapsed and the undercount was
                         # presented as healthy dedup (same reasoning as the secret fingerprint).
-                        "fingerprint": f"iac|{f}|{cid}|{rng[0] if rng else 0}"})
+                        "fingerprint": f"iac|{f}|{cid}|{c.get('resource', '')}|{rng[0] if rng else 0}"})
     return out
 
 
 _PARSERS = {"trivy": _norm_trivy, "gitleaks": _norm_gitleaks, "semgrep": _norm_semgrep,
             "checkov": _norm_checkov, "osv-scanner": _norm_osv,
             "gosec": _norm_gosec, "brakeman": _norm_brakeman,
-            "trufflehog": _norm_trufflehog}
+            "trufflehog": _norm_trufflehog, "bandit": _norm_bandit}
+
+
+def _checkov_summary(data) -> bool:
+    """The native zero-resource report is a summary, without a results object."""
+    return (isinstance(data, dict)
+            and all(type(data.get(k)) is int and data[k] >= 0
+                    for k in ("passed", "failed", "skipped", "parsing_errors", "resource_count"))
+            and isinstance(data.get("checkov_version"), str))
+
+
+def _valid_report(key: str, data) -> bool:
+    """A valid JSON scalar/object is not evidence that a scanner finished."""
+    if key == "gitleaks":
+        return isinstance(data, list) or (isinstance(data, dict) and isinstance(data.get("findings"), list))
+    if key == "checkov":
+        rows = data if isinstance(data, list) else [data]
+        return bool(rows) and all(
+            isinstance(row, dict) and (
+                isinstance(row.get("results"), dict)
+                and isinstance(row["results"].get("failed_checks"), list)
+                or _checkov_summary(row) and all(row[k] == 0 for k in ("passed", "failed", "skipped", "resource_count"))
+            ) for row in rows)
+    if key == "bandit":
+        return (isinstance(data, dict) and isinstance(data.get("results"), list)
+                and isinstance(data.get("errors"), list) and isinstance(data.get("metrics"), dict))
+    field = {"trivy": "Results", "semgrep": "results", "osv-scanner": "results",
+             "gosec": "Issues", "brakeman": "warnings"}.get(key)
+    if not isinstance(data, dict) or field is None:
+        return False
+    # Trivy and gosec use null for empty result collections in some releases.
+    return field in data and (isinstance(data[field], list) or (data[field] is None and key in {"trivy", "gosec"}))
+
+
+def _sca_occurrence(finding: dict, target: Path | None) -> None:
+    """Namespace vulnerability identity by affected input, not only advisory name."""
+    path = _rel_to(finding.get("file", ""), target) or finding.get("file", "")
+    path = posixpath.normpath(path.replace("\\", "/")) if path else ""
+    eco = str(finding.get("ecosystem") or "").lower()
+    eco = {"python-pkg": "pip", "node-pkg": "npm", "gobinary": "gomod"}.get(eco, eco)
+    identity = [path, eco, finding.get("pkg", ""), finding.get("installed", ""), finding.get("cve", "")]
+    finding["file"], finding["ecosystem"] = path, eco
+    finding["semantic_id"] = "dependency:" + hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:24]
+    finding["fingerprint"] = finding["semantic_id"]
+
+
+def _report_details(key: str, doc) -> dict:
+    """Native diagnostics are execution evidence even with a successful exit."""
+    details = {"errors": [], "skipped_checks": 0}
+    rows = doc if key == "checkov" and isinstance(doc, list) else [doc]
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if row.get("errors") or row.get("Errors"):
+            details["errors"].append("scanner reported errors")
+        if key == "checkov":
+            results = row.get("results") or {}
+            summary = row.get("summary") or (row if _checkov_summary(row) else {})
+            if not isinstance(summary, dict):
+                raise ValueError("invalid Checkov summary")
+            parse_errors = results.get("parsing_errors", [])
+            if not isinstance(parse_errors, list):
+                raise ValueError("invalid Checkov parsing_errors")
+            count = summary.get("parsing_errors", 0)
+            skipped = summary.get("skipped", len(results.get("skipped_checks") or []))
+            if any(type(n) is not int or n < 0 for n in (count, skipped)):
+                raise ValueError("invalid Checkov diagnostic counts")
+            if parse_errors or count:
+                details["errors"].append(f"{row.get('check_type', 'checkov')}: {max(len(parse_errors), count)} input parsing errors")
+            for count_key, rows_key in (("failed", "failed_checks"), ("passed", "passed_checks"), ("skipped", "skipped_checks")):
+                if count_key not in summary or rows_key not in results:
+                    continue
+                reported = summary[count_key]
+                actual = results[rows_key]
+                if (type(reported) is not int or reported < 0 or not isinstance(actual, list)
+                        or reported != len(actual)):
+                    details["errors"].append(f"{row.get('check_type', 'checkov')}: {count_key} summary contradicts result inventory")
+            details["skipped_checks"] += skipped
+            version = summary.get("checkov_version")
+            if isinstance(version, str) and version:
+                details["reported_version"] = version
+        elif key == "bandit":
+            totals = doc["metrics"].get("_totals", {})
+            if not isinstance(totals, dict):
+                raise ValueError("invalid Bandit metric totals")
+            for key_name in ("nosec", "skipped_tests"):
+                count = totals.get(key_name, 0)
+                if type(count) is not int or count < 0:
+                    raise ValueError("invalid Bandit suppression counts")
+                details[key_name] = count
+            details["skipped_checks"] += details["skipped_tests"]
+    return details
 
 
 def _gitignored(target: Path | None, paths) -> set:
@@ -732,6 +875,8 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
     raw = []
     parse_failed: list = []
     _parse_attempted: list = []
+    report_versions: dict = {}
+    report_details: dict = {}
     # A scanner that crashed, timed out, or wrote truncated JSON yields zero findings — which the CLI
     # and briefing render identically to "scanned clean". Track it so silence can be attributed.
     crashed = [r.get("key") for r in scan_results
@@ -740,9 +885,12 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
         out, key = r.get("output"), r.get("key")
         parser = _PARSERS.get(key)
         if not (out and parser and Path(out).exists()):
+            if not r.get("status"):
+                parse_failed.append(key)
             continue
         try:
-            text = Path(out).read_text()
+            output_path = Path(out).absolute()
+            text = read_artifact(output_path)
             _parse_attempted.append(key)
             if key == "trufflehog":          # JSON-LINES, one finding per line
                 doc = []
@@ -752,10 +900,28 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
                         try:
                             doc.append(json.loads(ln))
                         except ValueError:
-                            continue         # a partial/among-progress line is not fatal
+                            parse_failed.append(key)
+                    elif ln:
+                        parse_failed.append(key)
             else:
-                doc = json.loads(text or "{}")
-            raw += parser(doc)
+                doc = json.loads(text)
+            if key != "trufflehog" and not _valid_report(key, doc):
+                raise ValueError("scanner report has an unexpected shape")
+            details = _report_details(key, doc)
+            report_details[key] = details
+            if details["errors"]:
+                crashed.append(key)
+            if details.get("reported_version"):
+                report_versions[key] = details["reported_version"]
+            if isinstance(doc, dict):
+                version = doc.get("version") or doc.get("scanner_version")
+                if isinstance(version, (str, int)):
+                    report_versions[key] = str(version)
+            normalized = parser(doc)
+            for finding in normalized:
+                if finding.get("category") == "sca":
+                    _sca_occurrence(finding, target)
+            raw += normalized
         except Exception:
             parse_failed.append(key)          # a truncated/OOM-killed scanner must not read as clean
             continue
@@ -816,11 +982,20 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
                 by_fp[fp]["tools"].append(f["tool"])
             if SEV_ORDER[f["severity"]] > SEV_ORDER[by_fp[fp]["severity"]]:
                 by_fp[fp]["severity"] = f["severity"]
+            # A second tool may supply remediation/aliases missing from the first.
+            if f.get("fixed"):
+                fixes = {value for value in (f["fixed"], by_fp[fp].get("fixed", "")) if value}
+                by_fp[fp]["fixed"] = ", ".join(sorted(fixes))
+            aliases = set(by_fp[fp].get("advisory_aliases", [])) | set(f.get("advisory_aliases", []))
+            if aliases:
+                by_fp[fp]["advisory_aliases"] = sorted(aliases)
         else:
             f = dict(f)
             f["tools"] = [f.pop("tool")]
             by_fp[fp] = f
-    deduped = sorted(by_fp.values(), key=lambda f: -SEV_ORDER[f["severity"]])
+    deduped = sorted(by_fp.values(), key=lambda f: (-SEV_ORDER[f["severity"]], f["fingerprint"]))
+    for finding in deduped:
+        finding["tools"].sort()
 
     # ADDITIVE enrichment (never changes severity / count): is the vulnerable dependency actually
     # imported (reachability), and is the CVE known-exploited / high-EPSS (exploitability)? Both
@@ -835,10 +1010,16 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
         by_cat[f["category"]] = by_cat.get(f["category"], 0) + 1
     summaries = [{"severity": f["severity"], "category": f["category"], "title": f["title"],
                   "file": f["file"], "tools": f["tools"],
+                  **{k: f[k] for k in ("key", "rule_id", "id", "cve", "package", "pkg", "resource",
+                                      "service", "symbol", "sink", "semantic_id", "line", "fingerprint",
+                                      "installed", "fixed", "ecosystem", "advisory_aliases", "confidence", "cwe") if k in f},
                   # carry enrichment fields so the briefing/ledger/SARIF can render structured badges
                   **({"reachability": f["reachability"]} if f.get("reachability") else {}),
                   **({"epss": f["epss"]} if f.get("epss") is not None else {}),
-                  **({"kev": True} if f.get("kev") else {})}
+                  **({"epss_pct": f["epss_pct"]} if f.get("epss_pct") is not None else {}),
+                  **({"kev": f["kev"]} if type(f.get("kev")) is bool else {}),
+                  **({"intel": f["intel"]} if isinstance(f.get("intel"), dict) else {}),
+                  **({"intel_status": f["intel_status"]} if isinstance(f.get("intel_status"), str) else {})}
                  for f in deduped]
     return {"total_raw": len(raw), "total": len(deduped),
             "cross_tool_or_dup_merged": len(raw) - len(deduped),
@@ -850,6 +1031,9 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
             "reachability": reachability,
             "exploitability": exploitability,
             "parse_failed": sorted(set(parse_failed)),
+            "parse_attempted": sorted(set(_parse_attempted)),
+            "report_versions": report_versions,
+            "report_details": report_details,
             "scanner_errors": sorted({c for c in crashed if c}),
             "by_severity": by_sev, "by_category": by_cat,
             # `top` = a short slice for the human briefing; `all` = the FULL ranked set the
@@ -859,4 +1043,3 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
             # to avoid duplicating findings.json.)
             "top": summaries[:15],
             "all": summaries}
-

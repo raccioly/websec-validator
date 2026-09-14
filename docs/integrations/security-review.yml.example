@@ -1,0 +1,60 @@
+# Opt in by reviewing/configuring this file, then copying it into .github/workflows/.
+# WEBSEC_REVIEWED_SHA must identify a reviewed upstream commit containing these features.
+# Use a reviewed 0.14.0-or-later commit; the historical v0.13.0 tag lacks these contracts.
+name: Security review
+on:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 7 * * 1"
+permissions:
+  contents: read
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Require a reviewed engine revision
+        env:
+          WEBSEC_REVIEWED_SHA: ${{ vars.WEBSEC_REVIEWED_SHA }}
+        shell: bash
+        run: |
+          python3 -I - <<'PY'
+          import os, re
+          revision = os.environ.get("WEBSEC_REVIEWED_SHA", "")
+          if not re.fullmatch(r"[0-9a-fA-F]{40}", revision):
+              raise SystemExit("Set WEBSEC_REVIEWED_SHA to a reviewed full upstream commit SHA.")
+          PY
+      - name: Check out trusted engine separately
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: raccioly/websec-validator
+          ref: ${{ vars.WEBSEC_REVIEWED_SHA }}
+          path: .websec-engine
+          persist-credentials: false
+          submodules: false
+      - name: Check out review target as data
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: .websec-target
+          persist-credentials: false
+          submodules: false
+      - name: Review target
+        id: audit
+        uses: ./.websec-engine
+        with:
+          path: .websec-target
+          out: ${{ runner.temp }}/websec-review
+          scan: "false"
+          require-complete: "true"
+          fail-on: high
+          upload-sarif: "false"
+      - name: Retain only this attempt's artifacts
+        if: ${{ always() && steps.audit.outputs.run-directory != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: websec-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.audit.outputs.run-directory }}
+          if-no-files-found: error
+          retention-days: 7

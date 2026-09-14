@@ -1,0 +1,50 @@
+{
+  "proposal": {
+    "schema_version": "1.0",
+    "id": "original-ssrf-regression",
+    "version": "1",
+    "detector": "surface:ssrf",
+    "detector_revision": "resolved by research.example at evaluation time",
+    "primary_source": "https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html",
+    "source_date": "2026-09-12",
+    "provenance": "Original synthetic examples authored for websec; source link is guidance, no source snippets copied.",
+    "license": "MIT (original examples; project license)",
+    "affected_ecosystem": "Python HTTP services using requests/httpx",
+    "prerequisites": "Attacker-controlled URL reaches an outbound HTTP client.",
+    "remediation": "Prefer fixed trusted destinations; validate scheme, host and resolved address, and enforce redirect policy."
+  },
+  "cases": [
+    {
+      "id": "dev-vuln",
+      "partition": "development",
+      "label": "vulnerable",
+      "files": {
+        "app.py": "import requests\nresponse = requests.get(request.args[\"destination\"])\n"
+      }
+    },
+    {
+      "id": "dev-safe",
+      "partition": "development",
+      "label": "safe",
+      "files": {
+        "app.py": "import requests\nresponse = requests.get(\"https://example.com/status\")\n"
+      }
+    },
+    {
+      "id": "held-vuln",
+      "partition": "holdout",
+      "label": "vulnerable",
+      "files": {
+        "service.py": "import httpx\nresult = httpx.post(request.args[\"callback\"])\n"
+      }
+    },
+    {
+      "id": "held-safe",
+      "partition": "holdout",
+      "label": "safe",
+      "files": {
+        "service.py": "import httpx\nresult = httpx.post(\"https://example.org/health\")\n"
+      }
+    }
+  ]
+}

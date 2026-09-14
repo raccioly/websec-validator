@@ -24,6 +24,84 @@ import re
 from pathlib import Path
 
 from .base import Extractor, RepoContext, is_client_file, is_test_file
+from .profiles import service_for
+from .syntax import without_comments, expression_end, in_literal, js_functions
+
+
+class _ServiceContext:
+    """A view of the existing reader, not another filesystem walk or read policy."""
+    def __init__(self, context, service, inventory):
+        self.context, self.service = context, service
+        self.code_files = [path for path in context.code_files
+                           if service_for(inventory, context.rel(path)).get("id") == service["id"]]
+        self.service_scoped = True
+
+    def __getattr__(self, name):
+        return getattr(self.context, name)
+
+    def text(self, path):
+        return without_comments(self.context.text(path), Path(path).suffix.lower())
+
+    def iter_code(self):
+        for path in self.code_files:
+            yield path, self.rel(path), self.text(path)
+
+    def manifest(self, name):
+        prefix = "" if self.service["root"] == "." else self.service["root"] + "/"
+        return self.context.manifest(prefix + name)
+
+
+def _fastify_covers(text, endpoint, frameworks):
+    # A hook is scoped to its Fastify instance and registration order. An unrelated
+    # app, framework or file cannot inherit it from a matching helper name.
+    if set(frameworks) - {"fastify"}:
+        return False
+    hooks = []
+    for hook in re.finditer(r"\b(\w+)\.addHook\s*\(", text):
+        if not FASTIFY_HOOK_AUTH.match(text, hook.start() + len(hook[1]) + 1):
+            continue
+        scope = _lexical_scope(text, hook.start())
+        if scope is None:
+            continue
+        hooks.append((hook[1], hook.start(), scope))
+    route = re.compile(r"\b(\w+)\." + re.escape(str(endpoint.get("method", "")).lower())
+                       + r"\s*\(\s*['\"]" + re.escape(endpoint.get("path", "")) + r"['\"]")
+    candidates = list(route.finditer(text))
+    # A route row may aggregate multiple registrations of one path. Every visible
+    # candidate needs coverage; one protected child cannot bless an unguarded twin.
+    return bool(candidates) and all(any(receiver == match[1] and offset < match.start()
+                                       and scope == _lexical_scope(text, match.start())
+                                       for receiver, offset, scope in hooks) for match in candidates)
+
+
+def _lexical_scope(text, position):
+    """Conservative delimiter scope, not JavaScript name or Fastify plugin resolution."""
+    stack, quote, escaped = [], None, False
+    for offset, char in enumerate(text[:position]):
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+        elif char in "\"'`":
+            quote = char
+        elif char in "([{":
+            stack.append((char, offset))
+        elif char in ")]}":
+            if not stack or stack[-1][0] != {")": "(", "]": "[", "}": "{"}[char]:
+                return None
+            stack.pop()
+    return None if quote else tuple(stack)
+
+
+def _without_hooks(text):
+    masked = list(text)
+    for hook in re.finditer(r"\b\w+\.addHook\s*\(", text):
+        end = expression_end(text, hook.end() - 1, closing=")")
+        masked[hook.start():end] = ["\n" if char == "\n" else " " for char in text[hook.start():end]]
+    return "".join(masked)
 
 WRITE_VERBS = {"POST", "PUT", "PATCH", "DELETE"}
 
@@ -135,6 +213,42 @@ UNSAFE_DECODER = re.compile(r"\b([A-Za-z_]\w*(?:[Uu]nsafe|[Uu]nverified|[Nn]o[Vv
 AUTH_CONTEXT = re.compile(
     r"require(?:Auth|Admin|Role|Permission)|isAdmin|authoriz|getToken\s*\(|getServerSession|"
     r"req\.auth\b|currentUser|jwt\.(?:decode|verify)|decodeJwt", re.I)
+
+
+def _unsafe_decoder_sites(text: str, rel: str, suffix: str) -> list[dict]:
+    """Keep decoder/auth relationships within executable lexical scope.
+
+    A naming signal remains a review lead, not proven token dataflow. Literal
+    error messages and sibling guard definitions cannot establish that signal.
+    """
+    code = without_comments(text, suffix)
+    if not UNSAFE_DECODER.search(code):
+        return []
+    scopes = js_functions(code)
+
+    def enclosing(position):
+        candidates = [scope for scope in scopes if scope["start"] <= position < scope["end"]]
+        return min(candidates, key=lambda scope: scope["end"] - scope["start"]) if candidates else None
+
+    auth_scopes = set()
+    for match in AUTH_CONTEXT.finditer(code):
+        if not in_literal(code, match.start()):
+            scope = enclosing(match.start())
+            auth_scopes.add(scope["start"] if scope else -1)
+    sites = []
+    for match in UNSAFE_DECODER.finditer(code):
+        if in_literal(code, match.start()):
+            continue
+        scope = enclosing(match.start())
+        if scope and match.start() < scope["body_start"]:
+            continue  # declaration, not a call
+        if (scope["start"] if scope else -1) not in auth_scopes:
+            continue
+        sites.append({"file": rel, "decoder": match[1],
+                      "line": code.count("\n", 0, match.start()) + 1,
+                      "guard": scope.get("name", "") if scope else "",
+                      "control_scope": "same lexical function; token flow unverified"})
+    return sites
 
 # --- Router-mount auth (the dominant Express monorepo false-positive, validated on a real LLM-agent monorepo)
 # Auth is frequently applied at the MOUNT, not in the handler: `app.use('/api/x', apiAuth, ...,
@@ -410,6 +524,33 @@ class AuthzExtractor(Extractor):
 
     def extract(self, ctx: RepoContext, facts: dict) -> dict:
         endpoints = (facts.get("routes") or {}).get("endpoints", [])
+        inventory = (facts.get("stack") or getattr(ctx, "stack", {})).get("service_inventory", [])
+        if inventory and not getattr(ctx, "service_scoped", False):
+            results = []
+            for service in inventory:
+                own_endpoints = [endpoint for endpoint in endpoints
+                                 if service_for(inventory, ctx.rel(Path(endpoint["code_path"])) if endpoint.get("code_path") else "").get("id") == service["id"]]
+                scoped = _ServiceContext(ctx, service, inventory)
+                result = self.extract(scoped, {"routes": {"endpoints": own_endpoints}, "stack": service})
+                for row in result["endpoint_guards"]:
+                    row["service_id"] = service["id"]
+                results.append((service, result))
+            first = results[0][1]
+            combined = dict(first)
+            for key in ("mount_authed_factories", "roles_detected", "endpoint_guards",
+                        "write_endpoints_without_visible_guard", "unsafe_auth_decoders", "unverified_signature_routes"):
+                combined[key] = [row for _service, result in results for row in result[key]]
+            for key in ("global_auth_middleware", "mount_auth_detected"):
+                combined[key] = any(result[key] for _service, result in results)
+            combined["mount_covered_files"] = sum(result["mount_covered_files"] for _service, result in results)
+            combined["guard_summary"] = {key: sum(result["guard_summary"][key] for _service, result in results)
+                                         for key in first["guard_summary"]}
+            combined["endpoint_guards_truncated"] = sum(result["endpoint_guards_truncated"] for _service, result in results) + max(0, len(combined["endpoint_guards"]) - _MAX_ENDPOINT_GUARDS)
+            combined["endpoint_guards"] = combined["endpoint_guards"][:_MAX_ENDPOINT_GUARDS]
+            combined["service_controls"] = [{"service_id": service["id"], "global_auth_middleware": result["global_auth_middleware"],
+                                              "next_middleware": result["next_middleware"]} for service, result in results]
+            combined["note"] = "Authorization hints are scoped to the nearest service manifest. Hook inheritance across files or ambiguous framework instances remains unverified."
+            return combined
         mw = _parse_next_middleware(ctx)
         mw_auth = mw.get("is_auth", False)
 
@@ -453,21 +594,24 @@ class AuthzExtractor(Extractor):
         for e in endpoints:
             cp = e.get("code_path", "")
             text = ctx.text(Path(cp)) if cp else ""
+            guard_text = _without_hooks(text)
             _collect_roles(text, roles)
             relcp = ctx.rel(Path(cp)) if cp else ""
             # a matcher only counts as a guard when the middleware actually does auth — a
             # non-auth middleware.ts (i18n/headers) must NOT mark routes protected. Mount coverage,
             # the project's custom auth helper, and a one-hop delegated guard also count.
-            guarded = (bool(text and (GUARD.search(text) or CUSTOM_GUARD.search(text)
-                                      or PREHANDLER_AUTH.search(text) or SECRET_BEARER_GUARD.search(text)
-                                      or (INLINE_AUTHN.search(text) and AUTHN_REJECT.search(text))))
-                       or (alias_call is not None and bool(text) and bool(alias_call.search(text)))
-                       or fastify_global_auth
+            guarded = (bool(guard_text and (GUARD.search(guard_text) or CUSTOM_GUARD.search(guard_text)
+                                      or PREHANDLER_AUTH.search(guard_text) or SECRET_BEARER_GUARD.search(guard_text)
+                                      or (INLINE_AUTHN.search(guard_text) and AUTHN_REJECT.search(guard_text))))
+                       or (alias_call is not None and bool(guard_text) and bool(alias_call.search(guard_text)))
+                       or _fastify_covers(text, e, (facts.get("stack") or {}).get("frameworks", []))
                        or (relcp and relcp in mount_covered)
                        or (mw_auth and _matcher_covers(e.get("path", ""), mw.get("matchers", [])))
                        or _imported_guard(relcp, text))
             egs.append({"method": e.get("method"), "path": e.get("path"), "code_path": relcp,
                         "guarded": bool(guarded), "analyzed": bool(text),
+                        "unverified_controls": (["Fastify hook presence does not establish this route's instance/registration scope"]
+                                                if fastify_global_auth and not guarded else []),
                         "public_hint": bool(PUBLIC_HINT.search(e.get("path", "")))})
             if guarded:
                 protected += 1
@@ -478,26 +622,20 @@ class AuthzExtractor(Extractor):
                 if e.get("method") in WRITE_VERBS and not PUBLIC_HINT.search(e.get("path", "")):
                     no_guard_writes.append(f"{e['method']} {e['path']}  ({relcp or '?'})")
 
-        # F5: files that make an auth decision AND call an unsafe/unverified decoder
+        # F5: executable auth context and decoder call in the same lexical scope.
         unsafe_decoders = []
         for _p, rel, text in ctx.iter_code():
-            if AUTH_CONTEXT.search(text):
-                for dec in sorted(set(UNSAFE_DECODER.findall(text))):
-                    unsafe_decoders.append({"file": rel, "decoder": dec})
+            unsafe_decoders.extend(_unsafe_decoder_sites(text, rel, _p.suffix))
 
-        # A guard DEFINED in a file that also calls an unsafe/unverified decoder authenticates via
-        # an unverified decode. Routes that call such a guard are the static "at-risk" set for the
-        # forged-token bypass class — the dynamic probe confirms which actually fall, but this points
-        # at them even with NO live target (turns the F5 hypothesis into named routes).
+        # Only the guard containing the decoder supplies an at-risk route hint.
+        # Sibling guards do not inherit the signal; actual token trust still needs
+        # dataflow review or a bound dynamic observation.
         unverified_routes: list = []
         unsafe_files = {ud["file"] for ud in unsafe_decoders}
         if unsafe_files:
-            guard_def = re.compile(r"(?:export\s+)?(?:async\s+)?(?:function|const)\s+"
-                                   r"(require\w+|ensure\w+|\w*[Aa]uth\w*|verify\w+)\b")
-            unsafe_guards = set()
-            for _p, rel, text in ctx.iter_code():
-                if rel in unsafe_files:
-                    unsafe_guards.update(g for g in guard_def.findall(text) if len(g) >= 5)
+            unsafe_guards = {row["guard"] for row in unsafe_decoders
+                             if re.fullmatch(r"require\w+|ensure\w+|\w*[Aa]uth\w*|verify\w+", row["guard"])
+                             and len(row["guard"]) >= 5}
             if unsafe_guards:
                 call = re.compile(r"\b(?:" + "|".join(re.escape(g) for g in sorted(unsafe_guards)) + r")\s*\(")
                 for e in endpoints:

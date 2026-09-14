@@ -1,0 +1,224 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/raccioly/websec-validator/schemas/coverage.schema.json",
+  "title": "Execution coverage manifest",
+  "type": "object",
+  "required": [
+    "execution_complete",
+    "protection_complete",
+    "detector_revision",
+    "analyzed_input_digest",
+    "extractors",
+    "scanners",
+    "files",
+    "gaps"
+  ],
+  "properties": {
+    "execution_complete": {
+      "type": "boolean"
+    },
+    "protection_complete": {
+      "const": false
+    },
+    "detector_revision": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "analyzed_input_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "scope_digest": {
+      "type": "string"
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    },
+    "extractors": {
+      "type": "object"
+    },
+    "scanners": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "installed",
+          "runnable",
+          "selected",
+          "ran",
+          "outcome"
+        ],
+        "properties": {
+          "installed": {
+            "type": "boolean"
+          },
+          "runnable": {
+            "type": "boolean"
+          },
+          "selected": {
+            "type": "boolean"
+          },
+          "ran": {
+            "type": "boolean"
+          },
+          "outcome": {
+            "enum": [
+              "not_selected",
+              "unavailable",
+              "unsupported_adapter",
+              "not_run",
+              "timeout",
+              "error",
+              "parse_failed",
+              "missing_output",
+              "completed"
+            ]
+          }
+        }
+      }
+    },
+    "files": {
+      "type": "object"
+    },
+    "gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "detail",
+          "execution"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "execution": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "checks"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "service_id": {
+            "type": "string"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "status"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "completed",
+                    "unknown",
+                    "manual"
+                  ]
+                },
+                "examined": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "findings": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "service_inventory": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "profile_limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "imports": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "import_complete",
+          "analysis_outcome",
+          "execution_complete",
+          "source_freshness",
+          "gaps"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "import_complete": {
+            "type": "boolean"
+          },
+          "analysis_outcome": {
+            "enum": [
+              "completed",
+              "failed",
+              "unknown"
+            ]
+          },
+          "execution_complete": {
+            "type": "boolean"
+          },
+          "source_freshness": {
+            "const": "unverified"
+          },
+          "tool_scope": {
+            "type": "array"
+          },
+          "gaps": {
+            "type": "array"
+          }
+        }
+      }
+    },
+    "import_scope": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  }
+}

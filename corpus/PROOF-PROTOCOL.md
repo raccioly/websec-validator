@@ -56,3 +56,21 @@ by hand at milestones.
 
 > Record results in this folder as `results-YYYY-MM-DD.md` so regressions and
 > improvements are visible over time.
+
+## Evidence Discipline
+
+Every experiment records corpus source revision, detector revision (including dirty implementation
+changes), analyzed-input digest, profile/exclusions, scanner/rule versions, and execution completeness.
+Use paired vulnerable and repaired examples with authorized synthetic data. Keep application splits
+separate when tuning a detector; evaluating only its development fixtures measures regression, not
+generalization. Unmatched findings remain unknown until reviewed, and unknowns are reported separately
+from positive and negative labels. An empty scanner report is not a negative security proof.
+
+A repair result requires a failing negative test on the original build plus the corresponding passing
+negative and legitimate-behavior positive tests on the fixed build. Bind reports to application, source,
+build, finding, plan and test IDs, hash them, and preserve the complete rerun ledger. The offline
+`repair-verify` validator checks this operator-supplied evidence; it does not run or attest the tests.
+
+Historical 10/10 surface checks are a narrow proxy. They neither establish complete protection nor
+prove an agent-benefit/competitor benchmark. Publish current raw results and limitations before
+claiming improvement.

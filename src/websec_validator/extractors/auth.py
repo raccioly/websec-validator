@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 
 from .base import Extractor, RepoContext, is_test_file
+from .syntax import direct_call, guarded_body, in_literal, js_functions, split_arguments, without_comments
 
 JWT_LIBS = re.compile(r"jsonwebtoken|\bjose\b|\bPyJWT\b|import\s+jwt\b|get_jwt_identity|"
                       r"jwt\.(?:sign|verify|encode|decode)|jwtVerify|flask_jwt|@?jwt_required|token_required", re.I)
@@ -66,13 +67,12 @@ DEV_TOKEN_BACKDOOR = re.compile(
 # a NODE_ENV/production guard in the same file downgrades it (still risky, but not an all-envs backdoor).
 _PROD_GUARD = re.compile(r"NODE_ENV\s*[!=]==?\s*['\"]production|isProd|isProduction|process\.env\.PROD\b|env\s*!==?\s*['\"]prod", re.I)
 # (2) accept-any-credential: an authorize()/login with an explicit accept-any / MVP / mock intent, or a
-# password LENGTH-only check with NO hash comparison anywhere in the file.
+# password LENGTH check without a supported result guard in the login's own scope.
 AUTHORIZE_FN = re.compile(r"\bauthorize\s*\(|async\s+authorize|CredentialsProvider|export\s+(?:async\s+)?function\s+(?:login|authenticate|signIn)\b", re.I)
 ACCEPT_ANY_CRED = re.compile(
     r"accept\s+any|any\s+(?:valid[- ]?looking\s+)?(?:email|password|credential)|for\s+(?:now|mvp|demo|testing)[^.\n]{0,40}(?:auth|password|login|accept)"
     r"|mock\s+auth|skip\w*\s*(?:auth|password)|no\s+(?:real\s+)?password\s+check|TODO[^.\n]{0,30}(?:auth|password)", re.I)
 PW_LEN_ONLY = re.compile(r"password[\w.?]*\.length\s*(?:>=|>|===|==)\s*\d", re.I)
-PW_HASH_COMPARE = re.compile(r"bcrypt\.compare|argon2\.verify|\bverify\s*\(|compare_digest|compareSync|scrypt|pbkdf2|check_password|===\s*(?:\w+\.)?(?:passwordHash|hashedPassword|password_hash)", re.I)
 # (3) fail-open verification: a signature/secret check that only runs INSIDE `if (env.X_SECRET)` — when
 # the secret is unset the whole verification is SKIPPED (webhook/auth accepted unverified).
 FAILOPEN_VERIFY = re.compile(
@@ -85,6 +85,89 @@ def _looks_like_example(rel: str) -> bool:
     r = rel.lower()
     return (".example" in r or ".sample" in r or ".dist" in r or ".template" in r
             or "/docs/" in r or "/doc/" in r or "/examples/" in r or r.endswith((".md", ".mdx")))
+
+
+def _password_guard(scope: dict, password: str, program: str) -> bool:
+    if not scope.get("complete", True) or not scope["simple_params"]:
+        return False
+    body = scope["body"]
+    root = password.split(".")[0]
+    mutations = re.finditer(r"\b" + re.escape(root) + r"(?:\.[\w$]+)?\s*(?:=(?!=)|\+\+|--)", body)
+    if any(not in_literal(body, match.start()) for match in mutations):
+        return False
+
+    def compare(expression):
+        expression = expression.strip()
+        awaited = expression.startswith("await ")
+        if awaited:
+            expression = expression[6:].strip()
+        if not direct_call(expression, r"bcrypt\.(?:compare|compareSync)|argon2\.verify", program=program):
+            return False
+        name = expression[:expression.find("(")].strip()
+        # An unresolved Promise is truthy regardless of whether verification fails.
+        if name != "bcrypt.compareSync" and not awaited:
+            return False
+        arguments = split_arguments(expression[expression.find("(")+1:-1])
+        if len(arguments) != 2:
+            return False
+        supplied, stored = arguments if name.startswith("bcrypt.") else arguments[::-1]
+        # A supplied credentials object cannot also establish the trusted stored
+        # hash. Comparing its password with its own hash verifies attacker data.
+        return (supplied == password and stored.split(".")[0] != root
+                and bool(re.fullmatch(r"[\w$]+(?:\.[\w$]+)*", stored)))
+
+    def predicate(condition):
+        if condition.startswith("!(") and condition.endswith(")"):
+            return -1 if compare(condition[2:-1]) else 0
+        if condition.startswith("!"):
+            return -1 if compare(condition[1:]) else 0
+        # Only conjunction grants positive evidence; OR, ternaries and equality
+        # inversions are unresolved instead of being treated as verification.
+        if "||" in condition or "?" in condition:
+            return 0
+        return 1 if any(compare(part) for part in condition.split("&&")) else 0
+
+    return guarded_body(body, predicate)
+
+
+def _length_only_logins(text: str, suffix: str) -> list[tuple[int, str]]:
+    source = without_comments(text, suffix)
+    scopes = js_functions(source)
+    hits = []
+    for scope in scopes:
+        if scope["name"].lower() not in {"login", "authorize", "authenticate", "signin"}:
+            continue
+        if not scope.get("complete", True):
+            body = source[scope["body_start"]:scope["end"]-1]
+            match = PW_LEN_ONLY.search(body)
+            if match:
+                hits.append((scope["body_start"] + match.start(), scope["name"] + " (scope exceeds control-analysis limit)"))
+            continue
+        # Never let a nested function's comparison or length check stand in for
+        # the enclosing login's control. Nested length checks are reviewed by their
+        # own named scope if applicable.
+        body = scope["body"]
+        nested = [child for child in scopes if scope["body_start"] <= child["start"] < child["end"] < scope["end"]]
+        for match in re.finditer(r"([\w$]+(?:\.[\w$]+)*)\.length\s*(?:>=|>|===|==)\s*\d", body):
+            position = scope["body_start"] + match.start()
+            if "password" not in match[1].lower() or in_literal(body, match.start()):
+                continue
+            if any(child["start"] <= position < child["end"] for child in nested):
+                continue
+            if not _password_guard(scope, match[1], source):
+                hits.append((position, scope["name"]))
+                break
+    # Preserve a review lead when a recognizable login uses syntax this small JS
+    # scope locator cannot represent (typed/default/destructured arrow signatures).
+    for match in PW_LEN_ONLY.finditer(source):
+        if in_literal(source, match.start()) or any(scope["start"] <= match.start() < scope["end"] for scope in scopes):
+            continue
+        prefix = source[max(0, match.start()-800):match.start()]
+        marker = re.search(r"\b(?:function\s+(?:login|authorize|authenticate|signIn)\b|"
+                           r"(?:const|let|var)\s+(?:login|authorize|authenticate|signIn)\s*=|authorize\s*\()", prefix)
+        if marker and not in_literal(prefix, marker.start()):
+            hits.append((match.start(), "unresolved login scope"))
+    return hits
 
 
 class AuthExtractor(Extractor):
@@ -126,14 +209,18 @@ class AuthExtractor(Extractor):
                         "intent (a comment or code that admits any credential). This authenticates arbitrary "
                         "users (CWE-287/CWE-603). Replace with a real credential check against the datastore "
                         "(argon2id/bcrypt verify) before issuing a session."})
-                elif AUTHORIZE_FN.search(text) and PW_LEN_ONLY.search(text) and not PW_HASH_COMPARE.search(text):
-                    broken_auth.append({
+                else:
+                    for position, scope_name in _length_only_logins(text, _p.suffix):
+                        broken_auth.append({
                         "kind": "login-without-hash-compare", "attack_class": "auth-backdoor",
                         "severity": "HIGH", "confidence": "MEDIUM", "file": rel,
-                        "detail": f"{rel} has an authorize()/login that checks only the password LENGTH and shows "
-                        "no password-hash comparison (bcrypt/argon2/scrypt) — verify it isn't accepting any "
-                        "sufficiently-long password. If the compare lives in another module, confirm it runs "
-                        "before the session is issued."})
+                        "line": text.count("\n", 0, position) + 1,
+                        "control_scope": scope_name + "; named/complex controls unverified",
+                        "detail": f"{rel} has a {scope_name} path with a password LENGTH check and no supported "
+                        "hash-result guard in that function — verify it isn't accepting any sufficiently-long "
+                        "password. Direct awaited bcrypt/argon2 or synchronous bcrypt comparisons must enforce "
+                        "acceptance of the same supplied password. Aliases, delegated verification and complex "
+                        "control flow remain unverified; confirm they run before issuing a session."})
                 if FAILOPEN_VERIFY.search(text):
                     broken_auth.append({
                         "kind": "fail-open-verification", "attack_class": "fail-open-auth",

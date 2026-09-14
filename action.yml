@@ -15,7 +15,7 @@ inputs:
     required: false
     default: "false"
   fail-on:
-    description: "Fail the job if any finding at/above this severity remains (critical|high|medium|low). Empty = never fail (report-only)."
+    description: "Gate findings at this severity (critical|high|medium|low). Empty disables the severity gate; require-complete still applies."
     required: false
     default: ""
   baseline:
@@ -30,31 +30,55 @@ inputs:
     description: "Output directory."
     required: false
     default: "websec-out"
+  require-complete:
+    description: "Fail incomplete requested checks even in report-only mode."
+    default: "true"
+  scanners:
+    description: "Comma-separated explicitly required scanners; requires scan=true."
+    default: ""
+
+outputs:
+  run-directory:
+    description: "Exact current attempt, including incomplete attempts."
+    value: ${{ steps.scan.outputs.run_directory }}
+  sarif-file:
+    description: "SARIF from this attempt; never a prior latest run."
+    value: ${{ steps.scan.outputs.sarif_file }}
+  execution-complete:
+    description: "Whether requested execution completed."
+    value: ${{ steps.scan.outputs.execution_complete }}
 
 runs:
   using: "composite"
   steps:
     - name: Set up Python
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
       with:
         python-version: "3.11"
 
     - name: Install websec-validator
       shell: bash
-      run: pipx install websec-validator || pip install --user websec-validator
+      env:
+        WEBSEC_ACTION_PATH: ${{ github.action_path }}
+      run: python -I -m pip install --disable-pip-version-check "$WEBSEC_ACTION_PATH"
 
     - name: Run websec-validator
+      id: scan
       shell: bash
-      run: |
-        args=()
-        [ "${{ inputs.scan }}" = "true" ] && args+=(--scan)
-        [ -n "${{ inputs.fail-on }}" ] && args+=(--fail-on "${{ inputs.fail-on }}")
-        [ -n "${{ inputs.baseline }}" ] && args+=(--baseline "${{ inputs.baseline }}")
-        websec run "${{ inputs.path }}" --out "${{ inputs.out }}" "${args[@]}"
+      env:
+        WEBSEC_ACTION_PATH: ${{ github.action_path }}
+        WEBSEC_INPUT_PATH: ${{ inputs.path }}
+        WEBSEC_INPUT_OUT: ${{ inputs.out }}
+        WEBSEC_INPUT_SCAN: ${{ inputs.scan }}
+        WEBSEC_INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        WEBSEC_INPUT_BASELINE: ${{ inputs.baseline }}
+        WEBSEC_INPUT_REQUIRE_COMPLETE: ${{ inputs.require-complete }}
+        WEBSEC_INPUT_SCANNERS: ${{ inputs.scanners }}
+      run: python -I "$WEBSEC_ACTION_PATH/scripts/run-action.py"
 
     - name: Upload SARIF to Code Scanning
-      if: ${{ always() && inputs.upload-sarif == 'true' }}
-      uses: github/codeql-action/upload-sarif@v4
+      if: ${{ always() && inputs.upload-sarif == 'true' && steps.scan.outputs.sarif_file != '' }}
+      uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4
       with:
-        sarif_file: ${{ inputs.out }}/latest/results.sarif
+        sarif_file: ${{ steps.scan.outputs.sarif_file }}
         category: websec-validator

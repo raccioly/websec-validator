@@ -12,7 +12,8 @@ trust the right thing?" — for three real broken-access-control patterns the ro
     emitted at autocommit (no surrounding transaction): the RLS principal resets before the handler's
     query runs, so row-level security evaluates with an EMPTY context — defense-in-depth theater.
 
-All are file-level co-occurrence heuristics, server-side + test-excluded, framed as leads to verify —
+Cookie/claim relations remain conservative heuristics; RLS checks the enclosing transaction callback
+and receiver. Findings are server-side + test-excluded leads to verify —
 a static scan can't prove the cookie is the one that gates, only point the agent at the file.
 """
 
@@ -21,6 +22,7 @@ from __future__ import annotations
 import re
 
 from .base import Extractor, RepoContext, is_client_file, is_test_file
+from .syntax import without_comments, call_expression, server_file, direct_call
 
 # --- unsigned-cookie authorization ---
 COOKIE_AUTHZ_READ = re.compile(
@@ -52,6 +54,31 @@ IN_TRANSACTION = re.compile(
     r"transaction\s*\(\s*async", re.I)
 
 
+def _verified_cookie(text: str, position: int) -> bool:
+    for match in re.finditer(r"\b(?:jwtVerify|jwt\.verify)\s*\(", text):
+        expression = call_expression(text, match.start())
+        if (match.start() <= position < match.start() + len(expression)
+                and direct_call(expression, r"jwtVerify|jwt\.verify", text[:match.start()], program=text)):
+            return True
+    return False
+
+
+def _transaction_contains(text: str, position: int) -> bool:
+    callback = re.compile(r"\.transaction\s*\(\s*(?:async\s*)?\(?\s*(\w+)\s*\)?\s*=>\s*\{")
+    for match in callback.finditer(text):
+        end = match.start() + len(call_expression(text, match.start()))
+        if not match.end() <= position < end:
+            continue
+        receiver = re.compile(r"\b" + re.escape(match[1]) + r"\.\w+\s*\(")
+        for call in receiver.finditer(text, match.end(), position):
+            if position < call.start() + len(call_expression(text, call.start())):
+                between = text[match.end():call.start()]
+                if re.search(r"=>|\bfunction\b|\b" + re.escape(match[1]) + r"\s*=(?!=)", between):
+                    continue
+                return True
+    return False
+
+
 class AuthzDataflowExtractor(Extractor):
     name = "authz_dataflow"
     category = "authz"
@@ -67,13 +94,14 @@ class AuthzDataflowExtractor(Extractor):
             findings.append({"severity": sev, "kind": kind, "attack_class": attack,
                              "file": rel, "detail": detail})
 
-        for _p, rel, text in ctx.iter_code():
-            if is_test_file(rel) or is_client_file(rel, text):
+        for _p, rel, raw in ctx.iter_code():
+            text = without_comments(raw, _p.suffix.lower())
+            if is_test_file(rel) or not server_file(rel, text, is_client_file(rel, text)):
                 continue
 
             # 1. authorization decision keyed on an unsigned cookie
-            m = COOKIE_AUTHZ_READ.search(text)
-            if m and AUTHZ_GATE.search(text) and not COOKIE_VERIFY.search(text):
+            m = next((m for m in COOKIE_AUTHZ_READ.finditer(text) if not _verified_cookie(text, m.start())), None)
+            if m and AUTHZ_GATE.search(text):
                 add("MEDIUM", "unsigned-cookie-authz", "cookie-authz", rel,
                     f"An access decision appears to be keyed on a client-settable cookie "
                     f"(`{m.group(1)}`) with no signature/JWT/HMAC verification in this file. httpOnly only "
@@ -91,10 +119,10 @@ class AuthzDataflowExtractor(Extractor):
                     "inside the request, and never write a client-asserted claim back as the record of truth.")
 
             # 3. transaction-local RLS context set outside a transaction (resets before the query)
-            if SET_CONFIG_LOCAL.search(text) and not IN_TRANSACTION.search(text):
+            if any(not _transaction_contains(text, m.start()) for m in SET_CONFIG_LOCAL.finditer(text)):
                 add("MEDIUM", "rls-context-no-transaction", "rls-context", rel,
                     "`set_config('app.*', …, true)` sets the RLS principal TRANSACTION-LOCALLY "
-                    "(is_local=true) but there's no surrounding transaction in this file — at autocommit "
+                    "(is_local=true) but no transaction callback on the same receiver encloses this statement — at autocommit "
                     "the setting resets the instant that one statement commits, before any handler query "
                     "runs, so RLS evaluates with an EMPTY context (CWE-1188, defense-in-depth theater). "
                     "Set it INSIDE the transaction that runs the tenant-scoped query, on the SAME "

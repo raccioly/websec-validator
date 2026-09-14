@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 
 from .base import Extractor, RepoContext, is_script_file, is_test_file
+from .profiles import analyze as analyze_profiles, manifest_paths, node_metadata
 
 
 def _is_fixture_manifest(ctx: RepoContext, p) -> bool:
@@ -38,7 +39,8 @@ def _product_first(ctx: RepoContext, paths: list, repo_has_product: bool) -> lis
 NODE_FRAMEWORKS = {"express": "express", "fastify": "fastify", "koa": "koa",
                    "@nestjs/core": "nestjs", "next": "next", "@hapi/hapi": "hapi",
                    "next-auth": "nextauth", "@remix-run": "remix", "svelte": "sveltekit",
-                   "@apollo/server": "apollo-graphql", "graphql": "graphql"}
+                   "@apollo/server": "apollo-graphql", "graphql": "graphql",
+                   "@angular/core": "angular", "react": "react", "react-native": "react-native"}
 PY_FRAMEWORKS = {"fastapi": "fastapi", "flask": "flask", "django": "django",
                  "starlette": "starlette", "sanic": "sanic", "tornado": "tornado",
                  "aiohttp": "aiohttp"}
@@ -58,30 +60,32 @@ class StackExtractor(Extractor):
     def extract(self, ctx: RepoContext, facts: dict) -> dict:
         langs, frameworks, managers, datastores = set(), set(), set(), set()
 
-        _node_manifests = ctx.glob("**/package.json", 120)
-        _py_manifests = (ctx.glob("**/requirements*.txt", 80) + ctx.glob("**/pyproject.toml", 80)
-                         + ctx.glob("**/setup.py", 80) + ctx.glob("**/Pipfile", 80))
+        selected_manifests = manifest_paths(ctx)
+        _node_manifests = [path for path in selected_manifests if path.name == "package.json"]
+        _py_manifests = [path for path in selected_manifests
+                         if path.name in {"pyproject.toml", "setup.py", "Pipfile"}
+                         or (path.name.startswith("requirements") and path.suffix == ".txt")]
         # cross-language: is ANY manifest product code? (decides whether fixtures-only stacks
         # fall back to their fixture manifests — see _product_first)
         repo_has_product = any(not _is_fixture_manifest(ctx, p)
-                               for p in (_node_manifests + _py_manifests))
+                               for p in selected_manifests)
 
         pkgs = _product_first(ctx, _node_manifests, repo_has_product)
-        node_text = " ".join(ctx.text(p) for p in pkgs)
-        if node_text:
+        node_deps = set()
+        if pkgs:
             langs.add("node")
             managers.add("npm")
-            for dep, label in NODE_FRAMEWORKS.items():
-                if f'"{dep}"' in node_text or f'"{dep}/' in node_text:
-                    frameworks.add(label)
-            for dep, label in DATASTORES.items():
-                if f'"{dep}"' in node_text:
-                    datastores.add(label)
-            if '"typescript"' in node_text or ctx.glob("**/tsconfig.json", 1):
+            for path in pkgs:
+                metadata = node_metadata(ctx.text(path))
+                node_deps.update(metadata["dependencies"])
+                frameworks.update(metadata["frameworks"])
+                datastores.update(metadata["datastores"])
+                langs.update(metadata["languages"])
+            if _product_first(ctx, ctx.glob("**/tsconfig.json"), repo_has_product):
                 langs.add("typescript")
-        if ctx.glob("**/pnpm-lock.yaml", 1):
+        if _product_first(ctx, ctx.glob("**/pnpm-lock.yaml"), repo_has_product):
             managers.add("pnpm")
-        if ctx.glob("**/yarn.lock", 1):
+        if _product_first(ctx, ctx.glob("**/yarn.lock"), repo_has_product):
             managers.add("yarn")
 
         py_manifests = _product_first(ctx, _py_manifests, repo_has_product)
@@ -95,10 +99,13 @@ class StackExtractor(Extractor):
             for dep, label in DATASTORES.items():
                 if dep in py_text:
                     datastores.add(label)
-        if ctx.glob("**/go.mod", 1):
+        if any(path.name == "go.mod" for path in selected_manifests):
             langs.add("go")
-        if ctx.glob("**/Gemfile", 1):
+        if any(path.name == "Gemfile" for path in selected_manifests):
             langs.add("ruby")
+        if any(path.name == "Cargo.toml" for path in selected_manifests):
+            langs.add("rust")
+            managers.add("cargo")
 
         # P5: managed-platform config (wrangler / vercel / netlify / serverless) declares the framework
         # + datastore + cron surface that package.json deps don't reveal — so a KV/Workers app no
@@ -159,7 +166,7 @@ class StackExtractor(Extractor):
             frameworks.add("deno")
         if supabase_fns:
             frameworks.add("supabase-edge")
-        if supabase_fns or supabase_cfg or "@supabase/supabase-js" in node_text:
+        if supabase_fns or supabase_cfg or "@supabase/supabase-js" in node_deps:
             frameworks.add("supabase")
             datastores.add("postgres")                  # Supabase is Postgres-backed
 
@@ -185,8 +192,15 @@ class StackExtractor(Extractor):
             "package_managers": sorted(managers),
             "datastores": sorted(datastores),
             "cron_triggers": sorted(set(cron_triggers)),
-            "monorepo": len(pkgs) > 1 or ctx.exists("pnpm-workspace.yaml", "lerna.json", "nx.json", "turbo.json"),
-            "services": len(pkgs),
         }
+        profiles = analyze_profiles(ctx)
+        result["service_inventory"] = profiles["service_inventory"]
+        result["services"] = len(profiles["service_inventory"])
+        result["monorepo"] = result["services"] > 1 or ctx.exists("pnpm-workspace.yaml", "lerna.json", "nx.json", "turbo.json")
+        result["metadata_note"] = "Manifest and source hints; service boundaries are approximate. Dependency presence does not prove installation, deployment or a native application."
+        result["profiles"] = profiles
+        for key in ("languages", "frameworks", "datastores"):
+            result[key] = sorted(set(result[key]) | {value for service in profiles["service_inventory"]
+                                                    for value in service[key]})
         ctx.stack = result
         return result

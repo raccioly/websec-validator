@@ -18,6 +18,9 @@ Confidence rule (deterministic):
 from __future__ import annotations
 
 import fnmatch
+import json
+import re
+from datetime import date
 from pathlib import Path
 
 from . import calibration
@@ -102,13 +105,13 @@ STANDARDS = {
     "llm-prompt-injection": (["CWE-1427 Prompt Injection", "CWE-77 Command Injection"],
                              "ASVS V5.1", ["LLM01:2025 Prompt Injection"]),
     "llm-insecure-output": (["CWE-94 Code Injection", "CWE-79 XSS"],
-                            "ASVS V5.2", ["LLM02:2025 Insecure Output Handling"]),
+                            "ASVS V5.2", ["LLM05:2025 Improper Output Handling"]),
     "excessive-agency": (["CWE-862 Missing Authorization", "CWE-250 Execution with Unnecessary Privileges"],
-                         "ASVS V1.1", ["LLM06:2025 Excessive Agency", "LLM08:2025"]),
+                         "ASVS V1.1", ["LLM06:2025 Excessive Agency"]),
     "llm-unbounded": (["CWE-770 Allocation of Resources Without Limits or Throttling"],
                       "ASVS V11.1.4", ["LLM10:2025 Unbounded Consumption", "API4:2023 Unrestricted Resource Consumption"]),
     "llm-guardrail": (["CWE-693 Protection Mechanism Failure", "CWE-755 Improper Handling of Exceptional Conditions"],
-                      "ASVS V1.1", ["LLM02:2025", "LLM01:2025"]),
+                      "ASVS V1.1", ["LLM05:2025 Improper Output Handling", "LLM01:2025 Prompt Injection"]),
     # --- crypto-usage classes ---
     "weak-password-hash": (["CWE-916 Use of Password Hash With Insufficient Computational Effort", "CWE-759 Missing Salt"],
                            "ASVS V2.4.1", ["API2:2023 Broken Authentication"]),
@@ -371,53 +374,94 @@ _SINK_ATTACK = {"sql-injection": "sqli"}
 
 def _cite(cls):
     cwe, asvs, api = STANDARDS.get(cls, ([], "", []))
-    return {"cwe": cwe, "asvs": asvs, "owasp_api": api}
+    return {"cwe": cwe, "asvs": asvs.replace("ASVS ", "ASVS 4.0.3 ") if asvs else "",
+            "asvs_version": "4.0.3" if asvs else None, "owasp_api": api,
+            "sources": (["https://genai.owasp.org/llm-top-10/"] if any(ref.startswith("LLM") for ref in api) else [])}
 
 
-def load_suppressions(repo_root: Path) -> list:
-    """Read `.websec-ignore` (repo root or cwd): glob path patterns or `category:<x>` lines.
+class Suppressions(list):
+    def __init__(self):
+        super().__init__()
+        self.sources = []
 
-    `fingerprint:<fp>` lines are NOT path/category patterns — they are handled by
-    load_acknowledgements (kept + shown, not dropped) and skipped here so a fingerprint hex
-    can't accidentally substring-match a finding's location/title."""
-    pats = []
-    for cand in (repo_root / ".websec-ignore", Path.cwd() / ".websec-ignore"):
+
+class Acknowledgements(dict):
+    """Legacy fp→reason mapping with expiry and source audit records attached."""
+    def __init__(self):
+        super().__init__()
+        self.records = {}
+        self.sources = []
+        self.history = []
+
+
+def _ignore_inputs(repo_root: Path, *, include_cwd: bool = False, context=None):
+    from .extractors.base import RepoContext
+    roots = [(Path(repo_root), "target")]
+    if include_cwd and Path.cwd().resolve() != Path(repo_root).resolve():
+        roots.append((Path.cwd(), "explicit-legacy-cwd"))
+    for root, source in roots:
         try:
-            if cand.is_file():
-                for ln in cand.read_text().splitlines():
-                    ln = ln.split("#", 1)[0].strip()
-                    if ln and not ln.lower().startswith("fingerprint:"):
-                        pats.append(ln)
-        except Exception:
-            pass
-    return pats
+            ctx = context if source == "target" and context is not None else RepoContext(root)
+            text = ctx.text(ctx.root / ".websec-ignore", max_bytes=64 * 1024)
+            yield text, {"path": str(ctx.root / ".websec-ignore"), "source": source,
+                         "read_complete": not any(row.get("path") == ".websec-ignore" for row in ctx.skipped_files),
+                         "content_digest": ctx.input_hashes.get(".websec-ignore")}
+        except (OSError, ValueError):
+            yield "", {"path": str(root / ".websec-ignore"), "source": source, "read_complete": False}
 
 
-def load_acknowledgements(repo_root: Path) -> dict:
-    """Read `fingerprint:<fp> # <reason>` acks from `.websec-ignore` → {fp: reason}.
+def load_suppressions(repo_root: Path, *, include_cwd: bool = False, context=None) -> list:
+    """Read bounded target policy; unrelated cwd policy requires explicit include_cwd opt-in."""
+    patterns = Suppressions()
+    for text, source in _ignore_inputs(repo_root, include_cwd=include_cwd, context=context):
+        patterns.sources.append(source)
+        for line in text.splitlines():
+            body = line.split("#", 1)[0].strip()
+            if body and not body.lower().startswith("fingerprint:"):
+                patterns.append(body)
+    return patterns
 
-    An acknowledged finding is a KNOWN, human-reviewed result (e.g. a confirmed false positive)
-    that should stay VISIBLE + attributable but not gate CI — distinct from a path/category
-    suppression which drops the finding entirely. A reason is REQUIRED: an ack with no
-    justification is ignored (a silent 'trust me' is exactly what we don't want in a security
-    tool). Reason = text after the first '#'; the fingerprint is the ledger's stable id."""
-    acks: dict = {}
-    for cand in (repo_root / ".websec-ignore", Path.cwd() / ".websec-ignore"):
-        try:
-            if not cand.is_file():
+
+def load_acknowledgements(repo_root: Path, *, include_cwd: bool = False, context=None,
+                          today: date | None = None) -> Acknowledgements:
+    """Parse ``fingerprint:ID expires:YYYY-MM-DD # reason`` without discarding expired history.
+
+    Legacy no-expiry acknowledgements remain active with an explicit legacy status. Malformed or
+    expired acknowledgements remain visible in records but cannot remove findings from CI gates.
+    """
+    today = today or date.today()
+    result = Acknowledgements()
+    for text, source in _ignore_inputs(repo_root, include_cwd=include_cwd, context=context):
+        result.sources.append(source)
+        for line in text.splitlines():
+            body, _, reason = line.partition("#")
+            if not body.strip().lower().startswith("fingerprint:"):
                 continue
-            for ln in cand.read_text().splitlines():
-                s = ln.strip()
-                if not s.lower().startswith("fingerprint:"):
-                    continue
-                body = s.split(":", 1)[1]
-                fp, _, reason = body.partition("#")
-                fp, reason = fp.strip(), reason.strip()
-                if fp and reason:                 # require BOTH — no reason ⇒ not honored
-                    acks.setdefault(fp, reason)
-        except Exception:
-            pass
-    return acks
+            tokens = body.strip().split(":", 1)[1].split()
+            if not tokens:
+                continue
+            fp = tokens[0]
+            record = {"reason": reason.strip(), "source": source["source"], "expires": None,
+                      "state": "legacy-no-expiry"}
+            if len(tokens) > 1:
+                try:
+                    if len(tokens) != 2 or not re.fullmatch(r"expires:\d{4}-\d{2}-\d{2}", tokens[1]):
+                        raise ValueError("malformed expiry")
+                    expiry = date.fromisoformat(tokens[1].split(":", 1)[1])
+                    record["expires"] = expiry.isoformat()
+                    record["state"] = "active" if expiry >= today else "expired"
+                except ValueError:
+                    record["state"] = "malformed"
+            if not reason.strip():
+                record["state"] = "missing-reason"
+            result.history.append({"fingerprint": fp, **record})
+            # Last target entry supersedes its own history; explicit legacy cwd cannot override it.
+            if fp not in result.records or result.records[fp]["source"] == source["source"]:
+                result.records[fp] = record
+                result.pop(fp, None)
+                if record["state"] in ("active", "legacy-no-expiry"):
+                    result[fp] = reason.strip()
+    return result
 
 
 def _suppressed(f, pats):
@@ -438,26 +482,74 @@ def _f(title, category, attack_class, severity, confidence, location, evidence):
             "remediation": REMEDIATION.get(attack_class, _DEFAULT_REM), "status": "open"}
 
 
-# Dynamic verdicts that PROVE a route is gated, so no missing-auth finding should be emitted.
-# Kept next to the consumer and covered by a test that walks dynamic.py's verdict vocabulary: the
-# original bug-208 was a classifier whose input gained a value its branches didn't cover, and this is
-# the same shape one layer up — when dynamic.py learns a new "blocked" verdict, this must learn it too.
-_DYNAMIC_PROTECTED = ("auth-enforced", "protected")
-_DYNAMIC_PROTECTED_PREFIXES = ("redirect (", "soft-deny (")
+def route_scope_matches(left: dict, right: dict) -> bool:
+    """Compare available service/source binding; missing binding alone never proves association."""
+    for names in (("service_id", "service"), ("code_path", "file")):
+        lhs = next((left.get(name) for name in names if left.get(name)), None)
+        rhs = next((right.get(name) for name in names if right.get(name)), None)
+        if lhs and rhs and str(lhs).replace("\\", "/").removeprefix("./") != str(rhs).replace("\\", "/").removeprefix("./"):
+            return False
+    return True
+
+
+def unique_route_association(observation: dict, endpoint: dict, endpoints: list) -> bool:
+    """An unscoped observation cannot fan out across distinct same-method/path services."""
+    candidates = [row for row in endpoints if row.get("method") == endpoint.get("method")
+                  and row.get("path") == endpoint.get("path") and route_scope_matches(observation, row)]
+    scopes = {(row.get("service_id") or row.get("service") or "", row.get("code_path") or row.get("file") or "")
+              for row in candidates}
+    return len(scopes) == 1 and route_scope_matches(observation, endpoint)
+
+
+def merge_imports(unified: dict | None, rows: list[dict]) -> dict:
+    """Add normalized imports without replacing scanner diagnostics or truncating the ledger."""
+    combined = dict(unified or {})
+    all_rows = list(combined.get("all", combined.get("top", [])))
+    imported = {}
+    for row in rows:
+        identity = row["semantic_id"]
+        if identity not in imported:
+            imported[identity] = dict(row, sarif_occurrences=[row["sarif"]])
+            all_rows.append(imported[identity])
+        else:
+            existing = imported[identity]
+            if row["sarif"] not in existing["sarif_occurrences"]:
+                existing["sarif_occurrences"].append(row["sarif"])
+            def rank(candidate):
+                return (candidate["sarif"].get("kind") == "fail", SEV_RANK.get(candidate["severity"], 0),
+                        json.dumps(candidate["sarif"], sort_keys=True))
+            if rank(row) > rank(existing):
+                occurrences = existing["sarif_occurrences"]
+                existing.clear()
+                existing.update(row, sarif_occurrences=occurrences)
+    for row in imported.values():
+        row["sarif_occurrences"].sort(key=lambda value: json.dumps(value, sort_keys=True))
+    all_rows.sort(key=lambda row: -SEV_RANK.get(row.get("severity"), 0))
+    by_severity, by_category = {}, {}
+    for row in all_rows:
+        for counts, field in ((by_severity, "severity"), (by_category, "category")):
+            value = row.get(field, "UNKNOWN")
+            counts[value] = counts.get(value, 0) + 1
+    combined.update(all=all_rows, top=all_rows[:15], total=len(all_rows),
+                    total_raw=combined.get("total_raw", combined.get("total", 0)) + len(rows),
+                    cross_tool_or_dup_merged=combined.get("cross_tool_or_dup_merged", 0) + len(rows) - len(imported),
+                    by_severity=by_severity, by_category=by_category)
+    return combined
 
 
 def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                  suppressions: list | None = None, acknowledgements: dict | None = None) -> dict:
     suppressions = suppressions or []
-    acknowledgements = acknowledgements or {}
+    acknowledgements = acknowledgements if acknowledgements is not None else {}
     out = []
 
     # ---- 1. Access control: correlate recon (per-endpoint guard) with dynamic verdicts ----
     authz = facts.get("authz", {})
-    dyn_write = {(r["method"], r["path"]): r for r in
-                 ((dynamic or {}).get("write_auth_enforcement", {}) or {}).get("results", [])}
-    dyn_get = {r["path"]: r for r in
-               ((dynamic or {}).get("unauth_reachability", {}) or {}).get("results", [])}
+    dyn_write, dyn_get = {}, {}
+    for row in ((dynamic or {}).get("write_auth_enforcement", {}) or {}).get("results", []):
+        dyn_write.setdefault((row["method"], row["path"]), []).append(row)
+    for row in ((dynamic or {}).get("unauth_reachability", {}) or {}).get("results", []):
+        dyn_get.setdefault(row["path"], []).append(row)
     # If the dynamic run suspects a fail-OPEN test env, its unauth "successes" are untrustworthy —
     # do NOT escalate them to CRITICAL (the catastrophic-false-positive trap). Fall back to the
     # recon-level hypothesis with a caveat until the operator re-runs with auth resolving.
@@ -476,37 +568,51 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         # endpoint took the GET path: a protected GET silently DELETED the unguarded-write finding
         # (the highest-value class this tool produces), and an open GET escalated the write to HIGH
         # confidence on evidence that never tested the write. Only use a GET verdict for a GET.
-        dv = dyn_write.get((m, p)) if is_write else dyn_get.get(p)
+        observations = dyn_write.get((m, p), []) if is_write else dyn_get.get(p, []) if m == "GET" else []
+        scoped_observations = [row for row in observations
+                               if unique_route_association(row, eg, authz.get("endpoint_guards", []))]
+        dv = scoped_observations[0] if len(scoped_observations) == 1 else None
+        ambiguous_observation = bool(observations and len(scoped_observations) != 1)
+        if ambiguous_observation:
+            ev.append({"layer": "recon", "detail": "Runtime observation could not be associated with a unique service/source route.",
+                       "state": "unjudged", "confirmed": False})
         if dv:
             verdict = dv.get("verdict", "")
-            if dyn_fail_open and verdict not in ("auth-enforced", "protected"):
-                ev.append({"layer": "dynamic", "detail": f"reached unauthenticated (HTTP {dv.get('status')}) — "
-                           "BUT fail-open suspected (auth not resolving in the test env); UNTRUSTWORTHY, "
-                           "re-run with a working auth provider before trusting this"})
-                # keep recon-level conf/sev; do not escalate
-            elif "EXECUTED-UNAUTH" in verdict:
-                ev.append({"layer": "dynamic", "detail": f"{m} executed UNAUTHENTICATED (HTTP {dv.get('status')})"})
-                conf, sev = "HIGH", "CRITICAL"
-            elif "no-auth-gate" in verdict or verdict == "OPEN-no-auth":
-                ev.append({"layer": "dynamic", "detail": f"reached unauthenticated (HTTP {dv.get('status')}, {verdict})"})
-                conf = "HIGH"
-                sev = "HIGH" if is_write else "MEDIUM"
-            elif verdict in _DYNAMIC_PROTECTED or verdict.startswith(_DYNAMIC_PROTECTED_PREFIXES):
-                continue  # dynamic says it's actually protected → not a finding
+            ev.append({"layer": "dynamic", "detail": f"{m} observation: HTTP {dv.get('status')}, {verdict}; "
+                       "status alone does not establish route policy, identity or protected behavior",
+                       "state": dv.get("state", "inconclusive"), "confirmed": False})
+            if dyn_fail_open:
+                ev[-1]["detail"] += " — fail-open suspected; re-run with working identity controls"
         _mf = _f(f"Missing authorization: {m} {p}", "access-control", "missing-auth",
                  sev, conf, p, ev)
         # `location` is the ROUTE path (/api/admin/users) — useful to a human, but it matches no file,
         # so --diff scoping always marked these "untouched" and the scoped --fail-on gate skipped
         # them: a PR adding an unauthenticated admin route passed CI. Carry the handler file too.
         _mf["file"] = eg.get("code_path", "")
+        _mf["method"] = m
+        if eg.get("service_id"):
+            _mf["service_id"] = eg["service_id"]
+        if ambiguous_observation:
+            _mf["dynamic_association"] = "unknown"
+        _mf["rule_id"] = "missing-route-guard"
+        if dv:
+            _mf["verification_state"] = "unconfirmed"
+            _mf["dynamic_observation"] = {"state": dv.get("state", "inconclusive"), "verdict": dv.get("verdict"),
+                                          "status": dv.get("status"), "confirmed": False}
         out.append(_mf)
 
-    # ---- 1b. Cross-tenant BOLA leaks (dynamically confirmed) ----
-    for lk in ((dynamic or {}).get("cross_tenant_bola", {}) or {}).get("leaks", []):
-        out.append(_f(f"Cross-tenant read: {lk.get('direction')} {lk.get('path')}", "access-control", "bola",
-                      "CRITICAL", "HIGH", lk.get("path", ""),
-                      [{"layer": "dynamic", "detail": f"cross-tenant GET returned another tenant's data "
-                        f"(HTTP {lk.get('status')}, {lk.get('direction')})"}]))
+    # ---- 1b. Controlled BOLA proof; legacy LEAK labels remain unconfirmed leads. ----
+    bola = ((dynamic or {}).get("cross_tenant_bola") or {})
+    for lk in bola.get("leaks", []):
+        verified = (lk.get("state") == "confirmed-vulnerable" and lk.get("evidence_verified") is True
+                    and all(lk.get("controls", {}).get(key) is True for key in ("identity", "owner", "private")))
+        finding = _f(f"Cross-tenant read: {lk.get('direction')} {lk.get('path')}", "access-control", "bola",
+                     "CRITICAL" if verified else "MEDIUM", "HIGH" if verified else "LOW", lk.get("path", ""),
+                     [{"layer": "dynamic", "detail": "controlled repeatable private victim marker observed" if verified
+                       else "legacy leak claim lacks identity/ownership controls; verify before confirmation"}])
+        finding.update({"method": "GET", "rule_id": "cross-tenant-private-read", "parameter": lk.get("direction", ""),
+                        "verification_state": "confirmed-vulnerable" if verified else "unconfirmed"})
+        out.append(finding)
 
     # ---- 1c. Unsafe/unverified decoder feeding an auth decision (F5) ----
     _authz = facts.get("authz", {}) or {}
@@ -522,19 +628,16 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         out.append(_f(f"Auth decision uses an unverified decoder: {ud.get('decoder')}", "access-control",
                       "unsafe-auth-decoder", "HIGH", "MEDIUM", ud.get("file", ""), ev))
 
-    # ---- 1d. Forged-token acceptance — unverified signature, DYNAMICALLY CONFIRMED ----
-    # The verdict for 1c: we presented an UNSIGNED/bogus-sig token and the route reached its
-    # handler anyway (no-auth 401/403 → reached-handler with the forged token). That is the
-    # decodeJwtPayloadUnsafe/jwt.decode(verify=False) hypothesis proven — CWE-347 broken auth.
-    for b in ((dynamic or {}).get("forged_token_bypass", {}) or {}).get("bypassed", []):
-        out.append(_f(
-            f"Auth bypass: forged unsigned token accepted — {b.get('method')} {b.get('path')}",
-            "access-control", "unsafe-auth-decoder", "CRITICAL", "HIGH",
-            f"{b.get('method')} {b.get('path')}",
-            [{"layer": "dynamic", "detail": f"no auth → HTTP {b.get('baseline')}; a token with NO valid "
-              f"signature (via {b.get('via')}, far-future exp) → HTTP {b.get('forged')} — the auth gate "
-              "accepted it, so the signature is NOT verified. Reachable by anyone who can craft a token "
-              "string; route the guard through a verifying decode (jwt.verify w/ the key / a checked session)."}]))
+    # ---- 1d. Forged-token response candidates are leads, never status-only proof. ----
+    forged = ((dynamic or {}).get("forged_token_bypass") or {})
+    for row in (forged.get("candidates") or []) + (forged.get("bypassed") or []):
+        finding = _f(f"Investigate forged-token response: {row.get('method')} {row.get('path')}",
+                     "access-control", "unsafe-auth-decoder", "HIGH", "LOW", row.get("path", ""),
+                     [{"layer": "dynamic", "detail": f"baseline HTTP {row.get('baseline')}; forged-token HTTP "
+                       f"{row.get('forged')} via {row.get('via')}; verify legitimate identity and protected behavior"}])
+        finding.update({"method": row.get("method"), "rule_id": "forged-token-response",
+                        "verification_state": "unconfirmed"})
+        out.append(finding)
 
     # ---- 1e. Insecure DEFAULT signing secret — forgeable JWT (REF-PENTEST #8) ----
     _auth = facts.get("auth", {}) or {}
@@ -590,11 +693,18 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         # Confidence follows severity for secrets/CVEs: a generic-api-key tiered down to MEDIUM
         # (low-precision rule, bug-072) should NOT be stamped HIGH-confidence — keep P(real) honest.
         conf = "HIGH" if (cat in ("secret", "sca") and sev in ("HIGH", "CRITICAL")) else "MEDIUM"
+        native_confidence = None
+        if "bandit" in (t.get("tools") or []):
+            value = t.get("confidence")
+            native_confidence = value if isinstance(value, str) and value in CONF_RANK else "UNKNOWN"
+            # The ledger's categorical policy currently has no UNKNOWN bucket.
+            # Route conservatively and retain the actual unknown producer label.
+            conf = native_confidence if native_confidence != "UNKNOWN" else "LOW"
         _tfile = (t.get("file", "") or "").replace("\\", "/")
         _title = t.get("title", cat)
         # any scanner JWT hit (gitleaks/trivy → `secret`, semgrep → `sast`) on an anon-key file is the
         # intended-public Supabase key — downgrade regardless of the tool's category.
-        if (cat in ("secret", "sast") and ("jwt" in _title.lower() or "web token" in _title.lower())
+        if (not t.get("sarif") and cat in ("secret", "sast") and ("jwt" in _title.lower() or "web token" in _title.lower())
                 and any(_tfile.endswith(a) for a in _sb_anon)
                 and not any(_tfile.endswith(a) for a in _sb_svc)):
             out.append(_f(_title, f"static-{cat}", "client-exposure", "INFO", "LOW", t.get("file", ""),
@@ -603,8 +713,58 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                             "— DESIGNED to ship to the browser and protected by Row-Level Security, not a secret "
                             "leak. (A service_role key would be CRITICAL; none detected in this file.)"}]))
             continue
-        out.append(_f(_title, f"static-{cat}", cls, sev, conf, t.get("file", ""),
-                      [{"layer": "static", "detail": f"{'+'.join(t.get('tools', []))}: {t.get('title','')}"}]))
+        scanner_finding = _f(_title, f"static-{cat}", cls, sev, conf, t.get("file", ""),
+                             [{"layer": "static", "detail": f"{'+'.join(t.get('tools', []))}: {t.get('title','')}"}])
+        if isinstance(t.get("file"), str):
+            scanner_finding["file"] = t["file"]
+        if type(t.get("line")) is int and t["line"] > 0:
+            scanner_finding["line"] = t["line"]
+        if native_confidence is not None:
+            scanner_finding["native_confidence"] = native_confidence
+            if isinstance(t.get("cwe"), str) and re.fullmatch(r"CWE-[1-9][0-9]{0,5}", t["cwe"]):
+                scanner_finding["native_cwe"] = t["cwe"]
+                scanner_finding["standards"]["cwe"] = list(dict.fromkeys(
+                    scanner_finding["standards"]["cwe"] + [t["cwe"]]))
+        if isinstance(t.get("sarif"), dict):
+            scanner_finding["sarif"] = t["sarif"]
+            scanner_finding["sarif_occurrences"] = t.get("sarif_occurrences", [t["sarif"]])
+            scanner_finding["tools"] = t.get("tools", [])
+            scanner_finding["limitations"] = ["Imported producer evidence; source freshness and vulnerability truth are unverified.",
+                                                "Native suppressions are metadata, not local acknowledgements."]
+            for key in ("column", "end_line", "end_column"):
+                if key in t:
+                    scanner_finding[key] = t[key]
+            tags = t["sarif"].get("rule_properties", {}).get("tags", [])
+            cwes = ["CWE-" + str(int(match[1])) for tag in tags if isinstance(tag, str)
+                    for match in re.finditer(r"\bCWE-(0*[1-9][0-9]{0,5})\b", tag, re.I)] if isinstance(tags, list) else []
+            scanner_finding["standards"]["cwe"] = sorted(set(scanner_finding["standards"]["cwe"] + cwes))
+        for key in ("rule_id", "rule", "check_id", "package", "pkg", "cve", "vulnerability_id", "resource",
+                    "installed", "fixed", "ecosystem", "advisory_aliases",
+                    "resource_id", "service", "symbol", "sink", "semantic_id", "epss", "epss_pct", "kev", "reachability", "intel", "intel_status"):
+            if key in t:
+                scanner_finding[key] = t[key]
+        if not scanner_finding.get("rule_id") and t.get("key"):
+            scanner_finding["rule_id"] = t["key"]
+        # Brakeman publishes a semantic warning fingerprint; our adapters' fallback pipe-delimited
+        # fingerprints include line numbers and are deliberately not reused as durable identity.
+        native = t.get("fingerprint")
+        if (not scanner_finding.get("semantic_id") and "brakeman" in (t.get("tools") or [])
+                and isinstance(native, str) and native and "|" not in native):
+            scanner_finding["semantic_id"] = "brakeman:" + native
+        out.append(scanner_finding)
+
+    # Optional profile configuration findings carry explicit rule/site identity and scope limits.
+    for row in facts.get("stack", {}).get("profiles", {}).get("findings", []):
+        profile_finding = _f(row.get("title", "Profile configuration candidate"), "profile-configuration",
+                             row.get("attack_class", "transport-security"), row.get("severity", "MEDIUM"),
+                             row.get("confidence", "MEDIUM"), f"{row.get('file', '?')}:{row.get('line', 0)}",
+                             [{"layer": "recon", "detail": row.get("evidence", ""),
+                               "limitations": row.get("limitations", [])}])
+        profile_finding.update({key: row[key] for key in ("rule_id", "semantic_id", "file", "service_id", "profile_id",
+                                                         "remediation", "limitations") if key in row})
+        # The profile supplies CWE evidence only; do not invent ASVS or mobile-standard mappings.
+        profile_finding["standards"] = {"cwe": [row["cwe"]] if row.get("cwe") else []}
+        out.append(profile_finding)
 
     # ---- 3. Attack-surface sinks (recon hypotheses) ----
     # On a purely-NoSQL datastore, classic SQL-injection alerts are almost always FPs —
@@ -619,7 +779,21 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
             "oracle", "cockroach", "prisma(sql)", "sql-orm"}
     has_sql = bool(_ds & _sql) or any("sql" in d and "nosql" not in d for d in _ds)
     is_nosql_only = bool(_ds & _nosql) and not has_sql
+    occurrences = facts.get("surface", {}).get("sink_occurrences", []) or []
+    occurrence_classes = {row.get("sink_class") or row.get("attack_class") for row in occurrences}
+    for row in occurrences:
+        sink_class = row.get("sink_class") or row.get("attack_class", "sast")
+        attack = _SINK_ATTACK.get(row.get("attack_class", sink_class), row.get("attack_class", sink_class))
+        finding = _f(f"{sink_class} sink", "attack-surface", attack, "MEDIUM", "LOW",
+                     f"{row.get('file', '?')}:{row.get('line', 0)}",
+                     [{"layer": "recon", "detail": f"{row.get('source', 'untrusted input')} reaches {row.get('sink', sink_class)}",
+                       "control_scope": row.get("control_scope")}])
+        finding.update({key: row[key] for key in ("file", "semantic_id", "sink", "symbol", "service_id", "profile_id") if key in row})
+        finding["rule_id"] = sink_class
+        out.append(finding)
     for cls, info in (facts.get("surface", {}).get("sinks", {}) or {}).items():
+        if cls in occurrence_classes or _SINK_ATTACK.get(cls, cls) in occurrence_classes:
+            continue
         sev = "MEDIUM"
         if cls == "error-disclosure":
             # output-side sink — NOT user-input-gated (documented exception); don't mislabel it
@@ -902,18 +1076,33 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
     # reason, and is excluded from `findings`/total/gating so every downstream consumer
     # (gate_count, by_severity, SARIF results, calibration) drops it with no change of theirs.
     from . import baseline as _baseline
-    acknowledged = []
-    if acknowledgements:
-        active = []
-        for f in kept:
-            fp = f.setdefault("fingerprint", _baseline.fingerprint(f))
-            if fp in acknowledgements:
-                f["status"] = "acknowledged"
-                f["ack_reason"] = acknowledgements[fp]
-                acknowledged.append(f)
-            else:
-                active.append(f)
-        kept = active
+    _baseline.annotate({"findings": kept})
+    acknowledged, active = [], []
+    ack_records = getattr(acknowledgements, "records", {})
+    alias_candidates = {}
+    for candidate in kept:
+        for alias in candidate.get("fingerprint_aliases", []):
+            alias_candidates.setdefault(alias, set()).add(candidate["fingerprint"])
+    for finding in kept:
+        keys = [finding["fingerprint"]] + finding.get("fingerprint_aliases", [])
+        ack_key = next((key for key in keys if key in ack_records or key in acknowledgements), None)
+        record = ack_records.get(ack_key) if ack_key else None
+        if ack_key and ack_key != finding["fingerprint"] and len(alias_candidates.get(ack_key, set())) != 1:
+            finding["reopened_reason"] = "ambiguous legacy acknowledgement; review each semantic finding"
+            finding["acknowledgement"] = record or {"state": "ambiguous-legacy", "reason": acknowledgements.get(ack_key)}
+            active.append(finding)
+        elif record and record["state"] not in ("active", "legacy-no-expiry"):
+            finding["acknowledgement"] = record
+            finding["reopened_reason"] = f"acknowledgement {record['state']}; review required"
+            active.append(finding)
+        elif ack_key in acknowledgements:
+            finding["status"] = "acknowledged"
+            finding["ack_reason"] = acknowledgements[ack_key]
+            finding["acknowledgement"] = record or {"state": "legacy-no-expiry", "reason": acknowledgements[ack_key]}
+            acknowledged.append(finding)
+        else:
+            active.append(finding)
+    kept = active
     kept.sort(key=lambda f: (-SEV_RANK.get(f["severity"], 0), -CONF_RANK.get(f["confidence"], 0)))
     acknowledged.sort(key=lambda f: (-SEV_RANK.get(f["severity"], 0), -CONF_RANK.get(f["confidence"], 0)))
 
@@ -921,12 +1110,32 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
     cal_table = calibration.load()
     by_sev, by_conf, by_basis = {}, {}, {}
     for f in kept:
-        f["calibrated"] = calibration.apply(f.get("attack_class", ""), f["confidence"], cal_table)
+        f["calibrated"] = ({"p": None, "ci": None, "n": 0, "basis": "unvalidated import",
+                            "note": "Imported SARIF is not a reviewed truth label or calibration sample."}
+                           if f.get("sarif") else calibration.apply(f.get("attack_class", ""), f["confidence"], cal_table))
         by_sev[f["severity"]] = by_sev.get(f["severity"], 0) + 1
         by_conf[f["confidence"]] = by_conf.get(f["confidence"], 0) + 1
         by_basis[f["calibrated"]["basis"]] = by_basis.get(f["calibrated"]["basis"], 0) + 1
-    return {"schema_version": "1.0", "findings": kept, "total": len(kept), "suppressed": suppressed_n,
+    policy_rows = getattr(suppressions, "sources", []) + getattr(acknowledgements, "sources", [])
+    policy = []
+    for row in policy_rows:
+        bound = {key: row.get(key) for key in ("source", "read_complete", "content_digest")}
+        if bound not in policy:
+            policy.append(bound)
+    if facts.get("coverage") is not None:
+        facts["coverage"]["review_policy"] = policy
+        if any(row.get("read_complete") is False for row in policy):
+            from . import coverage
+            coverage.add_gap(facts, "review_policy", "ignore policy was unreadable or out of scope")
+    return {"schema_version": "2.0", "fingerprint_version": 2, "findings": kept, "total": len(kept), "suppressed": suppressed_n,
             "acknowledged": acknowledged, "acknowledged_n": len(acknowledged),
+            "acknowledgement_sources": getattr(acknowledgements, "sources", []),
+            "suppression_sources": getattr(suppressions, "sources", []),
+            "acknowledgement_history": getattr(acknowledgements, "history", []),
+            "review_policy": policy,
+            "verification_context": {"application_id": facts.get("application_id") or facts.get("target", ""),
+                                     "build_id": facts.get("build_id") or (facts.get("coverage") or {}).get("analyzed_input_digest", ""),
+                                     "source_digest": (facts.get("coverage") or {}).get("analyzed_input_digest", "")},
             "by_severity": by_sev, "by_confidence": by_conf,
             "calibration": {"loaded": bool(cal_table), "by_basis": by_basis,
                             "personalized": bool((cal_table or {}).get("meta", {}).get("personalized")),

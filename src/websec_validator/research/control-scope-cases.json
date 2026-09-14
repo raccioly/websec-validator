@@ -1,0 +1,304 @@
+[
+  {
+    "proposal": {
+      "schema_version": "1.0",
+      "version": "1",
+      "detector_revision": "resolved by research.control_scope_cases at evaluation time",
+      "source_date": "2026-09-12",
+      "provenance": "Original paired fixtures authored for websec; comments and sibling controls leave the vulnerable operation unchanged. No source snippets copied.",
+      "license": "MIT (original examples; project license)",
+      "prerequisites": "Evaluate only the named static check over provided fixture bytes.",
+      "affected_ecosystem": "JavaScript HTTP services",
+      "id": "control-scope-integrations",
+      "detector": "integrations:webhook-signature",
+      "primary_source": "https://docs.stripe.com/webhooks/signature",
+      "remediation": "Verify the exact incoming body and signature before fulfilling the event; reject verification failures."
+    },
+    "cases": [
+      {
+        "id": "development-base",
+        "partition": "development",
+        "label": "vulnerable",
+        "files": {
+          "handler.js": "app.post('/webhooks/payments',(req,res)=>{fulfillOrder(req.body);res.end();});"
+        },
+        "route_inventory": [
+          {
+            "method": "POST",
+            "path": "/webhooks/payments",
+            "file": "handler.js"
+          }
+        ]
+      },
+      {
+        "id": "development-comment",
+        "partition": "development",
+        "label": "vulnerable",
+        "files": {
+          "handler.js": "app.post('/webhooks/payments',(req,res)=>{fulfillOrder(req.body);res.end();});\n// TODO verifyWebhook(req.body)"
+        },
+        "route_inventory": [
+          {
+            "method": "POST",
+            "path": "/webhooks/payments",
+            "file": "handler.js"
+          }
+        ]
+      },
+      {
+        "id": "development-sibling",
+        "partition": "development",
+        "label": "vulnerable",
+        "files": {
+          "handler.js": "app.post('/webhooks/payments',(req,res)=>{fulfillOrder(req.body);res.end();});\nfunction another(raw,signature,secret){return stripe.webhooks.constructEvent(raw,signature,secret);}"
+        },
+        "route_inventory": [
+          {
+            "method": "POST",
+            "path": "/webhooks/payments",
+            "file": "handler.js"
+          }
+        ]
+      },
+      {
+        "id": "development-safe-control",
+        "partition": "development",
+        "label": "safe",
+        "files": {
+          "handler.js": "app.post('/webhooks/payments',(req,res)=>{const event=stripe.webhooks.constructEvent(req.body,req.headers['stripe-signature'],endpointSecret);fulfillOrder(event);res.end();});"
+        },
+        "route_inventory": [
+          {
+            "method": "POST",
+            "path": "/webhooks/payments",
+            "file": "handler.js"
+          }
+        ]
+      },
+      {
+        "id": "holdout-base",
+        "partition": "holdout",
+        "label": "vulnerable",
+        "files": {
+          "handler.js": "app.post('/webhooks/billing',(incoming,reply)=>{fulfillOrder(incoming.body);reply.end();});"
+        },
+        "route_inventory": [
+          {
+            "method": "POST",
+            "path": "/webhooks/billing",
+            "file": "handler.js"
+          }
+        ]
+      },
+      {
+        "id": "holdout-comment",
+        "partition": "holdout",
+        "label": "vulnerable",
+        "files": {
+          "handler.js": "app.post('/webhooks/billing',(incoming,reply)=>{fulfillOrder(incoming.body);reply.end();});\n// TODO verifyWebhook(incoming.body)"
+        },
+        "route_inventory": [
+          {
+            "method": "POST",
+            "path": "/webhooks/billing",
+            "file": "handler.js"
+          }
+        ]
+      },
+      {
+        "id": "holdout-sibling",
+        "partition": "holdout",
+        "label": "vulnerable",
+        "files": {
+          "handler.js": "app.post('/webhooks/billing',(incoming,reply)=>{fulfillOrder(incoming.body);reply.end();});\nfunction another(raw,signature,secret){return stripe.webhooks.constructEvent(raw,signature,secret);}"
+        },
+        "route_inventory": [
+          {
+            "method": "POST",
+            "path": "/webhooks/billing",
+            "file": "handler.js"
+          }
+        ]
+      },
+      {
+        "id": "holdout-safe-control",
+        "partition": "holdout",
+        "label": "safe",
+        "files": {
+          "handler.js": "app.post('/webhooks/billing',(incoming,reply)=>{const event=stripe.webhooks.constructEvent(incoming.body,incoming.headers['stripe-signature'],endpointSecret);fulfillOrder(event);reply.end();});"
+        },
+        "route_inventory": [
+          {
+            "method": "POST",
+            "path": "/webhooks/billing",
+            "file": "handler.js"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "proposal": {
+      "schema_version": "1.0",
+      "version": "1",
+      "detector_revision": "resolved by research.control_scope_cases at evaluation time",
+      "source_date": "2026-09-12",
+      "provenance": "Original paired fixtures authored for websec; comments and sibling controls leave the vulnerable operation unchanged. No source snippets copied.",
+      "license": "MIT (original examples; project license)",
+      "prerequisites": "Evaluate only the named static check over provided fixture bytes.",
+      "affected_ecosystem": "JavaScript HTTP services",
+      "id": "control-scope-upload",
+      "detector": "upload:client-mime",
+      "primary_source": "https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html",
+      "remediation": "Allowlist detected byte types for the same file before processing it; client MIME metadata is untrusted."
+    },
+    "cases": [
+      {
+        "id": "development-base",
+        "partition": "development",
+        "label": "vulnerable",
+        "files": {
+          "handler.js": "const middleware=multer({});app.post('/upload',middleware.single('file'),(req,res)=>{if(req.file.mimetype==='image/png')save(req.file.buffer);res.end();});"
+        }
+      },
+      {
+        "id": "development-comment",
+        "partition": "development",
+        "label": "vulnerable",
+        "files": {
+          "handler.js": "const middleware=multer({});app.post('/upload',middleware.single('file'),(req,res)=>{if(req.file.mimetype==='image/png')save(req.file.buffer);res.end();});\n// allowedMimeTypes must be enforced"
+        }
+      },
+      {
+        "id": "development-sibling",
+        "partition": "development",
+        "label": "vulnerable",
+        "files": {
+          "handler.js": "const middleware=multer({});app.post('/upload',middleware.single('file'),(req,res)=>{if(req.file.mimetype==='image/png')save(req.file.buffer);res.end();});\nasync function preview(buffer){return fileTypeFromBuffer(buffer);}"
+        }
+      },
+      {
+        "id": "development-safe-control",
+        "partition": "development",
+        "label": "safe",
+        "files": {
+          "handler.js": "const middleware=multer({});app.post('/upload',middleware.single('file'),async(req,res)=>{const type=await fileTypeFromBuffer(req.file.buffer);if(type?.mime !== 'image/png')return res.status(415).end();save(req.file.buffer,req.file.mimetype);});"
+        }
+      },
+      {
+        "id": "holdout-base",
+        "partition": "holdout",
+        "label": "vulnerable",
+        "files": {
+          "handler.js": "const middleware=multer({});app.post('/upload',middleware.single('file'),(request,res)=>{if(request.file.mimetype==='image/png')save(request.file.buffer);res.end();});"
+        }
+      },
+      {
+        "id": "holdout-comment",
+        "partition": "holdout",
+        "label": "vulnerable",
+        "files": {
+          "handler.js": "const middleware=multer({});app.post('/upload',middleware.single('file'),(request,res)=>{if(request.file.mimetype==='image/png')save(request.file.buffer);res.end();});\n// TODO sniff magic bytes"
+        }
+      },
+      {
+        "id": "holdout-sibling",
+        "partition": "holdout",
+        "label": "vulnerable",
+        "files": {
+          "handler.js": "const middleware=multer({});app.post('/upload',middleware.single('file'),(request,res)=>{if(request.file.mimetype==='image/png')save(request.file.buffer);res.end();});\nasync function preview(buffer){return fileTypeFromBuffer(buffer);}"
+        }
+      },
+      {
+        "id": "holdout-safe-control",
+        "partition": "holdout",
+        "label": "safe",
+        "files": {
+          "handler.js": "const middleware=multer({});app.post('/upload',middleware.single('file'),async(request,res)=>{const type=await fileTypeFromBuffer(request.file.buffer);if(type?.mime !== 'image/png')return res.status(415).end();save(request.file.buffer,request.file.mimetype);});"
+        }
+      }
+    ]
+  },
+  {
+    "proposal": {
+      "schema_version": "1.0",
+      "version": "1",
+      "detector_revision": "resolved by research.control_scope_cases at evaluation time",
+      "source_date": "2026-09-12",
+      "provenance": "Original paired fixtures authored for websec; comments and sibling controls leave the vulnerable operation unchanged. No source snippets copied.",
+      "license": "MIT (original examples; project license)",
+      "prerequisites": "Evaluate only the named static check over provided fixture bytes.",
+      "affected_ecosystem": "JavaScript HTTP services",
+      "id": "control-scope-crypto",
+      "detector": "crypto:password-hash",
+      "primary_source": "https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html",
+      "remediation": "Use a password KDF; a separate PKCE digest does not protect a password hashed with SHA-256."
+    },
+    "cases": [
+      {
+        "id": "development-base",
+        "partition": "development",
+        "label": "vulnerable",
+        "files": {
+          "handler.js": "function hashPassword(password){return crypto.createHash('sha256').update(password).digest('hex');}"
+        }
+      },
+      {
+        "id": "development-comment",
+        "partition": "development",
+        "label": "vulnerable",
+        "files": {
+          "handler.js": "function hashPassword(password){return crypto.createHash('sha256').update(password).digest('hex');}\n// PKCE support planned"
+        }
+      },
+      {
+        "id": "development-sibling",
+        "partition": "development",
+        "label": "vulnerable",
+        "files": {
+          "handler.js": "function hashPassword(password){return crypto.createHash('sha256').update(password).digest('hex');}\nfunction oauth(codeVerifier){return crypto.createHash('sha256').update(codeVerifier).digest('base64url');}"
+        }
+      },
+      {
+        "id": "development-safe-control",
+        "partition": "development",
+        "label": "safe",
+        "files": {
+          "handler.js": "function hashPassword(password){return bcrypt.hash(password,12);}"
+        }
+      },
+      {
+        "id": "holdout-base",
+        "partition": "holdout",
+        "label": "vulnerable",
+        "files": {
+          "service.py": "import hashlib\ndef hash_password(password):\n return hashlib.sha256(password.encode()).hexdigest()\n"
+        }
+      },
+      {
+        "id": "holdout-comment",
+        "partition": "holdout",
+        "label": "vulnerable",
+        "files": {
+          "service.py": "import hashlib\ndef hash_password(password):\n return hashlib.sha256(password.encode()).hexdigest()\n# PKCE support planned\n"
+        }
+      },
+      {
+        "id": "holdout-sibling",
+        "partition": "holdout",
+        "label": "vulnerable",
+        "files": {
+          "service.py": "import hashlib\ndef hash_password(password):\n return hashlib.sha256(password.encode()).hexdigest()\n\ndef oauth(code_verifier):\n return hashlib.sha256(code_verifier.encode()).hexdigest()\n"
+        }
+      },
+      {
+        "id": "holdout-safe-control",
+        "partition": "holdout",
+        "label": "safe",
+        "files": {
+          "service.py": "import bcrypt\ndef store_password(password, salt):\n return bcrypt.hashpw(password, salt)\n"
+        }
+      }
+    ]
+  }
+]
