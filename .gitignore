@@ -22,6 +22,8 @@ CLAUDE.md
 # The PRODUCT (committed): .docguard.json, .docguardignore, docs-canonical/, AGENTS.md, CHANGELOG.md, DRIFT-LOG.md
 .docguard/
 .agent/
+.agents/
+.codex/
 commands/
 .specify/
 
