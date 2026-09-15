@@ -181,12 +181,18 @@ class HttpSecurityTests(unittest.TestCase):
             self.assertEqual(status, 202)
             self.assertIsNone(body)
 
+
     def test_worker_limit_rejects_excess_connections(self):
         # Occupy slots deterministically; real HTTP request must be refused before a worker starts.
         for _ in range(mcp_server.HTTP_MAX_REQUESTS):
             self.assertTrue(self.server._slots.acquire(timeout=5))
         try:
-            self.assertEqual(self.request()[0], 503)
+            try:
+                status, _ = self.request()
+                self.assertEqual(status, 503)
+            except (BrokenPipeError, ConnectionResetError):
+                # The server may close the connection before the client finishes writing the request
+                pass
         finally:
             for _ in range(mcp_server.HTTP_MAX_REQUESTS):
                 self.server._slots.release()
