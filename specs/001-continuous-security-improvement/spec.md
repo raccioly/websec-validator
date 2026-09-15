@@ -1,5 +1,6 @@
 # Feature Specification: Continued security coverage after 0.14.0
 
+**Spec ID**: `websec.continuous-security-improvement`
 **Feature Branch**: `codex/security-expansion-release` (specification only)
 **Created**: 2026-09-14
 **Status**: Prioritized remaining-work specification; implementation is not implied

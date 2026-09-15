@@ -17,6 +17,32 @@ tag. The reviewed checkpoint passed 983 application tests on Python 3.14 and 3.1
 tests; isolated-wheel smoke checks also passed. Local-hook and Action documentation is finalized
 with its separate integration review; distribution examples remain an explicit next phase.
 
+### DocGuard 0.41.3 adoption — 2026-09-15
+
+Every validator key in the published `docguard-config.schema.json` is pinned explicitly in
+`.docguard.json`, each to the value it already had, so the repo does not inherit upstream defaults.
+(A bare "N validators" count is deliberately not written here: MET001 binds such a claim to a
+project-local enabled-validator count, not to the tool's validator total, and would flag a
+correct statement as stale.)
+DocGuard 0.41.3 added the three runtime validators (`diffSuspicion`, `referenceExistence`,
+`apiDocSmells`) that earlier schemas omitted, so the config is now schema-complete with no
+unknown keys.
+
+The ten requirements of `websec.continuous-security-improvement` (FR-001…006, SC-001…004) have no
+test coverage, which is accurate and intentional: that specification describes prioritized remaining
+work. No `@req` annotations or validator exemptions were added, because doing so would assert
+coverage that does not exist. DocGuard reconciles this correctly once `.docguard-specs.json` is
+committed — the registry records `delivery: planned` and the traceability validator then excludes
+those requirements rather than warning about them. Note the dependency on tracked state: with the
+identical registry present but untracked, traceability reports 4/14 with ten TRC004 warnings; once
+committed it reports 4/4. Do not "fix" those warnings during that window.
+
+`docs/METHODOLOGY.md` carries `docguard:last-reviewed 2026-07-02` while its content changed in the
+0.14.0 release commit, so FRS002 reports a review as due. Its countable claims were re-verified
+against code on 2026-09-15 (22 extractors, 17 sink classes, 10 scanner entries, 9 named profiles —
+all correct). The date was deliberately NOT bumped: a full methodology review is a human judgement
+and the marker must not assert one that did not happen.
+
 ## Resolved Drift
 
 | ID | Resolution | Date |

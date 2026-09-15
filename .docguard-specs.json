@@ -1,0 +1,63 @@
+{
+  "$schema": "https://raccioly.github.io/docguard/schemas/docguard-specs.schema.json",
+  "schemaVersion": 2,
+  "specs": [
+    {
+      "specId": "websec.continuous-security-improvement",
+      "path": "specs/001-continuous-security-improvement/spec.md",
+      "reviewed": {
+        "lifecycle": {
+          "approval": "draft",
+          "delivery": "planned",
+          "context": "current",
+          "retirementReason": null,
+          "storage": "working_tree",
+          "persistenceModel": null
+        },
+        "relations": {
+          "extends": [],
+          "duplicates": [],
+          "conflictsWith": [],
+          "supersedes": [],
+          "supersededBy": []
+        },
+        "scope": {
+          "canonicalDocs": []
+        },
+        "reconciliation": {
+          "lastReviewedRevision": null,
+          "outcomes": []
+        }
+      },
+      "intent": {
+        "requirements": [
+          "websec.continuous-security-improvement#FR-001",
+          "websec.continuous-security-improvement#FR-002",
+          "websec.continuous-security-improvement#FR-003",
+          "websec.continuous-security-improvement#FR-004",
+          "websec.continuous-security-improvement#FR-005",
+          "websec.continuous-security-improvement#FR-006",
+          "websec.continuous-security-improvement#SC-001",
+          "websec.continuous-security-improvement#SC-002",
+          "websec.continuous-security-improvement#SC-003",
+          "websec.continuous-security-improvement#SC-004"
+        ]
+      },
+      "observed": {
+        "artifacts": [
+          {
+            "path": "specs/001-continuous-security-improvement/spec.md",
+            "digest": "sha256:fbcfb384fb5fc724bcf3d0425d54ec74b43c21bb1b1836e2a5b396318683c11e"
+          }
+        ],
+        "taskCompletion": {
+          "checked": 0,
+          "total": 0
+        },
+        "implementationEvidence": [],
+        "testEvidence": []
+      }
+    }
+  ],
+  "tombstones": []
+}

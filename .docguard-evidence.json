@@ -1,0 +1,106 @@
+{
+  "$schema": "https://raccioly.github.io/docguard/schemas/docguard-evidence.schema.json",
+  "schemaVersion": 1,
+  "declarations": [
+    {
+      "id": "websec.proof-0140.surface-checks-noir",
+      "applicability": {
+        "mode": "always"
+      },
+      "target": {
+        "document": "docs/security-review/validation.md",
+        "heading": "Current 0.14.0 corpus proof",
+        "statement": "| Noir 1.1.0 present | 3/3 | {{value}}/10 | 7 | 0 |"
+      },
+      "source": {
+        "adapter": "json-pointer",
+        "path": "docs/security-review/public-proof-0.14.0.json",
+        "pointer": "/runs/with_noir/aggregate/checks_passed"
+      },
+      "predicate": {
+        "kind": "equals",
+        "valueType": "number"
+      }
+    },
+    {
+      "id": "websec.proof-0140.surface-checks-no-noir",
+      "applicability": {
+        "mode": "always"
+      },
+      "target": {
+        "document": "docs/security-review/validation.md",
+        "heading": "Current 0.14.0 corpus proof",
+        "statement": "| Minimal PATH, Noir absent | 3/3 | {{value}}/10 | 7 | 0 |"
+      },
+      "source": {
+        "adapter": "json-pointer",
+        "path": "docs/security-review/public-proof-0.14.0.json",
+        "pointer": "/runs/without_noir/aggregate/checks_passed"
+      },
+      "predicate": {
+        "kind": "equals",
+        "valueType": "number"
+      }
+    },
+    {
+      "id": "websec.proof-0140.unknown-labels-noir",
+      "applicability": {
+        "mode": "always"
+      },
+      "target": {
+        "document": "docs/security-review/validation.md",
+        "heading": "Current 0.14.0 corpus proof",
+        "statement": "| Noir 1.1.0 present | 3/3 | 10/10 | {{value}} | 0 |"
+      },
+      "source": {
+        "adapter": "json-pointer",
+        "path": "docs/security-review/public-proof-0.14.0.json",
+        "pointer": "/runs/with_noir/aggregate/unknown_labels"
+      },
+      "predicate": {
+        "kind": "equals",
+        "valueType": "number"
+      }
+    },
+    {
+      "id": "websec.proof-20260914.surface-checks",
+      "applicability": {
+        "mode": "always"
+      },
+      "target": {
+        "document": "docs/security-review/validation.md",
+        "heading": "Reviewed checkpoint \u2014 2026-09-14 (historical)",
+        "statement": "**3/3 applications complete, {{value}}/10 surface checks, seven unknown truth labels, zero unavailable**"
+      },
+      "source": {
+        "adapter": "json-pointer",
+        "path": "docs/security-review/public-proof-20260914.json",
+        "pointer": "/aggregate/checks_passed"
+      },
+      "predicate": {
+        "kind": "equals",
+        "valueType": "number"
+      }
+    },
+    {
+      "id": "websec.proof-20260912.surface-checks",
+      "applicability": {
+        "mode": "always"
+      },
+      "target": {
+        "document": "docs/security-review/validation.md",
+        "heading": "Executed pinned corpus run",
+        "statement": "**{{value}}/10 documented surface checks**"
+      },
+      "source": {
+        "adapter": "json-pointer",
+        "path": "docs/security-review/public-proof-20260912.json",
+        "pointer": "/aggregate/checks_passed"
+      },
+      "predicate": {
+        "kind": "equals",
+        "valueType": "number"
+      }
+    }
+  ]
+}

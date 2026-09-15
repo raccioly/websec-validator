@@ -44,11 +44,31 @@ This project uses **DocGuard** (it is the maintainer's own tool — `npm i -g do
 compliance:
 
 ```bash
-docguard guard                 # validate compliance (errors + warnings)
+docguard guard                 # validate compliance (errors + warnings); ~16s here
 docguard score                 # CDD maturity score (0-100)
 docguard diff                  # gaps between docs and code
 docguard diagnose              # guard → emit AI fix prompts
+docguard verify --evidence     # declared doc claims vs committed artifacts (deterministic)
+docguard verify --instructions # duplicate / contradictory / stale rules in AGENTS.md + CLAUDE.md
+docguard specs --check         # spec lifecycle registry is present and consistent
+docguard reconcile --since <ref>  # classify changed facts before editing intent (use a narrow ref)
+docguard retire --plan         # read-only inventory of docs eligible to leave active context
 ```
+
+### Committed DocGuard state
+
+| File | Purpose |
+|---|---|
+| `.docguard.json` | Validator configuration. **All validators are pinned explicitly** — DocGuard's validators are opt-out, so new releases widen the gate on their own: the 0.33.1 → 0.40.5 upgrade historically moved this repo from 182 to 203 checks with no config change. This repo therefore does not inherit defaults. That 182 → 203 pair is a historical record of that upgrade, not a current count — do not cite a live check count here, it moves every release. |
+| `.docguardignore` | Paths excluded from documentation scanning. |
+| `.docguard-specs.json` | Spec lifecycle registry: immutable spec IDs, reviewed approval/delivery state, and observed artifact digests. Refresh observed fields with `docguard specs --write`; never hand-edit the `observed` block. |
+| `.docguard-evidence.json` | Declared-evidence manifest binding exact statements in `docs/security-review/validation.md` to JSON pointers in the committed `public-proof-*.json` artifacts. A doc number that drifts from its artifact is caught deterministically. |
+
+Local Git hooks (not tracked; `.git/hooks/`) run the sub-second gates
+(`specs --check`, `verify --evidence`) on **pre-commit**, and the full `guard` on
+**pre-push**. Both fail open when DocGuard is absent, matching the name-guard convention, and both carry
+`# BEGIN/END DOCGUARD MANAGED` markers so a future `docguard init --with hooks` splices its
+content instead of overwriting the name-guard.
 
 ### AI Agent Workflow
 
@@ -63,7 +83,7 @@ docguard diagnose              # guard → emit AI fix prompts
 ## Code Conventions
 
 - Python 3.11+, stdlib only — **do not add runtime dependencies**. Integrate external tools by shelling
-  out (see `scanners.py`), never by importing.
+  out (see `src/websec_validator/scanners.py`), never by importing.
 - Add a recon dimension by dropping a module in `src/websec_validator/extractors/` and appending it to
   `REGISTRY` in `extractors/__init__.py`. One extractor must never crash the whole run (wrap in the
   registry driver's try/except, as existing extractors do).
