@@ -600,5 +600,5 @@ real-project validation or measured vulnerability recall.
 Assigned Python SQL query review now follows supported local assignments and branch joins to the
 query sink, preserving source traces and separate bound-value controls. Loops and cross-function
 behavior remain limited and disclosed. The [final fourth-phase validation](docs/security-review/validation.md)
-records 1082 tests across two Python versions and 15 isolated-wheel checks; historical corpus
+records 1083 tests across two Python versions and 15 isolated-wheel checks; historical corpus
 scores remain separate and do not establish full protection.

@@ -15,7 +15,7 @@ agent-install preservation, research catalog/control-scope suite, assigned SQL, 
 refusal. Its SHA256 is
 `5047bfb98e40b52ec32b40d5c63c2d5debf0e96a7cd0de16cd958df959f2ebb0`.
 The eight adoption tests were repeated successfully (1.343s). The full source matrix below remains
-1082 tests on each Python version; this wheel records the final 0.14.0 package version independently
+1083 tests on each Python version; this wheel records the final 0.14.0 package version independently
 from the earlier 0.13.0 checkpoint. No dependencies were installed or remote publication performed
 by this local validation. GitHub release/PyPI publication must be verified by the release workflow.
 
