@@ -32,7 +32,7 @@ pass. Pure-Python, **stdlib only, zero runtime dependencies**; it shells out to 
 | Command | Purpose |
 |---------|---------|
 | `pipx install --editable .` | Install the CLI from source (or `pip install -e .` in a 3.11+ venv) |
-| `python3 -m unittest discover -s tests` | Run the suite (1082 tests, stdlib only, no public network) |
+| `python3 -m unittest discover -s tests` | Run the suite (1083 tests, stdlib only, no public network) |
 | `websec run ./target` | Full pipeline → `FACTS.json` + `AGENT-BRIEFING.md` + `probes/` |
 | `websec doctor ./target` | Show which optional scanners are installed |
 | `websec proof` | Score recon coverage vs the vuln-app corpus (needs network on first clone) |
@@ -54,7 +54,7 @@ docguard diagnose              # guard → emit AI fix prompts
 
 1. **Before any work**: read `docs-canonical/` and run `docguard guard` to see the compliance state.
 2. **After changing code or docs**: re-run `docguard guard`; keep the numbers (22 extractors, 17 sink
-   classes, 1082 tests, dated 10/10 proof (not vulnerability recall)) consistent across every doc — DocGuard's metrics-consistency
+   classes, 1083 tests, dated 10/10 proof (not vulnerability recall)) consistent across every doc — DocGuard's metrics-consistency
    validator cross-checks them.
 3. **Update `CHANGELOG.md`** for any user-visible change.
 4. **Document drift**: if code must deviate from a canonical doc, add a `// DRIFT: reason` (or
