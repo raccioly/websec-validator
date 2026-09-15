@@ -790,7 +790,7 @@ def _report_details(key: str, doc) -> dict:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        if row.get("errors") or row.get("Errors"):
+        if (row.get("errors") and not (key == "semgrep" and all(isinstance(e, dict) and e.get("level") == "warn" for e in row.get("errors", [])))) or row.get("Errors"):
             details["errors"].append("scanner reported errors")
         if key == "checkov":
             results = row.get("results") or {}
