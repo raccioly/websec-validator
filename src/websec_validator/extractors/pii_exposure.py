@@ -63,10 +63,31 @@ def _projected_binding(code: str, position: int, argument: str, scopes: list[dic
         return False
     body = code[scope["body_start"]:scope["end"]]
     name = re.escape(argument)
+    prefix = code[scope["body_start"]:position]
+
+    # Destructuring projection: const { email, phone, ...safeUser } = user;
+    destructuring = re.search(r"\b(?:const|let)\s*\{[^{}]*\.\.\.\s*" + name + r"\s*\}\s*=", prefix)
+    if destructuring and not in_literal(prefix, destructuring.start()):
+        return True
+
+    # Database projection: const user = await User.findById(id).select('username role');
+    # or const user = await prisma.user.findUnique({ select: { id: true } });
+    db_binding = re.search(r"\b(?:const|let)\s+" + name + r"\s*=\s*([\s\S]+?)\s*;\s*$", prefix)
+    if db_binding and not in_literal(prefix, db_binding.start()):
+        rhs = db_binding.group(1)
+        if (re.search(r"\b(?:select|attributes)\b", rhs) or ".select(" in rhs) and not PII_FIELD.search(rhs):
+            return True
+
+    # Delete mutation projection: delete safeUser.email;
+    delete_mutations = re.findall(r"\bdelete\s+" + name + r"\.\w+", prefix)
+    # The variable is referenced in assignment, the deletes, and the response
+    if len(delete_mutations) > 0 and len(re.findall(r"\b" + name + r"\b", body)) <= 2 + len(delete_mutations):
+        return True
+
     if len(re.findall(r"\b" + name + r"\b", body)) != 2:
         return False
-    prefix = code[scope["body_start"]:position]
-    binding = re.search(r"\bconst\s+" + name + r"\s*=\s*(\{[^{};]*\})\s*;\s*$", prefix)
+
+    binding = re.search(r"\b(?:const|let)\s+" + name + r"\s*=\s*(\{[^{};]*\})\s*;\s*$", prefix)
     if not binding or in_literal(prefix, binding.start()):
         return False
     fields = split_arguments(binding[1][1:-1])

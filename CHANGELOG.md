@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Improved `pii_exposure` extractor to properly recognize benign projection patterns (destructuring rest properties like `const { email, ...safeUser } = user;`, delete mutations, and database projections like `.select()` or `{ select: ... }`), significantly reducing false positives for `raw-entity-pii-response`.
+
 ### Added
 
 - `websec feedback` records an operator verdict that a detector is wrong — `false-positive` or
