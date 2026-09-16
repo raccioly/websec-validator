@@ -104,7 +104,7 @@ jobs:
       contents: read
       actions: read      # reads this run's own job names to validate required-checks.json
     env:
-      MIN_TESTS: 1082          # bump when adding tests; never lower it to make a PR pass
+      MIN_TESTS: 1083          # bump when adding tests; never lower it to make a PR pass
       # The suite runs in ~10s on CI. 300s would have been 30x nominal and useless: the known
       # failure in this class (docguard PR #328 — a test given "/" as its project dir walked the
       # whole filesystem) was a 7.6x blowup that stayed GREEN throughout, and 7.6x of 10s still

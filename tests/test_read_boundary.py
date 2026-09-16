@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from websec_validator.extractors.agent_config import AgentConfigExtractor
-from websec_validator.extractors.base import RepoContext
+from websec_validator.extractors.base import SKIP_DIRS, RepoContext
 from websec_validator.extractors.dependencies import DependenciesExtractor
 
 
@@ -157,6 +157,27 @@ class ReadBoundaryTests(unittest.TestCase):
         self.assertEqual(ctx.code_files, [source])
         self.assertEqual(ctx.text(self.repo / ".local/nested/source.py"), "")
         self.assertEqual(ctx.manifest(".local/nested/source.py"), "")
+
+    def test_every_agent_tooling_directory_is_pruned(self):
+        # Agent scaffolding is not the target app: its configs and skill files are
+        # generated prompts/hooks, so scanning them invents findings that belong to
+        # the developer's tooling rather than the product. `.codex/` was missed when
+        # the rest of the family was added, so assert the whole family at once —
+        # a new sibling added to the set must be added here too.
+        family = (".wolf", ".claude", ".agent", ".agents", ".codex", ".local")
+        for directory in family:
+            self.write(f"{directory}/nested/tooling.py")
+        source = self.write("app.py")
+        ctx = RepoContext(self.repo)
+        self.assertEqual(ctx.code_files, [source])
+        for directory in family:
+            self.assertIn(directory, SKIP_DIRS, f"{directory} must be pruned")
+        # Pruning governs ENUMERATION only. An extractor may still read one of these
+        # by explicit path — agent_config deliberately reads `.claude/.mcp.json` — so
+        # do not assert unreadability here. `.local` is the private exception and is
+        # blocked even on an explicit read; that contract is covered by
+        # test_private_and_skip_directories_are_pruned_before_enumeration.
+        self.assertEqual(ctx.text(self.repo / ".local/nested/tooling.py"), "")
 
     def test_skip_named_ancestor_does_not_hide_project(self):
         nested = self.base / "vendor" / ".local" / "actual-project"
