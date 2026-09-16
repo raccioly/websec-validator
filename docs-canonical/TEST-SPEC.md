@@ -13,7 +13,7 @@ The suite uses stdlib `unittest` with synthetic fixtures and local loopback serv
 third-party runner, public network, external scanner, or running target app. Release CI also builds
 and smoke-tests the installed wheel. The final 2026-09-14 source phase passed **1082 application tests** on
 Python 3.14.7 (21.492s) and Python 3.12.14 (22.536s), plus **41 repository automation tests**.
-CI enforces an application-test floor of **1083**. The package
+CI enforces an application-test floor of **1098**. The package
 has **22 registered extractors**, **17 sink classes**, **10 scanner entries** and **9 named profiles**.
 
 ```bash

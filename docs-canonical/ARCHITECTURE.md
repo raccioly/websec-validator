@@ -50,6 +50,7 @@ scanner runs, a calibrated findings ledger, staged probes, and the briefing/repo
 | Named profiles | Nine explicit check catalogs and manifest-based service boundaries; native analysis remains manual | `src/websec_validator/extractors/profiles.py` | `tests/test_profiles.py` |
 | Intelligence | Explicit public-feed refresh, validated snapshots and offline known-CVE reassessment | `src/websec_validator/intel.py` | `tests/test_intel.py` |
 | Research | Data-only proposal evaluation against shipped detectors; human-review promotion | `src/websec_validator/research.py` | `tests/test_research.py` |
+| Feedback | Operator verdict that a detector is wrong; metadata-only record appended to `websec-out/feedback.jsonl` plus a printed issue link. Offline: builds a URL, sends nothing. Distinct from `.websec-ignore`, which suppresses locally and is never written here | `src/websec_validator/feedback.py` | `tests/test_feedback.py` |
 | Coverage | Execution outcomes, read losses, scope limitations and actual analyzed-input/detector digests | `src/websec_validator/coverage.py` | `tests/test_coverage.py` |
 | Repair evidence | Build-bound remediation plans and offline validation of contained, hashed before/after test artifacts | `src/websec_validator/repairs.py` | `tests/test_lifecycle.py`, `tests/test_coverage.py` |
 | Output schemas | Published JSON Schemas for FACTS + ledger, versioned in lockstep with `formats.SCHEMA_VERSION` | `src/websec_validator/schemas/` | — |
@@ -57,6 +58,20 @@ scanner runs, a calibrated findings ledger, staged probes, and the briefing/repo
 | Dynamic phase | Optional, gated live probing against a TEST instance (read-only BOLA, unauth reachability, localhost write-verb) | `src/websec_validator/dynamic.py` | `tests/test_hardening.py` |
 | Proof harness | Score recon coverage against the labeled vuln-app corpus (VAmPI/NodeGoat/DVGA) | `src/websec_validator/proof.py` | `tests/test_recon.py` |
 | Probe templates (22) | Scaffolds staged into the target's `probes/` for the agent + human to fill and run | `src/websec_validator/templates/probes/` | — (end-user scaffolding) |
+
+### Feedback record redaction
+
+A finding points at security-relevant code, so `feedback` is metadata-only by default: stable
+identity (fingerprint, aliases, version, `identity_precision`), classification (`attack_class`,
+`category`, `rule_id`, `severity`, `confidence`), calibration provenance, public standards
+citations, and the file **extension** alone. Titles, routes, `location`, file paths, `method`,
+`service_id` and evidence prose are withheld, because each can carry target structure or, for a
+secret finding, the secret itself. `--include-snippet` adds the contextual fields, records
+`"redaction": "with-context"` so a reader can tell which records were widened, shows the operator
+the exact record first, and refuses without `--yes` when stdin is not a terminal. The record shape
+is versioned by its `schema_version` field; no JSON Schema is shipped because nothing in the
+package validates it at runtime.
+
 
 ## Layer Boundaries
 

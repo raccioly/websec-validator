@@ -20,8 +20,11 @@ import uuid
 import sys
 from pathlib import Path
 
-from . import (__version__, baseline, briefing, calibration, constitution, diffscope, dynamic, findings,
-               coverage, formats, fpfilter, inventory, probes, proof, recon, report, scanners)
+from . import (__version__, baseline, briefing, calibration, constitution, diffscope, dynamic, feedback,
+               findings, coverage, formats, fpfilter, inventory, probes, proof, recon, report, scanners)
+
+_FEEDBACK_VERDICTS = feedback.VERDICTS
+_FEEDBACK_SEVERITIES = feedback.SEVERITIES
 
 MAX_SARIF_TOTAL_BYTES = 32 * 1024 * 1024
 
@@ -622,6 +625,74 @@ def cmd_capabilities(args) -> int:
     return 0
 
 
+def cmd_feedback(args) -> int:
+    """Record an operator verdict on detector correctness. Local, offline, redacted."""
+    import sys
+    fb = feedback
+
+    ledger_path = (Path(args.ledger).expanduser() if args.ledger
+                   else Path(args.out or "websec-out") / "latest" / "findings-ledger.json").resolve()
+    if not ledger_path.is_file():
+        print(f"no ledger at {ledger_path}; run a scan first or pass --ledger", file=sys.stderr)
+        return 2
+    try:
+        ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"cannot read {ledger_path}: {exc}", file=sys.stderr)
+        return 2
+
+    envelope = {}
+    envelope_path = ledger_path.parent / "findings.envelope.json"
+    if envelope_path.is_file():
+        try:
+            envelope = json.loads(envelope_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            envelope = {}
+    run_id = envelope.get("generated") or ledger_path.parent.name
+
+    try:
+        finding = fb.find_finding(ledger, args.fingerprint)
+        record = fb.build_record(
+            finding, verdict=args.verdict, reason=args.reason, envelope=envelope,
+            run_id=run_id, expected_severity=args.expected_severity or "",
+            include_snippet=bool(args.include_snippet))
+    except fb.FeedbackError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    # --include-snippet can carry route, path and evidence prose out of the repository,
+    # so it is never applied silently: the operator sees the exact record and confirms.
+    # Fail closed when nobody can answer (CI), rather than defaulting to disclosure.
+    if args.include_snippet and not args.yes:
+        if not sys.stdin.isatty():
+            print("--include-snippet needs --yes when stdin is not a terminal", file=sys.stderr)
+            return 2
+        print("This record will be written and included in the issue link:\n")
+        print(json.dumps(record, indent=2, sort_keys=True))
+        if input("\ninclude this context? [y/N] ").strip().lower() not in ("y", "yes"):
+            print("aborted; nothing written", file=sys.stderr)
+            return 2
+
+    destination = Path(args.out or "websec-out").resolve() / fb.FEEDBACK_FILENAME
+    try:
+        fb.append(destination, record)
+    except (fb.FeedbackError, OSError) as exc:
+        print(f"cannot record feedback: {exc}", file=sys.stderr)
+        return 2
+
+    url = fb.issue_url(record)
+    if getattr(args, "format", None) == "json":
+        _emit_json_result({"recorded": str(destination), "record": record, "issue_url": url})
+    else:
+        print(f"recorded {record['verdict']} for {record['finding'].get('fingerprint')} "
+              f"({record['redaction']}) → {destination}")
+        print("\nnothing was sent. To report it upstream, open:")
+        print(f"  {url}")
+        print("\nTo silence this finding locally instead, add a `fingerprint:` line "
+              "to .websec-ignore — feedback does not suppress.")
+    return 0
+
+
 def cmd_intel(args) -> int:
     from . import intel
     try:
@@ -900,7 +971,7 @@ def build_parser() -> argparse.ArgumentParser:
     # metavar lists only the user-facing commands; recon/proof/calibrate still work but are
     # omitted (they get no `help=`, so argparse leaves them out of the listing entirely).
     sub = p.add_subparsers(dest="cmd", required=True,
-                          metavar="{run,doctor,dynamic,mcp,capabilities,intel,research,repair-verify,install,hooks}")
+                          metavar="{run,doctor,dynamic,mcp,capabilities,feedback,intel,research,repair-verify,install,hooks}")
 
     r = sub.add_parser("run", help="full pipeline → briefing + tailored probes")
     r.add_argument("target")
@@ -1008,6 +1079,22 @@ def build_parser() -> argparse.ArgumentParser:
     capabilities = sub.add_parser("capabilities", help="show offline named security checks and profile limitations")
     capabilities.set_defaults(func=cmd_capabilities)
 
+    fb_parser = sub.add_parser(
+        "feedback", help="record an offline verdict that a finding is wrong (metadata-only by default)")
+    fb_parser.add_argument("--fingerprint", required=True, help="fingerprint of the finding, from the ledger")
+    fb_parser.add_argument("--verdict", required=True, choices=list(_FEEDBACK_VERDICTS),
+                           help="false-positive: not a real issue · severity-wrong: real but misrated")
+    fb_parser.add_argument("--reason", required=True, help="why the detector is wrong (max 1000 chars)")
+    fb_parser.add_argument("--expected-severity", dest="expected_severity",
+                           choices=list(_FEEDBACK_SEVERITIES), help="required with --verdict severity-wrong")
+    fb_parser.add_argument("--ledger", help="findings-ledger.json (default: <out>/latest/findings-ledger.json)")
+    fb_parser.add_argument("--include-snippet", action="store_true",
+                           help="also include title, route, file and evidence; prompts before writing")
+    fb_parser.add_argument("--yes", action="store_true", help="skip the --include-snippet prompt (for scripts)")
+    fb_parser.add_argument("--out", help="output directory (default: websec-out)")
+    fb_parser.add_argument("--format", choices=["text", "json"], default="text")
+    fb_parser.set_defaults(func=cmd_feedback)
+
     intelligence = sub.add_parser("intel", help="explicit public threat-feed refresh and offline known-CVE reassessment")
     intel_actions = intelligence.add_subparsers(dest="action", required=True)
     for action in ("refresh", "status", "reassess"):
@@ -1053,7 +1140,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-_COMMANDS = {"run", "recon", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks", "repair-verify", "capabilities", "intel", "research"}
+_COMMANDS = {"run", "recon", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks", "repair-verify", "capabilities", "intel", "research", "feedback"}
 
 
 def main(argv=None) -> int:

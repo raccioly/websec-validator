@@ -393,6 +393,8 @@ read policy; an unrelated working directory no longer contributes implicit suppr
 
 ```bash
 websec capabilities                                  # offline profile/check/limitation matrix
+websec feedback --fingerprint <fp> --verdict false-positive \
+  --reason "behind an nginx auth_request"            # report a wrong detector; metadata-only, sends nothing
 websec intel status                                  # offline freshness and provenance
 websec intel refresh                                 # explicit public FIRST/CISA downloads
 websec intel reassess --ledger prior-ledger.json --out reassessment.json

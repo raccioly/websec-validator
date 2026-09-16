@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `websec feedback` records an operator verdict that a detector is wrong — `false-positive` or
+  `severity-wrong` — against a finding's fingerprint, appends it to `websec-out/feedback.jsonl`
+  and prints a prefilled issue link. It is offline: the link is text, nothing is sent or opened.
+  Records are **metadata-only** by default (stable identity, classification, calibration
+  provenance, standards citations, file extension); titles, routes, paths and evidence prose are
+  withheld because a finding can point at a secret. `--include-snippet` opts in, marks the record
+  `with-context`, shows it before writing, and refuses without `--yes` outside a terminal.
+  Feedback never suppresses — `.websec-ignore` remains the way to silence a finding locally.
+
+### Fixed
+
+- Recon no longer enumerates `.codex/` as target application source. It was the one member of the
+  agent-tooling family missing from the traversal skip set, so a repository using Codex could have
+  findings raised against its own agent hooks configuration.
+
+
 ## [0.14.0] — 2026-09-14
 
 Migration: [0.14.0 migration guide](docs/MIGRATING-0.14.0.md). Facts, ledger and envelope move to
