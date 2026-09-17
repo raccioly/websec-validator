@@ -198,6 +198,37 @@ class CalibrationProvenanceTests(unittest.TestCase):
         self.assertEqual(calibration._upgrade_local(local)["legacy_uncertain"], local)
         self.assertEqual(local["by_label"]["HIGH"]["n"], 8)
 
+    def test_local_only_table_does_not_claim_corpus_provenance(self):
+        # A table built with no shipped corpus previously inherited CAVEAT, which asserts
+        # "calibrated on a deliberately-vulnerable app corpus" and warns the numbers skew
+        # optimistic on clean production code. Both describe the shipped corpus, not the
+        # operator's own confirmed samples, so every finding carried a provenance and a bias
+        # direction its data did not have. load_shipped() swallows every exception and returns
+        # None, so an unpackaged calibration.json reaches this path.
+        local = {"schema_version": 2, "meta": {"samples": 7},
+                 "by_class_label": {"sql-injection|HIGH": {"k": 6, "n": 7, "p": 0.86, "ci": [0.49, 0.97]}},
+                 "by_label": {"HIGH": {"k": 6, "n": 7, "p": 0.86, "ci": [0.49, 0.97]}}, "observations": {}}
+        merged = calibration._merge(None, local)
+        caveat = merged["meta"]["caveat"]
+        self.assertNotIn("corpus;", caveat)
+        self.assertNotIn("skews optimistic", caveat)
+        self.assertIn("no shipped corpus table", caveat)
+        self.assertIs(merged["meta"]["shipped_table"], False)
+        self.assertEqual(merged["meta"]["corpus"], [])
+        # The disclosure has to reach the finding, not just the table.
+        self.assertEqual(calibration.apply("sql-injection", "HIGH", merged)["note"], caveat)
+
+    def test_shipped_table_keeps_its_corpus_caveat(self):
+        # Guard the other direction: the fix must not strip provenance when a corpus IS present.
+        shipped = {"meta": {"caveat": calibration.CAVEAT, "corpus": ["vampi"], "n_total": 40},
+                   "by_class_label": {}, "by_label": {}}
+        self.assertEqual(calibration._merge(shipped, None)["meta"]["caveat"], calibration.CAVEAT)
+        personalized = calibration._merge(shipped, {"schema_version": 2, "meta": {"samples": 3},
+                                                    "by_class_label": {}, "by_label": {},
+                                                    "observations": {}})["meta"]
+        self.assertTrue(personalized["caveat"].startswith(calibration.CAVEAT))
+        self.assertEqual(personalized["corpus"], ["vampi"])
+
     def test_reimport_deduplicates_verified_observation(self):
         context = {"application_id": "fixture", "build_id": "rev", "identity": "anonymous", "endpoint": "/", "method": "GET", "parameter": ""}
         samples = dast_ingest.derive_labels(

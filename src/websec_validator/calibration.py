@@ -31,6 +31,13 @@ MIN_N = 5                 # a cell needs ≥ this many samples to be used (else 
 PRIOR = {"HIGH": 0.85, "MEDIUM": 0.5, "LOW": 0.25}
 CAVEAT = ("indicative — calibrated on a deliberately-vulnerable app corpus; "
           "skews optimistic on clean production code")
+# Used when NO shipped corpus table is present and the numbers come only from the operator's own
+# confirmed runs. CAVEAT must not be reused here: it asserts corpus provenance this data does not
+# have, and its specific bias direction ("optimistic on clean production code") describes the
+# vulnerable-app corpus, not local samples. Claiming the wrong provenance is worse than claiming
+# none, so the local-only path gets its own honest label.
+LOCAL_ONLY_CAVEAT = ("indicative — no shipped corpus table was available; these numbers come only "
+                     "from your own confirmed local samples and carry no corpus baseline")
 
 # Self-improving LOCAL overlay: user-global, gitignored (lives outside any repo), never
 # shipped. It accrues *confirmed* labels from your own dynamic runs (and optional hand-labels)
@@ -144,8 +151,9 @@ def _merge(shipped: dict | None, local: dict | None) -> dict | None:
     recomputing Wilson. Local samples are confirmed (oracle), so they're not filtered."""
     if not shipped and not local:
         return None
-    base = json.loads(json.dumps(shipped)) if shipped else {"meta": {"caveat": CAVEAT},
-                                                            "by_class_label": {}, "by_label": {}}
+    base = (json.loads(json.dumps(shipped)) if shipped
+            else {"meta": {"caveat": LOCAL_ONLY_CAVEAT, "corpus": [], "shipped_table": False},
+                  "by_class_label": {}, "by_label": {}})
     base.setdefault("prior", PRIOR)
     base.setdefault("meta", {})
     if local:

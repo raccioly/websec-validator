@@ -13,7 +13,7 @@ The suite uses stdlib `unittest` with synthetic fixtures and local loopback serv
 third-party runner, public network, external scanner, or running target app. Release CI also builds
 and smoke-tests the installed wheel. The 2026-09-16 source phase passed **1241 application tests** on
 Python 3.14.7 (33.393s) and Python 3.12.13 (33.955s), plus **41 repository automation tests**.
-CI enforces an application-test floor of **1241**. The package
+CI enforces an application-test floor of **1243**. The package
 has **22 registered extractors**, **17 sink classes**, **11 scanner entries** and **9 named profiles**.
 The eleventh scanner entry is `gitleaks-dir`: gitleaks runs as two disjoint passes, git history and
 working tree, because neither surface subsumes the other.

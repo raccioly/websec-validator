@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Calibration no longer claims corpus provenance it does not have. When no shipped
+  `calibration.json` is available and the table is built only from the operator's own confirmed
+  local samples, the caveat attached to every finding previously read "calibrated on a
+  deliberately-vulnerable app corpus; skews optimistic on clean production code" — a provenance
+  and a bias direction that describe the shipped corpus, not local data. That path now carries its
+  own label plus `corpus: []` and `shipped_table: false`. Tables built from a shipped corpus are
+  unchanged, including the personalization suffix when local samples are folded in.
+
+
 ## [0.15.0] — 2026-09-16
 
 Migration: **none required — every change is additive.** The ledger gains optional `attribution`
