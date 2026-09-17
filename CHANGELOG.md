@@ -18,6 +18,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `with-context`, shows it before writing, and refuses without `--yes` outside a terminal.
   Feedback never suppresses — `.websec-ignore` remains the way to silence a finding locally.
 
+### Added
+
+- Agent-config detection now covers hosts beyond Claude Code: Cursor, VS Code, Gemini, Codex,
+  Continue, OpenCode, Zed, Windsurf, Cline, Roo, Aider, Qwen and Warp. Committed literal
+  credentials in an MCP `env`/`headers` block, unpinned MCP servers, non-vendor LLM base URLs and
+  the hidden-unicode rules-file backdoor are found in those hosts' config and instruction files.
+  This deliberately extends the named ALLOW-LIST, not the walker: a broad sweep over agent
+  directories was measured against 1,515 agent files in 33 repositories and produced 0 true
+  positives and 1 false positive, because those directories hold worktree copies and cached
+  scanner output. The widened list finds 0 findings across 10 real repositories.
+- The non-vendor base-URL check now runs over every allow-listed file rather than only the ones
+  that parse as JSON. It is a text regex, and `.codex/config.toml`, `.windsurfrules` and the
+  `*.md` instruction files are exactly where a committed third-party LLM endpoint hides.
+
 ### Fixed
 
 - **Gitleaks now scans the working tree as well as git history, closing a false-clean.** The
