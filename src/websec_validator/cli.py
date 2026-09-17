@@ -269,6 +269,41 @@ def cmd_run(args) -> int:
     facts = recon.build_facts(target, __version__, args.exclude,
                               include_fixtures=getattr(args, "include_fixtures", False),
                               only=getattr(args, "only", None))
+    # OPT-IN registry existence check. Explicit consent, like --verify-secrets: this is the only
+    # part of `run` that talks to a third party, and it discloses dependency NAMES.
+    _network = getattr(args, "network", False) or getattr(args, "network_dry_run", False)
+    if _network:
+        from . import registry as _registry
+        _deps = facts.get("dependencies") or {}
+        if getattr(args, "network_dry_run", False):
+            scheduled = _registry.plan(_deps)
+            log(f"\n  --network-dry-run: {len(scheduled['queued'])} name(s) WOULD be sent to the "
+                f"public registry; {len(scheduled['suppressed'])} suppressed offline. NOTHING was sent.")
+            for row in scheduled["queued"]:
+                log(f"      would send: {row['ecosystem']}  {row['name']}")
+            for row in scheduled["suppressed"][:20]:
+                log(f"      suppressed: {row.get('ecosystem')}  {row.get('name')}  ({row.get('why')})")
+            facts["dependencies"]["network"] = {"ran": False, "dry_run": True,
+                                                "queued": len(scheduled["queued"]),
+                                                "suppressed": len(scheduled["suppressed"]),
+                                                "note": "dry run: no request was made"}
+        else:
+            log("\n  --network: sending dependency NAMES (no versions, paths or repo identity) to "
+                "registry.npmjs.org / pypi.org to check whether they exist. Names this repo publishes "
+                "and privately-bound scopes are suppressed offline first.")
+            net = _registry.check(_deps)
+            facts["dependencies"]["network"] = net
+            facts["dependencies"]["findings"] = (facts["dependencies"].get("findings") or []) + \
+                _registry.findings_from(net)
+            log(f"      queried {net['queried']} · exists {net['exists']} · "
+                f"missing {len(net['missing'])} · unknown {len(net['unknown'])} · "
+                f"suppressed {net['suppressed']} · {net['elapsed_seconds']}s")
+            if not net["complete"]:
+                # UNKNOWN is the tool failing to answer, not the dependency being fine.
+                coverage.add_gap(facts, "dependency-existence",
+                                 f"{len(net['unknown'])} dependency name(s) could not be resolved "
+                                 "(rate limit, timeout or offline); existence is UNKNOWN, not clean")
+
     langs = facts.get("stack", {}).get("languages", [])
     _print_facts_summary(facts, log)
 
@@ -439,6 +474,18 @@ def cmd_run(args) -> int:
                    and not facts["coverage"].get("execution_complete"))
     _scoped = bool(diff_scope and not diff_scope.get("error"))
     _gate_ledger = ledger
+    # Registry-existence findings are LEDGER-bound but NOT gate-eligible by default. The UNKNOWN
+    # rate is non-deterministic and outside the operator's control (measured 0%, 0%, 0%, 4.5% across
+    # four identical runs), so gating on it makes registry availability a dependency of shipping. A
+    # 404 is also an observation, not a proof. Opting in is a SECOND, explicit decision.
+    _network_classes = {"dependency-nonexistent", "dependency-unpublished-or-removed"}
+    _network_excluded = 0
+    if not getattr(args, "fail_on_network", False):
+        _kept = [f for f in ledger.get("findings", [])
+                 if f.get("attack_class") not in _network_classes]
+        _network_excluded = len(ledger.get("findings", [])) - len(_kept)
+        if _network_excluded:
+            _gate_ledger = dict(ledger, findings=_kept)
     if _scoped:
         # --diff narrows the gate to findings in CHANGED files (PR semantics: don't fail a PR on
         # pre-existing debt it didn't touch). Only when scoping actually succeeded.
@@ -450,7 +497,11 @@ def cmd_run(args) -> int:
              "baseline": str(args.baseline) if getattr(args, "baseline", None) else None,
              "diff_scoped": _scoped,
              "diff_base": (diff_scope or {}).get("base") if _scoped else None,
-             "execution_complete": bool(facts["coverage"].get("execution_complete"))}
+             "execution_complete": bool(facts["coverage"].get("execution_complete")),
+             "network_findings_excluded": _network_excluded,
+             "network_gate_note": ("registry-existence findings are reported but do not gate unless "
+                                   "--fail-on-network is given: the UNKNOWN rate is outside operator "
+                                   "control and a 404 is an observation, not a proof")}
     if _incomplete:
         _gate.update(verdict="incomplete", exit_code=2, count_at_or_above=None,
                      note="requested checks did not complete; the gate result is NOT a pass")
@@ -1145,6 +1196,19 @@ def build_parser() -> argparse.ArgumentParser:
                    help="exit 1 if any finding at/above this severity remains (CI gate). With --baseline, "
                         "new, changed and reopened findings count; incomplete execution exits 2.")
     r.add_argument("--require-complete", action="store_true", help="exit 2 when requested checks cannot complete")
+    r.add_argument("--network", action="store_true",
+                   help="opt in to checking whether declared dependencies EXIST on the public "
+                        "registry (the AI-hallucinated-dependency / slopsquat class). ⚠ this sends "
+                        "dependency NAMES — never versions, paths or repository identity — to "
+                        "registry.npmjs.org and pypi.org. Names this repo publishes and scopes bound "
+                        "to a private registry are suppressed OFFLINE first. Findings are "
+                        "ledger-bound MEDIUM/LOW-confidence and are NOT --fail-on eligible: a 404 is "
+                        "an observation, not a proof, and a 200 is not evidence of safety.")
+    r.add_argument("--fail-on-network", dest="fail_on_network", action="store_true",
+                   help="also let registry-existence findings fail --fail-on. Off by default on "
+                        "purpose: registry availability would become a dependency of shipping.")
+    r.add_argument("--network-dry-run", dest="network_dry_run", action="store_true",
+                   help="print the exact names --network WOULD send and make zero requests")
     r.add_argument("--only", action="append", metavar="PATH",
                    help="narrow ANALYSIS to these files, repo-relative (repeatable). Unlike --diff, "
                         "which filters the report, this changes what is read and matched: ~13x faster "

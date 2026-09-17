@@ -65,6 +65,67 @@ def _npm_unpinned(spec: str) -> bool:
     return True                              # github user/repo shorthand, url, etc. → unpinned
 
 
+def _npm_resolved_publicly(lock_texts: list) -> set:
+    """Names a committed lockfile proves ONCE resolved from a public registry.
+
+    A 404 today cannot say why. `event-stream`-style removal, a yanked release and a name that
+    never existed all answer 404. A lockfile entry carrying a `resolved` tarball URL plus an
+    `integrity` hash is offline proof the name WAS published — which makes it
+    `dependency-unpublished-or-removed` (possibly pulled for malware) rather than an AI
+    hallucination. Different cause, different remediation, so they must not share a finding class.
+    """
+    out: set = set()
+    for text in lock_texts:
+        try:
+            data = json.loads(text)
+        except Exception:
+            continue
+        packages = data.get("packages")
+        if isinstance(packages, dict):
+            for path, meta in packages.items():
+                if not isinstance(meta, dict) or not meta.get("resolved") or not meta.get("integrity"):
+                    continue
+                name = meta.get("name") or (path.split("node_modules/")[-1] if "node_modules/" in path else "")
+                if name:
+                    out.add(name)
+        deps = data.get("dependencies")
+        if isinstance(deps, dict):
+            for name, meta in deps.items():
+                if isinstance(meta, dict) and meta.get("resolved") and meta.get("integrity"):
+                    out.add(name)
+    return out
+
+
+def _npmrc_private_scopes(ctx: RepoContext) -> set:
+    """@scope:registry= bindings in repo-local .npmrc / .yarnrc.yml.
+
+    If the operator already told npm a scope resolves elsewhere, querying npmjs for it contradicts
+    their own configuration and discloses an internal namespace to a third party."""
+    out: set = set()
+    for rel in (".npmrc", ".yarnrc.yml", ".yarnrc"):
+        text = ctx.text(ctx.root / rel)
+        if not text:
+            continue
+        for m in re.finditer(r"(?m)^\s*@([\w.-]+):registry\s*=", text):
+            out.add(m.group(1).lower())
+        for m in re.finditer(r"(?m)^\s*npmScopes:\s*$|^\s{2,}([\w.-]+):\s*$", text):
+            if m.group(1):
+                out.add(m.group(1).lower())
+    return out
+
+
+def _pip_private_index(ctx: RepoContext) -> str:
+    """A non-PyPI default index means pip names should not be resolved against pypi.org."""
+    for rel in ("pip.conf", ".pip/pip.conf", "pip.ini"):
+        text = ctx.text(ctx.root / rel)
+        if not text:
+            continue
+        m = re.search(r"(?m)^\s*index-url\s*=\s*(\S+)", text)
+        if m and "pypi.org" not in m.group(1):
+            return m.group(1)[:200]
+    return ""
+
+
 def _npm_installed(texts: list) -> set:
     """Set of INSTALLED package names from package-lock.json/npm-shrinkwrap.json — the `node_modules/*`
     keys (lockfileVersion 2/3) and the top-level `dependencies` tree (v1). Deliberately EXCLUDES the
@@ -99,6 +160,16 @@ class DependenciesExtractor(Extractor):
         lockfiles_present: list = []
         ecosystems: set = set()
         manifests = 0
+        # Every registry-resolvable dependency, for the OPT-IN existence check (see registry.py).
+        # Collected offline and always: the check itself is opt-in, this inventory is not.
+        declarations: list = []
+        # Names this repository PUBLISHES itself, plus scopes bound to a private registry by
+        # repo-local config. Subtracted BEFORE any request. Measured: without this the naive check
+        # had a 100% false-positive rate (1 of 1) on a private monorepo package, and sending that
+        # name to npmjs was itself a disclosure of an internal package name.
+        local_names: set = set()
+        private_scopes: set = set()
+        resolved_once: set = set()   # names a lockfile proves once resolved publicly
 
         # ---- npm ----
         for mf in ctx.glob("**/package.json", 120):
@@ -123,6 +194,11 @@ class DependenciesExtractor(Extractor):
             if not isinstance(data, dict):
                 continue
 
+            own = data.get("name")
+            if isinstance(own, str) and own.strip():
+                local_names.add(own.strip())
+            resolved_once |= _npm_resolved_publicly(json_lock_texts)
+
             scripts = data.get("scripts") or {}
             if isinstance(scripts, dict):
                 for k in _LIFECYCLE_KEYS:
@@ -143,6 +219,8 @@ class DependenciesExtractor(Extractor):
                     deps.update(d)
             for name, spec in deps.items():
                 spec = str(spec)
+                if not spec.startswith(_NPM_INTENTIONAL) and not spec.startswith(("git", "http", "file", "link")):
+                    declarations.append({"ecosystem": "npm", "name": name, "spec": spec, "file": rel})
                 if _npm_unpinned(spec):
                     reason = "floating/unpinned version"
                     if has_lock:
@@ -165,6 +243,12 @@ class DependenciesExtractor(Extractor):
                                   "manifest and lockfile have drifted, so `npm install` may resolve a version "
                                   "nobody reviewed. Regenerate the lockfile and commit it as a reviewable diff."})
 
+        # Repo-local registry configuration: if the operator already told npm or pip that a scope
+        # or index is private, sending those names to the public registry contradicts their own
+        # config — and leaks an internal namespace to a third party.
+        private_scopes |= _npmrc_private_scopes(ctx)
+        pip_private = _pip_private_index(ctx)
+
         # ---- pip ----
         pip_manifests = (ctx.glob("**/requirements*.txt", 80) + ctx.glob("**/pyproject.toml", 40)
                          + ctx.glob("**/Pipfile", 20))
@@ -176,6 +260,10 @@ class DependenciesExtractor(Extractor):
                 lp = mf.parent / lname
                 if lp.is_file():
                     lockfiles_present.append(ctx.rel(lp))
+            if mf.name == "pyproject.toml":
+                own = re.search(r'(?m)^\s*name\s*=\s*["\']([^"\']+)["\']', ctx.text(mf))
+                if own:
+                    local_names.add(own.group(1).strip())
             if mf.name.startswith("requirements") and mf.suffix == ".txt":
                 for raw in ctx.text(mf).splitlines():
                     line = raw.split("#", 1)[0].strip()
@@ -184,6 +272,9 @@ class DependenciesExtractor(Extractor):
                     if "==" in line or "@" in line:
                         continue                       # pinned (== or @ url/hash)
                     m = _PIP_LINE.match(line)
+                    if m:
+                        declarations.append({"ecosystem": "pip", "name": m.group(1),
+                                             "spec": (m.group(2) or "").strip() or "*", "file": rel})
                     if m and re.search(r"[<>~*!]|^[A-Za-z0-9._-]+$", (m.group(2) or "").strip() or m.group(1)):
                         unpinned.append({"file": rel, "name": m.group(1), "spec": (m.group(2) or "").strip() or "*",
                                          "reason": "unpinned pip requirement (no == pin)"})
@@ -199,7 +290,13 @@ class DependenciesExtractor(Extractor):
             "unpinned": unpinned[:200],                # ADVISORY — not routed to the ledger
             "confusion_candidates": confusion[:100],   # ADVISORY — not routed to the ledger
             "counts": counts,
+            # Offline inputs for the OPT-IN existence check. Present always; the check is not.
+            "declarations": declarations[:2000],
+            "local_names": sorted(local_names),
+            "private_scopes": sorted(private_scopes),
+            "private_index": pip_private,
+            "resolved_once": sorted(resolved_once)[:4000],
             "network": {"ran": False,
-                        "note": "registry resolution / known-hallucinated-name list / typosquat distance are "
-                                "deferred behind an opt-in --network step; the default pass is fully offline."},
+                        "note": "registry resolution is deferred behind an opt-in --network step; the default "
+                                "pass is fully offline and makes ZERO network calls."},
         }

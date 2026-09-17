@@ -322,6 +322,30 @@ required tools when `scan: true`. Outputs expose `run-directory`, `sarif-file` a
 Keep the reviewed action checkout separate from untrusted target source. Pin a reviewed 0.14.0-or-later commit when adopting these changes; the historical v0.13.0 tag
 does not include them.
 
+**Dependency existence — `websec run --network` (opt-in).** Offline checks cannot tell whether a
+declared package actually exists, which is the AI-hallucinated-dependency surface.
+
+```bash
+websec run . --network-dry-run    # print the exact names that WOULD be sent; sends nothing
+websec run . --network            # HEAD registry.npmjs.org / pypi.org; ~2.8s for 52 deps
+```
+
+Only bare package **names** are sent — never versions, paths or repository identity. Suppression is
+applied **offline, before any request**: names this repo publishes (via the real workspace graph),
+scopes bound to a private registry in `.npmrc`/`.yarnrc.yml`, and pip `index-url` overrides. A
+private name that reaches a public registry cannot be un-sent, and a 404 on an internal name tells
+an attacker which name to squat.
+
+A 404 is split by offline lockfile evidence: `resolved` + `integrity` means the package once
+existed, so it is `dependency-unpublished-or-removed` (a package pulled for malware looks exactly
+like this) rather than `dependency-nonexistent`. Findings are MEDIUM/LOW-confidence and do **not**
+fail `--fail-on` unless you also pass `--fail-on-network` — the UNKNOWN rate is outside your
+control, so gating on it would make registry uptime a dependency of shipping. UNKNOWN is recorded
+as a coverage gap, never as clean.
+
+**A 200 is not evidence of safety.** A squatter who has already registered the hallucinated name
+also returns 200 — that is the successful attack, not the clean case.
+
 **Agent-loop gate — `websec gate` and `websec hooks install --agent`.** Scanning at the merge
 request makes a finding a backlog item; scanning on the edit that caused it makes it a retry the
 agent fixes immediately.

@@ -20,6 +20,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`websec run --network` verifies that declared dependencies actually EXIST** — the AI
+  slopsquat / hallucinated-dependency class, which no offline check can reach. Opt-in, like
+  `--verify-secrets`: it sends bare package **names** — never versions, paths or repository
+  identity — to `registry.npmjs.org` and `pypi.org` via HEAD requests that transfer zero body
+  bytes, under the same host allowlist, redirect re-validation and bounded-read rules as the
+  threat-feed refresh. 52 real dependencies resolve in ~2.8s at 8 workers and 20 requests/second.
+  `--network-dry-run` prints the exact list and sends nothing.
+  **Suppression happens offline, before any request**, because a private name that reaches a public
+  registry cannot be un-sent — and a 404 on an internal name tells an attacker exactly which name
+  to squat, so the check could otherwise create the dependency-confusion opportunity it exists to
+  find. Names this repository publishes (resolved through the real workspace graph, not a
+  spec-prefix guess), scopes bound to a private registry by `.npmrc`/`.yarnrc.yml`, and pip
+  `index-url` overrides are all subtracted first. Verified on the monorepo where the naive version
+  had a **100% false-positive rate**: the private `@repo/cdk-lib` — declared `"*"`, not
+  `workspace:*`, so the existing prefix filter could not catch it — is now suppressed offline, and
+  52 of 52 remaining names resolve with **0 false positives**.
+  A 404 is split using offline lockfile evidence: a `resolved` URL plus an `integrity` hash proves
+  the name once published, so it is reported as `dependency-unpublished-or-removed` — packages
+  pulled for malware look exactly like this — rather than `dependency-nonexistent`. Different
+  cause, different remediation.
+  Findings are ledger-bound at MEDIUM severity and LOW confidence and are **not `--fail-on`
+  eligible** unless `--fail-on-network` is given as a second, explicit decision: the UNKNOWN rate is
+  non-deterministic and outside operator control (measured 0%, 0%, 0% and 4.5% across four
+  identical runs), so gating would make registry availability a dependency of shipping. UNKNOWN is
+  neither clean nor missing — it records a coverage gap and makes execution incomplete. Every
+  result states that **a 200 is not evidence of safety**: a squatter who has already registered a
+  hallucinated name also returns 200, which is the successful attack rather than the clean case.
 - **`websec hooks install --agent` puts the gate inside the agent loop.** A `PostToolUse` hook on
   `Write|Edit|MultiEdit` runs `websec gate` on the file just written and exits 2 on a blocking
   finding, which stops the loop and shows the finding and its remediation to the model as a retry

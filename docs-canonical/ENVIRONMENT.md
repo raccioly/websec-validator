@@ -40,7 +40,11 @@ The core CLI requires no environment variables. Optional integrations use:
 | `WEBSEC_HOOK_FAIL_ON` | No | `high` | Native pre-push severity gate; changing it invalidates accepted baseline policy. |
 | `WEBSEC_HOOK_SCAN` | No | `0` | Set to `1` to execute optional scanners in native hooks. |
 | `WEBSEC_HOOK_SCANNERS` | No | Empty | Comma-separated required adapters; requires `WEBSEC_HOOK_SCAN=1`. |
-| `WEBSEC_SKIP_HOOK` | No | `0` | Explicit native-hook bypass when set to `1`; does not advance the accepted baseline. |
+| `WEBSEC_SKIP_HOOK` | No | `0` | Explicit native-hook bypass when set to `1`; does not advance the accepted baseline. An honoured bypass is now RECORDED to `$GIT_DIR/websec-guardrail/bypass.jsonl`. It is NOT honoured by the agent-loop hook, because an agent can set an environment variable itself. |
+| `WEBSEC_GATE_FAIL_ON` | No | `medium` | Severity threshold for the agent-loop `PostToolUse` gate. |
+| `WEBSEC_GATE_MIN_CONFIDENCE` | No | `low` | Confidence floor for the agent-loop gate; `low` applies no filtering. |
+| `WEBSEC_ACTOR` | No | — | Operator identity recorded under `attribution.declared`. SELF-ASSERTED and labelled as unverified — not audit evidence. |
+| `WEBSEC_AGENT_MODEL` / `WEBSEC_AGENT_HARNESS` / `WEBSEC_AGENT_SESSION` | No | — | Agent identity recorded under `attribution.declared`; same self-asserted caveat. |
 
 > **Detection signatures, not consumed by the tool.** `JWT_SECRET` (and the `'dev-secret'` fallback)
 > appears in `src/websec_validator/extractors/auth.py` only as a *pattern the recon engine searches for
