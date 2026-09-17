@@ -65,15 +65,26 @@ REGISTRY: list[Extractor] = [
 
 def run_all(root: Path, version: str, excludes: list | None = None,
             include_fixtures: bool = False, *,
-            expected_root: tuple[Path, int, int] | None = None) -> dict:
-    """Walk the repo once, run every extractor, return the merged FACTS dict."""
-    ctx = RepoContext(root, excludes, include_fixtures=include_fixtures, expected_root=expected_root)
+            expected_root: tuple[Path, int, int] | None = None,
+            only: list | None = None) -> dict:
+    """Walk the repo once, run every extractor, return the merged FACTS dict.
+
+    `only` narrows which files are READ AND MATCHED (see RepoContext: the walk itself always covers
+    the whole tree, so stack detection, ignore policy and fixture classification are unchanged).
+    """
+    ctx = RepoContext(root, excludes, include_fixtures=include_fixtures, expected_root=expected_root,
+                      only=only)
     facts: dict = {
         "tool": "websec-validator",
         "schema_version": "2.0",   # lockstep with formats.SCHEMA_VERSION + schemas/facts.schema.json
         "version": version,
         "target": str(root.resolve()),
         "files_scanned": len(ctx.code_files),
+        **({"analysis_scope": {"requested": ctx.scope_requested, "matched": ctx.scope_matched,
+                               "missed": ctx.scope_missed, "tree_files": len(ctx.all_code_files),
+                               "note": ("analysis was narrowed to these files; a MISSED path was never "
+                                        "analyzed and its absence from the findings is not a clean "
+                                        "result")}} if ctx.scope is not None else {}),
         # PARTIAL-scan guard: the walker stops at MAX_FILES (filesystem order), so on a very large
         # monorepo recon may miss files. Surface it loudly rather than implying full coverage.
         "files_truncated": bool(getattr(ctx, "truncated", False)),

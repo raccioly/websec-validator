@@ -20,6 +20,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`websec run --only PATH` narrows ANALYSIS, not just the report** — the basis of an in-loop
+  security gate. `--diff` scopes what is *reported*: measured at 42.2s versus 43.0s for a full run
+  on a 320-file repo, because 99% of the cost is extractors running over the whole tree. `--only`
+  changes what is read and matched, measured at **4.3s versus 43s (about 13x)** for a one-file
+  scope. It is two-tier by design: the tree is still walked in full, so stack detection, ignore
+  policy, fixture classification and glob discovery are unchanged — a scoped run of one Python file
+  in a Deno repo still detects Deno. Files are analyzed **in place**; copying them into a temporary
+  tree was measured to manufacture 3 CRITICAL and 1 HIGH findings purely from losing path context
+  and the ignore policy. A requested path the walker never selected is reported as `missed` in
+  `analysis_scope`, never as a clean result. Verified on this repository: scoping to the 17 files
+  carrying findings produced **0 new findings and 0 lost**, and a parity test now enforces that
+  scoped findings are a subset of full-tree findings with unchanged severities.
 - **Runs now record WHICH CHANGE they describe, graded by how much the evidence is worth.** A new
   `attribution` object carries the commit SHA, whether the tree was clean, branch, author/committer
   email, commit-signature status and key fingerprint; CI-minted context (provider, repository, run

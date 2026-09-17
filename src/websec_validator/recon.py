@@ -16,9 +16,10 @@ from .extractors.stack import StackExtractor
 
 def build_facts(root: Path, version: str, excludes: list | None = None,
                 include_fixtures: bool = False, *,
-                expected_root: tuple[Path, int, int] | None = None) -> dict:
+                expected_root: tuple[Path, int, int] | None = None,
+                only: list | None = None) -> dict:
     return extractors.run_all(root, version, excludes, include_fixtures=include_fixtures,
-                              expected_root=expected_root)
+                              expected_root=expected_root, only=only)
 
 
 def write_facts(facts: dict, out: Path) -> Path:
