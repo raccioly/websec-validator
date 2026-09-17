@@ -873,6 +873,29 @@ def cmd_hooks(args) -> int:
     from . import hooks as _hooks
     path = Path(args.path).expanduser() if getattr(args, "path", None) else Path(".")
     try:
+        if getattr(args, "agent", False):
+            # The AGENT-LOOP hook is a different animal from the git guardrail: it edits a
+            # STRUCTURED settings.json rather than appending shell text, and it runs per edit
+            # instead of per commit/push.
+            if args.action == "install":
+                result = _hooks.install_agent_hook(path)
+                if not result.get("ok"):
+                    print(f"error: {result.get('error')}", file=sys.stderr)
+                    return 2
+                print(f"{result['action']} PostToolUse gate ({result['matcher']}) in {result['path']}")
+                print("  runs `websec gate` on each file the agent writes; blocks the loop on a "
+                      "finding at or above MEDIUM so the agent can fix it immediately.")
+                print("  NOTE: this is developer ergonomics, not a compliance control. Settings "
+                      "files are editable, so only managed policy settings are unbypassable.")
+            elif args.action == "uninstall":
+                result = _hooks.install_agent_hook(path, uninstall=True)
+                if not result.get("ok"):
+                    print(f"error: {result.get('error')}", file=sys.stderr)
+                    return 2
+                print(f"{result['action']} agent hook in {result['path']}")
+            else:
+                print(json.dumps(_hooks.agent_hook_status(path), indent=2))
+            return 0
         if args.action == "install":
             print(_hooks.install(path, pre_push=args.pre_push))
         elif args.action == "uninstall":
@@ -1288,6 +1311,11 @@ def build_parser() -> argparse.ArgumentParser:
     hk = sub.add_parser("hooks",
                         help="install a git guardrail hook (post-commit advisory or pre-push gate on NEW findings)")
     hk.add_argument("action", choices=["install", "uninstall", "status"])
+    hk.add_argument("--agent", action="store_true",
+                    help="install the AGENT-LOOP gate (PostToolUse on Write|Edit|MultiEdit) into "
+                         ".claude/settings.json instead of a git hook: runs `websec gate` on each "
+                         "file the agent writes and blocks the loop on a finding, so it becomes a "
+                         "retry rather than a backlog item. Developer ergonomics, not a control.")
     hk.add_argument("--pre-push", dest="pre_push", action="store_true",
                     help="install a blocking pre-push gate (--fail-on new findings) instead of the advisory post-commit hook")
     hk.add_argument("--path", help="repo directory (default: current dir)")

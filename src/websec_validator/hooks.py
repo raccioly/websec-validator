@@ -16,7 +16,9 @@ latest completed attempt plus the independent accepted state.
 
 from __future__ import annotations
 
+import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -62,6 +64,106 @@ def _hooks_dir(root: Path) -> Path:
 
 
 BYPASS_LOG = "websec-guardrail/bypass.jsonl"
+
+# Stable marker so install is idempotent and uninstall removes only our entry from a file the user
+# also edits by hand. settings.json is STRUCTURED, so this is a JSON merge — the shell-text marker
+# approach used for git hooks would corrupt it.
+AGENT_HOOK_COMMAND = "websec-agent-hook"
+# Our entry may be spelled either as the console script or as the pinned-interpreter fallback, so
+# recognition must cover BOTH. Matching only the script name made install non-idempotent and left
+# uninstall unable to find what it had written.
+AGENT_HOOK_MODULE = "websec_validator.agenthook"
+AGENT_HOOK_MATCHER = "Write|Edit|MultiEdit"
+AGENT_HOOK_EVENT = "PostToolUse"
+
+
+def _agent_hook_entry(command: str) -> dict:
+    return {"matcher": AGENT_HOOK_MATCHER,
+            "hooks": [{"type": "command", "command": command, "timeout": 30}]}
+
+
+def _is_ours(group: dict) -> bool:
+    if not isinstance(group, dict):
+        return False
+    for hook in group.get("hooks") or []:
+        command = str(hook.get("command", "")) if isinstance(hook, dict) else ""
+        if AGENT_HOOK_COMMAND in command or AGENT_HOOK_MODULE in command:
+            return True
+    return False
+
+
+def agent_hook_command() -> str:
+    """Prefer the installed console script; fall back to the pinned interpreter.
+
+    The console script is on PATH wherever websec itself is installed. The fallback matters for an
+    editable/venv install where the script may not be on the agent's PATH."""
+    if shutil.which(AGENT_HOOK_COMMAND):
+        return AGENT_HOOK_COMMAND
+    pinned = _safe_pinned_python()
+    if pinned:
+        return f"{pinned} -I -m websec_validator.agenthook"
+    return f"{AGENT_HOOK_COMMAND}"
+
+
+def install_agent_hook(project_dir, *, uninstall: bool = False, settings_path=None) -> dict:
+    """Add (or remove) the PostToolUse gate in .claude/settings.json.
+
+    Idempotent: re-installing replaces our entry in place and never touches the user's other hooks.
+
+    NOT A COMPLIANCE CONTROL. Settings files are editable by the user and, in a repository the agent
+    can write to, by the agent. Only managed policy settings deployed through device management are
+    genuinely unbypassable. This is developer ergonomics — it catches mistakes early and cannot
+    evidence that it ran for every change."""
+    root = Path(project_dir).expanduser().resolve()
+    path = Path(settings_path) if settings_path else root / ".claude" / "settings.json"
+    data: dict = {}
+    if path.is_file():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8") or "{}")
+            data = loaded if isinstance(loaded, dict) else {}
+        except ValueError as error:
+            # Never clobber a settings file we cannot parse — the user's own config lives there.
+            return {"ok": False, "path": str(path), "error": f"settings.json is not valid JSON: {error}"}
+
+    hooks_block = data.get("hooks")
+    if not isinstance(hooks_block, dict):
+        hooks_block = {}
+    groups = [g for g in (hooks_block.get(AGENT_HOOK_EVENT) or []) if isinstance(g, dict)]
+    kept = [g for g in groups if not _is_ours(g)]
+    removed = len(groups) - len(kept)
+
+    if uninstall:
+        if kept:
+            hooks_block[AGENT_HOOK_EVENT] = kept
+        else:
+            hooks_block.pop(AGENT_HOOK_EVENT, None)
+        action = "removed" if removed else "not-installed"
+    else:
+        command = agent_hook_command()
+        hooks_block[AGENT_HOOK_EVENT] = kept + [_agent_hook_entry(command)]
+        action = "replaced" if removed else "installed"
+
+    if hooks_block:
+        data["hooks"] = hooks_block
+    else:
+        data.pop("hooks", None)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return {"ok": True, "path": str(path), "action": action, "event": AGENT_HOOK_EVENT,
+            "matcher": AGENT_HOOK_MATCHER}
+
+
+def agent_hook_status(project_dir, settings_path=None) -> dict:
+    root = Path(project_dir).expanduser().resolve()
+    path = Path(settings_path) if settings_path else root / ".claude" / "settings.json"
+    if not path.is_file():
+        return {"installed": False, "path": str(path)}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8") or "{}")
+    except ValueError:
+        return {"installed": False, "path": str(path), "error": "settings.json is not valid JSON"}
+    groups = ((data.get("hooks") or {}).get(AGENT_HOOK_EVENT) or []) if isinstance(data, dict) else []
+    return {"installed": any(_is_ours(g) for g in groups if isinstance(g, dict)), "path": str(path)}
 
 
 def read_bypasses(repo, limit: int = 50) -> dict:

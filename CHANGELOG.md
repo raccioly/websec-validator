@@ -20,6 +20,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`websec hooks install --agent` puts the gate inside the agent loop.** A `PostToolUse` hook on
+  `Write|Edit|MultiEdit` runs `websec gate` on the file just written and exits 2 on a blocking
+  finding, which stops the loop and shows the finding and its remediation to the model as a retry
+  signal. Measured at 0.30s to block, 0.15s for an edit no detector reads. It is `PostToolUse` and
+  not `PreToolUse` because at `PreToolUse` the file does not exist yet, so there is nothing to scan.
+  The hook runs the gate **in-process**: as a subprocess, an exit code of 1 for "module not found"
+  was indistinguishable from the gate's exit 1 for "blocking findings", so a broken check read as a
+  finding. It **fails open, loudly** — a check that blocks every edit when broken gets uninstalled —
+  and it deliberately does **not** honour `WEBSEC_SKIP_HOOK`, because the agent can set an
+  environment variable. Installation is a structural merge into `.claude/settings.json` that
+  preserves your own settings and hooks, is idempotent, and refuses to overwrite a settings file it
+  cannot parse. The plugin ships `hooks/hooks.json` and a `websec-agent-hook` console script,
+  verified from an isolated built wheel in a clean virtualenv. **This is developer ergonomics, not
+  a compliance control**: settings files are editable, so only managed policy settings are
+  unbypassable, and the install output says so.
 - **`websec gate` — a fast scoped pass/fail for inside the agent loop.** Measured at **0.3s** on a
   one-file change. It analyses the files you just changed and exits 0 (pass) or 1 (blocking
   findings), with 2 reserved for a usage or target error so a harness can tell a failed check from

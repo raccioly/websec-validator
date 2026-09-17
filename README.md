@@ -322,6 +322,46 @@ required tools when `scan: true`. Outputs expose `run-directory`, `sarif-file` a
 Keep the reviewed action checkout separate from untrusted target source. Pin a reviewed 0.14.0-or-later commit when adopting these changes; the historical v0.13.0 tag
 does not include them.
 
+**Agent-loop gate — `websec gate` and `websec hooks install --agent`.** Scanning at the merge
+request makes a finding a backlog item; scanning on the edit that caused it makes it a retry the
+agent fixes immediately.
+
+```bash
+websec gate                          # the files you just changed, ~0.3s, exit 1 if blocking
+websec gate --fail-on high           # default is medium (see below)
+websec hooks install --agent         # PostToolUse hook: runs the gate on every file the agent writes
+websec hooks status --agent
+websec hooks uninstall --agent
+```
+
+`gate` scopes the **analysis**, not just the report: `--only` narrows what is read and matched
+(~13x faster than a full pass), while the tree is still walked in full so stack detection, ignore
+policy and fixture classification are unchanged. Its default scope is the **working tree** —
+tracked modifications plus untracked files — because agent edits are uncommitted and a three-dot
+`base...HEAD` diff would see nothing. It writes no artifacts, publishes no run directory and never
+advances an accepted baseline.
+
+The default threshold is **medium, not high**: command injection and SSRF on agent-written code are
+frequently rated MEDIUM, so a HIGH default would miss the main case. `--min-confidence` filters
+low-confidence leads for teams that measure them as noisy; there is no confidence floor by default,
+because in the loop a false block costs one turn while a miss ships.
+
+Three deliberate properties of the hook:
+
+- It **fails open, loudly**. If the gate cannot run, the hook exits 0 and says on stderr that the
+  edit was *not* security-checked. A check that blocks every edit when broken gets uninstalled, and
+  then there is no check at all. A pass means "nothing blocking was found", never "this was verified".
+- It does **not** honour `WEBSEC_SKIP_HOOK`, unlike the git guardrail below. The agent can set an
+  environment variable in a Bash call, so an env escape hatch here would be one the agent operates.
+- It is **developer ergonomics, not a compliance control.** Settings files are editable by the user
+  and, in a repository the agent can write to, by the agent. Only managed policy settings deployed
+  through device management are genuinely unbypassable. This hook catches mistakes early; it cannot
+  evidence that it ran for every change, and should not be presented as though it could. For
+  enforcement, run `websec run --fail-on …` as a required status check.
+
+A scoped pass is a fast retry signal, not a review: it does not consult cross-file evidence outside
+the scope, and a clean result does not mean the repository is clean. Keep running the full pass.
+
 **Local guardrail — `websec hooks`.** Advisory and gating runs have separate responsibilities:
 
 ```bash
