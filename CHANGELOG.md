@@ -20,6 +20,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`websec gate` — a fast scoped pass/fail for inside the agent loop.** Measured at **0.3s** on a
+  one-file change. It analyses the files you just changed and exits 0 (pass) or 1 (blocking
+  findings), with 2 reserved for a usage or target error so a harness can tell a failed check from
+  a broken one. The default scope is the **working tree** — tracked modifications plus untracked
+  files — because agent edits are uncommitted by definition and `diffscope`'s three-dot
+  `base...HEAD` sees only committed work, returning nothing for the exact case this exists to catch.
+  It writes nothing, publishes no run directory and never advances an accepted baseline: a fast
+  scoped check is not a review, and the verdict says so inline. The default threshold is **medium,
+  not high**, because command injection and SSRF on agent-written code are frequently rated MEDIUM
+  and a HIGH default would look like it worked while missing the main case; `--min-confidence` is
+  available for teams that measure the low-confidence leads as too noisy, and no confidence floor
+  is applied by default because in the loop a false block costs one turn while a miss ships.
+  Requested paths that were never analysed are reported as `missed`, never as a clean result.
 - **`websec run --only PATH` narrows ANALYSIS, not just the report** — the basis of an in-loop
   security gate. `--diff` scopes what is *reported*: measured at 42.2s versus 43.0s for a full run
   on a 320-file repo, because 99% of the cost is extractors running over the whole tree. `--only`

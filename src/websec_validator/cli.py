@@ -706,6 +706,42 @@ def _emit_json_result(result: dict, output: str | None = None) -> None:
     print(content)
 
 
+def cmd_gate(args) -> int:
+    """Fast, scoped pass/fail for inside the agent loop. Writes nothing; never advances a baseline."""
+    from . import gate as _gate
+    target = Path(args.target).expanduser().resolve()
+    if not target.is_dir():
+        print(f"error: target is not a directory: {target}", file=sys.stderr)
+        return 2
+
+    scope_source = "explicit"
+    paths = list(getattr(args, "only", None) or [])
+    if not paths:
+        discovered = _gate.working_tree_paths(target)
+        paths, scope_source = discovered["paths"], discovered["source"]
+        if not paths:
+            # Nothing changed is a PASS, but say which question was answered.
+            print(_gate.to_json({"tool": "websec-validator", "command": "gate", "passed": True,
+                                 "blocking_count": 0, "analyzed": [], "missed": [],
+                                 "scope_source": scope_source,
+                                 "scope_note": discovered.get("note", ""),
+                                 "reason": "no changed files to analyze"}))
+            return 0
+
+    facts = recon.build_facts(target, __version__, getattr(args, "exclude", None), only=paths)
+    ledger = findings.build_ledger(facts, None)
+    result = _gate.verdict(ledger, facts, args.fail_on, scope_source=scope_source,
+                           min_confidence=getattr(args, "min_confidence", "low"))
+
+    if getattr(args, "format", "text") == "json":
+        print(_gate.to_json(result))
+    else:
+        print(_gate.render_text(result))
+    # 1 = blocking findings. Distinct from 2 (usage/target error) so a harness can tell a FAILED
+    # check from a BROKEN one and must never treat a crash as a pass.
+    return 0 if result["passed"] else 1
+
+
 def cmd_capabilities(args) -> int:
     from .extractors.profiles import capabilities
     _emit_json_result(capabilities())
@@ -1177,6 +1213,24 @@ def build_parser() -> argparse.ArgumentParser:
                              "overwrite an existing file)")
     verify.set_defaults(func=cmd_repair_verify)
 
+    g = sub.add_parser("gate", help="fast scoped pass/fail on the files you just changed (agent-loop check)")
+    g.add_argument("target", nargs="?", default=".")
+    g.add_argument("--only", action="append", metavar="PATH",
+                   help="analyze these files instead of the working-tree changes (repeatable)")
+    g.add_argument("--fail-on", dest="fail_on", default="medium",
+                   choices=["critical", "high", "medium", "low"],
+                   help="block at or above this severity (default: medium — command injection and "
+                        "SSRF on agent-written code are frequently MEDIUM, so a HIGH default would "
+                        "miss the main case this check exists for)")
+    g.add_argument("--min-confidence", dest="min_confidence", default="low",
+                   choices=["low", "medium", "high"],
+                   help="ignore findings below this calibrated confidence (default: low = no "
+                        "filtering; in the loop a false block costs one turn, a miss ships)")
+    g.add_argument("--format", choices=["text", "json"], default="text",
+                   help="text (default) is what a harness feeds back to the model; json for tooling")
+    g.add_argument("--exclude", action="append", metavar="PATH", help="exclude a path/glob")
+    g.set_defaults(func=cmd_gate)
+
     capabilities = sub.add_parser("capabilities", help="show offline named security checks and profile limitations")
     capabilities.set_defaults(func=cmd_capabilities)
 
@@ -1241,7 +1295,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-_COMMANDS = {"run", "recon", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks", "repair-verify", "capabilities", "intel", "research", "feedback"}
+_COMMANDS = {"run", "recon", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks", "repair-verify", "capabilities", "intel", "research", "feedback", "gate"}
 
 
 def main(argv=None) -> int:
