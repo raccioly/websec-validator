@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-09-16
+
+Migration: **none required — every change is additive.** The ledger gains optional `attribution`
+and `gate` objects, findings gain an optional `scan_mode`, facts gain an optional `analysis_scope`,
+and `manifest.json` gains `artifact_digests`. No field was removed or made required and the envelope
+stays at schema 2.0, so an existing consumer keeps working unchanged.
+
+Security note: `--network` adds a new, opt-in, third-party egress path. It is off by default, sends
+bare package names only, and suppresses names this repository publishes before any request. See
+[SECURITY.md](docs-canonical/SECURITY.md#dependency-existence---network).
+
+Not re-run for this release: the vuln-app corpus proof. The historical 10/10 result belongs to an
+earlier detector revision and is not renewed by this version.
+
 ### Added
 
 - `websec feedback` records an operator verdict that a detector is wrong — `false-positive` or

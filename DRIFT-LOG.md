@@ -43,6 +43,14 @@ against code on 2026-09-15 (22 extractors, 17 sink classes, 10 scanner entries, 
 all correct). The date was deliberately NOT bumped: a full methodology review is a human judgement
 and the marker must not assert one that did not happen.
 
+Updated 2026-09-16: a CHANGE-DRIVEN review of the same document corrected one claim that the
+working-tree gitleaks pass had falsified (the scanner table said Gitleaks catches "committed
+secrets"), documented the opt-in `--network` existence check beside the scanner layer, and added a
+section on where in the workflow analysis runs (review-time full pass versus in-loop scoped gate).
+The marker remains 2026-07-02 for the reason above: correcting claims touched by a change is not
+the full human methodology review the marker asserts, and FRS002 stays open by choice. Scanner
+entries are now **11**, not 10 — gitleaks runs as two disjoint passes.
+
 ## Resolved Drift
 
 | ID | Resolution | Date |
