@@ -383,6 +383,11 @@ def cmd_run(args) -> int:
     ledger["verification_context"] = {"application_id": getattr(args, "application_id", None) or str(target),
                                        "build_id": getattr(args, "build_id", None) or facts["coverage"]["analyzed_input_digest"],
                                        "source_digest": facts["coverage"]["analyzed_input_digest"]}
+    # WHICH CHANGE this finding set describes. A SIBLING of verification_context, never merged into
+    # it: repairs compares that object by strict dict equality, so an added key would invalidate
+    # every repair plan emitted before this change.
+    from . import attribution as _attribution
+    ledger["attribution"] = _attribution.build(target, actor=getattr(args, "actor", None))
     # 4b. baseline / diff — only NEW findings gate CI when a baseline is supplied
     diff = None
     if getattr(args, "baseline", None):
@@ -999,6 +1004,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="exit 1 if any finding at/above this severity remains (CI gate). With --baseline, "
                         "new, changed and reopened findings count; incomplete execution exits 2.")
     r.add_argument("--require-complete", action="store_true", help="exit 2 when requested checks cannot complete")
+    r.add_argument("--actor", metavar="WHO",
+                   help="record who initiated this run (or $WEBSEC_ACTOR). SELF-ASSERTED: stored under "
+                        "attribution.declared and labelled as not verified — a value the runner can set "
+                        "to any string is a label, not audit evidence.")
     r.add_argument("--application-id", help="stable application identity for repair verification (default: target path)")
     r.add_argument("--build-id", help="reviewed build identity (default: analyzed input digest)")
     r.add_argument("--diff", metavar="REF",

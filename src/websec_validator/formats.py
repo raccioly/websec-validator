@@ -264,6 +264,9 @@ def to_json(ledger: dict, facts: dict | None = None, tool_version: str = "0", ts
         },
         "calibration": ledger.get("calibration", {}),
         "verification_context": ledger.get("verification_context", {}),
+        # Sibling of verification_context by design (see attribution.build): WHICH change the
+        # findings describe, graded by how much the identity evidence is actually worth.
+        "attribution": ledger.get("attribution", {}),
         "coverage": ledger.get("coverage", facts.get("coverage")),
         "findings": ledger.get("findings", []),
     }

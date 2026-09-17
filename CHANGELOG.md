@@ -20,6 +20,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Runs now record WHICH CHANGE they describe, graded by how much the evidence is worth.** A new
+  `attribution` object carries the commit SHA, whether the tree was clean, branch, author/committer
+  email, commit-signature status and key fingerprint; CI-minted context (provider, repository, run
+  id, workflow ref, triggering actor) when a GitHub Actions or GitLab CI runner injected it; and a
+  `corroborate_at` link telling an assessor where to check the claim against a system websec does
+  not control. `assurance` is **computed** — `ci-minted` > `vcs-observed` > `self-asserted` > `none`
+  — and is never accepted as input. `--actor` / `$WEBSEC_ACTOR` and agent model/harness/session are
+  recorded under `declared` with an inline warning that they are unverified: a value the runner can
+  set to any string is a label, not audit evidence. The object also states, in the artifact rather
+  than only in the docs, that approver independence is **not** evidenced — that lives in a forge
+  approval record, not a scan. `attribution` is a **sibling** of `verification_context`, never
+  merged into it, because repairs compares that object by strict dict equality and an added key
+  would invalidate every previously emitted repair plan.
 - Agent-config detection now covers hosts beyond Claude Code: Cursor, VS Code, Gemini, Codex,
   Continue, OpenCode, Zed, Windsurf, Cline, Roo, Aider, Qwen and Warp. Committed literal
   credentials in an MCP `env`/`headers` block, unpinned MCP servers, non-vendor LLM base URLs and
