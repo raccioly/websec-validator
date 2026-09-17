@@ -725,6 +725,11 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                 scanner_finding["native_cwe"] = t["cwe"]
                 scanner_finding["standards"]["cwe"] = list(dict.fromkeys(
                     scanner_finding["standards"]["cwe"] + [t["cwe"]]))
+        # bug-218: carry WHICH gitleaks surface produced the hit (git history vs working tree)
+        # through to the ledger. "is this already committed, or only in my tree right now?" changes
+        # the remediation, and it is the whole point of running both passes.
+        if isinstance(t.get("scan_mode"), str):
+            scanner_finding["scan_mode"] = t["scan_mode"]
         if isinstance(t.get("sarif"), dict):
             scanner_finding["sarif"] = t["sarif"]
             scanner_finding["sarif_occurrences"] = t.get("sarif_occurrences", [t["sarif"]])

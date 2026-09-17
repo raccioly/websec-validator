@@ -20,6 +20,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Gitleaks now scans the working tree as well as git history, closing a false-clean.** The
+  adapter only ever ran `gitleaks detect --source`, which reads the **commit graph only**, so a
+  secret written but not yet committed was invisible to gitleaks on every target. Verified: an
+  uncommitted `.env` holding a live-shape GitHub PAT yields 0 findings before the fix and 1 after.
+  Trivy `fs` was the only working-tree secret path, so a run selecting `--scanners gitleaks`
+  reported a clean tree that was not clean. Gitleaks now runs **two disjoint passes** — history
+  (`gitleaks git`) and working tree (`gitleaks dir`) — because neither surface subsumes the other;
+  history mode remains load-bearing for the HISTORY-ONLY "rotate, don't just delete" annotation.
+  Each finding records `scan_mode` (`git`, `dir` or `git+dir`) through to the ledger, and a secret
+  seen by both passes collapses to one finding, so recall rises without inflating counts.
+  `--scanners gitleaks` selects both passes. On pre-8.19 gitleaks, which has no `git`/`dir`
+  subcommands, a cached capability probe falls back to the legacy `detect` spellings; a failed
+  probe assumes legacy rather than skipping the scan.
 - Recon no longer enumerates `.codex/` as target application source. It was the one member of the
   agent-tooling family missing from the traversal skip set, so a repository using Codex could have
   findings raised against its own agent hooks configuration.
