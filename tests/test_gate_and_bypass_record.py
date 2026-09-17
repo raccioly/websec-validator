@@ -139,6 +139,54 @@ class GateRecordTests(unittest.TestCase):
         self.assertEqual(gate["exit_code"], code)
         self.assertIn(gate["verdict"], {"pass", "fail", "incomplete"})
 
+    # ---- the FAIL path, with a finding that actually blocks ----
+    #
+    # Found by mutation testing: making the recorded verdict unconditionally "pass" survived the
+    # whole suite. The consistency test below compares the recorded exit_code against the process
+    # exit code, and that mutation changes BOTH together, so they still agreed — wrongly. The
+    # severity fixture also produced no findings at all, so the fail path was never exercised.
+    # Asserting a relationship between two values a fault moves in lockstep proves nothing; these
+    # cases pin the ABSOLUTE outcome against a repository that really does contain a blocking
+    # finding.
+    def _vuln_repo(self):
+        repo = _repo(self.base / "v")
+        (repo / "src").mkdir()
+        (repo / "src" / "app.py").write_text(
+            "from flask import Flask, request\n"
+            "import subprocess\n"
+            "app = Flask(__name__)\n\n"
+            "@app.route('/ping')\n"
+            "def ping():\n"
+            "    return subprocess.check_output('ping -c1 ' + request.args.get('host'), shell=True)\n")
+        (repo / "requirements.txt").write_text("flask==3.0.0\n")
+        return repo
+
+    def _run_on(self, repo, *extra):
+        out = self.base / f"out-{repo.name}"
+        code = cli.main(["run", str(repo), "--out", str(out), *extra])
+        led = sorted(out.glob("runs/*/findings-ledger.json"))[-1]
+        return code, json.loads(led.read_text())
+
+    def test_blocking_findings_record_verdict_fail_not_pass(self):
+        repo = self._vuln_repo()
+        code, ledger = self._run_on(repo, "--fail-on", "medium")
+        gate = ledger["gate"]
+        self.assertGreater(ledger["total"], 0, "fixture must actually produce findings")
+        self.assertEqual(gate["verdict"], "fail",
+                         "a blocking finding must be recorded as a FAILED gate, not a pass")
+        self.assertGreater(gate["count_at_or_above"], 0)
+        self.assertEqual(gate["exit_code"], 1)
+        self.assertEqual(code, 1)
+
+    def test_clean_repo_records_verdict_pass_with_zero_count(self):
+        """The paired case: `pass` must mean zero blocking findings, not merely 'not fail'."""
+        code, ledger = self._run_on(self.repo, "--fail-on", "critical")
+        gate = ledger["gate"]
+        self.assertEqual(gate["verdict"], "pass")
+        self.assertEqual(gate["count_at_or_above"], 0)
+        self.assertEqual(gate["exit_code"], 0)
+        self.assertEqual(code, 0)
+
     def test_recorded_exit_code_matches_the_process_exit_code(self):
         for extra in ((), ("--fail-on", "critical"), ("--fail-on", "low")):
             with self.subTest(extra=extra):
