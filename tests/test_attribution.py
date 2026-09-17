@@ -21,7 +21,9 @@ def _repo(root: Path, commit=True) -> Path:
     subprocess.run(["git", "init", "-q", "."], cwd=root, check=True)
     subprocess.run(["git", "config", "user.email", "dev@example.com"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.name", "Dev"], cwd=root, check=True)
-    subprocess.run(["git", "config", "commit.gpgsign", "false"], cwd=root, check=True)
+    for _k, _v in (("commit.gpgsign", "false"), ("core.autocrlf", "false"),
+                   ("core.hooksPath", ".git/hooks")):
+        subprocess.run(["git", "config", _k, _v], cwd=root, check=True)
     (root / "a.py").write_text("x = 1\n")
     if commit:
         subprocess.run(["git", "add", "-A"], cwd=root, check=True)

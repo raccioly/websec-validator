@@ -18,10 +18,14 @@ from websec_validator import cli, hooks
 
 def _repo(root: Path) -> Path:
     root.mkdir(parents=True, exist_ok=True)
-    for cmd in (["git", "init", "-q", "."],
-                ["git", "config", "user.email", "d@e.com"],
-                ["git", "config", "user.name", "D"]):
-        subprocess.run(cmd, cwd=root, check=True)
+    subprocess.run(["git", "init", "-q", "."], cwd=root, check=True)
+    # Pin every ambient git setting these tests depend on (the pattern in test_diffscope.py).
+    # A hostile or merely opinionated global config otherwise reaches in: commit.gpgsign=true fails
+    # the commits outright with no secret key, autocrlf rewrites line endings, and a global
+    # core.hooksPath runs someone else's hooks inside — or instead of — our fixture repo.
+    for _k, _v in (("user.email", "d@e.com"), ("user.name", "D"), ("commit.gpgsign", "false"),
+                   ("core.autocrlf", "false"), ("core.hooksPath", ".git/hooks")):
+        subprocess.run(["git", "-C", str(root), "config", _k, _v], check=True)
     (root / "a.txt").write_text("x\n")
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)
     subprocess.run(["git", "commit", "-qm", "init"], cwd=root, check=True)

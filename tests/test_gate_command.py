@@ -34,9 +34,14 @@ class GateTests(unittest.TestCase):
         (self.repo / "src").mkdir(parents=True)
         (self.repo / "src" / "safe.py").write_text(SAFE)
         (self.repo / "requirements.txt").write_text("flask==3.0.0\n")
-        for cmd in (["git", "init", "-q", "."], ["git", "config", "user.email", "d@e.com"],
-                    ["git", "config", "user.name", "D"]):
-            subprocess.run(cmd, cwd=self.repo, check=True)
+        subprocess.run(["git", "init", "-q", "."], cwd=self.repo, check=True)
+        # Pin ambient git settings (pattern from test_diffscope.py): a hostile global
+        # config with commit.gpgsign=true fails these commits outright, and a global
+        # core.hooksPath would redirect hook installs out of the fixture repo.
+        for _k, _v in (("user.email", "d@e.com"), ("user.name", "D"),
+                       ("commit.gpgsign", "false"), ("core.autocrlf", "false"),
+                       ("core.hooksPath", ".git/hooks")):
+            subprocess.run(["git", "-C", str(self.repo), "config", _k, _v], check=True)
         subprocess.run(["git", "add", "-A"], cwd=self.repo, check=True)
         subprocess.run(["git", "commit", "-qm", "init"], cwd=self.repo, check=True)
 
