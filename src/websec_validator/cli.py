@@ -12,6 +12,7 @@ agent at the generated AGENT-BRIEFING.md.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import stat
@@ -110,6 +111,37 @@ def _new_run_dir(out: str | None) -> tuple:
         raise ValueError("output runs path must be a real directory, not a symlink or other file: " + str(runs))
     run = Path(tempfile.mkdtemp(prefix=stamp + "-", dir=runs))
     return run, run.name
+
+
+_DIGESTED = ("FACTS.json", "coverage.json", "findings-ledger.json", "findings.envelope.json",
+             "results.sarif", "findings.json", "repair-plans.json", "attack-surface.json",
+             "REPORT.md", "AGENT-BRIEFING.md", "diff-scope.json", "sarif-imports.json")
+
+
+def _now_stamp() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _artifact_digests(run: Path) -> dict:
+    """sha256 of each artifact this run emitted, for integrity checking after the fact.
+
+    Bounded and non-raising: an unreadable artifact records an error string rather than failing a
+    run that has already completed its actual work."""
+    out: dict = {}
+    for name in _DIGESTED:
+        path = run / name
+        try:
+            if not path.is_file():
+                continue
+            digest = hashlib.sha256()
+            with path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            out[name] = "sha256:" + digest.hexdigest()
+        except Exception as error:
+            out[name] = f"unreadable: {type(error).__name__}"
+    return out
 
 
 def _publish_run(run: Path) -> None:
@@ -459,7 +491,17 @@ def cmd_run(args) -> int:
          "findings_summary": manifest_summary, "ledger": {"total": ledger["total"], "by_severity": ledger["by_severity"]},
          "sarif": "results.sarif", "sbom": sbom, "attack_surface": "attack-surface.json",
          "attack_surface_summary": inv.get("summary", {}),
-         "probes": manifest, "timestamp": ts}, indent=2))
+         "probes": manifest, "timestamp": ts,
+         # The INPUT side was already content-addressed (analyzed_input_digest, per-file hashes),
+         # but nothing hashed what we EMIT: the manifest listed filenames only, so a finding could
+         # be deleted from findings-ledger.json in a text editor and no artifact would contradict
+         # it. These digests make that edit detectable. They are integrity, NOT tamper-proofing:
+         # anyone who can edit an artifact can recompute the manifest, so this is only meaningful
+         # alongside an external copy (CI log, forge artifact store).
+         "artifact_digests": _artifact_digests(out),
+         "artifact_digests_note": ("sha256 of the artifacts emitted by this run, computed after they "
+                                   "were written. Detects later edits; does not prove authorship. "
+                                   "The manifest itself is not self-hashed.")}, indent=2))
 
     if facts["coverage"].get("execution_complete"):
         _publish_run(out)
@@ -637,7 +679,18 @@ def cmd_repair_verify(args) -> int:
     except (OSError, ValueError, TypeError) as error:
         result = {"accepted": False, "state": "verification-rejected", "errors": [str(error)],
                   "tests_executed_by_websec": False}
-    print(json.dumps(result, indent=2))
+    # The bound original/target repair evidence is the strongest thing websec produces, and it used
+    # to exist only on stdout and as an exit code — nothing durable, nothing an assessor could read
+    # later. `--out` persists it; _emit_json_result opens with "x", so a result can never overwrite
+    # an input or prior evidence.
+    result.setdefault("tests_executed_by_websec", False)
+    result["verified_at"] = _now_stamp()
+    try:
+        _emit_json_result(result, getattr(args, "out", None))
+    except FileExistsError:
+        print(json.dumps(result, indent=2))
+        print(f"\nrefusing to overwrite existing evidence at {args.out}", file=sys.stderr)
+        return 2
     return 0 if result.get("accepted") else 2
 
 
@@ -1111,6 +1164,9 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--record", required=True, help="operator-supplied verification record JSON")
     verify.add_argument("--rerun", required=True, help="findings ledger from the fixed build")
     verify.add_argument("--evidence-root", required=True, help="directory containing referenced test reports")
+    verify.add_argument("--out", metavar="RESULT.json",
+                        help="persist the verification result as a durable artifact (refuses to "
+                             "overwrite an existing file)")
     verify.set_defaults(func=cmd_repair_verify)
 
     capabilities = sub.add_parser("capabilities", help="show offline named security checks and profile limitations")

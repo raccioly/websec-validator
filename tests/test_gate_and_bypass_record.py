@@ -146,3 +146,44 @@ class GateRecordTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ArtifactIntegrityTests(unittest.TestCase):
+    """The input side was content-addressed; the output side was not. A finding could be deleted
+    from a written ledger in a text editor and no artifact would contradict it."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name).resolve()
+        self.repo = _repo(self.base / "r")
+        (self.repo / "app.py").write_text("print('ok')\n")
+        self.out = self.base / "out"
+        cli.main(["run", str(self.repo), "--out", str(self.out)])
+        self.run_dir = sorted(self.out.glob("runs/*"))[-1]
+        self.manifest = json.loads((self.run_dir / "manifest.json").read_text())
+
+    def test_emitted_artifacts_are_digested(self):
+        digests = self.manifest["artifact_digests"]
+        self.assertIn("findings-ledger.json", digests)
+        self.assertIn("results.sarif", digests)
+        for value in digests.values():
+            self.assertTrue(value.startswith("sha256:") or value.startswith("unreadable:"))
+
+    def test_digest_detects_a_later_edit(self):
+        import hashlib
+        led = self.run_dir / "findings-ledger.json"
+        recorded = self.manifest["artifact_digests"]["findings-ledger.json"]
+        before = "sha256:" + hashlib.sha256(led.read_bytes()).hexdigest()
+        self.assertEqual(recorded, before)
+        data = json.loads(led.read_text())
+        data["total"] = 0                                  # the edit an auditor cares about
+        led.write_text(json.dumps(data))
+        after = "sha256:" + hashlib.sha256(led.read_bytes()).hexdigest()
+        self.assertNotEqual(recorded, after, "a post-hoc edit must be detectable")
+
+    def test_digests_do_not_claim_tamper_proofing(self):
+        """Anyone who can edit an artifact can recompute the manifest. Say so, don't overclaim."""
+        note = self.manifest["artifact_digests_note"]
+        self.assertIn("does not prove authorship", note)
+        self.assertIn("not self-hashed", note)

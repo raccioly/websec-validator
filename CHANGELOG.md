@@ -41,6 +41,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   verdict (`pass` / `fail` / `incomplete` / `not-evaluated`) and exit code — so the artifact and
   the process exit code cannot disagree. The record states inline that a client-side gate is
   advisory unless run as a required status check: it cannot evidence that it ran for every change.
+- `manifest.json` now records a sha256 of every artifact the run emitted. The input side was
+  already content-addressed but the output side was not, so a finding could be deleted from a
+  written ledger in a text editor with nothing to contradict it. This is integrity, not
+  tamper-proofing — anyone who can edit an artifact can recompute the manifest — and the note
+  beside the digests says exactly that.
+- `websec repair-verify --out RESULT.json` persists the verification result. The bound
+  original/target repair evidence is the strongest artifact websec produces and it previously
+  existed only on stdout and as an exit code. The write refuses to overwrite an existing file, so a
+  result can never clobber an input or prior evidence.
 - **An honoured `WEBSEC_SKIP_HOOK` bypass now leaves a durable record.** The test was the first
   statement in the generated hook, before the interpreter was resolved and before any Python ran,
   so a skipped gate produced no run directory, no `hook.log` and no stderr line at all. The hook now
