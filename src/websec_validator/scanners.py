@@ -117,6 +117,10 @@ def _annotate_history_only_secrets(raw: list, target: Path | None) -> int:
     for f in raw:
         if f.get("tool") != "gitleaks" or f.get("category") != "secret":
             continue
+        # A working-tree hit is by definition present in the tree; only history mode can be
+        # history-ONLY. Guard on the recorded mode rather than re-deriving it from the filesystem.
+        if f.get("scan_mode") == "dir":
+            continue
         rel = _rel_to(f.get("file", ""), target)
         if not rel:
             continue
@@ -135,9 +139,43 @@ def _annotate_history_only_secrets(raw: list, target: Path | None) -> int:
     return n
 
 
+_GITLEAKS_DIR_SUPPORT: dict = {}
+
+
+def _gitleaks_has_subcommands(binary: str = "gitleaks") -> bool:
+    """Does the installed gitleaks have the 8.19+ `git`/`dir` subcommands?
+
+    `detect` survives only as a DEPRECATED alias and may be removed in a future major, so prefer the
+    explicit subcommands where available and fall back to the legacy spelling otherwise. Probed once
+    per process; a probe failure means "assume legacy", never "skip the scan"."""
+    if binary not in _GITLEAKS_DIR_SUPPORT:
+        try:
+            probe = subprocess.run([binary, "dir", "--help"], capture_output=True, timeout=20)
+            _GITLEAKS_DIR_SUPPORT[binary] = probe.returncode == 0
+        except Exception:
+            _GITLEAKS_DIR_SUPPORT[binary] = False
+    return _GITLEAKS_DIR_SUPPORT[binary]
+
+
 def _gitleaks(target: Path, out: Path, excludes=()) -> list:
-    return ["gitleaks", "detect", "--source", str(target), "--no-banner",
-            "--report-format", "json", "--report-path", str(out)]
+    """HISTORY mode — scans the commit graph across ALL refs. See _annotate_history_only_secrets."""
+    common = ["--no-banner", "--report-format", "json", "--report-path", str(out)]
+    if _gitleaks_has_subcommands():
+        return ["gitleaks", "git", str(target), *common]
+    return ["gitleaks", "detect", "--source", str(target), *common]
+
+
+def _gitleaks_dir(target: Path, out: Path, excludes=()) -> list:
+    """WORKING-TREE mode — the uncommitted surface history mode cannot see.
+
+    bug-218: the adapter only ever ran history mode, so a secret written but not yet committed was
+    invisible to gitleaks. Verified: an uncommitted .env yields 0 hits in history mode and 2 in
+    working-tree mode. That is exactly the state an AI coding agent leaves a tree in mid-task, and
+    trivy `fs` was the only working-tree secret path, so a gitleaks-only run reported a false clean."""
+    common = ["--no-banner", "--report-format", "json", "--report-path", str(out)]
+    if _gitleaks_has_subcommands():
+        return ["gitleaks", "dir", str(target), *common]
+    return ["gitleaks", "detect", "--source", str(target), "--no-git", *common]
 
 
 def _trufflehog(target: Path, out: Path, excludes=()) -> list:
@@ -223,6 +261,11 @@ REGISTRY: tuple = (
             install="brew install trivy  # pin by digest in CI", argv=_trivy),
     Scanner("gitleaks", "Gitleaks", "secrets", "gitleaks",
             install="brew install gitleaks", argv=_gitleaks),
+    # Same binary, second pass: history mode and working-tree mode are DISJOINT surfaces in gitleaks
+    # and neither subsumes the other. Kept as its own registry entry so the existing one-argv-per-
+    # scanner runner is untouched; `--scanners gitleaks` selects both (see _expand_only).
+    Scanner("gitleaks-dir", "Gitleaks (working tree)", "secrets", "gitleaks",
+            install="brew install gitleaks", argv=_gitleaks_dir),
     Scanner("semgrep", "Semgrep/OpenGrep", "sast", "semgrep",
             install="pipx install semgrep  # or opengrep for fully-OSS", argv=_semgrep),
     Scanner("checkov", "Checkov", "iac", "checkov",
@@ -255,6 +298,10 @@ def detect(stack_languages: list | None = None) -> dict:
     for s in REGISTRY:
         if s.languages and not (set(s.languages) & langs):
             continue  # not relevant to this repo's stack
+        # Same binary as `gitleaks`, run as a second pass. Listing it again would imply a separate
+        # tool the operator has to install. Presence/absence is already covered by the entry above.
+        if s.key == "gitleaks-dir":
+            continue
         entry = {"key": s.key, "name": s.name, "category": s.category,
                  "runnable": s.argv is not None}
         if shutil.which(s.binary):
@@ -275,6 +322,10 @@ def run_available(target: Path, outdir: Path, stack_languages: list | None = Non
     """
     langs = set(stack_languages or [])
     excludes = excludes or []
+    # bug-218: gitleaks is ONE tool to the operator but two registry entries. Selecting it by name
+    # must run both passes, or `--scanners gitleaks` silently keeps the old history-only blind spot.
+    if only:
+        only = list(only) + (["gitleaks-dir"] if "gitleaks" in only else [])
     only = set(only) if only else None
     scan_dir = outdir / "scanners"
     scan_dir.mkdir(parents=True, exist_ok=True)
@@ -734,7 +785,7 @@ def _norm_checkov(data) -> list:
     return out
 
 
-_PARSERS = {"trivy": _norm_trivy, "gitleaks": _norm_gitleaks, "semgrep": _norm_semgrep,
+_PARSERS = {"trivy": _norm_trivy, "gitleaks": _norm_gitleaks, "gitleaks-dir": _norm_gitleaks, "semgrep": _norm_semgrep,
             "checkov": _norm_checkov, "osv-scanner": _norm_osv,
             "gosec": _norm_gosec, "brakeman": _norm_brakeman,
             "trufflehog": _norm_trufflehog, "bandit": _norm_bandit}
@@ -750,7 +801,7 @@ def _checkov_summary(data) -> bool:
 
 def _valid_report(key: str, data) -> bool:
     """A valid JSON scalar/object is not evidence that a scanner finished."""
-    if key == "gitleaks":
+    if key in ("gitleaks", "gitleaks-dir"):
         return isinstance(data, list) or (isinstance(data, dict) and isinstance(data.get("findings"), list))
     if key == "checkov":
         rows = data if isinstance(data, list) else [data]
@@ -921,10 +972,38 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
             for finding in normalized:
                 if finding.get("category") == "sca":
                     _sca_occurrence(finding, target)
+                # bug-218: gitleaks runs twice over disjoint surfaces. Record WHICH surface produced
+                # the hit so history-only annotation and the briefing can tell them apart.
+                if key in ("gitleaks", "gitleaks-dir"):
+                    finding["scan_mode"] = "dir" if key == "gitleaks-dir" else "git"
             raw += normalized
         except Exception:
             parse_failed.append(key)          # a truncated/OOM-killed scanner must not read as clean
             continue
+
+    # bug-218: the same committed-and-still-present secret is found by BOTH gitleaks passes and
+    # shares a fingerprint (secret|file|rule|line). Collapse to one finding carrying both modes, so
+    # the dual pass adds RECALL without inflating the count.
+    _seen_gl: dict = {}
+    deduped = []
+    for f in raw:
+        if f.get("tool") != "gitleaks":
+            deduped.append(f)
+            continue
+        fp = f.get("fingerprint")
+        prior = _seen_gl.get(fp)
+        if prior is None:
+            _seen_gl[fp] = f
+            deduped.append(f)
+        elif prior.get("scan_mode") != f.get("scan_mode"):
+            # SAME secret seen by BOTH passes — one finding, both modes recorded.
+            prior["scan_mode"] = "git+dir"
+        else:
+            # Same mode: a within-tool duplicate. Leave it to the existing within-tool dedup so
+            # total_raw and the dedup counters keep their established meaning.
+            deduped.append(f)
+    gitleaks_modes_merged = len(raw) - len(deduped)
+    raw = deduped
 
     # bug-066 (a): a subprocess scanner can re-enter dirs the walker skips (nested worktrees,
     # build output, the tool's own websec-out) → drop anything under a SKIP_DIR. The
@@ -1013,6 +1092,9 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
                   **{k: f[k] for k in ("key", "rule_id", "id", "cve", "package", "pkg", "resource",
                                       "service", "symbol", "sink", "semantic_id", "line", "fingerprint",
                                       "installed", "fixed", "ecosystem", "advisory_aliases", "confidence", "cwe") if k in f},
+                  # bug-218: which gitleaks surface produced the hit (git | dir | git+dir). Committed
+                  # vs working-tree-only changes the remediation, so the ledger must see it.
+                  **({"scan_mode": f["scan_mode"]} if isinstance(f.get("scan_mode"), str) else {}),
                   # carry enrichment fields so the briefing/ledger/SARIF can render structured badges
                   **({"reachability": f["reachability"]} if f.get("reachability") else {}),
                   **({"epss": f["epss"]} if f.get("epss") is not None else {}),

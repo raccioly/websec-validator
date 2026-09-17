@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-09-16
+
+Migration: **none required — every change is additive.** The ledger gains optional `attribution`
+and `gate` objects, findings gain an optional `scan_mode`, facts gain an optional `analysis_scope`,
+and `manifest.json` gains `artifact_digests`. No field was removed or made required and the envelope
+stays at schema 2.0, so an existing consumer keeps working unchanged.
+
+Security note: `--network` adds a new, opt-in, third-party egress path. It is off by default, sends
+bare package names only, and suppresses names this repository publishes before any request. See
+[SECURITY.md](docs-canonical/SECURITY.md#dependency-existence---network).
+
+Not re-run for this release: the vuln-app corpus proof. The historical 10/10 result belongs to an
+earlier detector revision and is not renewed by this version.
+
 ### Added
 
 - `websec feedback` records an operator verdict that a detector is wrong — `false-positive` or
@@ -18,8 +32,158 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `with-context`, shows it before writing, and refuses without `--yes` outside a terminal.
   Feedback never suppresses — `.websec-ignore` remains the way to silence a finding locally.
 
+### Added
+
+- **`websec attest` projects an existing run into a per-control audit-evidence table.** It computes
+  nothing: it reads the artifacts a run already wrote and reports which audit-relevant facts websec
+  holds and which it does not. **Gaps are listed before evidence** in both the data and the
+  rendering, because a table that leads with coverage invites absence to read as satisfaction; on a
+  typical run 5 of 12 rows have no websec evidence at all, and the output says so plainly. Formats:
+  human-readable, JSON, and an **unsigned in-toto Statement** — unsigned by design, because a
+  websec-signed attestation would attest only that websec ran, whereas one signed with the
+  organisation's own key and identity is verifiable.
+  It renders no verdict, score, percentage or badge, and the word "compliant" appears in no output
+  format; a test enforces that. Compliance is an attribute of an assessed entity determined by a
+  qualified assessor, not a property a tool can confer. Approver independence, rollback and PCI
+  6.4.2 runtime protection are declared non-goals **in the artifact**, and the output states that
+  the local gate is bypassable and its bypass record is not exhaustive.
+  Citations are exact and tested, because the obvious ones are wrong: EU DORA change management is
+  Commission Delegated Regulation (EU) 2024/1774 Art. 17 (the RTS under DORA Art. 9(4)(e)), not
+  DORA Art. 17, which is incident management; there is no SOX article for ITGC, whose domains come
+  from SEC Release 33-8810 §II.A.2.d; and PCI DSS 6.2.3 permits automated review while 6.2.3.1 is
+  conditional on choosing manual review, so websec is deliberately not offered against it.
+- **`websec run --network` verifies that declared dependencies actually EXIST** — the AI
+  slopsquat / hallucinated-dependency class, which no offline check can reach. Opt-in, like
+  `--verify-secrets`: it sends bare package **names** — never versions, paths or repository
+  identity — to `registry.npmjs.org` and `pypi.org` via HEAD requests that transfer zero body
+  bytes, under the same host allowlist, redirect re-validation and bounded-read rules as the
+  threat-feed refresh. 52 real dependencies resolve in ~2.8s at 8 workers and 20 requests/second.
+  `--network-dry-run` prints the exact list and sends nothing.
+  **Suppression happens offline, before any request**, because a private name that reaches a public
+  registry cannot be un-sent — and a 404 on an internal name tells an attacker exactly which name
+  to squat, so the check could otherwise create the dependency-confusion opportunity it exists to
+  find. Names this repository publishes (resolved through the real workspace graph, not a
+  spec-prefix guess), scopes bound to a private registry by `.npmrc`/`.yarnrc.yml`, and pip
+  `index-url` overrides are all subtracted first. Verified on the monorepo where the naive version
+  had a **100% false-positive rate**: the private `@repo/cdk-lib` — declared `"*"`, not
+  `workspace:*`, so the existing prefix filter could not catch it — is now suppressed offline, and
+  52 of 52 remaining names resolve with **0 false positives**.
+  A 404 is split using offline lockfile evidence: a `resolved` URL plus an `integrity` hash proves
+  the name once published, so it is reported as `dependency-unpublished-or-removed` — packages
+  pulled for malware look exactly like this — rather than `dependency-nonexistent`. Different
+  cause, different remediation.
+  Findings are ledger-bound at MEDIUM severity and LOW confidence and are **not `--fail-on`
+  eligible** unless `--fail-on-network` is given as a second, explicit decision: the UNKNOWN rate is
+  non-deterministic and outside operator control (measured 0%, 0%, 0% and 4.5% across four
+  identical runs), so gating would make registry availability a dependency of shipping. UNKNOWN is
+  neither clean nor missing — it records a coverage gap and makes execution incomplete. Every
+  result states that **a 200 is not evidence of safety**: a squatter who has already registered a
+  hallucinated name also returns 200, which is the successful attack rather than the clean case.
+- **`websec hooks install --agent` puts the gate inside the agent loop.** A `PostToolUse` hook on
+  `Write|Edit|MultiEdit` runs `websec gate` on the file just written and exits 2 on a blocking
+  finding, which stops the loop and shows the finding and its remediation to the model as a retry
+  signal. Measured at 0.30s to block, 0.15s for an edit no detector reads. It is `PostToolUse` and
+  not `PreToolUse` because at `PreToolUse` the file does not exist yet, so there is nothing to scan.
+  The hook runs the gate **in-process**: as a subprocess, an exit code of 1 for "module not found"
+  was indistinguishable from the gate's exit 1 for "blocking findings", so a broken check read as a
+  finding. It **fails open, loudly** — a check that blocks every edit when broken gets uninstalled —
+  and it deliberately does **not** honour `WEBSEC_SKIP_HOOK`, because the agent can set an
+  environment variable. Installation is a structural merge into `.claude/settings.json` that
+  preserves your own settings and hooks, is idempotent, and refuses to overwrite a settings file it
+  cannot parse. The plugin ships `hooks/hooks.json` and a `websec-agent-hook` console script,
+  verified from an isolated built wheel in a clean virtualenv. **This is developer ergonomics, not
+  a compliance control**: settings files are editable, so only managed policy settings are
+  unbypassable, and the install output says so.
+- **`websec gate` — a fast scoped pass/fail for inside the agent loop.** Measured at **0.3s** on a
+  one-file change. It analyses the files you just changed and exits 0 (pass) or 1 (blocking
+  findings), with 2 reserved for a usage or target error so a harness can tell a failed check from
+  a broken one. The default scope is the **working tree** — tracked modifications plus untracked
+  files — because agent edits are uncommitted by definition and `diffscope`'s three-dot
+  `base...HEAD` sees only committed work, returning nothing for the exact case this exists to catch.
+  It writes nothing, publishes no run directory and never advances an accepted baseline: a fast
+  scoped check is not a review, and the verdict says so inline. The default threshold is **medium,
+  not high**, because command injection and SSRF on agent-written code are frequently rated MEDIUM
+  and a HIGH default would look like it worked while missing the main case; `--min-confidence` is
+  available for teams that measure the low-confidence leads as too noisy, and no confidence floor
+  is applied by default because in the loop a false block costs one turn while a miss ships.
+  Requested paths that were never analysed are reported as `missed`, never as a clean result.
+- **`websec run --only PATH` narrows ANALYSIS, not just the report** — the basis of an in-loop
+  security gate. `--diff` scopes what is *reported*: measured at 42.2s versus 43.0s for a full run
+  on a 320-file repo, because 99% of the cost is extractors running over the whole tree. `--only`
+  changes what is read and matched, measured at **4.3s versus 43s (about 13x)** for a one-file
+  scope. It is two-tier by design: the tree is still walked in full, so stack detection, ignore
+  policy, fixture classification and glob discovery are unchanged — a scoped run of one Python file
+  in a Deno repo still detects Deno. Files are analyzed **in place**; copying them into a temporary
+  tree was measured to manufacture 3 CRITICAL and 1 HIGH findings purely from losing path context
+  and the ignore policy. A requested path the walker never selected is reported as `missed` in
+  `analysis_scope`, never as a clean result. Verified on this repository: scoping to the 17 files
+  carrying findings produced **0 new findings and 0 lost**, and a parity test now enforces that
+  scoped findings are a subset of full-tree findings with unchanged severities.
+- **Runs now record WHICH CHANGE they describe, graded by how much the evidence is worth.** A new
+  `attribution` object carries the commit SHA, whether the tree was clean, branch, author/committer
+  email, commit-signature status and key fingerprint; CI-minted context (provider, repository, run
+  id, workflow ref, triggering actor) when a GitHub Actions or GitLab CI runner injected it; and a
+  `corroborate_at` link telling an assessor where to check the claim against a system websec does
+  not control. `assurance` is **computed** — `ci-minted` > `vcs-observed` > `self-asserted` > `none`
+  — and is never accepted as input. `--actor` / `$WEBSEC_ACTOR` and agent model/harness/session are
+  recorded under `declared` with an inline warning that they are unverified: a value the runner can
+  set to any string is a label, not audit evidence. The object also states, in the artifact rather
+  than only in the docs, that approver independence is **not** evidenced — that lives in a forge
+  approval record, not a scan. `attribution` is a **sibling** of `verification_context`, never
+  merged into it, because repairs compares that object by strict dict equality and an added key
+  would invalidate every previously emitted repair plan.
+- **The CI gate's verdict is now recorded as evidence, not only as an exit code.** `--fail-on` was
+  evaluated *after* the artifacts were written and *after* the run was published, so nothing in the
+  run directory said which gate ran, at what threshold, against which baseline, or whether it
+  passed. The verdict is now computed before anything is written and stored on the ledger as
+  `gate` — threshold, `new_only`, baseline identity, diff scoping, count at or above threshold,
+  verdict (`pass` / `fail` / `incomplete` / `not-evaluated`) and exit code — so the artifact and
+  the process exit code cannot disagree. The record states inline that a client-side gate is
+  advisory unless run as a required status check: it cannot evidence that it ran for every change.
+- `manifest.json` now records a sha256 of every artifact the run emitted. The input side was
+  already content-addressed but the output side was not, so a finding could be deleted from a
+  written ledger in a text editor with nothing to contradict it. This is integrity, not
+  tamper-proofing — anyone who can edit an artifact can recompute the manifest — and the note
+  beside the digests says exactly that.
+- `websec repair-verify --out RESULT.json` persists the verification result. The bound
+  original/target repair evidence is the strongest artifact websec produces and it previously
+  existed only on stdout and as an exit code. The write refuses to overwrite an existing file, so a
+  result can never clobber an input or prior evidence.
+- **An honoured `WEBSEC_SKIP_HOOK` bypass now leaves a durable record.** The test was the first
+  statement in the generated hook, before the interpreter was resolved and before any Python ran,
+  so a skipped gate produced no run directory, no `hook.log` and no stderr line at all. The hook now
+  appends a JSONL record (hook kind, HEAD, timestamp, `scanned: false`) to
+  `$GIT_DIR/websec-guardrail/bypass.jsonl` and says so on stderr before exiting 0. The escape hatch
+  still works — this records it, it does not block it. Every record and the `read_bypasses` reader
+  carry the limitation inline: websec cannot observe `git push --no-verify`, an uninstalled hook or
+  a deleted one, so **an empty bypass log is not evidence that no bypass occurred**.
+- Agent-config detection now covers hosts beyond Claude Code: Cursor, VS Code, Gemini, Codex,
+  Continue, OpenCode, Zed, Windsurf, Cline, Roo, Aider, Qwen and Warp. Committed literal
+  credentials in an MCP `env`/`headers` block, unpinned MCP servers, non-vendor LLM base URLs and
+  the hidden-unicode rules-file backdoor are found in those hosts' config and instruction files.
+  This deliberately extends the named ALLOW-LIST, not the walker: a broad sweep over agent
+  directories was measured against 1,515 agent files in 33 repositories and produced 0 true
+  positives and 1 false positive, because those directories hold worktree copies and cached
+  scanner output. The widened list finds 0 findings across 10 real repositories.
+- The non-vendor base-URL check now runs over every allow-listed file rather than only the ones
+  that parse as JSON. It is a text regex, and `.codex/config.toml`, `.windsurfrules` and the
+  `*.md` instruction files are exactly where a committed third-party LLM endpoint hides.
+
 ### Fixed
 
+- **Gitleaks now scans the working tree as well as git history, closing a false-clean.** The
+  adapter only ever ran `gitleaks detect --source`, which reads the **commit graph only**, so a
+  secret written but not yet committed was invisible to gitleaks on every target. Verified: an
+  uncommitted `.env` holding a live-shape GitHub PAT yields 0 findings before the fix and 1 after.
+  Trivy `fs` was the only working-tree secret path, so a run selecting `--scanners gitleaks`
+  reported a clean tree that was not clean. Gitleaks now runs **two disjoint passes** — history
+  (`gitleaks git`) and working tree (`gitleaks dir`) — because neither surface subsumes the other;
+  history mode remains load-bearing for the HISTORY-ONLY "rotate, don't just delete" annotation.
+  Each finding records `scan_mode` (`git`, `dir` or `git+dir`) through to the ledger, and a secret
+  seen by both passes collapses to one finding, so recall rises without inflating counts.
+  `--scanners gitleaks` selects both passes. On pre-8.19 gitleaks, which has no `git`/`dir`
+  subcommands, a cached capability probe falls back to the legacy `detect` spellings; a failed
+  probe assumes legacy rather than skipping the scan.
 - Recon no longer enumerates `.codex/` as target application source. It was the one member of the
   agent-tooling family missing from the traversal skip set, so a repository using Codex could have
   findings raised against its own agent hooks configuration.

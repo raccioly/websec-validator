@@ -138,7 +138,8 @@ class RepoContext:
     """Walk the tree once; cache file text; serve cheap queries to every extractor."""
 
     def __init__(self, root: Path, excludes: list | None = None, include_fixtures: bool = False,
-                 *, expected_root: tuple[Path, int, int] | None = None, walk: bool = True):
+                 *, expected_root: tuple[Path, int, int] | None = None, walk: bool = True,
+                 only: list | None = None):
         # Keep the caller's spelling for returned paths (macOS /var aliases
         # /private/var), with a separate canonical root for containment.
         self.root = Path(root).absolute()
@@ -175,9 +176,27 @@ class RepoContext:
         # an authorization cache: resolved targets and file state are rechecked.
         self._relative_files: dict[Path, Path] = {}
         self.code_files: list[Path] = []
+        # TWO-TIER ANALYSIS SCOPE (`only`). The tree is ALWAYS walked in full — walking is cheap
+        # (~0.3s on a 315-file repo) while reading and matching is not, and the walk is what
+        # establishes stack detection, ignore policy, fixture classification and glob discovery.
+        # `only` restricts which files are READ AND MATCHED; `all_code_files` keeps the full
+        # inventory for classification consumers.
+        #
+        # Files are analyzed IN PLACE against the real root. Measured: the same three files copied
+        # to a bare directory produced 3 CRITICAL + 1 HIGH findings that the full tree does not
+        # report, purely from losing path context and the ignore policy (a detector's own pattern
+        # literals read as application code once the path changes). Never copy, reroot or stage.
+        self.all_code_files: list[Path] = []
+        self.scope: set[str] | None = None
+        if only:
+            self.scope = {Path(str(p)).as_posix().lstrip("./") for p in only if str(p).strip()}
+        self.scope_requested: list[str] = sorted(self.scope) if self.scope else []
+        self.scope_matched: list[str] = []
+        self.scope_missed: list[str] = []
         self.stack: dict = {}
         if walk:
             self._walk()
+            self._apply_scope()
 
     @staticmethod
     def _identity(info: os.stat_result) -> tuple[int, int]:
@@ -294,6 +313,19 @@ class RepoContext:
                 elif suffix in SOURCE_EXT:
                     self.unsupported_files.append(self.rel(path))
 
+    def _apply_scope(self) -> None:
+        """Keep the full inventory, then narrow what will actually be analyzed."""
+        self.all_code_files = list(self.code_files)
+        if self.scope is None:
+            return
+        kept = [p for p in self.code_files if self.rel(p) in self.scope]
+        self.scope_matched = sorted(self.rel(p) for p in kept)
+        # A requested path that the walker never selected (excluded, generated, unsupported suffix,
+        # nonexistent, or outside the root) is a SCOPE MISS, not an empty clean result. The caller
+        # must be able to tell "analyzed and found nothing" from "never looked".
+        self.scope_missed = sorted(self.scope - set(self.scope_matched))
+        self.code_files = kept
+
     def rel(self, path: Path) -> str:
         relative = self._relative_files.get(path)
         if relative is not None:
@@ -390,8 +422,20 @@ class RepoContext:
         return self._text[key]
 
     def iter_code(self):
-        """Yield (path, relpath, text) for every selected code file."""
+        """Yield (path, relpath, text) for every selected code file (honours the analysis scope)."""
         for path in self.code_files:
+            yield path, self.rel(path), self.text(path)
+
+    def iter_all_code(self, suffixes: tuple = ()):
+        """Yield (path, relpath, text) over the WHOLE tree, ignoring the analysis scope.
+
+        For CLASSIFICATION probes only — the ones that decide which stack/frameworks a repo has and
+        therefore which detectors run. Scoping those would let a scoped run of one file silently
+        change the detected stack. Pass `suffixes` to keep the cost proportionate: a probe that only
+        applies to TS/JS must not read every Python file in the tree to answer."""
+        for path in (self.all_code_files or self.code_files):
+            if suffixes and path.suffix.lower() not in suffixes:
+                continue
             yield path, self.rel(path), self.text(path)
 
     def manifest(self, name: str) -> str:

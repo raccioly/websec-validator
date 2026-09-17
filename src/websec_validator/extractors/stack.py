@@ -138,7 +138,11 @@ class StackExtractor(Extractor):
         # the whole app reads as `languages: ?` — which zeroes out every downstream extractor.
         # File-extension fallback + Deno/Supabase/WebExtension/SQL-schema detection restore a real
         # stack model for these manifest-less stacks. ---
-        code_exts = {p.suffix.lower() for p in ctx.code_files}
+        # CLASSIFICATION, not detection: the stack must be derived from the WHOLE tree even when
+        # analysis is scoped to a few changed files. Scoping this would silently change the detected
+        # stack and therefore which detectors run — a scoped run of one .py file in a TypeScript repo
+        # must not conclude the project is Python.
+        code_exts = {p.suffix.lower() for p in getattr(ctx, "all_code_files", None) or ctx.code_files}
         if not langs:                                   # nothing from manifests → infer from source
             if code_exts & {".ts", ".tsx", ".mts", ".cts"}:
                 langs.update({"node", "typescript"})
@@ -157,7 +161,11 @@ class StackExtractor(Extractor):
                             or ctx.glob("supabase/functions/**/index.js", 1))
         supabase_cfg = ctx.exists("supabase/config.toml") or bool(ctx.glob("supabase/**/*.sql", 1))
         if not deno_sig:
-            for _p, _rel, text in ctx.iter_code():
+            # CLASSIFICATION: scan the whole tree, not the analysis scope — a scoped run of one file
+            # must not conclude a Deno repo is not a Deno repo and drop the framework. Narrowed to
+            # TS/JS suffixes so the full-tree read stays proportionate, and it breaks on first match.
+            for _p, _rel, text in ctx.iter_all_code((".ts", ".tsx", ".mts", ".cts",
+                                                     ".js", ".jsx", ".mjs", ".cjs")):
                 if "Deno.serve" in text or "Deno.env" in text:
                     deno_sig = True
                     break

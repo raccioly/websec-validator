@@ -49,6 +49,39 @@
     },
     "verification_context": {
       "type": "object"
+    },
+    "attribution": {
+      "type": "object",
+      "description": "Which change this finding set describes, graded by how much the identity evidence is worth. A SIBLING of verification_context, never merged into it: repairs compares that object by strict dict equality. `assurance` is COMPUTED from what was observed and is never accepted as input.",
+      "properties": {
+        "schema_version": {
+          "type": "string"
+        },
+        "assurance": {
+          "enum": [
+            "ci-minted",
+            "vcs-observed",
+            "self-asserted",
+            "none"
+          ]
+        },
+        "vcs": {
+          "type": "object",
+          "description": "Tier 2 \u2014 observed from the repository itself."
+        },
+        "ci": {
+          "type": "object",
+          "description": "Tier 1 \u2014 injected by a recognised CI runner; corroborable against the forge."
+        },
+        "declared": {
+          "type": "object",
+          "description": "Tier 3 \u2014 operator-declared, NOT verified, never promoted."
+        },
+        "approver_independence": {
+          "type": "object",
+          "description": "Always evidenced:false \u2014 websec records the run side only."
+        }
+      }
     }
   },
   "definitions": {

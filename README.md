@@ -322,6 +322,100 @@ required tools when `scan: true`. Outputs expose `run-directory`, `sarif-file` a
 Keep the reviewed action checkout separate from untrusted target source. Pin a reviewed 0.14.0-or-later commit when adopting these changes; the historical v0.13.0 tag
 does not include them.
 
+**Audit evidence — `websec attest`.** Projects an existing run into a per-control evidence table.
+It computes nothing and asserts nothing.
+
+```bash
+websec attest                      # latest run, human-readable
+websec attest --format json
+websec attest --format in-toto     # UNSIGNED Statement — sign it with your own key
+```
+
+**Gaps are listed before evidence**, in the data and in the output, because a table that leads with
+coverage invites absence to read as satisfaction. On a typical run, 5 of 12 rows have no websec
+evidence at all — most of these controls are organisational and the artifact says so.
+
+It renders no verdict, score, percentage or badge, and the word "compliant" does not appear in any
+output format (there is a test). Compliance is an attribute of an assessed *entity*, determined by a
+qualified assessor and evidenced by their report — PCI SSC FAQ 1258: *"no single product can provide
+PCI DSS compliance"*. Three things are declared non-goals in the artifact itself: approver
+independence (it lives in the forge's approval record), rollback, and PCI 6.4.2 runtime protection.
+The output also states that the local gate is bypassable and that its bypass record is not
+exhaustive.
+
+Citations are exact, because the obvious ones are wrong. EU DORA change management is **Commission
+Delegated Regulation (EU) 2024/1774 Art. 17** (the RTS under DORA Art. 9(4)(e)); DORA Art. 17 itself
+is incident management. There is **no SOX article** for ITGC — the domains come from SEC Release
+33-8810 §II.A.2.d. PCI DSS **6.2.3 permits automated review**, and **6.2.3.1 is conditional** on
+choosing manual review, so websec is deliberately not offered against it.
+
+The in-toto Statement is unsigned by design: a websec-signed attestation would only attest that
+websec ran. Sign it with your own key and identity and it becomes verifiable.
+
+**Dependency existence — `websec run --network` (opt-in).** Offline checks cannot tell whether a
+declared package actually exists, which is the AI-hallucinated-dependency surface.
+
+```bash
+websec run . --network-dry-run    # print the exact names that WOULD be sent; sends nothing
+websec run . --network            # HEAD registry.npmjs.org / pypi.org; ~2.8s for 52 deps
+```
+
+Only bare package **names** are sent — never versions, paths or repository identity. Suppression is
+applied **offline, before any request**: names this repo publishes (via the real workspace graph),
+scopes bound to a private registry in `.npmrc`/`.yarnrc.yml`, and pip `index-url` overrides. A
+private name that reaches a public registry cannot be un-sent, and a 404 on an internal name tells
+an attacker which name to squat.
+
+A 404 is split by offline lockfile evidence: `resolved` + `integrity` means the package once
+existed, so it is `dependency-unpublished-or-removed` (a package pulled for malware looks exactly
+like this) rather than `dependency-nonexistent`. Findings are MEDIUM/LOW-confidence and do **not**
+fail `--fail-on` unless you also pass `--fail-on-network` — the UNKNOWN rate is outside your
+control, so gating on it would make registry uptime a dependency of shipping. UNKNOWN is recorded
+as a coverage gap, never as clean.
+
+**A 200 is not evidence of safety.** A squatter who has already registered the hallucinated name
+also returns 200 — that is the successful attack, not the clean case.
+
+**Agent-loop gate — `websec gate` and `websec hooks install --agent`.** Scanning at the merge
+request makes a finding a backlog item; scanning on the edit that caused it makes it a retry the
+agent fixes immediately.
+
+```bash
+websec gate                          # the files you just changed, ~0.3s, exit 1 if blocking
+websec gate --fail-on high           # default is medium (see below)
+websec hooks install --agent         # PostToolUse hook: runs the gate on every file the agent writes
+websec hooks status --agent
+websec hooks uninstall --agent
+```
+
+`gate` scopes the **analysis**, not just the report: `--only` narrows what is read and matched
+(~13x faster than a full pass), while the tree is still walked in full so stack detection, ignore
+policy and fixture classification are unchanged. Its default scope is the **working tree** —
+tracked modifications plus untracked files — because agent edits are uncommitted and a three-dot
+`base...HEAD` diff would see nothing. It writes no artifacts, publishes no run directory and never
+advances an accepted baseline.
+
+The default threshold is **medium, not high**: command injection and SSRF on agent-written code are
+frequently rated MEDIUM, so a HIGH default would miss the main case. `--min-confidence` filters
+low-confidence leads for teams that measure them as noisy; there is no confidence floor by default,
+because in the loop a false block costs one turn while a miss ships.
+
+Three deliberate properties of the hook:
+
+- It **fails open, loudly**. If the gate cannot run, the hook exits 0 and says on stderr that the
+  edit was *not* security-checked. A check that blocks every edit when broken gets uninstalled, and
+  then there is no check at all. A pass means "nothing blocking was found", never "this was verified".
+- It does **not** honour `WEBSEC_SKIP_HOOK`, unlike the git guardrail below. The agent can set an
+  environment variable in a Bash call, so an env escape hatch here would be one the agent operates.
+- It is **developer ergonomics, not a compliance control.** Settings files are editable by the user
+  and, in a repository the agent can write to, by the agent. Only managed policy settings deployed
+  through device management are genuinely unbypassable. This hook catches mistakes early; it cannot
+  evidence that it ran for every change, and should not be presented as though it could. For
+  enforcement, run `websec run --fail-on …` as a required status check.
+
+A scoped pass is a fast retry signal, not a review: it does not consult cross-file evidence outside
+the scope, and a clean result does not mean the repository is clean. Keep running the full pass.
+
 **Local guardrail — `websec hooks`.** Advisory and gating runs have separate responsibilities:
 
 ```bash
@@ -500,7 +594,7 @@ add the matching dated changelog and migration guidance, and validate the combin
 In the 0.x series, feature additions or incompatible contracts increment the minor version.
 
 After reviewing current main and overlapping PRs, merge the approved release PR only after its
-required CI checks pass. The resulting main commit subject must be `release: v0.14.0` for this
+required CI checks pass. The resulting main commit subject must be `release: v0.15.0` for this
 release. [release-tag.yml](.github/workflows/release-tag.yml) validates that subject against the
 package version, creates the matching tag/GitHub Release, and explicitly dispatches
 [publish.yml](.github/workflows/publish.yml) at that tag. A version edit alone does not publish.
@@ -516,12 +610,18 @@ omit an independent version field. Check both sources when diagnosing stale inst
 
 ## Status / roadmap
 
-Version 0.14.0 provides 22 recon extractors, ten optional scanner entries, nine named profiles,
+Version 0.15.0 provides 22 recon extractors, eleven optional scanner entries, nine named profiles,
 SARIF import/export, bounded source/query analysis, explicit coverage and lifecycle evidence,
-intelligence/research commands, and opt-in agent/hook/CI adoption. These are scoped review tools;
-manual profiles, unknown routes, dynamic behavior and unsupported syntax remain limitations.
+intelligence/research commands, and opt-in agent/hook/CI adoption. It adds an in-loop security gate
+(`websec gate` and a `PostToolUse` hook), analysis scoping with `--only`, an opt-in dependency
+existence check (`--network`), run attribution with graded assurance, recorded gate verdicts and
+hook bypasses, and an audit-evidence projection (`websec attest`). These are scoped review tools;
+manual profiles, unknown routes, dynamic behavior and unsupported syntax remain limitations. The
+in-loop gate is developer ergonomics, not a control, and `attest` reports evidence without
+rendering a compliance verdict.
 
-The [migration guide](docs/MIGRATING-0.14.0.md) explains schema 2.0 and gate/artifact changes.
+The [0.14.0 migration guide](docs/MIGRATING-0.14.0.md) explains schema 2.0 and gate/artifact
+changes. 0.15.0 is additive and needs no migration.
 The [remaining-work specification](specs/001-continuous-security-improvement/spec.md) consolidates
 unresolved gaps and acceptance tests so overlapping old-base PRs do not become competing roadmaps.
 Existing runtime probes are opt-in; their earlier isolated results are not current deployment proofs.

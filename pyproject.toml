@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "websec-validator"
-version = "0.14.0"
+version = "0.15.0"
 description = "Defensive, local-first security recon that briefs your AI coding agent on your own codebase — read-only by default (code in, artifacts out): facts + tailored probe scripts, no LLM, no server, no running app."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -38,6 +38,9 @@ Issues = "https://github.com/raccioly/websec-validator/issues"
 
 [project.scripts]
 websec = "websec_validator.cli:main"
+# PostToolUse agent-loop hook. A console script rather than `python -m …` so the plugin's
+# hooks.json does not have to guess an interpreter path.
+websec-agent-hook = "websec_validator.agenthook:main"
 websec-mcp = "websec_validator.mcp_server:serve"
 
 [tool.setuptools]

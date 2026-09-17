@@ -15,7 +15,8 @@ that steer a coding agent — `.claude/settings.json`, `.mcp.json`, cursor/copil
                               (a `sk-…` / `ghp_…` / `AKIA…` / bearer token) — a real key leak in agent
                               config. Structural + value-shape, NOT prose grammar (keeps the FP bar).
 
-SAFETY: it reads a FIXED, bounded allow-list of paths directly off `ctx.root` (the walker deliberately
+SAFETY: it reads a FIXED, bounded allow-list of paths (Claude, Cursor, Copilot, Gemini, Codex,
+Continue, OpenCode, Zed, Windsurf, Cline, Roo, Aider, Qwen, Warp) directly off `ctx.root` (the walker deliberately
 SKIPs `.claude`/`.cursor`), parses them as text/JSON, and **never** imports, evals, or executes anything
 it finds — every byte is attacker-controlled. Tool-description *poisoning* (a prose-grammar match over a
 running server's tool descriptions) remains deliberately DEFERRED: it's the one class that would endanger
@@ -30,9 +31,25 @@ import re
 from .base import Extractor, RepoContext
 
 # Fixed allow-list of agent-steering files, read directly (NOT globbed — .claude/.cursor are skip-dirs).
+#
+# Deliberately an ALLOW-LIST, not a walk. A broad sweep over agent directories was measured against
+# 1,515 agent files in 33 repositories and produced 0 true positives and 1 false positive: two thirds
+# of the apparent hits in the worst repo were the tool's OWN prior scanner output re-scanned, and the
+# rest were worktree copies of secrets already reported through the main-tree path. That is bug-066(a)
+# reproduced. Widening the walker is the wrong fix; naming more files is the right one.
 _TEXT_TARGETS = [".mcp.json", ".claude/settings.json", ".claude/settings.local.json",
-                 "CLAUDE.md", "AGENTS.md", ".cursorrules", ".github/copilot-instructions.md"]
-_JSON_TARGETS = [".mcp.json", ".claude/settings.json", ".claude/settings.local.json"]
+                 "CLAUDE.md", "AGENTS.md", ".cursorrules", ".github/copilot-instructions.md",
+                 # other agent hosts, same shapes: hidden-unicode + non-vendor base-URL apply to any
+                 # file an agent reads as standing instruction or configuration.
+                 ".cursor/mcp.json", ".vscode/mcp.json", ".gemini/settings.json",
+                 ".continue/config.json", "opencode.json", ".opencode.json", ".zed/settings.json",
+                 ".codex/config.toml", ".windsurfrules", ".clinerules", ".roomodes",
+                 ".aider.conf.yml", "GEMINI.md", "QWEN.md", "WARP.md"]
+# Structural MCP checks need parsed JSON. .codex/config.toml and the *rules/*.md files stay TEXT-only
+# (no TOML/YAML parser in a stdlib-only runtime); they still get the unicode and base-URL checks.
+_JSON_TARGETS = [".mcp.json", ".claude/settings.json", ".claude/settings.local.json",
+                 ".cursor/mcp.json", ".vscode/mcp.json", ".gemini/settings.json",
+                 ".continue/config.json", "opencode.json", ".opencode.json", ".zed/settings.json"]
 _CURSOR_RULES_DIR = ".cursor/rules"
 _MAX_FILE_BYTES = 400_000
 _MAX_CURSOR_RULES = 30
@@ -296,14 +313,11 @@ class AgentConfigExtractor(Extractor):
                     "the agent reads (Rules-File-Backdoor). A backdoored instruction can hide here and survive "
                     "forking. Render the file with a bidi-aware viewer and strip the character.", line)
 
-        # 2/3/4. structural JSON checks over the parsed config files.
-        for rel in _JSON_TARGETS:
-            text = _read(ctx, rel)
-            if not text:
-                continue
-            data = _load_json(text)
-
-            # 4. base-URL override (regex over the raw text — a ${VAR} placeholder won't match https).
+            # 4. base-URL override. This is a pure TEXT regex, so it belongs here rather than in the
+            # JSON-only loop below: `.codex/config.toml`, `.windsurfrules` and the *.md instruction
+            # files are exactly where a non-vendor base URL hides, and none of them parse as JSON.
+            # A ${VAR} placeholder never matches the literal https capture, so env-indirected
+            # configs stay silent.
             for m in BASEURL.finditer(text):
                 url = m.group(2)
                 if not _VENDOR_HOST.match(url):
@@ -311,6 +325,13 @@ class AgentConfigExtractor(Extractor):
                         f"`{m.group(1)}` is pinned to a NON-vendor host ({url}) in committed config — an agent "
                         "using this base URL sends its API key to that host (key-exfil). Remove the override or "
                         "point it back at the provider; never commit a third-party LLM base URL with a live key.")
+
+        # 2/3/4. structural JSON checks over the parsed config files.
+        for rel in _JSON_TARGETS:
+            text = _read(ctx, rel)
+            if not text:
+                continue
+            data = _load_json(text)
 
             if data is None:
                 continue

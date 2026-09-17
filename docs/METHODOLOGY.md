@@ -137,7 +137,7 @@ When present on your machine, the tool shells out to best-of-breed open-source s
 
 | Scanner | Catches |
 |---|---|
-| **Gitleaks** | committed secrets / credentials |
+| **Gitleaks** | secrets / credentials, in **two disjoint passes**: git history (across all refs) and the working tree. Neither subsumes the other — a secret written but not yet committed is invisible to history mode, which is exactly the state an AI coding agent leaves a tree in |
 | **Trivy** | vulnerable dependencies (CVEs), with fixed-version info |
 | **Semgrep / OpenGrep** | code-level SAST patterns |
 | **Checkov** | infrastructure-as-code misconfig |
@@ -146,6 +146,12 @@ When present on your machine, the tool shells out to best-of-breed open-source s
 It **never hard-fails if a tool is absent** — it reports what's missing with install hints and
 carries on. Scanners are detected by default and only *executed* with `--scan`, because execution
 can be slow and the recon + briefing are valuable on their own.
+
+One class no local scanner can reach is whether a declared dependency **exists at all** — the
+AI-hallucinated-package surface. `--network` opts into asking the public registry, sending bare
+package names only, with names this repository publishes and privately-bound scopes removed
+*offline* beforehand. A 200 is not evidence of safety: a squatter who already registered the
+hallucinated name also answers 200.
 
 ---
 
@@ -233,6 +239,26 @@ conservative:
 localhost-only; isolated test targets; and **production is out of scope without written
 authorization.** The tool refuses write probes against non-localhost targets, and the human owns
 every credential and authorizes every live run.
+
+---
+
+## Where in the workflow this runs
+
+Two placements, deliberately different in kind:
+
+**At review time** — `websec run` analyses the whole tree and produces the briefing, ledger, probes
+and SARIF. This is the review.
+
+**Inside the agent loop** — `websec gate` analyses only the files just changed (about 0.3s) and
+returns pass/fail; a `PostToolUse` hook runs it after each write and blocks the loop on a finding,
+so the model fixes it on the next turn. A finding surfaced after forty merges is a backlog item; the
+same finding surfaced on the edit that caused it is a retry.
+
+The gate is deliberately *not* a smaller review. It scopes the analysis rather than the report, does
+not consult cross-file evidence outside that scope, writes nothing, and never advances an accepted
+baseline. A clean gate does not mean the repository is clean — keep running the full pass. It is
+also developer ergonomics rather than a control: settings files are editable, so enforcement remains
+a server-side required status check.
 
 ---
 

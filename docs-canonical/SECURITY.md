@@ -2,7 +2,7 @@
 
 <!-- docguard:version 0.9.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-09-14 -->
+<!-- docguard:last-reviewed 2026-09-16 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — a security model is correctly stated as invariants (MUST NOT, never, read-only, out-of-scope); negation is the right register for safety guarantees. -->
 
@@ -23,7 +23,7 @@ explicitly invoke the gated dynamic phase against a TEST target you control.
 |----------|-----------------|-----------------|
 | Target repo → tool | source files and configuration (read-only) | Shared root containment, exclusions, bounded regular-file reads, and private-tree pruning; target code is never executed. |
 | Tool → scanner subprocesses | the target path | Scanners are detected and only **executed with `--scan`**; they are read-only and shelled out, never imported. |
-| Tool → network | nothing, in the core pass | Recon + briefing are fully offline. Outbound traffic requires optional scanner/Noir subprocesses, the **explicit TEST URL** for dynamic checks, an explicit public-feed refresh, or a corpus preparation command. |
+| Tool → network | nothing, in the core pass | Recon + briefing are fully offline. Outbound traffic requires optional scanner/Noir subprocesses, the **explicit TEST URL** for dynamic checks, an explicit public-feed refresh, an opt-in `--network` dependency-existence check, or a corpus preparation command. |
 | Tool → disk | artifacts under `websec-out/` + a gitignored calibration overlay | Each attempt has a unique directory; `latest` is atomically published only after completed execution. Target source is not mutated. |
 
 ## Authentication & Authorization
@@ -120,6 +120,36 @@ plan, complete fixed-build rerun, unchanged detector/scope/policy, and contained
 identifying application, build, source, finding, plan, and test. The negative test must also have a
 matching failed report for the original build. Validation never executes supplied code and treats
 these artifacts as operator-supplied evidence, not an independently trusted test runner.
+
+## Dependency Existence (`--network`)
+
+`run --network` is an opt-in network entry point, off by default, alongside `intel refresh`. It
+sends **bare package names only** — never versions, file paths, repository identity or operator
+identity — as HEAD requests to `registry.npmjs.org` and `pypi.org`, transferring zero body bytes.
+It enforces the same host allowlist, HTTPS-only, no-userinfo, no-alternate-port and per-redirect
+re-validation policy as the feed refresh, and never issues a POST.
+
+A membership query is itself a disclosure: asking a public registry about `@acme/billing-core`
+reveals that an internal package exists, and a 404 on such a name tells an observer precisely which
+name is available to squat. The check could therefore create the dependency-confusion exposure it
+exists to detect. Suppression is consequently applied **offline, before any socket is opened** — a
+name that reaches a public registry cannot be un-sent. Names published by any manifest in the
+repository (resolved through the workspace graph, not a version-spec heuristic), scopes bound to a
+private registry by repo-local `.npmrc`/`.yarnrc.yml`, non-PyPI pip `index-url` overrides, and
+non-registry specs are all removed first. `--network-dry-run` discloses the exact name list and
+makes no request.
+
+Results are graded, not asserted. `exists` is explicitly **not** evidence of safety: a squatter who
+has already registered a hallucinated name also answers 200. An explicit 404 is a lead, split by
+offline lockfile evidence into a package that never published and one that published and was
+removed. Any other outcome — rate limit, timeout, offline — is UNKNOWN, which is neither clean nor
+missing; it records a coverage gap and makes execution incomplete. Existence findings are
+ledger-bound but excluded from `--fail-on` unless `--fail-on-network` is also given, because the
+UNKNOWN rate is outside the operator's control and gating on it would make registry availability a
+precondition for shipping.
+
+The default pass remains fully offline and makes zero network calls; a test asserts this by
+intercepting socket connections during recon.
 
 ## Public Intelligence and Data-only Research
 

@@ -12,6 +12,7 @@ agent at the generated AGENT-BRIEFING.md.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import stat
@@ -110,6 +111,37 @@ def _new_run_dir(out: str | None) -> tuple:
         raise ValueError("output runs path must be a real directory, not a symlink or other file: " + str(runs))
     run = Path(tempfile.mkdtemp(prefix=stamp + "-", dir=runs))
     return run, run.name
+
+
+_DIGESTED = ("FACTS.json", "coverage.json", "findings-ledger.json", "findings.envelope.json",
+             "results.sarif", "findings.json", "repair-plans.json", "attack-surface.json",
+             "REPORT.md", "AGENT-BRIEFING.md", "diff-scope.json", "sarif-imports.json")
+
+
+def _now_stamp() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _artifact_digests(run: Path) -> dict:
+    """sha256 of each artifact this run emitted, for integrity checking after the fact.
+
+    Bounded and non-raising: an unreadable artifact records an error string rather than failing a
+    run that has already completed its actual work."""
+    out: dict = {}
+    for name in _DIGESTED:
+        path = run / name
+        try:
+            if not path.is_file():
+                continue
+            digest = hashlib.sha256()
+            with path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            out[name] = "sha256:" + digest.hexdigest()
+        except Exception as error:
+            out[name] = f"unreadable: {type(error).__name__}"
+    return out
 
 
 def _publish_run(run: Path) -> None:
@@ -235,7 +267,43 @@ def cmd_run(args) -> int:
 
     # 1. recon
     facts = recon.build_facts(target, __version__, args.exclude,
-                              include_fixtures=getattr(args, "include_fixtures", False))
+                              include_fixtures=getattr(args, "include_fixtures", False),
+                              only=getattr(args, "only", None))
+    # OPT-IN registry existence check. Explicit consent, like --verify-secrets: this is the only
+    # part of `run` that talks to a third party, and it discloses dependency NAMES.
+    _network = getattr(args, "network", False) or getattr(args, "network_dry_run", False)
+    if _network:
+        from . import registry as _registry
+        _deps = facts.get("dependencies") or {}
+        if getattr(args, "network_dry_run", False):
+            scheduled = _registry.plan(_deps)
+            log(f"\n  --network-dry-run: {len(scheduled['queued'])} name(s) WOULD be sent to the "
+                f"public registry; {len(scheduled['suppressed'])} suppressed offline. NOTHING was sent.")
+            for row in scheduled["queued"]:
+                log(f"      would send: {row['ecosystem']}  {row['name']}")
+            for row in scheduled["suppressed"][:20]:
+                log(f"      suppressed: {row.get('ecosystem')}  {row.get('name')}  ({row.get('why')})")
+            facts["dependencies"]["network"] = {"ran": False, "dry_run": True,
+                                                "queued": len(scheduled["queued"]),
+                                                "suppressed": len(scheduled["suppressed"]),
+                                                "note": "dry run: no request was made"}
+        else:
+            log("\n  --network: sending dependency NAMES (no versions, paths or repo identity) to "
+                "registry.npmjs.org / pypi.org to check whether they exist. Names this repo publishes "
+                "and privately-bound scopes are suppressed offline first.")
+            net = _registry.check(_deps)
+            facts["dependencies"]["network"] = net
+            facts["dependencies"]["findings"] = (facts["dependencies"].get("findings") or []) + \
+                _registry.findings_from(net)
+            log(f"      queried {net['queried']} · exists {net['exists']} · "
+                f"missing {len(net['missing'])} · unknown {len(net['unknown'])} · "
+                f"suppressed {net['suppressed']} · {net['elapsed_seconds']}s")
+            if not net["complete"]:
+                # UNKNOWN is the tool failing to answer, not the dependency being fine.
+                coverage.add_gap(facts, "dependency-existence",
+                                 f"{len(net['unknown'])} dependency name(s) could not be resolved "
+                                 "(rate limit, timeout or offline); existence is UNKNOWN, not clean")
+
     langs = facts.get("stack", {}).get("languages", [])
     _print_facts_summary(facts, log)
 
@@ -383,6 +451,11 @@ def cmd_run(args) -> int:
     ledger["verification_context"] = {"application_id": getattr(args, "application_id", None) or str(target),
                                        "build_id": getattr(args, "build_id", None) or facts["coverage"]["analyzed_input_digest"],
                                        "source_digest": facts["coverage"]["analyzed_input_digest"]}
+    # WHICH CHANGE this finding set describes. A SIBLING of verification_context, never merged into
+    # it: repairs compares that object by strict dict equality, so an added key would invalidate
+    # every repair plan emitted before this change.
+    from . import attribution as _attribution
+    ledger["attribution"] = _attribution.build(target, actor=getattr(args, "actor", None))
     # 4b. baseline / diff — only NEW findings gate CI when a baseline is supplied
     diff = None
     if getattr(args, "baseline", None):
@@ -392,6 +465,58 @@ def cmd_run(args) -> int:
         diff = baseline.diff(ledger, base_fps)
         log(f"\n  baseline: {diff['new_count']} new · {diff['unchanged_count']} unchanged · "
             f"{diff.get('no_longer_observed_count', 0)} no longer observed (vs {args.baseline})")
+
+    # 4c. Evaluate the CI gate HERE, before any artifact is written, and record the verdict in the
+    # ledger. Previously the gate ran after the artifacts were written and after the run was
+    # published, so the verdict existed only as a process exit code: nothing in the run directory
+    # said which gate ran, at what threshold, or whether it passed. An exit code is not evidence.
+    _incomplete = (bool(getattr(args, "fail_on", None) or getattr(args, "require_complete", False))
+                   and not facts["coverage"].get("execution_complete"))
+    _scoped = bool(diff_scope and not diff_scope.get("error"))
+    _gate_ledger = ledger
+    # Registry-existence findings are LEDGER-bound but NOT gate-eligible by default. The UNKNOWN
+    # rate is non-deterministic and outside the operator's control (measured 0%, 0%, 0%, 4.5% across
+    # four identical runs), so gating on it makes registry availability a dependency of shipping. A
+    # 404 is also an observation, not a proof. Opting in is a SECOND, explicit decision.
+    _network_classes = {"dependency-nonexistent", "dependency-unpublished-or-removed"}
+    _network_excluded = 0
+    if not getattr(args, "fail_on_network", False):
+        _kept = [f for f in ledger.get("findings", [])
+                 if f.get("attack_class") not in _network_classes]
+        _network_excluded = len(ledger.get("findings", [])) - len(_kept)
+        if _network_excluded:
+            _gate_ledger = dict(ledger, findings=_kept)
+    if _scoped:
+        # --diff narrows the gate to findings in CHANGED files (PR semantics: don't fail a PR on
+        # pre-existing debt it didn't touch). Only when scoping actually succeeded.
+        _gate_ledger = dict(ledger, findings=[f for f in ledger.get("findings", [])
+                                              if f.get("diff_state") in {"in-changed-file", "in-changed-hunk"}])
+    _gate = {"threshold": getattr(args, "fail_on", None),
+             "require_complete": bool(getattr(args, "require_complete", False)),
+             "new_only": bool(diff),
+             "baseline": str(args.baseline) if getattr(args, "baseline", None) else None,
+             "diff_scoped": _scoped,
+             "diff_base": (diff_scope or {}).get("base") if _scoped else None,
+             "execution_complete": bool(facts["coverage"].get("execution_complete")),
+             "network_findings_excluded": _network_excluded,
+             "network_gate_note": ("registry-existence findings are reported but do not gate unless "
+                                   "--fail-on-network is given: the UNKNOWN rate is outside operator "
+                                   "control and a 404 is an observation, not a proof")}
+    if _incomplete:
+        _gate.update(verdict="incomplete", exit_code=2, count_at_or_above=None,
+                     note="requested checks did not complete; the gate result is NOT a pass")
+    elif getattr(args, "fail_on", None):
+        _n = baseline.gate_count(_gate_ledger, args.fail_on, new_only=bool(diff))
+        _gate.update(count_at_or_above=_n, verdict="fail" if _n else "pass", exit_code=1 if _n else 0)
+    else:
+        _gate.update(verdict="not-evaluated", exit_code=0, count_at_or_above=None,
+                     note="no --fail-on was requested; this run gated nothing")
+    # Enforcement is a server-side concern. Say so IN THE ARTIFACT, not only in the docs: a local
+    # gate can be skipped with --no-verify, an uninstalled hook, or a deleted one.
+    _gate["enforcement"] = ("advisory unless run as a required status check. A client-side gate is a "
+                            "developer convenience, not a control: it cannot evidence that it ran for "
+                            "every change.")
+    ledger["gate"] = _gate
 
     recon.write_facts(facts, out / "FACTS.json")
     (out / "coverage.json").write_text(json.dumps(facts["coverage"], indent=2))
@@ -418,7 +543,17 @@ def cmd_run(args) -> int:
          "findings_summary": manifest_summary, "ledger": {"total": ledger["total"], "by_severity": ledger["by_severity"]},
          "sarif": "results.sarif", "sbom": sbom, "attack_surface": "attack-surface.json",
          "attack_surface_summary": inv.get("summary", {}),
-         "probes": manifest, "timestamp": ts}, indent=2))
+         "probes": manifest, "timestamp": ts,
+         # The INPUT side was already content-addressed (analyzed_input_digest, per-file hashes),
+         # but nothing hashed what we EMIT: the manifest listed filenames only, so a finding could
+         # be deleted from findings-ledger.json in a text editor and no artifact would contradict
+         # it. These digests make that edit detectable. They are integrity, NOT tamper-proofing:
+         # anyone who can edit an artifact can recompute the manifest, so this is only meaningful
+         # alongside an external copy (CI log, forge artifact store).
+         "artifact_digests": _artifact_digests(out),
+         "artifact_digests_note": ("sha256 of the artifacts emitted by this run, computed after they "
+                                   "were written. Detects later edits; does not prove authorship. "
+                                   "The manifest itself is not self-hashed.")}, indent=2))
 
     if facts["coverage"].get("execution_complete"):
         _publish_run(out)
@@ -440,27 +575,19 @@ def cmd_run(args) -> int:
     elif fmt == "json":
         print(json.dumps(formats.to_json(ledger, facts, __version__, ts), indent=2))
 
-    # 6. CI gate — exit non-zero if findings at/above --fail-on remain (only NEW ones when a baseline
-    # is supplied). Default (no --fail-on) never fails the build.
-    if ((getattr(args, "fail_on", None) or getattr(args, "require_complete", False))
-            and not facts["coverage"].get("execution_complete")):
+    # 6. CI gate — the verdict was computed and RECORDED above, before artifacts were written. This
+    # block only reports it and returns the exit code, so the artifact and the exit code cannot
+    # disagree.
+    if _gate["verdict"] == "incomplete":
         log("\n✗ requested security checks did not complete; partial artifacts saved (exit 2).")
         return 2
-    if getattr(args, "fail_on", None):
-        # --diff narrows the gate to findings in CHANGED files (PR semantics: don't fail a PR on
-        # pre-existing debt it didn't touch). Only when scoping actually succeeded.
-        _gate_ledger = ledger
-        _scoped = bool(diff_scope and not diff_scope.get("error"))
-        if _scoped:
-            _gate_ledger = dict(ledger, findings=[f for f in ledger.get("findings", [])
-                                                  if f.get("diff_state") in {"in-changed-file", "in-changed-hunk"}])
-        n = baseline.gate_count(_gate_ledger, args.fail_on, new_only=bool(diff))
-        if n:
-            log(f"\n✗ --fail-on {args.fail_on}: {n} finding(s) at or above threshold"
-                + (" (new since baseline)" if diff else "")
-                + (f" (in files changed vs {diff_scope['base']})" if _scoped else "")
-                + " — failing the build.")
-            return 1
+    if _gate["verdict"] == "fail":
+        log(f"\n✗ --fail-on {args.fail_on}: {_gate['count_at_or_above']} finding(s) at or above threshold"
+            + (" (new since baseline)" if diff else "")
+            + (f" (in files changed vs {_gate['diff_base']})" if _gate["diff_scoped"] else "")
+            + " — failing the build.")
+        return 1
+    if _gate["verdict"] == "pass":
         log(f"\n✓ --fail-on {args.fail_on}: no findings at or above threshold"
             + (" (new since baseline)" if diff else "") + ".")
     return 0
@@ -604,7 +731,18 @@ def cmd_repair_verify(args) -> int:
     except (OSError, ValueError, TypeError) as error:
         result = {"accepted": False, "state": "verification-rejected", "errors": [str(error)],
                   "tests_executed_by_websec": False}
-    print(json.dumps(result, indent=2))
+    # The bound original/target repair evidence is the strongest thing websec produces, and it used
+    # to exist only on stdout and as an exit code — nothing durable, nothing an assessor could read
+    # later. `--out` persists it; _emit_json_result opens with "x", so a result can never overwrite
+    # an input or prior evidence.
+    result.setdefault("tests_executed_by_websec", False)
+    result["verified_at"] = _now_stamp()
+    try:
+        _emit_json_result(result, getattr(args, "out", None))
+    except FileExistsError:
+        print(json.dumps(result, indent=2))
+        print(f"\nrefusing to overwrite existing evidence at {args.out}", file=sys.stderr)
+        return 2
     return 0 if result.get("accepted") else 2
 
 
@@ -617,6 +755,76 @@ def _emit_json_result(result: dict, output: str | None = None) -> None:
         with destination.open("x", encoding="utf-8") as stream:
             stream.write(content + "\n")
     print(content)
+
+
+def cmd_gate(args) -> int:
+    """Fast, scoped pass/fail for inside the agent loop. Writes nothing; never advances a baseline."""
+    from . import gate as _gate
+    target = Path(args.target).expanduser().resolve()
+    if not target.is_dir():
+        print(f"error: target is not a directory: {target}", file=sys.stderr)
+        return 2
+
+    scope_source = "explicit"
+    paths = list(getattr(args, "only", None) or [])
+    if not paths:
+        discovered = _gate.working_tree_paths(target)
+        paths, scope_source = discovered["paths"], discovered["source"]
+        if not paths:
+            # Nothing changed is a PASS, but say which question was answered.
+            print(_gate.to_json({"tool": "websec-validator", "command": "gate", "passed": True,
+                                 "blocking_count": 0, "analyzed": [], "missed": [],
+                                 "scope_source": scope_source,
+                                 "scope_note": discovered.get("note", ""),
+                                 "reason": "no changed files to analyze"}))
+            return 0
+
+    facts = recon.build_facts(target, __version__, getattr(args, "exclude", None), only=paths)
+    ledger = findings.build_ledger(facts, None)
+    result = _gate.verdict(ledger, facts, args.fail_on, scope_source=scope_source,
+                           min_confidence=getattr(args, "min_confidence", "low"))
+
+    if getattr(args, "format", "text") == "json":
+        print(_gate.to_json(result))
+    else:
+        print(_gate.render_text(result))
+    # 1 = blocking findings. Distinct from 2 (usage/target error) so a harness can tell a FAILED
+    # check from a BROKEN one and must never treat a crash as a pass.
+    return 0 if result["passed"] else 1
+
+
+def cmd_attest(args) -> int:
+    """Project EXISTING run artifacts into an evidence table. Computes nothing, asserts nothing."""
+    from . import attest as _attest, hooks as _hooks
+    run_dir = Path(args.run).expanduser().resolve() if getattr(args, "run", None) else None
+    if run_dir is None:
+        out_root = Path(getattr(args, "out", None) or "./websec-out").expanduser().resolve()
+        latest = out_root / "runs" / "latest"
+        if latest.exists():
+            run_dir = latest.resolve()
+        else:
+            candidates = sorted((out_root / "runs").glob("*")) if (out_root / "runs").is_dir() else []
+            run_dir = candidates[-1] if candidates else None
+    if run_dir is None or not run_dir.is_dir():
+        print("error: no run directory found; pass --run <dir> or run `websec run` first",
+              file=sys.stderr)
+        return 2
+    if not (run_dir / "findings-ledger.json").is_file():
+        print(f"error: {run_dir} does not look like a websec run (no findings-ledger.json)",
+              file=sys.stderr)
+        return 2
+
+    bypasses = _hooks.read_bypasses(Path(getattr(args, "repo", None) or ".").expanduser())
+    result = _attest.build(run_dir, bypasses=bypasses)
+    fmt = getattr(args, "format", "text")
+    if fmt == "json":
+        print(json.dumps(result, indent=2))
+    elif fmt == "in-toto":
+        print(json.dumps(_attest.to_in_toto(result), indent=2))
+    else:
+        print(_attest.render_text(result))
+    # Always 0. This command reports; it does not judge, so there is no failure to signal.
+    return 0
 
 
 def cmd_capabilities(args) -> int:
@@ -750,6 +958,29 @@ def cmd_hooks(args) -> int:
     from . import hooks as _hooks
     path = Path(args.path).expanduser() if getattr(args, "path", None) else Path(".")
     try:
+        if getattr(args, "agent", False):
+            # The AGENT-LOOP hook is a different animal from the git guardrail: it edits a
+            # STRUCTURED settings.json rather than appending shell text, and it runs per edit
+            # instead of per commit/push.
+            if args.action == "install":
+                result = _hooks.install_agent_hook(path)
+                if not result.get("ok"):
+                    print(f"error: {result.get('error')}", file=sys.stderr)
+                    return 2
+                print(f"{result['action']} PostToolUse gate ({result['matcher']}) in {result['path']}")
+                print("  runs `websec gate` on each file the agent writes; blocks the loop on a "
+                      "finding at or above MEDIUM so the agent can fix it immediately.")
+                print("  NOTE: this is developer ergonomics, not a compliance control. Settings "
+                      "files are editable, so only managed policy settings are unbypassable.")
+            elif args.action == "uninstall":
+                result = _hooks.install_agent_hook(path, uninstall=True)
+                if not result.get("ok"):
+                    print(f"error: {result.get('error')}", file=sys.stderr)
+                    return 2
+                print(f"{result['action']} agent hook in {result['path']}")
+            else:
+                print(json.dumps(_hooks.agent_hook_status(path), indent=2))
+            return 0
         if args.action == "install":
             print(_hooks.install(path, pre_push=args.pre_push))
         elif args.action == "uninstall":
@@ -999,6 +1230,30 @@ def build_parser() -> argparse.ArgumentParser:
                    help="exit 1 if any finding at/above this severity remains (CI gate). With --baseline, "
                         "new, changed and reopened findings count; incomplete execution exits 2.")
     r.add_argument("--require-complete", action="store_true", help="exit 2 when requested checks cannot complete")
+    r.add_argument("--network", action="store_true",
+                   help="opt in to checking whether declared dependencies EXIST on the public "
+                        "registry (the AI-hallucinated-dependency / slopsquat class). ⚠ this sends "
+                        "dependency NAMES — never versions, paths or repository identity — to "
+                        "registry.npmjs.org and pypi.org. Names this repo publishes and scopes bound "
+                        "to a private registry are suppressed OFFLINE first. Findings are "
+                        "ledger-bound MEDIUM/LOW-confidence and are NOT --fail-on eligible: a 404 is "
+                        "an observation, not a proof, and a 200 is not evidence of safety.")
+    r.add_argument("--fail-on-network", dest="fail_on_network", action="store_true",
+                   help="also let registry-existence findings fail --fail-on. Off by default on "
+                        "purpose: registry availability would become a dependency of shipping.")
+    r.add_argument("--network-dry-run", dest="network_dry_run", action="store_true",
+                   help="print the exact names --network WOULD send and make zero requests")
+    r.add_argument("--only", action="append", metavar="PATH",
+                   help="narrow ANALYSIS to these files, repo-relative (repeatable). Unlike --diff, "
+                        "which filters the report, this changes what is read and matched: ~13x faster "
+                        "on a 320-file repo. The tree is still walked in full, so stack detection, "
+                        "ignore policy and fixture classification are unchanged, and files are "
+                        "analyzed IN PLACE. A requested path the walker never selected is reported as "
+                        "MISSED, not as a clean result.")
+    r.add_argument("--actor", metavar="WHO",
+                   help="record who initiated this run (or $WEBSEC_ACTOR). SELF-ASSERTED: stored under "
+                        "attribution.declared and labelled as not verified — a value the runner can set "
+                        "to any string is a label, not audit evidence.")
     r.add_argument("--application-id", help="stable application identity for repair verification (default: target path)")
     r.add_argument("--build-id", help="reviewed build identity (default: analyzed input digest)")
     r.add_argument("--diff", metavar="REF",
@@ -1074,7 +1329,38 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--record", required=True, help="operator-supplied verification record JSON")
     verify.add_argument("--rerun", required=True, help="findings ledger from the fixed build")
     verify.add_argument("--evidence-root", required=True, help="directory containing referenced test reports")
+    verify.add_argument("--out", metavar="RESULT.json",
+                        help="persist the verification result as a durable artifact (refuses to "
+                             "overwrite an existing file)")
     verify.set_defaults(func=cmd_repair_verify)
+
+    g = sub.add_parser("gate", help="fast scoped pass/fail on the files you just changed (agent-loop check)")
+    g.add_argument("target", nargs="?", default=".")
+    g.add_argument("--only", action="append", metavar="PATH",
+                   help="analyze these files instead of the working-tree changes (repeatable)")
+    g.add_argument("--fail-on", dest="fail_on", default="medium",
+                   choices=["critical", "high", "medium", "low"],
+                   help="block at or above this severity (default: medium — command injection and "
+                        "SSRF on agent-written code are frequently MEDIUM, so a HIGH default would "
+                        "miss the main case this check exists for)")
+    g.add_argument("--min-confidence", dest="min_confidence", default="low",
+                   choices=["low", "medium", "high"],
+                   help="ignore findings below this calibrated confidence (default: low = no "
+                        "filtering; in the loop a false block costs one turn, a miss ships)")
+    g.add_argument("--format", choices=["text", "json"], default="text",
+                   help="text (default) is what a harness feeds back to the model; json for tooling")
+    g.add_argument("--exclude", action="append", metavar="PATH", help="exclude a path/glob")
+    g.set_defaults(func=cmd_gate)
+
+    at = sub.add_parser("attest",
+                        help="project an existing run into an audit-evidence table (gaps first; no verdict)")
+    at.add_argument("--run", metavar="DIR", help="run directory (default: the latest under --out)")
+    at.add_argument("--out", metavar="DIR", help="output root to search for the latest run (default: ./websec-out)")
+    at.add_argument("--repo", metavar="DIR", help="repository to read hook-bypass records from (default: .)")
+    at.add_argument("--format", choices=["text", "json", "in-toto"], default="text",
+                    help="text (default) | json | in-toto (an UNSIGNED Statement for you to sign "
+                         "with your own key — a websec-signed one would attest only that websec ran)")
+    at.set_defaults(func=cmd_attest)
 
     capabilities = sub.add_parser("capabilities", help="show offline named security checks and profile limitations")
     capabilities.set_defaults(func=cmd_capabilities)
@@ -1133,6 +1419,11 @@ def build_parser() -> argparse.ArgumentParser:
     hk = sub.add_parser("hooks",
                         help="install a git guardrail hook (post-commit advisory or pre-push gate on NEW findings)")
     hk.add_argument("action", choices=["install", "uninstall", "status"])
+    hk.add_argument("--agent", action="store_true",
+                    help="install the AGENT-LOOP gate (PostToolUse on Write|Edit|MultiEdit) into "
+                         ".claude/settings.json instead of a git hook: runs `websec gate` on each "
+                         "file the agent writes and blocks the loop on a finding, so it becomes a "
+                         "retry rather than a backlog item. Developer ergonomics, not a control.")
     hk.add_argument("--pre-push", dest="pre_push", action="store_true",
                     help="install a blocking pre-push gate (--fail-on new findings) instead of the advisory post-commit hook")
     hk.add_argument("--path", help="repo directory (default: current dir)")
@@ -1140,7 +1431,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-_COMMANDS = {"run", "recon", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks", "repair-verify", "capabilities", "intel", "research", "feedback"}
+_COMMANDS = {"run", "recon", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks", "repair-verify", "capabilities", "intel", "research", "feedback", "gate", "attest"}
 
 
 def main(argv=None) -> int:
