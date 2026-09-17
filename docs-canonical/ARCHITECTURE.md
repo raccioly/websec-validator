@@ -45,6 +45,7 @@ scanner runs, a calibrated findings ledger, staged probes, and the briefing/repo
 | Agent-loop gate | Fast scoped pass/fail on the files just changed; writes nothing, publishes nothing, never advances a baseline | `src/websec_validator/gate.py` | `tests/test_gate_command.py` |
 | PostToolUse hook | Run the gate on each file an agent writes and block the loop on a finding; fails open, loudly | `src/websec_validator/agenthook.py` | `tests/test_agent_hook.py` |
 | Dependency existence | Opt-in registry check for hallucinated/removed packages, with offline suppression applied before any request | `src/websec_validator/registry.py` | `tests/test_registry_existence.py` |
+| Audit evidence | Project an existing run into a per-control table, gaps first; no verdict, no score, no badge | `src/websec_validator/attest.py` | `tests/test_attest.py` |
 | Run attribution | Which change a finding set describes, graded ci-minted / vcs-observed / self-asserted | `src/websec_validator/attribution.py` | `tests/test_attribution.py` |
 | Calibration (CJE) | Wilson-interval `P(real)` per `(attack-class, confidence)` bucket; self-improving local overlay | `src/websec_validator/calibration.py` | `tests/test_recon.py` |
 | Probe staging | Choose + stage the probe templates that match the extracted surface | `src/websec_validator/probes.py` | `tests/test_recon.py` |

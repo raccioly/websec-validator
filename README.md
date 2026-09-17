@@ -322,6 +322,36 @@ required tools when `scan: true`. Outputs expose `run-directory`, `sarif-file` a
 Keep the reviewed action checkout separate from untrusted target source. Pin a reviewed 0.14.0-or-later commit when adopting these changes; the historical v0.13.0 tag
 does not include them.
 
+**Audit evidence — `websec attest`.** Projects an existing run into a per-control evidence table.
+It computes nothing and asserts nothing.
+
+```bash
+websec attest                      # latest run, human-readable
+websec attest --format json
+websec attest --format in-toto     # UNSIGNED Statement — sign it with your own key
+```
+
+**Gaps are listed before evidence**, in the data and in the output, because a table that leads with
+coverage invites absence to read as satisfaction. On a typical run, 5 of 12 rows have no websec
+evidence at all — most of these controls are organisational and the artifact says so.
+
+It renders no verdict, score, percentage or badge, and the word "compliant" does not appear in any
+output format (there is a test). Compliance is an attribute of an assessed *entity*, determined by a
+qualified assessor and evidenced by their report — PCI SSC FAQ 1258: *"no single product can provide
+PCI DSS compliance"*. Three things are declared non-goals in the artifact itself: approver
+independence (it lives in the forge's approval record), rollback, and PCI 6.4.2 runtime protection.
+The output also states that the local gate is bypassable and that its bypass record is not
+exhaustive.
+
+Citations are exact, because the obvious ones are wrong. EU DORA change management is **Commission
+Delegated Regulation (EU) 2024/1774 Art. 17** (the RTS under DORA Art. 9(4)(e)); DORA Art. 17 itself
+is incident management. There is **no SOX article** for ITGC — the domains come from SEC Release
+33-8810 §II.A.2.d. PCI DSS **6.2.3 permits automated review**, and **6.2.3.1 is conditional** on
+choosing manual review, so websec is deliberately not offered against it.
+
+The in-toto Statement is unsigned by design: a websec-signed attestation would only attest that
+websec ran. Sign it with your own key and identity and it becomes verifiable.
+
 **Dependency existence — `websec run --network` (opt-in).** Offline checks cannot tell whether a
 declared package actually exists, which is the AI-hallucinated-dependency surface.
 

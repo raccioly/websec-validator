@@ -20,6 +20,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`websec attest` projects an existing run into a per-control audit-evidence table.** It computes
+  nothing: it reads the artifacts a run already wrote and reports which audit-relevant facts websec
+  holds and which it does not. **Gaps are listed before evidence** in both the data and the
+  rendering, because a table that leads with coverage invites absence to read as satisfaction; on a
+  typical run 5 of 12 rows have no websec evidence at all, and the output says so plainly. Formats:
+  human-readable, JSON, and an **unsigned in-toto Statement** — unsigned by design, because a
+  websec-signed attestation would attest only that websec ran, whereas one signed with the
+  organisation's own key and identity is verifiable.
+  It renders no verdict, score, percentage or badge, and the word "compliant" appears in no output
+  format; a test enforces that. Compliance is an attribute of an assessed entity determined by a
+  qualified assessor, not a property a tool can confer. Approver independence, rollback and PCI
+  6.4.2 runtime protection are declared non-goals **in the artifact**, and the output states that
+  the local gate is bypassable and its bypass record is not exhaustive.
+  Citations are exact and tested, because the obvious ones are wrong: EU DORA change management is
+  Commission Delegated Regulation (EU) 2024/1774 Art. 17 (the RTS under DORA Art. 9(4)(e)), not
+  DORA Art. 17, which is incident management; there is no SOX article for ITGC, whose domains come
+  from SEC Release 33-8810 §II.A.2.d; and PCI DSS 6.2.3 permits automated review while 6.2.3.1 is
+  conditional on choosing manual review, so websec is deliberately not offered against it.
 - **`websec run --network` verifies that declared dependencies actually EXIST** — the AI
   slopsquat / hallucinated-dependency class, which no offline check can reach. Opt-in, like
   `--verify-secrets`: it sends bare package **names** — never versions, paths or repository

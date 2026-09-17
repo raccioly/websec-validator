@@ -793,6 +793,40 @@ def cmd_gate(args) -> int:
     return 0 if result["passed"] else 1
 
 
+def cmd_attest(args) -> int:
+    """Project EXISTING run artifacts into an evidence table. Computes nothing, asserts nothing."""
+    from . import attest as _attest, hooks as _hooks
+    run_dir = Path(args.run).expanduser().resolve() if getattr(args, "run", None) else None
+    if run_dir is None:
+        out_root = Path(getattr(args, "out", None) or "./websec-out").expanduser().resolve()
+        latest = out_root / "runs" / "latest"
+        if latest.exists():
+            run_dir = latest.resolve()
+        else:
+            candidates = sorted((out_root / "runs").glob("*")) if (out_root / "runs").is_dir() else []
+            run_dir = candidates[-1] if candidates else None
+    if run_dir is None or not run_dir.is_dir():
+        print("error: no run directory found; pass --run <dir> or run `websec run` first",
+              file=sys.stderr)
+        return 2
+    if not (run_dir / "findings-ledger.json").is_file():
+        print(f"error: {run_dir} does not look like a websec run (no findings-ledger.json)",
+              file=sys.stderr)
+        return 2
+
+    bypasses = _hooks.read_bypasses(Path(getattr(args, "repo", None) or ".").expanduser())
+    result = _attest.build(run_dir, bypasses=bypasses)
+    fmt = getattr(args, "format", "text")
+    if fmt == "json":
+        print(json.dumps(result, indent=2))
+    elif fmt == "in-toto":
+        print(json.dumps(_attest.to_in_toto(result), indent=2))
+    else:
+        print(_attest.render_text(result))
+    # Always 0. This command reports; it does not judge, so there is no failure to signal.
+    return 0
+
+
 def cmd_capabilities(args) -> int:
     from .extractors.profiles import capabilities
     _emit_json_result(capabilities())
@@ -1318,6 +1352,16 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--exclude", action="append", metavar="PATH", help="exclude a path/glob")
     g.set_defaults(func=cmd_gate)
 
+    at = sub.add_parser("attest",
+                        help="project an existing run into an audit-evidence table (gaps first; no verdict)")
+    at.add_argument("--run", metavar="DIR", help="run directory (default: the latest under --out)")
+    at.add_argument("--out", metavar="DIR", help="output root to search for the latest run (default: ./websec-out)")
+    at.add_argument("--repo", metavar="DIR", help="repository to read hook-bypass records from (default: .)")
+    at.add_argument("--format", choices=["text", "json", "in-toto"], default="text",
+                    help="text (default) | json | in-toto (an UNSIGNED Statement for you to sign "
+                         "with your own key — a websec-signed one would attest only that websec ran)")
+    at.set_defaults(func=cmd_attest)
+
     capabilities = sub.add_parser("capabilities", help="show offline named security checks and profile limitations")
     capabilities.set_defaults(func=cmd_capabilities)
 
@@ -1387,7 +1431,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-_COMMANDS = {"run", "recon", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks", "repair-verify", "capabilities", "intel", "research", "feedback", "gate"}
+_COMMANDS = {"run", "recon", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks", "repair-verify", "capabilities", "intel", "research", "feedback", "gate", "attest"}
 
 
 def main(argv=None) -> int:
