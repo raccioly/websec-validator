@@ -61,6 +61,44 @@ def _hooks_dir(root: Path) -> Path:
     return d
 
 
+BYPASS_LOG = "websec-guardrail/bypass.jsonl"
+
+
+def read_bypasses(repo, limit: int = 50) -> dict:
+    """Honoured WEBSEC_SKIP_HOOK bypasses recorded by the installed hook.
+
+    HONEST LIMIT, repeated wherever this is surfaced: websec can only see a bypass it was asked to
+    honour. `git push --no-verify`, an uninstalled hook and a deleted `$GIT_DIR/hooks/pre-push`
+    (an untracked local file) are all invisible here. An empty list is NOT evidence that no bypass
+    occurred."""
+    out: dict = {"records": [], "count": 0,
+                 "limitation": ("cannot observe --no-verify, an uninstalled hook or a deleted hook; "
+                                "an empty list is not evidence that no bypass occurred")}
+    try:
+        git_dir = subprocess.run(["git", "-C", str(repo), "rev-parse", "--git-dir"],
+                                 capture_output=True, text=True, timeout=10)
+        if git_dir.returncode != 0:
+            return out
+        base = (Path(repo) / git_dir.stdout.strip()).resolve()
+        log = base / BYPASS_LOG
+        if not log.is_file():
+            return out
+        lines = log.read_text(errors="replace").splitlines()[-limit:]
+    except Exception:
+        return out
+    import json as _json
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out["records"].append(_json.loads(line))
+        except ValueError:
+            out["records"].append({"event": "bypass", "unparsed": line[:200]})
+    out["count"] = len(out["records"])
+    return out
+
+
 def _script(pre_push: bool) -> str:
     """Isolated launch of this explicitly installed package; never import from the target cwd."""
     import shlex
@@ -73,9 +111,26 @@ def _script(pre_push: bool) -> str:
     missing_rc = 2 if pre_push else 0
     # The subshell's exit never skips another installed hook's body. The parent
     # propagates only a failed gate before continuing the original shell hook.
+    hook_kind = "pre-push" if pre_push else "post-commit"
+    # An honoured bypass used to be COMPLETELY silent: this test is the first statement in the
+    # subshell, before the interpreter is resolved and before any Python runs, so no run directory,
+    # no hook.log and no stderr line was produced. A gate that can be skipped without trace cannot
+    # evidence that it ran. Record it in POSIX sh (macOS Bash 3.2 compatible) before exiting, and
+    # never let the bookkeeping itself fail the hook.
     return f"""{MARKER_START}
 (
-[ "${{WEBSEC_SKIP_HOOK:-0}}" = "1" ] && exit 0
+if [ "${{WEBSEC_SKIP_HOOK:-0}}" = "1" ]; then
+    _WS_GD=$(git rev-parse --git-dir 2>/dev/null || echo ".git")
+    _WS_DIR="$_WS_GD/websec-guardrail"
+    _WS_HEAD=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+    _WS_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)
+    if mkdir -p "$_WS_DIR" 2>/dev/null; then
+        printf '{{"event":"bypass","hook":"%s","head":"%s","at":"%s","scanned":false,"via":"WEBSEC_SKIP_HOOK","limitation":"websec cannot observe --no-verify or a removed hook; absence of a bypass record is NOT evidence that no bypass occurred"}}\\n' \
+            "{hook_kind}" "$_WS_HEAD" "$_WS_TS" >> "$_WS_DIR/bypass.jsonl" 2>/dev/null || true
+    fi
+    echo "[websec hook] BYPASSED via WEBSEC_SKIP_HOOK — no scan ran; recorded in $_WS_DIR/bypass.jsonl" >&2
+    exit 0
+fi
 _PINNED={pinned}
 if [ -n "$_PINNED" ] && [ -x "$_PINNED" ]; then
     _PYTHON="$_PINNED"

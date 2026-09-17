@@ -398,6 +398,42 @@ def cmd_run(args) -> int:
         log(f"\n  baseline: {diff['new_count']} new · {diff['unchanged_count']} unchanged · "
             f"{diff.get('no_longer_observed_count', 0)} no longer observed (vs {args.baseline})")
 
+    # 4c. Evaluate the CI gate HERE, before any artifact is written, and record the verdict in the
+    # ledger. Previously the gate ran after the artifacts were written and after the run was
+    # published, so the verdict existed only as a process exit code: nothing in the run directory
+    # said which gate ran, at what threshold, or whether it passed. An exit code is not evidence.
+    _incomplete = (bool(getattr(args, "fail_on", None) or getattr(args, "require_complete", False))
+                   and not facts["coverage"].get("execution_complete"))
+    _scoped = bool(diff_scope and not diff_scope.get("error"))
+    _gate_ledger = ledger
+    if _scoped:
+        # --diff narrows the gate to findings in CHANGED files (PR semantics: don't fail a PR on
+        # pre-existing debt it didn't touch). Only when scoping actually succeeded.
+        _gate_ledger = dict(ledger, findings=[f for f in ledger.get("findings", [])
+                                              if f.get("diff_state") in {"in-changed-file", "in-changed-hunk"}])
+    _gate = {"threshold": getattr(args, "fail_on", None),
+             "require_complete": bool(getattr(args, "require_complete", False)),
+             "new_only": bool(diff),
+             "baseline": str(args.baseline) if getattr(args, "baseline", None) else None,
+             "diff_scoped": _scoped,
+             "diff_base": (diff_scope or {}).get("base") if _scoped else None,
+             "execution_complete": bool(facts["coverage"].get("execution_complete"))}
+    if _incomplete:
+        _gate.update(verdict="incomplete", exit_code=2, count_at_or_above=None,
+                     note="requested checks did not complete; the gate result is NOT a pass")
+    elif getattr(args, "fail_on", None):
+        _n = baseline.gate_count(_gate_ledger, args.fail_on, new_only=bool(diff))
+        _gate.update(count_at_or_above=_n, verdict="fail" if _n else "pass", exit_code=1 if _n else 0)
+    else:
+        _gate.update(verdict="not-evaluated", exit_code=0, count_at_or_above=None,
+                     note="no --fail-on was requested; this run gated nothing")
+    # Enforcement is a server-side concern. Say so IN THE ARTIFACT, not only in the docs: a local
+    # gate can be skipped with --no-verify, an uninstalled hook, or a deleted one.
+    _gate["enforcement"] = ("advisory unless run as a required status check. A client-side gate is a "
+                            "developer convenience, not a control: it cannot evidence that it ran for "
+                            "every change.")
+    ledger["gate"] = _gate
+
     recon.write_facts(facts, out / "FACTS.json")
     (out / "coverage.json").write_text(json.dumps(facts["coverage"], indent=2))
     (out / "findings-ledger.json").write_text(json.dumps(ledger, indent=2))
@@ -445,27 +481,19 @@ def cmd_run(args) -> int:
     elif fmt == "json":
         print(json.dumps(formats.to_json(ledger, facts, __version__, ts), indent=2))
 
-    # 6. CI gate — exit non-zero if findings at/above --fail-on remain (only NEW ones when a baseline
-    # is supplied). Default (no --fail-on) never fails the build.
-    if ((getattr(args, "fail_on", None) or getattr(args, "require_complete", False))
-            and not facts["coverage"].get("execution_complete")):
+    # 6. CI gate — the verdict was computed and RECORDED above, before artifacts were written. This
+    # block only reports it and returns the exit code, so the artifact and the exit code cannot
+    # disagree.
+    if _gate["verdict"] == "incomplete":
         log("\n✗ requested security checks did not complete; partial artifacts saved (exit 2).")
         return 2
-    if getattr(args, "fail_on", None):
-        # --diff narrows the gate to findings in CHANGED files (PR semantics: don't fail a PR on
-        # pre-existing debt it didn't touch). Only when scoping actually succeeded.
-        _gate_ledger = ledger
-        _scoped = bool(diff_scope and not diff_scope.get("error"))
-        if _scoped:
-            _gate_ledger = dict(ledger, findings=[f for f in ledger.get("findings", [])
-                                                  if f.get("diff_state") in {"in-changed-file", "in-changed-hunk"}])
-        n = baseline.gate_count(_gate_ledger, args.fail_on, new_only=bool(diff))
-        if n:
-            log(f"\n✗ --fail-on {args.fail_on}: {n} finding(s) at or above threshold"
-                + (" (new since baseline)" if diff else "")
-                + (f" (in files changed vs {diff_scope['base']})" if _scoped else "")
-                + " — failing the build.")
-            return 1
+    if _gate["verdict"] == "fail":
+        log(f"\n✗ --fail-on {args.fail_on}: {_gate['count_at_or_above']} finding(s) at or above threshold"
+            + (" (new since baseline)" if diff else "")
+            + (f" (in files changed vs {_gate['diff_base']})" if _gate["diff_scoped"] else "")
+            + " — failing the build.")
+        return 1
+    if _gate["verdict"] == "pass":
         log(f"\n✓ --fail-on {args.fail_on}: no findings at or above threshold"
             + (" (new since baseline)" if diff else "") + ".")
     return 0

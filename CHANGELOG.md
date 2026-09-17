@@ -33,6 +33,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   approval record, not a scan. `attribution` is a **sibling** of `verification_context`, never
   merged into it, because repairs compares that object by strict dict equality and an added key
   would invalidate every previously emitted repair plan.
+- **The CI gate's verdict is now recorded as evidence, not only as an exit code.** `--fail-on` was
+  evaluated *after* the artifacts were written and *after* the run was published, so nothing in the
+  run directory said which gate ran, at what threshold, against which baseline, or whether it
+  passed. The verdict is now computed before anything is written and stored on the ledger as
+  `gate` — threshold, `new_only`, baseline identity, diff scoping, count at or above threshold,
+  verdict (`pass` / `fail` / `incomplete` / `not-evaluated`) and exit code — so the artifact and
+  the process exit code cannot disagree. The record states inline that a client-side gate is
+  advisory unless run as a required status check: it cannot evidence that it ran for every change.
+- **An honoured `WEBSEC_SKIP_HOOK` bypass now leaves a durable record.** The test was the first
+  statement in the generated hook, before the interpreter was resolved and before any Python ran,
+  so a skipped gate produced no run directory, no `hook.log` and no stderr line at all. The hook now
+  appends a JSONL record (hook kind, HEAD, timestamp, `scanned: false`) to
+  `$GIT_DIR/websec-guardrail/bypass.jsonl` and says so on stderr before exiting 0. The escape hatch
+  still works — this records it, it does not block it. Every record and the `read_bypasses` reader
+  carry the limitation inline: websec cannot observe `git push --no-verify`, an uninstalled hook or
+  a deleted one, so **an empty bypass log is not evidence that no bypass occurred**.
 - Agent-config detection now covers hosts beyond Claude Code: Cursor, VS Code, Gemini, Codex,
   Continue, OpenCode, Zed, Windsurf, Cline, Roo, Aider, Qwen and Warp. Committed literal
   credentials in an MCP `env`/`headers` block, unpinned MCP servers, non-vendor LLM base URLs and
