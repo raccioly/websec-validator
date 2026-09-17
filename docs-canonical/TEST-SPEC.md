@@ -2,19 +2,21 @@
 
 <!-- docguard:version 0.9.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-09-14 -->
+<!-- docguard:last-reviewed 2026-09-16 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — the suite deliberately uses no third-party runner, no network, and no running app; the negations describe real, intentional test constraints. -->
 
 > **Canonical document** — Design intent. This file declares what tests MUST exist.  
-> Last updated: 2026-09-14
+> Last updated: 2026-09-16
 
 The suite uses stdlib `unittest` with synthetic fixtures and local loopback servers; it requires no
 third-party runner, public network, external scanner, or running target app. Release CI also builds
-and smoke-tests the installed wheel. The final 2026-09-14 source phase passed **1082 application tests** on
-Python 3.14.7 (21.492s) and Python 3.12.14 (22.536s), plus **41 repository automation tests**.
-CI enforces an application-test floor of **1098**. The package
-has **22 registered extractors**, **17 sink classes**, **10 scanner entries** and **9 named profiles**.
+and smoke-tests the installed wheel. The 2026-09-16 source phase passed **1241 application tests** on
+Python 3.14.7 (33.393s) and Python 3.12.13 (33.955s), plus **41 repository automation tests**.
+CI enforces an application-test floor of **1241**. The package
+has **22 registered extractors**, **17 sink classes**, **11 scanner entries** and **9 named profiles**.
+The eleventh scanner entry is `gitleaks-dir`: gitleaks runs as two disjoint passes, git history and
+working tree, because neither surface subsumes the other.
 
 ```bash
 python3 -m unittest discover -s tests
@@ -41,6 +43,10 @@ python3 -m unittest discover -s tests
 | a fixed bug / disproven pen-test finding | a dedicated case in `tests/test_pentest_regressions.py` | Regression |
 | entitlement / licensing + WebExtension client-trust classes (`integrations`, `webext`) | a case in `tests/test_entitlement_webext.py` (incl. cross-provider genericity) | Unit / Regression |
 | `src/websec_validator/{cli,dynamic}.py` + safety invariants | a case in `tests/test_hardening.py` | Hardening |
+| analysis scoping (`--only`) in `extractors/base.py` | a parity case in `tests/test_analysis_scope.py` proving scoped findings are a SUBSET of full-tree findings with unchanged severities | Regression |
+| the agent-loop gate (`gate.py`, `agenthook.py`) | a case in `tests/test_gate_command.py` / `tests/test_agent_hook.py`, including fail-open behaviour | Hardening |
+| any network egress (`registry.py`, `intel.py`) | an offline-contract case proving the DEFAULT pass makes zero socket connections | Hardening |
+| audit-evidence output (`attest.py`) | a guardrail case in `tests/test_attest.py` asserting no verdict is rendered and no citation is misattributed | Hardening |
 
 ## Source-to-Test Map
 
@@ -58,6 +64,14 @@ python3 -m unittest discover -s tests
 | `src/websec_validator/proof.py` | `tests/test_proof_revisions.py`: pinned revisions, mismatch and unavailable diagnostics | ✅ |
 | `src/websec_validator/cli.py` | `tests/test_workbench_cli.py`: bounded command inputs, new-only outputs and validated documentation examples | ✅ |
 | `src/websec_validator/formats.py` | `tests/test_formats.py`, `tests/test_openapi.py`, `tests/test_graph_enrich.py`: schema 2.0, SARIF enums, scoped reads and distinct input origins | ✅ |
+| `src/websec_validator/gate.py` | `tests/test_gate_command.py`: working-tree target selection, thresholds, writes-nothing, and verdict text that states it is not a review | ✅ |
+| `src/websec_validator/agenthook.py` | `tests/test_agent_hook.py`: blocking on a real finding, failing OPEN and loudly on an internal error, no env escape hatch, malformed events, out-of-repo paths | ✅ |
+| `src/websec_validator/registry.py` | `tests/test_registry_existence.py`: offline suppression before any request, host allowlist, UNKNOWN never reported as missing, and the removed-vs-hallucinated split | ✅ |
+| `src/websec_validator/attribution.py` | `tests/test_attribution.py`: computed assurance tiers, self-asserted values never promoted, and isolation from `verification_context` | ✅ |
+| `src/websec_validator/attest.py` | `tests/test_attest.py`: no verdict/score/badge, gaps ordered before evidence, exact regulatory citations, unsigned in-toto shape | ✅ |
+| `src/websec_validator/hooks.py` (agent hook + bypass record) | `tests/test_gate_and_bypass_record.py`, `tests/test_agent_hook.py`: durable bypass records, structural settings.json merge, idempotent install/uninstall | ✅ |
+| `src/websec_validator/scanners.py` (secret surfaces) | `tests/test_gitleaks_worktree.py`: history and working-tree passes, cross-mode dedup, history-only annotation correctness | ✅ |
+| `src/websec_validator/extractors/agent_config.py` | `tests/test_agent_hosts.py`: paired safe/unsafe cases per agent host, and proof the allow-list never walks an agent directory | ✅ |
 
 Boundary tests must include legitimate positive cases as well as rejected inputs. Fault tests must
 show preserved partial evidence and failed execution gates; returning an empty result is insufficient.
@@ -106,7 +120,7 @@ A/B in [`corpus/PROOF-PROTOCOL.md`](../corpus/PROOF-PROTOCOL.md).
 |---------|-------------|----------|
 | Regression guards | Pin every fixed bug / disproven finding with a dedicated case (the bulk of `tests/test_pentest_regressions.py`) | ⚠️ High |
 | Individual extractors | Test each extractor directly against a fixture, not only end-to-end | ⚠️ High |
-| Safety-gate assertions | Prove dynamic write probes refuse non-localhost; prove the core pass stays offline | ⚠️ High |
+| Safety-gate assertions | Prove dynamic write probes refuse non-localhost; prove the core pass stays offline (`test_registry_existence.py` intercepts `socket.connect` during recon and asserts zero connections) | ⚠️ High |
 | Edge cases | Empty repo, missing files, partial-scan (file-cap) truncation, absent scanners | ✅ Medium |
 | Error paths | One failing extractor must never sink the whole run | ✅ Medium |
 

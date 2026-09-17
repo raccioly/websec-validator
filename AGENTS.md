@@ -2,7 +2,7 @@
 
 <!-- docguard:version 0.9.1 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-09-14 -->
+<!-- docguard:last-reviewed 2026-09-16 -->
 <!-- docguard:owner @raccioly -->
 
 > This project follows **Canonical-Driven Development (CDD)**.  
@@ -32,9 +32,11 @@ pass. Pure-Python, **stdlib only, zero runtime dependencies**; it shells out to 
 | Command | Purpose |
 |---------|---------|
 | `pipx install --editable .` | Install the CLI from source (or `pip install -e .` in a 3.11+ venv) |
-| `python3 -m unittest discover -s tests` | Run the suite (1082 tests, stdlib only, no public network) |
+| `python3 -m unittest discover -s tests` | Run the suite (1241 tests, stdlib only, no public network) |
 | `websec run ./target` | Full pipeline → `FACTS.json` + `AGENT-BRIEFING.md` + `probes/` |
 | `websec doctor ./target` | Show which optional scanners are installed |
+| `websec gate` | Fast scoped pass/fail on the files you just changed (agent-loop check) |
+| `websec attest` | Project a run into an audit-evidence table (gaps first; no verdict) |
 | `websec proof` | Score recon coverage vs the vuln-app corpus (needs network on first clone) |
 | `docguard guard` | Validate documentation against the code (CDD) |
 
@@ -74,7 +76,7 @@ content instead of overwriting the name-guard.
 
 1. **Before any work**: read `docs-canonical/` and run `docguard guard` to see the compliance state.
 2. **After changing code or docs**: re-run `docguard guard`; keep the numbers (22 extractors, 17 sink
-   classes, 1082 tests, dated 10/10 proof (not vulnerability recall)) consistent across every doc — DocGuard's metrics-consistency
+   classes, 11 scanner entries, 1241 tests, dated 10/10 proof (not vulnerability recall)) consistent across every doc — DocGuard's metrics-consistency
    validator cross-checks them.
 3. **Update `CHANGELOG.md`** for any user-visible change.
 4. **Document drift**: if code must deviate from a canonical doc, add a `// DRIFT: reason` (or
