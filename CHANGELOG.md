@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.1] — 2026-09-18
+
+Migration: **none required.** No schema, contract or CLI surface changes.
+
 ### Changed
 
 - The CI test floor is now derived from the base commit instead of stored as `MIN_TESTS`.
@@ -30,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and a bias direction that describe the shipped corpus, not local data. That path now carries its
   own label plus `corpus: []` and `shipped_table: false`. Tables built from a shipped corpus are
   unchanged, including the personalization suffix when local samples are folded in.
+
+- The Docker image builds again. `ARG TRIVY_VERSION` pinned 0.58.1, whose GitHub Release and
+  assets have since been deleted upstream; the installer downloads release assets, so the build
+  failed at that step. Pinned to 0.74.0, the current release. The git tag for 0.58.1 still
+  resolves, which is why this looks fine until the asset fetch runs.
 
 
 ## [0.15.0] — 2026-09-16
@@ -983,6 +992,7 @@ The initial public line. Highlights across 0.2.1–0.2.9:
 
 [Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.14.0...HEAD
 [0.14.0]: https://github.com/raccioly/websec-validator/compare/v0.13.0...v0.14.0
+[0.15.1]: https://github.com/raccioly/websec-validator/compare/v0.15.0...v0.15.1
 [0.13.0]: https://github.com/raccioly/websec-validator/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/raccioly/websec-validator/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/raccioly/websec-validator/compare/v0.10.0...v0.11.0
