@@ -1877,6 +1877,37 @@ class EmitContextTests(unittest.TestCase):
         with self.assertRaises(json.JSONDecodeError):                 # markdown mode is NOT JSON
             json.loads(out)
 
+    def test_unknown_subcommand_fails_loudly_instead_of_scanning(self):
+        # A mistyped or not-yet-released subcommand used to be rewritten into a scan
+        # target, so it printed `run`'s help and exited 0. A missing command was then
+        # indistinguishable from a present one — `websec gate --help` on a build without
+        # gate looked exactly like success.
+        from websec_validator import cli
+        for bogus in ("totally-not-a-command", "atest", "gat"):
+            with self.subTest(bogus=bogus):
+                with self.assertRaises(SystemExit) as caught:
+                    cli.main([bogus, "--help"])
+                self.assertEqual(caught.exception.code, 2)
+
+    def test_unknown_subcommand_suggests_the_near_match(self):
+        from websec_validator import cli
+        import contextlib, io
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+            cli.main(["atest", "."])
+        self.assertIn("unknown command 'atest'", err.getvalue())
+        self.assertIn("attest", err.getvalue())
+
+    def test_point_and_go_still_runs_an_existing_path(self):
+        # The convenience this guard must not break: `websec <path>` == `websec run <path>`.
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "app"
+            target.mkdir()
+            (target / "a.py").write_text("print(1)\n", encoding="utf-8")
+            from websec_validator import cli
+            code = cli.main([str(target), "--out", str(Path(directory) / "out"), "--format", "json"])
+            self.assertEqual(code, 0)
+
     def test_bare_subcommand_not_rewritten_to_run(self):
         # regression: `emit-context` must be in _COMMANDS, else main() rewrites it to `run
         # emit-context <path>` and argparse rejects the target.

@@ -12,6 +12,7 @@ agent at the generated AGENT-BRIEFING.md.
 from __future__ import annotations
 
 import argparse
+import difflib
 import hashlib
 import json
 import os
@@ -770,6 +771,12 @@ def cmd_gate(args) -> int:
     if not paths:
         discovered = _gate.working_tree_paths(target)
         paths, scope_source = discovered["paths"], discovered["source"]
+        if scope_source == "working-tree-unavailable":
+            # Not a pass: the gate could not determine what to analyse, so it never
+            # answered the question. Exit 2 (incomplete requested execution), never 0.
+            print(f"error: {discovered.get('note', 'changed-file scope unavailable')}",
+                  file=sys.stderr)
+            return 2
         if not paths:
             # Nothing changed is a PASS, but say which question was answered.
             print(_gate.to_json({"tool": "websec-validator", "command": "gate", "passed": True,
@@ -1440,8 +1447,17 @@ def main(argv=None) -> int:
     if not argv:                      # bare `websec` → show help, don't error
         parser.print_help()
         return 0
-    # bare `websec <path>` (no subcommand) ⇒ treat as `websec run <path>` — point-and-go
+    # bare `websec <path>` (no subcommand) ⇒ treat as `websec run <path>` — point-and-go.
+    # Gate this on the path EXISTING. Without that check a mistyped or not-yet-released
+    # subcommand is silently rewritten into a scan target: `websec atest .` scanned the
+    # current directory, and `websec gate --help` on a build with no gate printed run's
+    # help and exited 0, so a missing command was indistinguishable from a present one.
     if argv[0] not in _COMMANDS and not argv[0].startswith("-"):
+        if not Path(argv[0]).expanduser().exists():
+            near = difflib.get_close_matches(argv[0], sorted(_COMMANDS), n=1, cutoff=0.6)
+            hint = f" Did you mean {near[0]!r}?" if near else ""
+            parser.error(f"unknown command {argv[0]!r} (and no such path).{hint} "
+                         f"Run `websec --help` for the command list.")
         argv = ["run"] + argv
     args = parser.parse_args(argv)
     return args.func(args)

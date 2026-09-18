@@ -68,6 +68,14 @@ def working_tree_paths(repo: Path) -> dict:
     out: list[str] = []
     # -z keeps paths with spaces/newlines intact; porcelain v1 is stable across git versions.
     raw = _git(repo, "status", "--porcelain", "-z", "--untracked-files=all")
+    if raw is None:
+        # `git status` failed (timeout, index.lock contention, non-zero exit). An empty
+        # path list here is NOT an empty working tree, and reporting source="working-tree"
+        # would make the two indistinguishable — the gate would then pass having analysed
+        # nothing. The rev-parse check above already draws this distinction; so does this.
+        return {"paths": [], "source": "working-tree-unavailable",
+                "note": "`git status` did not complete, so the changed-file set is unknown; "
+                        "pass paths explicitly with --only"}
     if raw:
         for entry in raw.split("\0"):
             if len(entry) < 4:
