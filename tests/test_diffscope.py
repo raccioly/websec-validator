@@ -1,6 +1,7 @@
 """Diff scoping — changed files + exact hunk line ranges (the line-in-diff validation LLM reviewers skip)."""
 
 import shutil
+import os
 import subprocess
 import sys
 import tempfile
@@ -20,7 +21,8 @@ def _repo():
     # rewrites line endings under assertions that check exact hunk ranges, and a global core.hooksPath
     # runs someone else's post-commit hook inside our fixture repo.
     for k, v in (("user.email", "t@t"), ("user.name", "t"), ("commit.gpgsign", "false"),
-                 ("core.autocrlf", "false"), ("core.hooksPath", ".git/hooks")):
+                 ("core.autocrlf", "false"), ("core.hooksPath", ".git/hooks"),
+                 ("core.excludesFile", os.devnull)):
         subprocess.run(["git", "-C", str(d), "config", k, v], check=True)
     return d
 

@@ -33,6 +33,9 @@ def _init_repo(root: Path) -> None:
     # system) core.hooksPath would otherwise redirect every install in this class, and the unlink in
     # test_uninstall_removes_pure_websec_hook, at that shared directory instead of the temp repo.
     subprocess.run(["git", "config", "core.hooksPath", ".git/hooks"], cwd=root, check=True)
+    # A developer global gitignore (core.excludesFile) hides untracked paths from
+    # `git status --porcelain`, which once made a test pass locally and fail on CI.
+    subprocess.run(["git", "config", "core.excludesFile", os.devnull], cwd=root, check=True)
 
 
 @unittest.skipUnless(HAVE_GIT, "git not available")

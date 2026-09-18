@@ -6,6 +6,7 @@ fast, it writes nothing, and it never reports 'clean' for something it did not a
 """
 import contextlib
 import io
+import os
 import json
 from pathlib import Path
 import subprocess
@@ -43,7 +44,8 @@ class GateTests(unittest.TestCase):
         # core.hooksPath would redirect hook installs out of the fixture repo.
         for _k, _v in (("user.email", "d@e.com"), ("user.name", "D"),
                        ("commit.gpgsign", "false"), ("core.autocrlf", "false"),
-                       ("core.hooksPath", ".git/hooks")):
+                       ("core.hooksPath", ".git/hooks"),
+                       ("core.excludesFile", os.devnull)):
             subprocess.run(["git", "-C", str(self.repo), "config", _k, _v], check=True)
         subprocess.run(["git", "add", "-A"], cwd=self.repo, check=True)
         subprocess.run(["git", "commit", "-qm", "init"], cwd=self.repo, check=True)

@@ -9,6 +9,7 @@ assumed.
 Citation accuracy is also pinned: a misattributed clause is the fastest way for an assessor to
 discount the whole artifact, and the obvious citations are wrong.
 """
+import os
 import json
 from pathlib import Path
 import subprocess
@@ -34,7 +35,8 @@ class AttestOutputTests(unittest.TestCase):
         # core.hooksPath would redirect hook installs out of the fixture repo.
         for _k, _v in (("user.email", "d@e.com"), ("user.name", "D"),
                        ("commit.gpgsign", "false"), ("core.autocrlf", "false"),
-                       ("core.hooksPath", ".git/hooks")):
+                       ("core.hooksPath", ".git/hooks"),
+                       ("core.excludesFile", os.devnull)):
             subprocess.run(["git", "-C", str(self.repo), "config", _k, _v], check=True)
         subprocess.run(["git", "add", "-A"], cwd=self.repo, check=True)
         subprocess.run(["git", "commit", "-qm", "init"], cwd=self.repo, check=True)

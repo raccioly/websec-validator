@@ -5,6 +5,7 @@ evidence, and presenting one as identity would manufacture exactly the false ass
 exists to avoid. These tests pin that: `assurance` is computed, tier 3 never promotes, and the
 object never leaks into verification_context (which repairs compares by strict dict equality).
 """
+import os
 import json
 from pathlib import Path
 import subprocess
@@ -22,7 +23,8 @@ def _repo(root: Path, commit=True) -> Path:
     subprocess.run(["git", "config", "user.email", "dev@example.com"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.name", "Dev"], cwd=root, check=True)
     for _k, _v in (("commit.gpgsign", "false"), ("core.autocrlf", "false"),
-                   ("core.hooksPath", ".git/hooks")):
+                   ("core.hooksPath", ".git/hooks"),
+                   ("core.excludesFile", os.devnull)):
         subprocess.run(["git", "config", _k, _v], cwd=root, check=True)
     (root / "a.py").write_text("x = 1\n")
     if commit:

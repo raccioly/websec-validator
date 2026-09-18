@@ -4,6 +4,7 @@ The properties that matter: it must block only on real findings, it must NEVER b
 itself broken, it must not honour an env escape hatch the agent can set, and it must cost nothing
 on edits no detector reads.
 """
+import os
 import json
 from pathlib import Path
 import subprocess
@@ -44,7 +45,8 @@ class AgentHookTests(unittest.TestCase):
         # core.hooksPath would redirect hook installs out of the fixture repo.
         for _k, _v in (("user.email", "d@e.com"), ("user.name", "D"),
                        ("commit.gpgsign", "false"), ("core.autocrlf", "false"),
-                       ("core.hooksPath", ".git/hooks")):
+                       ("core.hooksPath", ".git/hooks"),
+                       ("core.excludesFile", os.devnull)):
             subprocess.run(["git", "-C", str(self.repo), "config", _k, _v], check=True)
         subprocess.run(["git", "add", "-A"], cwd=self.repo, check=True)
         subprocess.run(["git", "commit", "-qm", "init"], cwd=self.repo, check=True)

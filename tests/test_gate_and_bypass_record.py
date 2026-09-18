@@ -5,6 +5,7 @@ published, so nothing in the run directory said which gate ran, at what threshol
 passed. And an honoured WEBSEC_SKIP_HOOK exited before any Python ran — no run directory, no
 hook.log, no stderr line. A gate that can be skipped without trace cannot evidence that it ran.
 """
+import os
 import json
 from pathlib import Path
 import subprocess
@@ -24,7 +25,8 @@ def _repo(root: Path) -> Path:
     # the commits outright with no secret key, autocrlf rewrites line endings, and a global
     # core.hooksPath runs someone else's hooks inside — or instead of — our fixture repo.
     for _k, _v in (("user.email", "d@e.com"), ("user.name", "D"), ("commit.gpgsign", "false"),
-                   ("core.autocrlf", "false"), ("core.hooksPath", ".git/hooks")):
+                   ("core.autocrlf", "false"), ("core.hooksPath", ".git/hooks"),
+                   ("core.excludesFile", os.devnull)):
         subprocess.run(["git", "-C", str(root), "config", _k, _v], check=True)
     (root / "a.txt").write_text("x\n")
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)
