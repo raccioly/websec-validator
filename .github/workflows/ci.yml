@@ -96,15 +96,23 @@ jobs:
   suite-integrity:
     # Guards the "green but wrong" failure mode that matters for a scanner: a change that makes CI
     # pass by REMOVING coverage. A deleted or neutered test makes the suite greener AND faster, so
-    # neither a pass/fail signal nor a runtime ceiling catches it — only a floor does. Raising the
-    # floor means editing this workflow, which is a human-reviewed path.
+    # neither a pass/fail signal nor a runtime ceiling catches it — only a floor does.
+    #
+    # The floor is DERIVED from the base commit, not stored here. A stored MIN_TESTS was itself a
+    # shared counter every branch adding tests had to edit: two branches each added two tests, both
+    # bumped 1241 -> 1243, and the rebase was clean *because* the values matched, leaving the floor
+    # two below the real suite with no conflict and no error. Counting the base at run time removes
+    # the number two branches can disagree about. A deliberate removal is still possible, via a
+    # `Test-Removal: <reason>` commit trailer that leaves the reason in the history.
     name: suite-integrity
     runs-on: ubuntu-latest
     permissions:
       contents: read
       actions: read      # reads this run's own job names to validate required-checks.json
     env:
-      MIN_TESTS: 1245          # bump when adding tests; never lower it to make a PR pass
+      # The floor is derived from BASE_REF at run time — see the job comment above.
+      # For a PR that is the target branch's tip; for a push it is the previous commit.
+      BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || 'HEAD~1' }}
       # The suite runs in ~10s on CI. 300s would have been 30x nominal and useless: the known
       # failure in this class (docguard PR #328 — a test given "/" as its project dir walked the
       # whole filesystem) was a 7.6x blowup that stayed GREEN throughout, and 7.6x of 10s still
@@ -113,6 +121,10 @@ jobs:
       MAX_SECONDS: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # The derived floor reads the base commit's tests/ tree, which a depth-1 clone
+          # does not contain. Without this the floor silently degrades to "not enforced".
+          fetch-depth: 0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: "3.13"
@@ -146,14 +158,14 @@ jobs:
           if [ -z "$count" ]; then
             echo "::error::could not parse the test count from unittest output"; exit 1
           fi
-          echo "collected $count tests in ${elapsed}s (floor $MIN_TESTS, ceiling ${MAX_SECONDS}s)"
+          echo "ran $count tests in ${elapsed}s (ceiling ${MAX_SECONDS}s)"
 
-          if [ "$count" -lt "$MIN_TESTS" ]; then
-            echo "::error::test count $count is below the floor $MIN_TESTS — coverage was removed."
-            echo "::error::Restore missing tests or investigate test collection; never lower MIN_TESTS to make this pass."
-            exit 1
-          fi
           if [ "$elapsed" -gt "$MAX_SECONDS" ]; then
             echo "::error::suite took ${elapsed}s (> ${MAX_SECONDS}s) — likely a test blocking on the network"
             exit 1
           fi
+
+      - name: Enforce the derived test floor (no stored counter)
+        run: |
+          set -euo pipefail
+          python .github/scripts/test_floor.py --base-ref "$BASE_REF"

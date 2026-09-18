@@ -132,5 +132,10 @@ not — so CI could never reproduce or confirm the fix. That defect is fixed (bu
 **What never merges automatically:** anything under `src/`, `.github/`, packaging files, instruction
 files (`AGENTS.md`, `CLAUDE.md`), binaries, or any major version bump.
 
-**Never lower `MIN_TESTS` in `.github/workflows/ci.yml` to make a PR pass.** That floor exists
-because a deleted test makes this suite greener *and* faster, so nothing else catches it.
+**Never make a PR pass by removing coverage.** A deleted or gutted test makes this suite greener
+*and* faster, so nothing else catches it. The floor is derived at CI time by counting the base
+commit's suite — there is no `MIN_TESTS` to edit, and none should be reintroduced: a stored
+counter is a shared number every branch adding tests must bump, and two branches that each add
+the same count bump it identically and merge cleanly while being jointly wrong. If a removal is
+genuinely correct, put a `Test-Removal: <reason>` trailer on the commit so the drop is recorded
+in the history rather than hidden.
