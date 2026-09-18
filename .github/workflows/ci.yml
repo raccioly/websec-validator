@@ -69,6 +69,12 @@ jobs:
           git config --file "$cfg" core.hooksPath "$RUNNER_TEMP/globalhooks"
           git config --file "$cfg" core.autocrlf true
           git config --file "$cfg" commit.gpgsign true
+          # A global gitignore hides untracked paths from `git status --porcelain`. A fixture
+          # that inherits it can pass locally and fail here — or worse, pass in both while
+          # asserting on a status that silently omits files. Developers commonly ignore
+          # __pycache__/ globally, which is exactly how this was missed.
+          printf '__pycache__/\n*.log\n.DS_Store\n' > "$RUNNER_TEMP/global-gitignore"
+          git config --file "$cfg" core.excludesFile "$RUNNER_TEMP/global-gitignore"
           git config --file "$cfg" init.defaultBranch trunk
           cat "$cfg"
 

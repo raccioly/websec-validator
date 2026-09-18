@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The test suite is now hermetic against a developer's global gitignore. Seven fixtures
+  pinned `user.email`, `commit.gpgsign`, `core.autocrlf` and `core.hooksPath` but not
+  `core.excludesFile`, so a global ignore listing `__pycache__/` hid untracked paths from
+  `git status --porcelain` inside the fixture repo — one test passed locally and failed on
+  CI for exactly that reason. The `hermeticity (hostile git config)` job now also
+  manufactures a global gitignore, so the whole class is detectable rather than relying on
+  a developer happening to have one.
+
+
 ### Added
 
 - `websec doctor` now reports where the running engine came from, not just its version.
