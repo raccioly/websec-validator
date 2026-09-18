@@ -30,6 +30,7 @@ counter.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -74,9 +75,17 @@ def count_tests(tests_dir: Path) -> int:
 
 
 def count_in_subprocess(tests_dir: Path) -> int:
-    """Count `tests_dir` in a fresh interpreter. See the module docstring for why."""
+    """Count `tests_dir` in a fresh interpreter. See the module docstring for why.
+
+    PYTHONDONTWRITEBYTECODE: importing the modules would otherwise drop a `__pycache__`
+    into the tree being measured. In the base worktree that is merely litter that
+    `worktree remove --force` has to clear, but in the checkout it makes the working
+    tree dirty — a measurement must not modify what it measures.
+    """
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
     result = subprocess.run([sys.executable, str(Path(__file__).resolve()),
-                             "--count-only", str(tests_dir)], capture_output=True, text=True)
+                             "--count-only", str(tests_dir)],
+                            capture_output=True, text=True, env=env)
     if result.returncode != 0:
         raise DiscoveryError((result.stdout + result.stderr).strip().splitlines()[-1]
                              if (result.stdout + result.stderr).strip() else "counter failed")

@@ -5,6 +5,7 @@ should. A floor that only ever passes is the bug it is meant to prevent.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -27,11 +28,18 @@ def _repo(root: Path) -> Path:
     An opinionated global config otherwise reaches in: commit.gpgsign=true fails the
     commits with no secret key, autocrlf rewrites line endings, and a global
     core.hooksPath runs someone else's hooks inside our fixture.
+
+    core.excludesFile is pinned on top of that list for a reason this suite learned the
+    hard way: a developer global gitignore containing `__pycache__/` made
+    test_base_worktree_is_removed_and_head_is_untouched pass locally while it failed on
+    CI, because `git status --porcelain` hid the bytecode the counter was leaving behind.
+    A fixture that inherits the developer's ignore rules is not hermetic.
     """
     root.mkdir(parents=True, exist_ok=True)
     _git(root, "init", "-q", ".")
     for key, value in (("user.email", "d@e.com"), ("user.name", "D"), ("commit.gpgsign", "false"),
-                       ("core.autocrlf", "false"), ("core.hooksPath", ".git/hooks")):
+                       ("core.autocrlf", "false"), ("core.hooksPath", ".git/hooks"),
+                       ("core.excludesFile", os.devnull)):
         _git(root, "config", key, value)
     return root
 
@@ -162,12 +170,17 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("floor not enforced", result.stdout)
 
     def test_base_worktree_is_removed_and_head_is_untouched(self):
+        # A measurement must not modify what it measures. This caught a real one: the
+        # counter imported the test modules in-place and left tests/__pycache__ behind,
+        # dirtying the checkout. It passed on macOS and failed on the CI runner, so the
+        # assertion stays exact rather than tolerating stray paths.
         before = _git(self.root, "worktree", "list").stdout
         head_before = _git(self.root, "rev-parse", "HEAD").stdout
         _run(self.root)
         self.assertEqual(_git(self.root, "worktree", "list").stdout, before)
         self.assertEqual(_git(self.root, "rev-parse", "HEAD").stdout, head_before)
         self.assertEqual(_git(self.root, "status", "--porcelain").stdout, "")
+        self.assertFalse(list(self.root.rglob("__pycache__")), "counter wrote bytecode into the tree")
 
 
 if __name__ == "__main__":
