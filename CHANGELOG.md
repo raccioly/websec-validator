@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.2] — 2026-09-18
+
+Migration: **none required.** Two commands that exited 0 without doing their work now exit 2.
+
 ### Fixed
 
 - A mistyped or unavailable subcommand no longer exits 0. `websec <word>` falls back to
@@ -1007,6 +1011,7 @@ The initial public line. Highlights across 0.2.1–0.2.9:
 
 [Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.14.0...HEAD
 [0.14.0]: https://github.com/raccioly/websec-validator/compare/v0.13.0...v0.14.0
+[0.15.2]: https://github.com/raccioly/websec-validator/compare/v0.15.1...v0.15.2
 [0.15.1]: https://github.com/raccioly/websec-validator/compare/v0.15.0...v0.15.1
 [0.13.0]: https://github.com/raccioly/websec-validator/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/raccioly/websec-validator/compare/v0.11.0...v0.12.0
