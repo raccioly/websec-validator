@@ -615,7 +615,7 @@ add the matching dated changelog and migration guidance, and validate the combin
 In the 0.x series, feature additions or incompatible contracts increment the minor version.
 
 After reviewing current main and overlapping PRs, merge the approved release PR only after its
-required CI checks pass. The resulting main commit subject must be `release: v0.15.3` for this
+required CI checks pass. The resulting main commit subject must be `release: v0.16.0` for this
 release. [release-tag.yml](.github/workflows/release-tag.yml) validates that subject against the
 package version, creates the matching tag/GitHub Release, and explicitly dispatches
 [publish.yml](.github/workflows/publish.yml) at that tag. A version edit alone does not publish.
@@ -631,18 +631,19 @@ omit an independent version field. Check both sources when diagnosing stale inst
 
 ## Status / roadmap
 
-Version 0.15.3 provides 22 recon extractors, eleven optional scanner entries, nine named profiles,
+Version 0.16.0 provides 22 recon extractors, eleven optional scanner entries, nine named profiles,
 SARIF import/export, bounded source/query analysis, explicit coverage and lifecycle evidence,
 intelligence/research commands, and opt-in agent/hook/CI adoption. It adds an in-loop security gate
 (`websec gate` and a `PostToolUse` hook), analysis scoping with `--only`, an opt-in dependency
 existence check (`--network`), run attribution with graded assurance, recorded gate verdicts and
-hook bypasses, and an audit-evidence projection (`websec attest`). These are scoped review tools;
+hook bypasses, an audit-evidence projection (`websec attest`), and a claimspec export of the
+calibration table (`websec calibrate --claimspec`). These are scoped review tools;
 manual profiles, unknown routes, dynamic behavior and unsupported syntax remain limitations. The
 in-loop gate is developer ergonomics, not a control, and `attest` reports evidence without
 rendering a compliance verdict.
 
 The [0.14.0 migration guide](docs/MIGRATING-0.14.0.md) explains schema 2.0 and gate/artifact
-changes. 0.15.3 is a patch over 0.15.2 and needs no migration.
+changes. 0.16.0 adds the claimspec calibration export over 0.15.3 and needs no migration.
 The [remaining-work specification](specs/001-continuous-security-improvement/spec.md) consolidates
 unresolved gaps and acceptance tests so overlapping old-base PRs do not become competing roadmaps.
 Existing runtime probes are opt-in; their earlier isolated results are not current deployment proofs.
