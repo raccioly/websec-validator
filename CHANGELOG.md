@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `websec demo` scans a bundled sample app and summarises what it finds, so the output
+  can be seen before pointing the tool at anything you care about. It is a real run
+  through the same recon and ledger code as `websec run`, not a recorded transcript, and
+  it writes only inside a temporary directory that it removes afterwards.
+
+  The sample ships as `.txt` so nothing imports, lints or executes it, and it deliberately
+  carries no credential-shaped strings — a planted fake credential inside an installed
+  package gets flagged by other people's scanners pointed at site-packages. It plants
+  injection and missing-auth classes instead. An empty result is reported as a detector
+  bug and exits 1; it must never read as a clean bill of health.
+
+
+### Added
+
 - `websec explain <attack-class|CWE-id>` answers offline what a finding class means, what
   would confirm or refute it in your code, the remediation pattern, and whether a
   calibrated cell actually exists for it. A ledger entry names a class and cites a CWE but
