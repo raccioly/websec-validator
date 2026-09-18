@@ -1121,6 +1121,33 @@ def cmd_calibrate(args) -> int:
     write calibration.json (shipped + applied at runtime by findings.build_ledger)."""
     from importlib import resources
 
+    # --claimspec: export the calibration the runtime actually uses (shipped table + your local
+    # overlay, merged) as a claimspec v1 `calibration` document — the Guard-family shared format,
+    # so another tool can read websec's P(real) table with its caveat, floor, backoff and
+    # labelled fallback intact. Additive: the internal calibration.json shape is unchanged.
+    if getattr(args, "claimspec", None):
+        table = calibration.load()
+        if not table:
+            print("websec calibrate --claimspec: no calibration table is available (neither the shipped "
+                  "table nor a local overlay loaded). Nothing to export.")
+            return 2
+        try:
+            doc = calibration.to_claimspec(table)
+        except ValueError as e:
+            sys.exit(f"error: --claimspec refused to export a non-reproducible table: {e}")
+        text = json.dumps(doc, indent=2) + "\n"
+        if args.claimspec == "-":
+            sys.stdout.write(text)
+            return 0
+        dest = Path(args.claimspec).expanduser().resolve()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(text)
+        cells = len(doc["buckets"])
+        print(f"websec calibrate --claimspec: wrote {dest} — source.kind={doc['source']['kind']}, "
+              f"evidenceStatus={doc['source']['evidenceStatus']}, {cells} primary cell(s), "
+              f"minN={doc['minN']}.")
+        return 0
+
     # --ingest-dast: close the loop with a REAL scan — a ZAP/Nuclei report confirms/refutes websec's
     # DAST-predictable findings (§4b) and folds the verdicts into your local overlay. Needs the ledger.
     if getattr(args, "ingest_dast", None):
@@ -1370,6 +1397,9 @@ def build_parser() -> argparse.ArgumentParser:
                           "(needs --ledger)")
     cal.add_argument("--ledger", metavar="findings-ledger.json",
                      help="the websec ledger the --ingest-dast report is matched against")
+    cal.add_argument("--claimspec", metavar="PATH",
+                     help="export the calibration the runtime uses (shipped + local overlay) as a "
+                          "claimspec v1 `calibration` document; `-` writes to stdout")
     cal.set_defaults(func=cmd_calibrate)
 
     dyn = sub.add_parser("dynamic", help="dynamic probes vs a LIVE target (read-only): cross-tenant BOLA (--config) or unauth reachability (--unauth)")

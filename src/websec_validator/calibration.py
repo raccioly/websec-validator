@@ -258,6 +258,98 @@ def samples_from_dynamic(dynamic: dict) -> list:
     return out
 
 
+# ---- claimspec `calibration` writer (additive: the internal table shape above is unchanged) ----
+# claimspec is the Guard-family shared spec (testguard `spec/`). Its `calibration` kind carries the
+# same honesty fields this table does — corpus, caveat, limitation, evidence status, min-n floor,
+# backoff tier and a labelled fallback — under different names. This writer is the translation.
+CLAIMSPEC_SCHEMA_VERSION = 1
+CLAIMSPEC_MEASURES = "finding-real"            # P(a reported finding of this class is a real vulnerability)
+CLAIMSPEC_BUCKET_BY = "attackClass|confidence"  # `by_class_label` keys are `class|LABEL`
+CLAIMSPEC_BACKOFF_BY = "confidence"             # `by_label` keys are `LABEL`
+CLAIMSPEC_CONFIDENCE = 0.95                     # Z95 above is the exact quantile for this level
+_EVIDENCE_STATUS = {"historical-unverified": "unverified", "historical-quarantined": "quarantined"}
+# meta keys that are websec provenance with no claimspec field; they travel in `source.detail`.
+_DETAIL_KEYS = ("n_total", "n_unknown", "unmatched_rule", "researched_classes", "personalized",
+                "local_samples", "legacy_uncertain_samples", "historical_uncertain_samples",
+                "shipped_table", "method")
+
+
+def _claimspec_cell(key: str, cell: dict) -> dict:
+    """Translate one `{n, k, p, ci}` cell to `{n, positives, p, ci}`, refusing one that does not
+    reproduce from its own counts.
+
+    The stored `p`/`ci` are passed through, not recomputed: they are the numbers `apply()` actually
+    attaches to findings, and an exported document must not quote a different one. The validator
+    recomputes both from `positives`/`n` at the document's own precision, so a stale hand-edited
+    cell would make the whole document non-conforming — better to refuse here and name the cell.
+    Precision note: `_cell` uses Python `round()` (round-half-even on the binary value) where the
+    JS validator uses `toFixed` (round-half-away); an exact tie at 3 dp is effectively impossible
+    for a Wilson bound, so the two agree in practice.
+    """
+    n, k = int(cell.get("n", 0)), int(cell.get("k", 0))
+    if k > n or n < 0:
+        raise ValueError(f"calibration cell {key!r} has {k} positives in {n} trials")
+    expected = _cell(k, n)
+    got = {"p": cell.get("p"), "ci": list(cell.get("ci", []))}
+    if got["p"] != expected["p"] or got["ci"] != expected["ci"]:
+        raise ValueError(f"calibration cell {key!r} does not reproduce from its counts "
+                         f"({k}/{n}): stored p={got['p']} ci={got['ci']}, "
+                         f"expected p={expected['p']} ci={expected['ci']}")
+    return {"n": n, "positives": k, "p": got["p"], "ci": got["ci"]}
+
+
+def to_claimspec(table: dict, computed_at: str | None = None) -> dict:
+    """Render an internal calibration table (shipped, local-only or merged, i.e. anything `load()`
+    returns) as a claimspec v1 `calibration` document.
+
+    Field mapping is fixed by the spec's own reference translation of the shipped table
+    (`spec/conformance/examples/calibration-websec.json` in testguard). `source.kind` says where
+    the labels came from: `human-label` for the shipped corpus table, `tool-oracle` when only the
+    operator's confirmed local samples exist, `mixed` once local samples are folded over shipped.
+    `source.caveat` is always written — a number quoted without it is a misquote.
+    """
+    from datetime import datetime, timezone
+    from . import __version__
+
+    meta = table.get("meta", {}) or {}
+    if meta.get("shipped_table") is False:
+        kind, ref = "tool-oracle", "calibration-local.json (operator overlay; no shipped table)"
+    elif meta.get("personalized"):
+        kind, ref = "mixed", "shipped calibration.json + operator overlay calibration-local.json"
+    else:
+        kind, ref = "human-label", "src/websec_validator/calibration.json, shipped in the package"
+    source: dict = {"kind": kind, "ref": ref}
+    if meta.get("corpus"):
+        source["corpus"] = list(meta["corpus"])
+    source["caveat"] = meta.get("caveat") or CAVEAT
+    if meta.get("limitation"):
+        source["limitation"] = meta["limitation"]
+    source["evidenceStatus"] = _EVIDENCE_STATUS.get(meta.get("evidence_status"), "verified")
+    detail = {key: meta[key] for key in _DETAIL_KEYS if meta.get(key) is not None}
+    if detail:
+        source["detail"] = detail
+
+    if computed_at is None:
+        computed_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return {
+        "schemaVersion": CLAIMSPEC_SCHEMA_VERSION,
+        "tool": {"name": "websec-validator", "version": __version__},
+        "computedAt": computed_at,
+        "method": "wilson",
+        "confidence": CLAIMSPEC_CONFIDENCE,
+        "measures": CLAIMSPEC_MEASURES,
+        "bucketBy": CLAIMSPEC_BUCKET_BY,
+        "minN": int(meta.get("min_n", MIN_N)),
+        "source": source,
+        "buckets": {key: _claimspec_cell(key, cell)
+                    for key, cell in sorted((table.get("by_class_label") or {}).items())},
+        "backoff": [{"bucketBy": CLAIMSPEC_BACKOFF_BY,
+                     "buckets": {key: _claimspec_cell(key, cell)
+                                 for key, cell in sorted((table.get("by_label") or {}).items())}}],
+        "fallback": {"basis": "uncalibrated-prior", "values": dict(table.get("prior") or PRIOR)},
+    }
+
+
 def apply(attack_class: str, confidence: str, table: dict | None) -> dict:
     """Attach a calibrated estimate for a finding's (attack_class, confidence) bucket.
 

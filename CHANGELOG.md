@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `websec calibrate --claimspec PATH` exports the calibration the runtime uses (shipped table plus
+  local overlay, merged) as a claimspec v1 `calibration` document, the Guard-family shared format
+  (testguard `spec/`, calibration kind from testguard#94/#95). The translation is field for field:
+  corpus, caveat, limitation, evidence status, the `minN` floor, the per-confidence backoff tier
+  and the labelled uncalibrated prior all carry over, and every cell keeps raw `n`/`positives` so
+  `p` and the Wilson interval are recomputable and two tables merge by summing counts. `-` writes
+  to stdout. The writer refuses a cell whose stored `p`/`ci` do not reproduce from its counts.
+  Additive only: the internal `calibration.json` shape, the local overlay's `schema_version: 2`,
+  the ledger's `calibrated` block and the runtime fallback cascade are unchanged.
+- A round-trip test hands every emitted shape (shipped, quarantined runtime, overlay-only, merged)
+  to the spec's own Node validator, which recomputes each `p` and interval. It runs when `node`
+  and a testguard checkout with the calibration format are present (`WEBSEC_CLAIMSPEC_SPEC_DIR`,
+  or the sibling `../testguard/spec`) and is skipped with a stated reason otherwise, never
+  silently passed. No new runtime or test dependency.
+
 ## [0.15.3] — 2026-09-18
 
 Migration: **none required — every change is additive or a test-only fix.**
