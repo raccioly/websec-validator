@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `websec explain <attack-class|CWE-id>` answers offline what a finding class means, what
+  would confirm or refute it in your code, the remediation pattern, and whether a
+  calibrated cell actually exists for it. A ledger entry names a class and cites a CWE but
+  carries none of that, so an agent either trusts every lead or none. Resolves all 73
+  shipped classes and by CWE id, refuses an ambiguous CWE rather than guessing, and
+  suggests near matches for a typo. `--list` enumerates the classes. Built from the
+  shipped STANDARDS/REMEDIATION/calibration data, so there is no second source of truth.
+- `websec feedback --verdict false-negative --attack-class <class>` reports something the
+  tool missed. It takes no fingerprint and reads no ledger — the report is that nothing was
+  produced, so requiring the findings artifact would gate it on the very thing that is
+  absent. Metadata-only by construction; a supplied filename contributes only its suffix.
+
+
 ### Fixed
 
 - The test suite is now hermetic against a developer's global gitignore. Seven fixtures

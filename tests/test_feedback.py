@@ -116,6 +116,42 @@ class VerdictTests(unittest.TestCase):
             _record(verdict="false-positive", expected_severity="LOW")
 
 
+class FalseNegativeTests(unittest.TestCase):
+    """A miss has no fingerprint — the point is that nothing was reported."""
+
+    def test_missed_record_has_no_finding_block(self):
+        record = fb.build_missed_record(attack_class="sqli", reason="raw concat in reports",
+                                        now=FIXED)
+        self.assertEqual(record["verdict"], "false-negative")
+        self.assertNotIn("finding", record)
+        self.assertEqual(record["missed"]["attack_class"], "sqli")
+        self.assertEqual(record["redaction"], "metadata-only")
+
+    def test_only_the_extension_survives_a_supplied_filename(self):
+        record = fb.build_missed_record(attack_class="sqli", reason="r",
+                                        file_extension="src/billing/charge_secrets.py", now=FIXED)
+        self.assertEqual(record["missed"]["file_extension"], ".py")
+        self.assertNotIn("charge_secrets", json.dumps(record))
+
+    def test_attack_class_and_reason_are_required_and_bounded(self):
+        for kwargs in ({"attack_class": "", "reason": "r"},
+                       {"attack_class": "sqli", "reason": "  "},
+                       {"attack_class": "Not A Class", "reason": "r"},
+                       {"attack_class": "sqli", "reason": "x" * (fb.MAX_REASON + 1)}):
+            with self.subTest(**kwargs), self.assertRaises(fb.FeedbackError):
+                fb.build_missed_record(now=FIXED, **kwargs)
+
+    def test_finding_builder_refuses_the_false_negative_verdict(self):
+        # The two record shapes must not be interchangeable.
+        with self.assertRaises(fb.FeedbackError):
+            _record(verdict="false-negative")
+
+    def test_issue_title_says_not_reported(self):
+        record = fb.build_missed_record(attack_class="sqli", reason="r", now=FIXED)
+        self.assertIn("false-negative", fb.issue_url(record))
+        self.assertIn("not+reported", fb.issue_url(record))
+
+
 class ResolutionTests(unittest.TestCase):
     def test_resolves_by_current_fingerprint_and_by_retained_alias(self):
         self.assertIs(fb.find_finding(LEDGER, "b0bd5e900126aed8"), FINDING)

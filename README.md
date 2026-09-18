@@ -487,6 +487,8 @@ read policy; an unrelated working directory no longer contributes implicit suppr
 
 ```bash
 websec capabilities                                  # offline profile/check/limitation matrix
+websec explain bola                                  # what a class means + how to confirm it
+websec explain --list                                # every attack class this build cites
 websec feedback --fingerprint <fp> --verdict false-positive \
   --reason "behind an nginx auth_request"            # report a wrong detector; metadata-only, sends nothing
 websec intel status                                  # offline freshness and provenance

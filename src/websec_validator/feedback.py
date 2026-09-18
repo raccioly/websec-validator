@@ -17,6 +17,7 @@ the operator's explicit act in their own browser.
 from __future__ import annotations
 
 import json
+import re
 import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,7 +26,10 @@ SCHEMA_VERSION = "1.0"
 FEEDBACK_FILENAME = "feedback.jsonl"
 ISSUE_REPO = "raccioly/websec-validator"
 
-VERDICTS = ("false-positive", "severity-wrong")
+VERDICTS = ("false-positive", "severity-wrong", "false-negative")
+# A false negative has no fingerprint to anchor to — the point is that nothing was
+# reported — so it is described by attack class instead, and carries no finding block.
+FINDING_VERDICTS = ("false-positive", "severity-wrong")
 SEVERITIES = ("INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL")
 
 MAX_REASON = 1000
@@ -103,11 +107,46 @@ def find_finding(ledger: dict, fingerprint: str) -> dict:
     raise FeedbackError(f"no finding with fingerprint {fingerprint} in this ledger")
 
 
+def build_missed_record(*, attack_class: str, reason: str, envelope: dict | None = None,
+                        run_id: str = "", file_extension: str = "", now=None) -> dict:
+    """A report that websec MISSED something. No fingerprint exists, by definition.
+
+    Kept separate from build_record rather than bolted on: a false negative shares no
+    structure with a finding report, and forcing one shape would mean emitting a
+    `finding` block describing something the tool never produced.
+    """
+    attack_class = (attack_class or "").strip().lower()
+    if not attack_class:
+        raise FeedbackError("--attack-class is required with --verdict false-negative")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,63}", attack_class):
+        raise FeedbackError("--attack-class must be a short lowercase identifier, e.g. 'sqli'")
+    reason = (reason or "").strip()
+    if not reason:
+        raise FeedbackError("--reason is required: describe what was missed and where it lives")
+    if len(reason) > MAX_REASON:
+        raise FeedbackError(f"--reason exceeds {MAX_REASON} characters")
+    stamp = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "recorded": stamp,
+        "verdict": "false-negative",
+        "reason": reason,
+        # Metadata-only by construction: an operator describing a miss in free text controls
+        # exactly what it contains, and nothing is lifted out of their source.
+        "redaction": "metadata-only",
+        "run_id": run_id or "",
+        "tool_version": (envelope or {}).get("tool_version", ""),
+        "missed": {"attack_class": attack_class,
+                   "file_extension": _extension(file_extension) if file_extension else ""},
+    }
+
+
 def build_record(finding: dict, *, verdict: str, reason: str, envelope: dict | None = None,
                  run_id: str = "", expected_severity: str = "",
                  include_snippet: bool = False, now=None) -> dict:
-    if verdict not in VERDICTS:
-        raise FeedbackError(f"--verdict must be one of {', '.join(VERDICTS)}")
+    if verdict not in FINDING_VERDICTS:
+        raise FeedbackError(f"--verdict must be one of {', '.join(FINDING_VERDICTS)} "
+                            "for a report about an existing finding")
     reason = (reason or "").strip()
     if not reason:
         raise FeedbackError("--reason is required: state why the detector is wrong")
@@ -152,9 +191,12 @@ def append(path: Path, record: dict) -> Path:
 
 def issue_url(record: dict, repo: str = ISSUE_REPO) -> str:
     """Build a prefilled issue link. Returned as text; nothing is opened or sent."""
-    finding = record.get("finding", {})
+    finding = record.get("finding") or record.get("missed") or {}
     verdict = record["verdict"]
-    title = f"[{verdict}] {finding.get('attack_class') or 'finding'} ({finding.get('rule_id') or 'no rule id'})"
+    if verdict == "false-negative":
+        title = f"[false-negative] {finding.get('attack_class') or 'unknown'} not reported"
+    else:
+        title = f"[{verdict}] {finding.get('attack_class') or 'finding'} ({finding.get('rule_id') or 'no rule id'})"
     body = (
         f"**Verdict:** {verdict}\n"
         f"**Reason:** {record['reason']}\n"
