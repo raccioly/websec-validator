@@ -162,6 +162,12 @@ def cmd_doctor(args) -> int:
     det = scanners.detect(langs)
     print(f"websec-validator v{__version__} — scanner check"
           + (f"  (stack: {', '.join(langs) or 'unknown'})" if langs else ""))
+    # A version string alone does not identify the engine: a stale wheel from /tmp, an
+    # editable checkout and a clean index install all print the same number. Say which.
+    from . import provenance as _prov
+    print()
+    for line in _prov.lines():
+        print(line)
     print("\n  available:")
     for s in det["available"]:
         print(f"    ✓ {s['name']:20} {s['category']}")

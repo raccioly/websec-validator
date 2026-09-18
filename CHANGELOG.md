@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `websec doctor` now reports where the running engine came from, not just its version.
+  A stale wheel installed from `/tmp`, an editable checkout, a source tree and a clean
+  index install all print the same `__version__`, so a review can cite a version that
+  never matched the code that produced it. Classification uses PEP 610 `direct_url.json`
+  plus the metadata directory and makes no network call, so it works in the offline core
+  pass. Anything that did not come from an index is flagged, and importing code from
+  outside the installed distribution is called out separately.
+
+  This exists because a `pipx` install pinned to `file:///tmp/websec_validator-0.14.0-py3-none-any.whl`
+  stayed two releases behind while `pipx upgrade` reported "already at latest" — upgrade
+  re-resolved the same file rather than the index, and nothing in the tool's own output
+  disclosed that the engine was not from PyPI.
+
+
 ## [0.15.2] — 2026-09-18
 
 Migration: **none required.** Two commands that exited 0 without doing their work now exit 2.
