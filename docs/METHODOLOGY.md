@@ -2,7 +2,7 @@
 
 <!-- docguard:version 0.9.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-07-02 -->
+<!-- docguard:last-reviewed 2026-09-18 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — this tool is defined by what it deliberately omits (no LLM, no server, no running app, no runtime deps); the negations describe real architectural properties, not phrasing defects. -->
 
@@ -256,7 +256,9 @@ same finding surfaced on the edit that caused it is a retry.
 
 The gate is deliberately *not* a smaller review. It scopes the analysis rather than the report, does
 not consult cross-file evidence outside that scope, writes nothing, and never advances an accepted
-baseline. A clean gate does not mean the repository is clean — keep running the full pass. It is
+baseline. `websec run --only <path>` applies the same idea to a full run: it narrows what is
+*analysed*, not merely what is printed, so the coverage record reports the narrowed scope rather
+than implying the untouched paths were examined and found clean. A clean gate does not mean the repository is clean — keep running the full pass. It is
 also developer ergonomics rather than a control: settings files are editable, so enforcement remains
 a server-side required status check.
 
@@ -372,6 +374,17 @@ map into a full ASVS index lookup.)
   honest about what it *doesn't* measure: the full kill-criterion (does the briefing make an agent
   find planted bugs better than a generic prompt?) is the manual A/B in
   [`corpus/PROOF-PROTOCOL.md`](../corpus/PROOF-PROTOCOL.md).
+- **`websec attest`** projects a completed run into an audit-evidence table, gaps first. It renders
+  **no verdict, score, percentage or badge**, and the word "compliant" does not appear in its output
+  — a test enforces that. It states what is *not* evidenced as plainly as what is, including that it
+  cannot attest the gate was un-bypassed (a client-side hook is bypassable by construction) and
+  cannot evidence approver independence. An evidence inventory is not a compliance determination.
+- **`websec feedback`** records an operator verdict that a detector is wrong — `false-positive` or
+  `severity-wrong` — against a finding's fingerprint, and prints a prefilled issue link without
+  sending anything. Records are metadata-only by default: a finding can point at a secret, so
+  titles, routes, paths and evidence prose are withheld unless `--include-snippet` is passed
+  explicitly. It never suppresses; `.websec-ignore` remains the way to silence a finding locally.
+  The two answer different questions — "this detector is wrong" versus "stop showing me this here".
 - **What this tool is not:** an autonomous scanner, a SaaS, or a replacement for a human reviewer.
   It is the precise front-half that makes the agent + human dramatically more effective — and it
   tells you, with a calibrated and clearly-caveated number, how much to trust each lead.
