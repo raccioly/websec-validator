@@ -4,12 +4,15 @@ A finding surfaced after forty merges is a backlog item; the same finding surfac
 caused it is a retry. This pins the properties that make that true: it sees UNCOMMITTED work, it is
 fast, it writes nothing, and it never reports 'clean' for something it did not analyse.
 """
+import contextlib
+import io
 import json
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from websec_validator import cli, gate
@@ -140,6 +143,40 @@ class GateTests(unittest.TestCase):
         self._vuln()
         self.assertEqual(cli.main(["gate", str(self.repo), "--only", "src/safe.py",
                                    "--format", "json"]), 0)
+
+    def test_failed_git_status_is_not_reported_as_a_clean_tree(self):
+        # `git status` failing left paths empty with source="working-tree", which is
+        # exactly what a genuinely clean tree returns. The gate then passed having
+        # analysed nothing — a silent pass inside the agent loop.
+        real = gate._git
+
+        def flaky(repo, *args):
+            return None if args and args[0] == "status" else real(repo, *args)
+
+        with patch.object(gate, "_git", flaky):
+            discovered = gate.working_tree_paths(self.repo)
+        self.assertEqual(discovered["source"], "working-tree-unavailable")
+        self.assertIn("git status", discovered["note"])
+
+    def test_unavailable_scope_exits_2_rather_than_passing(self):
+        # A harness must not read "the gate could not determine what to analyse" as a pass.
+        real = gate._git
+
+        def flaky(repo, *args):
+            return None if args and args[0] == "status" else real(repo, *args)
+
+        err = io.StringIO()
+        with patch.object(gate, "_git", flaky), contextlib.redirect_stderr(err):
+            code = cli.main(["gate", str(self.repo), "--format", "json"])
+        self.assertEqual(code, 2)
+        self.assertIn("changed-file set is unknown", err.getvalue())
+
+    def test_genuinely_clean_tree_still_passes(self):
+        # The guard must not turn "nothing changed" into a failure. setUp already
+        # commits the fixture, so the tree is clean here.
+        discovered = gate.working_tree_paths(self.repo)
+        self.assertEqual(discovered["source"], "working-tree")
+        self.assertEqual(discovered["paths"], [])
 
     def test_bad_target_exits_2_not_1(self):
         """A harness must be able to tell a FAILED check from a BROKEN one."""

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A mistyped or unavailable subcommand no longer exits 0. `websec <word>` falls back to
+  `run <word>` for point-and-go, but the fallback was unconditional, so any unknown word
+  became a scan target: `websec gate --help` on a build without `gate` printed `run`'s help
+  and exited 0, making a missing command indistinguishable from a present one. The fallback
+  now requires the argument to be an existing path, and otherwise exits 2 with a near-match
+  suggestion. `websec <existing-path>` is unchanged.
+- `websec gate` no longer reports a pass when it could not determine what to analyse. If
+  `git status` failed — timeout, `index.lock` contention, non-zero exit — the changed-file
+  set came back empty and labelled `working-tree`, which is exactly what a genuinely clean
+  tree returns, so the gate passed having analysed nothing. That state is now
+  `working-tree-unavailable` and exits 2. A genuinely clean tree still passes.
+
+
 ## [0.15.1] — 2026-09-18
 
 Migration: **none required.** No schema, contract or CLI surface changes.
