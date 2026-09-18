@@ -594,7 +594,7 @@ add the matching dated changelog and migration guidance, and validate the combin
 In the 0.x series, feature additions or incompatible contracts increment the minor version.
 
 After reviewing current main and overlapping PRs, merge the approved release PR only after its
-required CI checks pass. The resulting main commit subject must be `release: v0.15.0` for this
+required CI checks pass. The resulting main commit subject must be `release: v0.15.1` for this
 release. [release-tag.yml](.github/workflows/release-tag.yml) validates that subject against the
 package version, creates the matching tag/GitHub Release, and explicitly dispatches
 [publish.yml](.github/workflows/publish.yml) at that tag. A version edit alone does not publish.
@@ -610,7 +610,7 @@ omit an independent version field. Check both sources when diagnosing stale inst
 
 ## Status / roadmap
 
-Version 0.15.0 provides 22 recon extractors, eleven optional scanner entries, nine named profiles,
+Version 0.15.1 provides 22 recon extractors, eleven optional scanner entries, nine named profiles,
 SARIF import/export, bounded source/query analysis, explicit coverage and lifecycle evidence,
 intelligence/research commands, and opt-in agent/hook/CI adoption. It adds an in-loop security gate
 (`websec gate` and a `PostToolUse` hook), analysis scoping with `--only`, an opt-in dependency
@@ -621,7 +621,7 @@ in-loop gate is developer ergonomics, not a control, and `attest` reports eviden
 rendering a compliance verdict.
 
 The [0.14.0 migration guide](docs/MIGRATING-0.14.0.md) explains schema 2.0 and gate/artifact
-changes. 0.15.0 is additive and needs no migration.
+changes. 0.15.1 is a patch over 0.15.0 and needs no migration.
 The [remaining-work specification](specs/001-continuous-security-improvement/spec.md) consolidates
 unresolved gaps and acceptance tests so overlapping old-base PRs do not become competing roadmaps.
 Existing runtime probes are opt-in; their earlier isolated results are not current deployment proofs.
