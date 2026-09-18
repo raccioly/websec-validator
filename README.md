@@ -270,6 +270,11 @@ Extractor failures, source read loss/caps, invalid scanner reports, timeouts, an
 missing scanners remain visible in `coverage.json`; partial artifacts are preserved. Optional missing
 unselected scanners are reported as unavailable. `--scanners` requires `--scan`.
 
+**Naming a scanner requires it.** `--scanners` is not only a subset filter: a scanner you select but
+have not installed is an incomplete run, not a clean one. `websec run . --scan --scanners trivy,osv-scanner
+--require-complete` exits 2 with `trivy: unavailable` in `coverage.json`, so a CI job whose scanner
+install failed fails instead of reporting zero findings from a scan that never ran.
+
 Every attempt receives a unique directory under `websec-out/runs/`. The atomic `latest` pointer
 advances only after a completed execution has written its artifacts; a partial attempt retains its
 own directory and leaves the previous completed scan selected. Completed execution describes the

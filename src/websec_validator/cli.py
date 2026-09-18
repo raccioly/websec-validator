@@ -1286,7 +1286,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="also emit a Software Bill of Materials (default cyclonedx → sbom.cdx.json) via "
                         "Trivy — offline, for CI/compliance (SLSA, EO 14028)")
     r.add_argument("--scanners", metavar="A,B",
-                   help="comma-separated subset of scanners to run with --scan (e.g. gitleaks,semgrep)")
+                   help="comma-separated scanners to REQUIRE and run with --scan (e.g. gitleaks,semgrep). "
+                        "Selection is also a requirement: a selected scanner that is not installed is "
+                        "recorded as unavailable, makes the run incomplete, and exits 2 under --fail-on "
+                        "or --require-complete — a gate never reports green from a scanner that never ran.")
     r.add_argument("--format", choices=["briefing", "sarif", "json"], default="briefing",
                    help="stdout format: briefing (human, default) | sarif (SARIF 2.1.0) | json (envelope). "
                         "results.sarif is ALWAYS written to the run dir regardless.")
