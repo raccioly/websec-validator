@@ -846,6 +846,12 @@ def cmd_capabilities(args) -> int:
     return 0
 
 
+def cmd_demo(args) -> int:
+    """Run a real pass against a bundled sample so the output can be seen before adopting."""
+    from . import demo as _demo
+    return _demo.run()
+
+
 def cmd_explain(args) -> int:
     """What an attack class means, how to confirm it, and what its number is worth."""
     from . import explain as _explain
@@ -1260,7 +1266,7 @@ def build_parser() -> argparse.ArgumentParser:
     # metavar lists only the user-facing commands; recon/proof/calibrate still work but are
     # omitted (they get no `help=`, so argparse leaves them out of the listing entirely).
     sub = p.add_subparsers(dest="cmd", required=True,
-                          metavar="{run,doctor,dynamic,mcp,capabilities,explain,feedback,intel,research,repair-verify,install,hooks}")
+                          metavar="{run,doctor,dynamic,mcp,capabilities,demo,explain,feedback,intel,research,repair-verify,install,hooks}")
 
     r = sub.add_parser("run", help="full pipeline → briefing + tailored probes")
     r.add_argument("target")
@@ -1444,6 +1450,9 @@ def build_parser() -> argparse.ArgumentParser:
     fb_parser.add_argument("--format", choices=["text", "json"], default="text")
     fb_parser.set_defaults(func=cmd_feedback)
 
+    dm = sub.add_parser("demo", help="scan a bundled sample app to see real output (writes nothing here)")
+    dm.set_defaults(func=cmd_demo)
+
     ex = sub.add_parser("explain", help="what an attack class means and how to confirm it (offline)")
     ex.add_argument("term", nargs="?", help="attack class (e.g. bola) or CWE id (e.g. CWE-918)")
     ex.add_argument("--list", action="store_true", help="list every attack class this build cites")
@@ -1500,7 +1509,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-_COMMANDS = {"run", "recon", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks", "repair-verify", "capabilities", "intel", "research", "feedback", "gate", "attest", "explain"}
+_COMMANDS = {"run", "recon", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks", "repair-verify", "capabilities", "intel", "research", "feedback", "gate", "attest", "explain", "demo"}
 
 
 def main(argv=None) -> int:

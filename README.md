@@ -487,6 +487,7 @@ read policy; an unrelated working directory no longer contributes implicit suppr
 
 ```bash
 websec capabilities                                  # offline profile/check/limitation matrix
+websec demo                                          # real scan of a bundled sample; writes nothing here
 websec explain bola                                  # what a class means + how to confirm it
 websec explain --list                                # every attack class this build cites
 websec feedback --fingerprint <fp> --verdict false-positive \

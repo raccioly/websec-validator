@@ -1,0 +1,33 @@
+# Deliberately vulnerable sample for `websec demo`. Not importable and never executed:
+# it ships as .txt so no installer, linter or import machinery treats it as code.
+#
+# Deliberately contains NO credential-shaped strings. A planted fake credential inside an
+# installed package gets flagged by other people's scanners pointed at site-packages, and
+# a demo is not worth poisoning someone else's results. Injection classes make the point.
+import sqlite3
+import subprocess
+
+import requests
+from flask import Flask, request
+
+app = Flask(__name__)
+
+
+@app.route("/orders/<order_id>")
+def get_order(order_id):
+    # missing-auth + sqli: no guard, and the id is concatenated into SQL.
+    db = sqlite3.connect("shop.db")
+    return db.execute("SELECT * FROM orders WHERE id = " + order_id).fetchall()
+
+
+@app.route("/admin/ping")
+def ping():
+    # command-injection: a request value reaches a shell.
+    host = request.args.get("host", "")
+    return subprocess.check_output("ping -c1 " + host, shell=True)
+
+
+@app.route("/fetch")
+def fetch():
+    # ssrf: the URL is request-derived and the caller is server-side.
+    return requests.get(request.args["url"]).text
