@@ -846,10 +846,55 @@ def cmd_capabilities(args) -> int:
     return 0
 
 
+def cmd_explain(args) -> int:
+    """What an attack class means, how to confirm it, and what its number is worth."""
+    from . import explain as _explain
+    if getattr(args, "list", False):
+        if getattr(args, "format", "text") == "json":
+            _emit_json_result({"attack_classes": _explain.classes()})
+        else:
+            for name in _explain.classes():
+                print(name)
+        return 0
+    if not getattr(args, "term", None):
+        print("error: give an attack class or CWE id, or --list", file=sys.stderr)
+        return 2
+    info = _explain.describe(args.term)
+    if getattr(args, "format", "text") == "json":
+        _emit_json_result(info)
+        return 0 if info.get("ok") else 2
+    print(_explain.render(info))
+    return 0 if info.get("ok") else 2
+
+
 def cmd_feedback(args) -> int:
     """Record an operator verdict on detector correctness. Local, offline, redacted."""
     import sys
     fb = feedback
+
+    if args.verdict == "false-negative":
+        # No fingerprint and no ledger: the report is that nothing was produced. Gating
+        # this on a findings ledger would require the artifact whose absence is the point.
+        if args.fingerprint:
+            print("--fingerprint does not apply to --verdict false-negative", file=sys.stderr)
+            return 2
+        try:
+            record = fb.build_missed_record(
+                attack_class=getattr(args, "attack_class", "") or "", reason=args.reason,
+                file_extension=getattr(args, "file_extension", "") or "")
+            destination = Path(args.out or "websec-out").resolve() / fb.FEEDBACK_FILENAME
+            fb.append(destination, record)
+        except (fb.FeedbackError, OSError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        url = fb.issue_url(record)
+        if getattr(args, "format", None) == "json":
+            _emit_json_result({"recorded": str(destination), "record": record, "issue_url": url})
+        else:
+            print(f"recorded false-negative for {record['missed']['attack_class']} → {destination}")
+            print("\nnothing was sent. To report it upstream, open:")
+            print(f"  {url}")
+        return 0
 
     ledger_path = (Path(args.ledger).expanduser() if args.ledger
                    else Path(args.out or "websec-out") / "latest" / "findings-ledger.json").resolve()
@@ -1215,7 +1260,7 @@ def build_parser() -> argparse.ArgumentParser:
     # metavar lists only the user-facing commands; recon/proof/calibrate still work but are
     # omitted (they get no `help=`, so argparse leaves them out of the listing entirely).
     sub = p.add_subparsers(dest="cmd", required=True,
-                          metavar="{run,doctor,dynamic,mcp,capabilities,feedback,intel,research,repair-verify,install,hooks}")
+                          metavar="{run,doctor,dynamic,mcp,capabilities,explain,feedback,intel,research,repair-verify,install,hooks}")
 
     r = sub.add_parser("run", help="full pipeline → briefing + tailored probes")
     r.add_argument("target")
@@ -1380,7 +1425,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     fb_parser = sub.add_parser(
         "feedback", help="record an offline verdict that a finding is wrong (metadata-only by default)")
-    fb_parser.add_argument("--fingerprint", required=True, help="fingerprint of the finding, from the ledger")
+    fb_parser.add_argument("--fingerprint", help="fingerprint of the finding, from the ledger "
+                                                 "(not used by --verdict false-negative)")
     fb_parser.add_argument("--verdict", required=True, choices=list(_FEEDBACK_VERDICTS),
                            help="false-positive: not a real issue · severity-wrong: real but misrated")
     fb_parser.add_argument("--reason", required=True, help="why the detector is wrong (max 1000 chars)")
@@ -1390,9 +1436,19 @@ def build_parser() -> argparse.ArgumentParser:
     fb_parser.add_argument("--include-snippet", action="store_true",
                            help="also include title, route, file and evidence; prompts before writing")
     fb_parser.add_argument("--yes", action="store_true", help="skip the --include-snippet prompt (for scripts)")
+    fb_parser.add_argument("--attack-class", dest="attack_class",
+                           help="what was missed (required with --verdict false-negative)")
+    fb_parser.add_argument("--file-extension", dest="file_extension",
+                           help="optional language hint for a false negative; only the suffix is kept")
     fb_parser.add_argument("--out", help="output directory (default: websec-out)")
     fb_parser.add_argument("--format", choices=["text", "json"], default="text")
     fb_parser.set_defaults(func=cmd_feedback)
+
+    ex = sub.add_parser("explain", help="what an attack class means and how to confirm it (offline)")
+    ex.add_argument("term", nargs="?", help="attack class (e.g. bola) or CWE id (e.g. CWE-918)")
+    ex.add_argument("--list", action="store_true", help="list every attack class this build cites")
+    ex.add_argument("--format", choices=["text", "json"], default="text")
+    ex.set_defaults(func=cmd_explain)
 
     intelligence = sub.add_parser("intel", help="explicit public threat-feed refresh and offline known-CVE reassessment")
     intel_actions = intelligence.add_subparsers(dest="action", required=True)
@@ -1444,7 +1500,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-_COMMANDS = {"run", "recon", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks", "repair-verify", "capabilities", "intel", "research", "feedback", "gate", "attest"}
+_COMMANDS = {"run", "recon", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks", "repair-verify", "capabilities", "intel", "research", "feedback", "gate", "attest", "explain"}
 
 
 def main(argv=None) -> int:
