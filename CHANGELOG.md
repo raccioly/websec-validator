@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The CI test floor is now derived from the base commit instead of stored as `MIN_TESTS`.
+  A stored floor was a shared counter that every branch adding tests had to edit, so two
+  branches adding the same number of tests bumped it identically and merged cleanly while
+  being jointly wrong — which happened, leaving the floor two below the real suite with no
+  conflict and no error. `.github/scripts/test_floor.py` counts the base commit's suite in a
+  throwaway worktree and compares, so there is no number for two branches to disagree about.
+  A deliberate removal is still allowed via a `Test-Removal: <reason>` commit trailer, which
+  keeps the reason in the history. Discovery errors are a hard failure rather than a count,
+  because an unimportable module collapses to a single `_FailedTest` and would otherwise
+  understate a whole file.
+
+
 ### Fixed
 
 - Calibration no longer claims corpus provenance it does not have. When no shipped
