@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-09-18
+
+Migration: **none required — the release is a single additive export; no existing artifact, schema or
+command changes.**
+
 ### Added
 
 - `websec calibrate --claimspec PATH` exports the calibration the runtime uses (shipped table plus
@@ -1086,7 +1091,8 @@ The initial public line. Highlights across 0.2.1–0.2.9:
 ### Fixed
 - Scanner-contamination and rate-limit fixes (agent-wallet dogfood).
 
-[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/raccioly/websec-validator/compare/v0.15.3...v0.16.0
 [0.14.0]: https://github.com/raccioly/websec-validator/compare/v0.13.0...v0.14.0
 [0.15.3]: https://github.com/raccioly/websec-validator/compare/v0.15.2...v0.15.3
 [0.15.2]: https://github.com/raccioly/websec-validator/compare/v0.15.1...v0.15.2
