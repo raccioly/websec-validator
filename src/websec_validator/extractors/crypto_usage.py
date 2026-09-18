@@ -101,6 +101,8 @@ def _unparenthesized(value: str) -> str:
 
 def _credential_operand(value: str) -> bool:
     # Literal words in arbitrary message strings aren't credential variables.
+    if re.search(r'\.(?:length|size|byteLength|type)$', value):
+        return False
     bare = re.sub(_TIMING_LITERAL, "''", value)
     if _CREDENTIAL_NAME.search(bare):
         return True
@@ -112,7 +114,7 @@ def _credential_operand(value: str) -> bool:
 
 def _presence_literal(value: str, suffix: str) -> bool:
     value = _unparenthesized(value)
-    if value in {"''", '""'}:
+    if value in {"''", '""', '0', '"0"', "'0'"}:
         return True
     if suffix == ".py":
         return value in {"None", "True", "False"}
@@ -244,7 +246,12 @@ class CryptoUsageExtractor(Extractor):
                             arg_start = end + update.end()
                             arg_end = expression_end(body, arg_start-1, closing=")")
                             argument = body[arg_start:arg_end-1].strip()
-                        if argument not in {"codeVerifier", "code_verifier"}:
+                        # Ignore explicitly non-credential identifier arguments
+                        if argument in {"codeVerifier", "code_verifier"}:
+                            pass
+                        elif re.search(r'(?:^|\.)(?:id|email|userId|user_id|tenantId|tenant_id)$', argument, re.I):
+                            pass
+                        else:
                             weak = True
             if weak:
                 add("HIGH", "weak-password-hash", "weak-password-hash", rel,

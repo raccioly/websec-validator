@@ -1082,3 +1082,8 @@ The initial public line. Highlights across 0.2.1–0.2.9:
 [0.4.0]: https://github.com/raccioly/websec-validator/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/raccioly/websec-validator/compare/v0.2.9...v0.3.0
 [0.2.x]: https://github.com/raccioly/websec-validator/releases
+
+### Security
+
+- **Crypto**: Reduced false positives in `timing-unsafe-compare` by excluding checks against credential lengths/types and numeric literal 0.
+- **Crypto**: Reduced false positives in `weak-password-hash` by ignoring explicit, non-credential identifiers (e.g. terminating in `id` or `email`) when checking `crypto.createHash` inside password-related methods.
