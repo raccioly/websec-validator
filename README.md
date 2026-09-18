@@ -567,6 +567,19 @@ unproven samples are quarantined. Unknown-only input reports no successful measu
 existing fitted calibration unchanged. A DAST hit may confirm a scoped lead; absence from a report
 cannot refute it. Manual labels should include reviewer/evidence provenance, not only a boolean.
 
+**Shared format.** `websec calibrate --claimspec PATH` (or `-` for stdout) exports the table the
+runtime actually uses — shipped corpus table plus your local overlay, merged — as a
+[claimspec](https://github.com/raccioly/testguard/tree/main/spec) v1 `calibration` document, the
+Guard-family interchange format. Nothing is lost in translation: the caveat, limitation, evidence
+status, `minN` floor, the per-confidence backoff tier and the labelled uncalibrated prior all travel
+with the numbers (`measures: finding-real`, `bucketBy: attackClass|confidence`). Each cell carries
+raw `n` and `positives`, so a consumer can recompute `p` and the Wilson interval and merge two
+tables by summing counts — the only merge the spec allows. `source.kind` says where the labels came
+from: `human-label` for the shipped table, `tool-oracle` for an overlay-only table, `mixed` once
+your samples are folded in. The writer refuses to export a cell whose stored numbers do not
+reproduce from its counts rather than emit a document the spec validator would reject. The
+internal `calibration.json` shape and the local overlay are unchanged.
+
 ## Dynamic phase (v2 — read-only so far)
 
 When you have a *running TEST instance*, `websec dynamic` mints role tokens and runs the probes the
