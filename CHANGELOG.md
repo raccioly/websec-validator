@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Fixed false positive `raw-entity-pii-response` detections when common array/object mapping, destructuring or lodash pick/omit variants were used as PII projections.
+
 ## [0.16.0] — 2026-09-18
 
 Migration: **none required — the release is a single additive export; no existing artifact, schema or
