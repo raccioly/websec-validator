@@ -47,23 +47,80 @@ def _sender_control(scope: dict) -> bool:
         return False
     sender = scope["params"][1]
     body = scope["body"]
+
+    # Handle aliases from destructuring or direct assignment
+    aliases = {sender: ""}
+    destructured = re.finditer(r"\b(?:const|let|var)\s*(?:\{\s*([^=;]+)\s*\}|\[\s*([^=;]+)\s*\])\s*=\s*" + re.escape(sender) + r"\b", body)
+    for match in destructured:
+        if match.group(1):
+            props = match.group(1).split(",")
+            for prop in props:
+                prop = prop.strip()
+                if not prop:
+                    continue
+                # { id, origin }
+                if prop in {"id", "origin", "url"}:
+                    aliases[prop] = prop
+                else:
+                    # { origin: senderOrigin }
+                    m = re.match(r"(id|origin|url)\s*:\s*([\w$]+)", prop)
+                    if m:
+                        aliases[m.group(2)] = m.group(1)
+
+    assigned = re.finditer(r"\b(?:const|let|var)\s+([\w$]+)\s*=\s*" + re.escape(sender) + r"(?:\?)?\.(id|origin|url)\b", body)
+    for match in assigned:
+        aliases[match.group(1)] = match.group(2)
+
     # A check on an earlier value does not authorize a replaced sender object.
     mutations = re.finditer(r"\b" + re.escape(sender) + r"(?:\.[\w$]+)?\s*(?:=(?!=)|\+\+|--)", body)
     if any(not in_literal(body, match.start()) for match in mutations):
         return False
 
     def predicate(condition):
-        match = re.fullmatch(re.escape(sender) + r"\.(?:id|origin|url)\s*(===|!==)\s*(['\"])([^'\"]+)\2", condition)
-        if match and not any(char in match[3] for char in "*\\$`"):
-            return 1 if match[1] == "===" else -1
-        # Only a literal finite allowlist is resolved. A variable/helper called
-        # allowedOrigins does not establish the contents or runtime enforcement.
-        match = re.fullmatch(r"(!)?\s*(\[[^\[\]]+\])\.includes\(\s*" + re.escape(sender)
-                             + r"\.(?:id|origin|url)\s*\)", condition)
-        if match:
-            items = split_arguments(match[2][1:-1])
+        condition = condition.strip()
+
+        inverted = False
+        if condition.startswith("!"):
+            inverted = True
+            condition = condition[1:].strip()
+            if condition.startswith("(") and condition.endswith(")"):
+                condition = condition[1:-1].strip()
+
+        escaped_sender = re.escape(sender)
+        sender_props = [escaped_sender + r"(?:\?)?\.(?:id|origin|url)"]
+        for alias, prop in aliases.items():
+            if prop:
+                sender_props.append(re.escape(alias))
+
+        sender_prop = r"(?:" + r"|".join(sender_props) + r")"
+        op = r"(===|!==|==|!=)"
+
+        match1 = re.fullmatch(sender_prop + r"\s*" + op + r"\s*(['\"])([^'\"*\\$`]+)\2", condition)
+        match2 = re.fullmatch(r"(['\"])([^'\"*\\$`]+)\1\s*" + op + r"\s*" + sender_prop, condition)
+
+        if match1:
+            operator = match1[1]
+        elif match2:
+            operator = match2[3]
+        else:
+            operator = None
+
+        if operator:
+            is_equality = (operator in {"===", "=="})
+            if inverted:
+                is_equality = not is_equality
+            return 1 if is_equality else -1
+
+        match3 = re.fullmatch(r"(!)?\s*(\[[^\[\]]+\])\.includes\(\s*" + sender_prop + r"\s*\)", condition)
+        if match3:
+            includes_inverted = bool(match3[1])
+            if inverted:
+                includes_inverted = not includes_inverted
+
+            items = split_arguments(match3[2][1:-1])
             if items and all(re.fullmatch(r"(['\"])[^'\"*\\$`]+\1", item) for item in items):
-                return -1 if match[1] else 1
+                return -1 if includes_inverted else 1
+
         return 0
 
     return guarded_body(body, predicate)

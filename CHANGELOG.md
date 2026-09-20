@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- Fixed several false positive cases in the `webext` extractor related to `_sender_control`, improving parsing for Yoda conditions, loose equality checks, logical NOT negations, and optional chaining logic.
 
 ## [0.16.0] — 2026-09-18
 
