@@ -20,7 +20,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import re
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from . import calibration
@@ -462,6 +462,90 @@ def load_acknowledgements(repo_root: Path, *, include_cwd: bool = False, context
                 if record["state"] in ("active", "legacy-no-expiry"):
                     result[fp] = reason.strip()
     return result
+
+
+# ---- claimspec `ignore` writer (additive: the .websec-ignore format itself is unchanged) ----
+# claimspec's `ignore` kind is "reviewable scoping": every entry carries a REASON, because the
+# document exists for an auditor to read. `.websec-ignore` holds two suppression mechanisms and
+# only one of them meets that bar:
+#   * `fingerprint:<id> expires:<date> # reason` — reason, expiry and lifecycle state all survive.
+#   * a bare gitignore-style pattern             — `load_suppressions` discards the trailing `#`
+#     comment, so no reason survives anywhere in the process.
+# The gap is NOT closed by inventing one. A synthesised "suppressed by .websec-ignore" would make
+# an unreviewed suppression read to an auditor exactly like a reviewed one, which is the single
+# thing this document exists to prevent. Those entries are omitted and COUNTED, and the count is
+# returned to the caller so the export can never be mistaken for the whole policy.
+CLAIMSPEC_IGNORE_SCHEMA_VERSION = 1
+CLAIMSPEC_REASON_MIN = 8      # `reason` minLength in the claimspec ignore schema
+CLAIMSPEC_REASON_MAX = 2000   # `reason` maxLength
+CLAIMSPEC_PATTERN_MAX = 512   # `pattern` maxLength
+_TRUNCATED = " …[truncated]"
+
+
+def _claimspec_expiry(day: str) -> str:
+    """``2026-12-31`` → ``2027-01-01T00:00:00Z``: the instant AFTER the last valid day.
+
+    websec stores a date and keeps the acknowledgement alive while ``expiry >= today``, i.e. through
+    the whole of that day. claimspec stores an instant after which the entry no longer applies.
+    Writing ``2026-12-31T00:00:00Z`` would retire the entry a full day before websec's own gate
+    does, so the two tools would disagree about the same finding on the same day.
+    """
+    return (date.fromisoformat(day) + timedelta(days=1)).isoformat() + "T00:00:00Z"
+
+
+def to_claimspec_ignore(repo_root: Path, *, include_cwd: bool = False, context=None,
+                        today: date | None = None) -> tuple:
+    """Render the reviewed acknowledgements in ``.websec-ignore`` as a claimspec v1 ``ignore``
+    document, plus a report of everything that could not be represented.
+
+    Returns ``(document, report)``. The schema sets ``additionalProperties: false`` and allows only
+    ``$schema``/``schemaVersion``/``entries``, so the report cannot travel inside the document — and
+    that split is right: the artifact an auditor reads stays clean, while the operator is told
+    separately how much of their policy is missing from it.
+
+    Which acknowledgement states export, and why the rest do not:
+      active, expired   exported WITH ``expires``. An expired entry is deliberately not dropped:
+                        the schema has that field precisely so a consumer can warn about it, and
+                        omitting it would hide a lapsed suppression from the auditor.
+      legacy-no-expiry  exported without ``expires``; it genuinely has none.
+      missing-reason    omitted — ``reason`` is required and there is nothing true to put in it.
+      malformed         omitted — the expiry did not parse, so the entry's lifetime is unknown.
+                        Exporting it without ``expires`` would silently promote a suppression the
+                        operator meant to time-limit into one that never expires.
+    """
+    today = today or date.today()
+    acks = load_acknowledgements(repo_root, include_cwd=include_cwd, context=context, today=today)
+    entries, omitted = [], []
+    for fingerprint, record in sorted(acks.records.items()):
+        state = record.get("state")
+        reason = (record.get("reason") or "").strip()
+        if state in ("missing-reason", "malformed") or len(reason) < CLAIMSPEC_REASON_MIN:
+            omitted.append({"fingerprint": fingerprint, "state": state,
+                            "why": ("no reason to record" if len(reason) < CLAIMSPEC_REASON_MIN
+                                    else "expiry did not parse, so the entry's lifetime is unknown")})
+            continue
+        if len(fingerprint) > CLAIMSPEC_PATTERN_MAX:
+            omitted.append({"fingerprint": fingerprint[:64] + "…", "state": state,
+                            "why": f"fingerprint exceeds the {CLAIMSPEC_PATTERN_MAX}-char pattern limit"})
+            continue
+        if len(reason) > CLAIMSPEC_REASON_MAX:
+            reason = reason[:CLAIMSPEC_REASON_MAX - len(_TRUNCATED)] + _TRUNCATED
+        entry = {"kind": "fingerprint", "pattern": fingerprint, "reason": reason}
+        if record.get("expires"):
+            entry["expires"] = _claimspec_expiry(record["expires"])
+        entries.append(entry)
+
+    patterns = load_suppressions(repo_root, include_cwd=include_cwd, context=context)
+    report = {
+        "entries": len(entries),
+        "omitted_acknowledgements": omitted,
+        "omitted_patterns": len(patterns),
+        # False means the exported document is NOT the project's whole suppression policy. A caller
+        # that renders this must say so; an auditor reading a partial policy as a complete one is
+        # exactly the misreading the reason field exists to stop.
+        "complete": not omitted and not patterns,
+    }
+    return {"schemaVersion": CLAIMSPEC_IGNORE_SCHEMA_VERSION, "entries": entries}, report
 
 
 def _suppressed(f, pats):
