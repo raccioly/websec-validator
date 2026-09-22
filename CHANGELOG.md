@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — the claimspec `ignore` writer
+
+- **`websec init --claimspec PATH|-`** exports the reviewed `fingerprint:` acknowledgements in
+  `.websec-ignore` as a claimspec v1 `ignore` document — the Guard-family shared format, alongside
+  the `calibration` writer shipped in 0.16.0. The mapping is deliberately partial. `.websec-ignore`
+  holds two suppression mechanisms and only one of them can be said honestly: a `fingerprint:`
+  acknowledgement keeps its reason, expiry and lifecycle state, while a bare gitignore-style pattern
+  has its trailing `#` comment discarded during parsing, so no reason survives anywhere. claimspec
+  requires a reason on every entry because the document is what an auditor reads, and synthesising
+  one would make an unreviewed suppression read exactly like a reviewed one. Those entries are
+  omitted and **counted**, and the count is reported so the export cannot be mistaken for the whole
+  policy. Refused for the same reason: a missing reason, a reason below the schema's floor, and a
+  malformed expiry — exporting that one without an expiry would silently promote a suppression the
+  operator meant to time-limit into one that never expires. An **expired** acknowledgement is
+  exported rather than dropped, because the schema carries that field so a consumer can warn.
+  Expiry translation is end-of-day: websec keeps an acknowledgement alive through the whole of its
+  stored date, so `2026-12-31` exports as `2027-01-01T00:00:00Z` rather than midnight of the 31st,
+  which would retire it a day before websec's own gate does.
+
 ### Changed
 - **README links the rendered brief, not the repository blob.** GitHub serves an `.html` blob as
   source rather than as a page, so the previous in-repo link showed markup to anyone who clicked it.
