@@ -50,7 +50,7 @@
         "artifacts": [
           {
             "path": "specs/002-calibration-honesty-and-structural-coverage/spec.md",
-            "digest": "sha256:a6f9bcb9e9deefa282a208c316fb4725b40e11e73244befdc26526550552e472"
+            "digest": "sha256:fa1d9824d0cdbae4c2f4d518bff74cb96b3da2a649fdbbe506447de5f3c10a11"
           }
         ],
         "taskCompletion": {

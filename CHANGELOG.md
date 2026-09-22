@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `CODE_EXT | {…}` whose members `CODE_EXT` had since absorbed entirely except `.scala`, so the
   walker's "unsupported source" arm was reachable for exactly one language. A deliberately
   vulnerable Elixir application (raw SQL interpolation, `System.cmd` injection, a hardcoded
-  `sk_live_` key, no auth plug) therefore produced `unsupported: []`, `gaps: []` and the headline
+  credential, no auth plug) therefore produced `unsupported: []`, `gaps: []` and the headline
   *"REQUESTED CHECKS COMPLETED — 0 files read"*. The unanalyzed-source list is now written out
   independently of `CODE_EXT` and covers 43 suffixes across 30 languages. New coverage evidence:
   `files.unanalyzed_languages` (language → file count), `files.no_analyzable_source`, and the
