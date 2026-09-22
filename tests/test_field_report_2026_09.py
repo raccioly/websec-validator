@@ -287,5 +287,47 @@ class ConfidenceAndIdentityTests(unittest.TestCase):
         self.assertNotEqual(one, two)
 
 
+class RuleLevelGapTests(unittest.TestCase):
+    """#7 — `semgrep: error` hid the fact that named high-value rules timed out."""
+
+    def _doc(self):
+        return {"results": [], "version": "1.177.0", "errors": [
+            {"code": 3, "level": "warn", "type": ["Timeout"],
+             "rule_id": "javascript.express.security.ssrf", "path": "a.js"},
+            {"code": 3, "level": "warn", "type": "Timeout",
+             "rule_id": "javascript.browser.security.dom-xss", "path": "b.js"}]}
+
+    def test_timed_out_rules_are_named(self):
+        details = scanners._report_details("semgrep", self._doc())
+        self.assertEqual(details["rules_incomplete"],
+                         ["javascript.browser.security.dom-xss",
+                          "javascript.express.security.ssrf"])
+        self.assertEqual(details["rules_incomplete_kinds"], ["Timeout"])
+
+    def test_rule_timeouts_are_not_reported_as_a_broken_scanner(self):
+        self.assertEqual(scanners._report_details("semgrep", self._doc())["errors"], [])
+
+    def test_an_unclassifiable_error_still_fails_loud(self):
+        """A diagnostic shape we do not recognise must never read as a clean scan."""
+        details = scanners._report_details("semgrep", {"errors": [{"message": "timeout"}]})
+        self.assertTrue(details["errors"])
+
+    def test_coverage_says_partial_and_names_the_rules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            (base / "semgrep.json").write_text(json.dumps(self._doc()))
+            results = [{"key": "semgrep", "name": "Semgrep", "exit_code": 0,
+                        "output": str(base / "semgrep.json")}]
+            unified = scanners.normalize_findings(results, base)
+            facts = {"coverage": {"execution_complete": True, "gaps": [], "scanners": {}}}
+            coverage.add_scanners(facts, {"available": [{"key": "semgrep"}], "missing": []},
+                                  results, unified, scan=True, only=["semgrep"])
+            self.assertEqual(facts["coverage"]["scanners"]["semgrep"]["outcome"], "partial")
+            rule_gaps = [g for g in facts["coverage"]["gaps"] if g["kind"] == "scanner_rules"]
+            self.assertTrue(rule_gaps)
+            self.assertIn("javascript.express.security.ssrf", rule_gaps[0]["detail"])
+            self.assertIn("UNMEASURED", rule_gaps[0]["detail"])
+
+
 if __name__ == "__main__":
     unittest.main()

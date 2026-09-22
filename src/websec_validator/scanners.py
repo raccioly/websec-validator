@@ -975,12 +975,71 @@ def _sca_occurrence(finding: dict, target: Path | None) -> None:
     finding["fingerprint"] = finding["semantic_id"]
 
 
+# Semgrep classifies its own per-rule failures in `errors[].type`. A Timeout means THAT RULE did not
+# run — the other rules did — which is a completely different fact from "semgrep crashed", and by far
+# the more common one on a large repo.
+_SEMGREP_RULE_FAILURE = {"Timeout", "TimeoutDuringInterfile", "OutOfMemory",
+                         "OutOfMemoryDuringInterfile", "StackOverflow", "PartialParsing",
+                         "MaxMemory", "Timeout during interfile analysis"}
+
+
+def _semgrep_rule_errors(doc: dict) -> list:
+    """Per-RULE execution failures from semgrep's `errors[]`, as structured rows.
+
+    `coverage.gaps` used to say `semgrep: error` for this. That sentence is true and useless: it
+    reads as "the scanner is broken", when what actually happened was that five specific rules —
+    Express-SSRF, XSS, React-unsanitized, i.e. the highest-value rules in the set — timed out while
+    every other rule ran fine. "Scanner errored" and "your five best rules did not run" call for
+    different reactions, so they get different words (field report #7)."""
+    rows = []
+    for e in (doc.get("errors") or []):
+        if not isinstance(e, dict):
+            continue
+        # `type` is a string in some versions and a [tag, payload] list in others.
+        raw = e.get("type")
+        kinds = [raw] if isinstance(raw, str) else [x for x in (raw or []) if isinstance(x, str)]
+        kind = next((k for k in kinds if k in _SEMGREP_RULE_FAILURE), kinds[0] if kinds else "")
+        rule = e.get("rule_id") or e.get("check_id") or ""
+        # An error row we cannot classify is STILL an error. Dropping it would make an unrecognized
+        # diagnostic shape read as a clean scan — the exact silent failure this tool exists to
+        # prevent, and it regressed a test that pins "reported errors are distinct from empty".
+        # Unattributed rows fall through to the scanner-level bucket, which fails loud.
+        rows.append({"rule_id": rule, "kind": kind or "error",
+                     "path": e.get("path") or (e.get("location") or {}).get("path") or "",
+                     "level": e.get("level") or "",
+                     "message": str(e.get("message") or "")[:200],
+                     "rule_scoped": bool(rule) and kind in _SEMGREP_RULE_FAILURE})
+    return rows
+
+
 def _report_details(key: str, doc) -> dict:
     """Native diagnostics are execution evidence even with a successful exit."""
     details = {"errors": [], "skipped_checks": 0}
     rows = doc if key == "checkov" and isinstance(doc, list) else [doc]
     for row in rows:
         if not isinstance(row, dict):
+            continue
+        if key == "semgrep":
+            rule_errors = _semgrep_rule_errors(row)
+            scoped = [r for r in rule_errors if r["rule_scoped"]]
+            if rule_errors:
+                details["rule_errors"] = rule_errors
+            if scoped:
+                # Name the rules. A gap the operator can act on ("raise --timeout, or drop this
+                # rule") instead of one they can only shrug at.
+                details["rules_incomplete"] = sorted({r["rule_id"] for r in scoped})
+                details["rules_incomplete_kinds"] = sorted({r["kind"] for r in scoped})
+            # Rules that failed WHOLESALE stay in `errors` (the scanner-level bucket); per-rule
+            # timeouts do NOT, because they are a partial result, not a broken scanner.
+            whole = [r for r in rule_errors if not r["rule_scoped"]]
+            if whole:
+                details["errors"].append(
+                    f"semgrep: {len(whole)} scanner-level error(s): "
+                    + ", ".join(sorted({r["kind"] for r in whole})[:4]))
+            if isinstance(row.get("skipped_rules"), list) and row["skipped_rules"]:
+                details["skipped_rules"] = [str(r.get("rule_id") or r)[:120]
+                                            for r in row["skipped_rules"][:40]
+                                            if isinstance(r, (str, dict))]
             continue
         if row.get("errors") or row.get("Errors"):
             details["errors"].append("scanner reported errors")
@@ -1050,6 +1109,8 @@ def _gitignored(target: Path | None, paths) -> set:
         return {rel_to_orig[r] for r in ignored_rel if r in rel_to_orig}
     except Exception:
         return set()
+
+
 # --- confidence + stable per-instance identity (field report #6) -----------------------------
 # The LEDGER carried a confidence for every finding, but the normalized SCANNER findings that feed
 # findings.json / the envelope carried one only when the scanner itself supplied it — bandit and
@@ -1123,6 +1184,8 @@ def _instance_id(f: dict, target=None) -> str:
     parts = [str(f.get("category") or ""), rel, str(f.get("key") or f.get("rule_id") or ""),
              str(f.get("line") or 0), str(f.get("cve") or f.get("pkg") or "")]
     return "wv1_" + hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
+
+
 
 
 # Rules that are SECRET DETECTION regardless of which adapter reported them. Semgrep ships a pile
