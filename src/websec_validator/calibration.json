@@ -24,7 +24,7 @@
     "caveat": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code",
     "evidence_status": "reviewed",
     "reviewed_on": "2026-09-22",
-    "limitation": "21 of 56 corpus findings carry a reviewed label; the other 35 are UNKNOWN and are excluded from every count rather than treated as false. Per-class cells are all below min_n=5, so the runtime falls back to the per-label tier. Measured after the 2026-09-22 false-positive fixes (vendored assets, spec-as-handler, Express route middleware, displayed source), so these rates describe the current detector and not any earlier one."
+    "limitation": "21 of 56 corpus findings carry a reviewed label; the other 35 are UNKNOWN and are excluded from every count rather than treated as false. All per-class cells except missing-auth|MEDIUM (n=7) are below min_n=5, so every other class falls back to the per-label tier. Measured after the 2026-09-22 false-positive fixes (vendored assets, spec-as-handler, Express route middleware, displayed source), so these rates describe the current detector and not any earlier one."
   },
   "by_class_label": {
     "command-injection|LOW": {

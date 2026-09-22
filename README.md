@@ -20,6 +20,11 @@ A senior pentester's "here's what to test and how" handoff — auto-generated fr
 
 [![websec-validator demo](assets/demo.gif)](assets/demo.gif)
 
+**New here?** Read the eight-page technical brief — what it reads, how a finding earns its severity,
+what it refuses to say, and the field evidence: [PDF](docs/websec-explained.pdf) ·
+[HTML source](docs/websec-explained.html). Every number in it is asserted against this tree by
+`tests/test_explained_brief.py`.
+
 It is *not* an autonomous scanner and *not* a SaaS. It's the missing front-half: the thing that
 turns a repo into a precise, fact-grounded security brief an AI agent (with a human in the loop)
 can act on — an auto-filled, repo-aware version of a senior pentester's "here's what to test and
@@ -684,7 +689,7 @@ omit an independent version field. Check both sources when diagnosing stale inst
 
 ## Status / roadmap
 
-Version 0.16.0 provides 22 recon extractors, eleven optional scanner entries, nine named profiles,
+Version 0.18.0 provides 22 recon extractors, eleven optional scanner entries, nine named profiles,
 SARIF import/export, bounded source/query analysis, explicit coverage and lifecycle evidence,
 intelligence/research commands, and opt-in agent/hook/CI adoption. It adds an in-loop security gate
 (`websec gate` and a `PostToolUse` hook), analysis scoping with `--only`, an opt-in dependency
@@ -696,7 +701,12 @@ in-loop gate is developer ergonomics, not a control, and `attest` reports eviden
 rendering a compliance verdict.
 
 The [0.14.0 migration guide](docs/MIGRATING-0.14.0.md) explains schema 2.0 and gate/artifact
-changes. 0.16.0 adds the claimspec calibration export over 0.15.3 and needs no migration.
+changes. 0.16.0 added the claimspec calibration export over 0.15.3 and needed no migration.
+0.17.0 split the exit codes (`2` = usage error, `3` = incomplete run) — the one breaking change in the
+project's history; CI scripts that tested for `2` as "incomplete" must test for `3`. 0.17.1 changed no
+behaviour: it corrected only what the tool says about itself.
+0.18.0 adds a measured `P(real)` from a relabelled corpus, and stops a scan that could read no
+analyzable source from reporting as a completed clean run (`--require-analyzed`, exit 3).
 The [remaining-work specification](specs/001-continuous-security-improvement/spec.md) consolidates
 unresolved gaps and acceptance tests so overlapping old-base PRs do not become competing roadmaps.
 Existing runtime probes are opt-in; their earlier isolated results are not current deployment proofs.

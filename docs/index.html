@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>websec-validator</title>
+<meta name="description" content="Local-first security recon that briefs your AI coding agent. Code in, artifacts out. No LLM in the tool, no server, no running app required.">
+<meta property="og:title" content="websec-validator — the deterministic half of a pentest">
+<meta property="og:description" content="Reads a repository the way a senior pentester reads it on day one, then hands your AI coding agent the plan. No model inside, no server, no running app.">
+<meta property="og:type" content="website">
+<style>
+  :root {
+    --paper: #faf9f5; --card: #fff; --ink: #191917; --ink-soft: #565550; --ink-faint: #918d83;
+    --rule: #e6e2d8; --rule-soft: #f0ede4; --clay: #d97757; --clay-deep: #b85636; --sage: #3f6b5f;
+    --sans: "Helvetica Neue", Helvetica, "Inter", "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+    --mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--sans);
+         font-size: 16px; line-height: 1.55; letter-spacing: -0.005em; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 56px 16px 72px; }
+  .masthead { display: flex; align-items: baseline; justify-content: space-between;
+              border-bottom: 2px solid var(--ink); padding-bottom: 10px; flex-wrap: wrap; gap: 8px; }
+  .wordmark { font-size: 21px; font-weight: 700; letter-spacing: -0.025em; }
+  .wordmark .mark { color: var(--clay); }
+  .meta { font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
+          letter-spacing: 0.07em; text-transform: uppercase; }
+  h1 { font-size: 34px; line-height: 1.1; font-weight: 700; letter-spacing: -0.032em;
+       margin: 32px 0 0; max-width: 18ch; }
+  .standfirst { font-size: 18px; color: var(--ink-soft); margin: 14px 0 0; max-width: 58ch; }
+  h2 { font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+       color: var(--clay-deep); margin: 40px 0 12px; }
+  p { margin: 0 0 12px; }
+  a { color: var(--clay-deep); }
+  code, pre { font-family: var(--mono); }
+  pre { background: var(--card); border: 1px solid var(--rule); border-left: 3px solid var(--clay);
+        padding: 12px 14px; font-size: 14px; overflow-x: auto; margin: 0 0 14px; }
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 4px; }
+  @media (max-width: 620px) { .cards { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  .card { display: block; border: 1px solid var(--rule); background: var(--card);
+          padding: 16px 18px; text-decoration: none; color: inherit; }
+  .card:hover { border-color: var(--clay); }
+  .card .t { font-weight: 700; font-size: 16px; }
+  .card .d { font-size: 14px; color: var(--ink-soft); margin-top: 5px; }
+  ul { margin: 0; padding-left: 18px; }
+  li { margin-bottom: 7px; font-size: 15px; }
+  footer { margin-top: 48px; border-top: 1px solid var(--rule); padding-top: 12px;
+           font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
+           letter-spacing: 0.07em; text-transform: uppercase; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #16151300; --paper: #161513; --card: #1e1d1a; --ink: #f2f0ea; --ink-soft: #b8b4aa;
+      --ink-faint: #8a8579; --rule: #33312c; --rule-soft: #26241f; --clay-deep: #e08a68;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #161513; --card: #1e1d1a; --ink: #f2f0ea; --ink-soft: #b8b4aa;
+    --ink-faint: #8a8579; --rule: #33312c; --rule-soft: #26241f; --clay-deep: #e08a68;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="masthead">
+    <div class="wordmark">web<span class="mark">sec</span>-validator</div>
+    <div class="meta">v0.18.0 · MIT · Python 3.11+</div>
+  </div>
+
+  <h1>The deterministic half of a pentest.</h1>
+  <p class="standfirst">It reads a repository the way a senior pentester reads it on day one, then hands
+  your AI coding agent the plan: what the attack surface is, which findings are real, and exactly what to
+  test. No model inside, no server, no running app.</p>
+
+  <h2>Read the brief</h2>
+  <div class="cards">
+    <a class="card" href="websec-explained.html">
+      <div class="t">Technical brief →</div>
+      <div class="d">Eight pages: what it reads, how a finding earns its severity, what it refuses to say, and the field evidence.</div>
+    </a>
+    <a class="card" href="websec-explained.pdf">
+      <div class="t">The same brief as PDF →</div>
+      <div class="d">For printing, or for reading offline.</div>
+    </a>
+  </div>
+
+  <h2>Try it</h2>
+  <pre>pip install websec-validator
+websec run ./your-repo</pre>
+  <p>Artifacts land in <code>websec-out/</code>: a briefing written for your agent, the structured
+  recon, a de-duplicated findings ledger, SARIF 2.1.0, and probe scripts pre-filled with the
+  endpoints it found. It never edits your repository.</p>
+
+  <h2>What makes it different</h2>
+  <ul>
+    <li><strong>It says when it could not look.</strong> Exit 3 means the picture is incomplete, and it outranks a clean result.</li>
+    <li><strong>No model in the tool.</strong> Same repository, same output, every run.</li>
+    <li><strong>Zero runtime dependencies.</strong> It shells out to the scanners you have installed and never imports them.</li>
+    <li><strong>Nothing leaves your machine.</strong> The default pass makes no network calls at all.</li>
+  </ul>
+
+  <h2>Elsewhere</h2>
+  <div class="cards">
+    <a class="card" href="https://github.com/raccioly/websec-validator">
+      <div class="t">Source on GitHub →</div>
+      <div class="d">MIT. Issues, releases, and the full README.</div>
+    </a>
+    <a class="card" href="METHODOLOGY.md">
+      <div class="t">Methodology →</div>
+      <div class="d">The reasoning behind every check, and the standards each one maps to.</div>
+    </a>
+  </div>
+
+  <footer>websec-validator · pip install websec-validator · github.com/raccioly/websec-validator</footer>
+</div>
+</body>
+</html>
