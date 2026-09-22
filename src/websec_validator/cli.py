@@ -968,6 +968,23 @@ def cmd_feedback(args) -> int:
             print("aborted; nothing written", file=sys.stderr)
             return 2
 
+    # A false-positive report is the ONE verdict that is also a calibration label (is_real=False).
+    # It is stored as a PENDING CANDIDATE, never as a measured sample: an operator's verdict is
+    # evidence, not proof, and a wrong label would lower P(real) for that bucket on every future
+    # run of every project, permanently (bug-212). Promotion requires `calibrate --accept`.
+    candidate = None
+    if record.get("verdict") == "false-positive":
+        _cov = {}
+        _cov_path = ledger_path.parent / "coverage.json"
+        if _cov_path.is_file():
+            try:
+                _cov = json.loads(_cov_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                _cov = {}
+        candidate = calibration.record_candidate(
+            record, detector_revision=_cov.get("detector_revision", ""),
+            analyzed_input_digest=_cov.get("analyzed_input_digest", ""))
+
     destination = Path(args.out or "websec-out").resolve() / fb.FEEDBACK_FILENAME
     try:
         fb.append(destination, record)
@@ -977,10 +994,16 @@ def cmd_feedback(args) -> int:
 
     url = fb.issue_url(record)
     if getattr(args, "format", None) == "json":
-        _emit_json_result({"recorded": str(destination), "record": record, "issue_url": url})
+        _emit_json_result({"recorded": str(destination), "record": record, "issue_url": url,
+                           **({"calibration_candidate": candidate} if candidate else {})})
     else:
         print(f"recorded {record['verdict']} for {record['finding'].get('fingerprint')} "
               f"({record['redaction']}) → {destination}")
+        if candidate:
+            print(f"\ncalibration candidate {candidate['candidate_id']} queued for review "
+                  f"({candidate['attack_class']}|{candidate['confidence']}). No probability changed: "
+                  "review it with `websec calibrate --review`, then\n"
+                  f"  websec calibrate --accept {candidate['candidate_id']} --reason \"<why it is wrong>\"")
         print("\nnothing was sent. To report it upstream, open:")
         print(f"  {url}")
         print("\nTo silence this finding locally instead, add a `fingerprint:` line "
@@ -1144,6 +1167,81 @@ def cmd_calibrate(args) -> int:
     write calibration.json (shipped + applied at runtime by findings.build_ledger)."""
     from importlib import resources
 
+    # --review / --accept / --reject: the human gate between an operator's false-positive report and
+    # a measured probability. Nothing else may promote a candidate; `record_samples`' evidence bar is
+    # enforced on the far side of --accept, so there is no weaker second door into a cell.
+    if getattr(args, "review", False) or getattr(args, "accept", None) or getattr(args, "reject", None):
+        from . import coverage as _coverage
+        revision = _coverage.detector_revision()
+        if getattr(args, "review", False):
+            rows = calibration.candidates(revision)
+            if getattr(args, "format", None) == "json":
+                _emit_json_result({"detector_revision": revision, "candidates": rows})
+                return 0
+            if not rows:
+                print("no pending calibration candidates. `websec feedback --verdict false-positive` "
+                      "queues one; nothing else changes a measured probability.")
+                return 0
+            table = calibration.load()
+            print(f"{len(rows)} pending candidate(s) — none is counted until accepted:\n")
+            for row in rows:
+                est = calibration.apply(row["attack_class"], row["confidence"], table)
+                flag = "  [STALE — detector changed since it was reported]" if row["stale"] else ""
+                print(f"  {row['candidate_id']}  {row['attack_class']}|{row['confidence']}"
+                      f"   bucket now p={est['p']} (n={est['n']}, {est['basis']}){flag}")
+                print(f"      reported {row.get('recorded') or 'unknown date'}: {row.get('reason', '')[:100]}")
+            print("\nAccepting records is_real=False for that bucket and is permanent across every "
+                  "project on this machine:\n  websec calibrate --accept <id> --reason \"<why it is "
+                  "wrong>\"\n  websec calibrate --reject <id>")
+            return 0
+        target = getattr(args, "accept", None) or getattr(args, "reject", None)
+        result = calibration.review_candidate(
+            target, accept=bool(getattr(args, "accept", None)),
+            reason=getattr(args, "reason", "") or "", current_revision=revision)
+        if not result["ok"]:
+            print(f"error: {result['error']}", file=sys.stderr)
+            return 2
+        row = result["candidate"]
+        if getattr(args, "format", None) == "json":
+            _emit_json_result({"candidate": row})
+            return 0
+        if row["state"] == "accepted":
+            print(f"accepted {row['candidate_id']}: recorded one is_real=False sample for "
+                  f"{row['attack_class']}|{row['confidence']} in {calibration.LOCAL_PATH}.")
+            est = calibration.apply(row["attack_class"], row["confidence"], calibration.load())
+            print(f"  bucket now p={est['p']} ci={est['ci']} n={est['n']} basis={est['basis']}")
+        else:
+            print(f"rejected {row['candidate_id']}: discarded, no probability changed.")
+        return 0
+
+    # --synthetic: score the authored paired fixtures. Written to its OWN file and never merged:
+    # a pair measures whether a rule still handles what it was built to handle, which is regression
+    # evidence, not the rate at which a finding in real code is a real vulnerability.
+    if getattr(args, "synthetic", False):
+        from . import synthetic as _syn
+        pairs = _syn.load_pairs(getattr(args, "pairs", None))
+        if not pairs:
+            print("websec calibrate --synthetic: no pair manifest found.", file=sys.stderr)
+            return 2
+        res = _syn.evaluate(pairs)
+        table = calibration.fit_synthetic(res["labels"])
+        dest = calibration.write_synthetic(table)
+        if getattr(args, "format", None) == "json":
+            _emit_json_result({"written": str(dest), "table": table, "errors": res["errors"]})
+            return 0
+        agg = table["by_label"]
+        print(f"websec calibrate --synthetic: scored {res['pairs']} pair(s) → {len(res['labels'])} "
+              f"label(s), {len(res['errors'])} error(s) → {dest}")
+        for key, cell in sorted(table["by_class_label"].items()):
+            print(f"    {key:28} {cell['k']}/{cell['n']} correct · p={cell['p']} · 95% CI {cell['ci']}")
+        for key, cell in sorted(agg.items()):
+            print(f"    {key + ' (aggregate)':28} {cell['k']}/{cell['n']} · p={cell['p']} · 95% CI {cell['ci']}")
+        for err in res["errors"]:
+            print(f"    ! {err.get('pair')}: {err.get('error')}")
+        print(f"\n  {calibration.SYNTHETIC_CAVEAT}")
+        print("  This table is NOT merged into P(real); `websec explain <class>` reports it separately.")
+        return 0
+
     # --claimspec: export the calibration the runtime actually uses (shipped table + your local
     # overlay, merged) as a claimspec v1 `calibration` document — the Guard-family shared format,
     # so another tool can read websec's P(real) table with its caveat, floor, backoff and
@@ -1263,7 +1361,18 @@ def cmd_calibrate(args) -> int:
         print("\n  no labeled findings produced — is the corpus cloned? (needs network on first run)")
         return 1
 
-    researched = {t.get("class") for entry in corpus for t in (entry.get("truth") or [])}
+    # A class is RESEARCHED only when it has at least one REVIEWED truth entry. Merely appearing in
+    # corpus.json is not research: the historical entries are class-level wildcards
+    # (location_contains "*") with is_real null, which cannot separate a real vulnerability from a
+    # false positive within the same class. Publishing a class-specific cell on that basis would
+    # assert a precision the labels do not support; an unreviewed class falls back to the label
+    # tier, which is wider and honest. See calibration.reviewed_classes.
+    researched = calibration.reviewed_classes(corpus)
+    unreviewed = ({t.get("class") for entry in corpus for t in (entry.get("truth") or [])}
+                  - researched)
+    if unreviewed:
+        print(f"  unreviewed classes (fall back to the label tier, no class-specific cell): "
+              f"{', '.join(sorted(c for c in unreviewed if c))}")
     table = calibration.fit(labeled, used, researched)
     print(f"  calibration labels: {table['meta']['n_total']} scored · {table['meta'].get('n_unknown', 0)} unknown")
     if not table["meta"]["n_total"]:
@@ -1433,6 +1542,23 @@ def build_parser() -> argparse.ArgumentParser:
     cal.add_argument("--claimspec", metavar="PATH",
                      help="export the calibration the runtime uses (shipped + local overlay) as a "
                           "claimspec v1 `calibration` document; `-` writes to stdout")
+    cal.add_argument("--synthetic", action="store_true",
+                     help="score the authored paired fixtures into a SEPARATE table "
+                          "(calibration-synthetic.json). Never merged into P(real): pairs measure "
+                          "regression precision on anticipated cases, not the rate in real code.")
+    cal.add_argument("--pairs", metavar="PAIRS.json",
+                     help="pair manifest to score with --synthetic (default: bundled pairs.json)")
+    cal.add_argument("--review", action="store_true",
+                     help="list pending calibration candidates from `websec feedback "
+                          "--verdict false-positive`. They change no probability until accepted.")
+    cal.add_argument("--accept", metavar="CANDIDATE_ID",
+                     help="promote one candidate into a measured is_real=False sample. Requires "
+                          "--reason; refuses a candidate reported against a different detector build.")
+    cal.add_argument("--reject", metavar="CANDIDATE_ID", help="discard one pending candidate")
+    cal.add_argument("--reason", help="why the finding is wrong (required with --accept): a label "
+                                      "with no reviewer rationale is an assertion, not evidence")
+    cal.add_argument("--format", choices=["text", "json"], default="text",
+                     help="output format for --review/--accept/--reject")
     cal.set_defaults(func=cmd_calibrate)
 
     dyn = sub.add_parser("dynamic", help="dynamic probes vs a LIVE target (read-only): cross-tenant BOLA (--config) or unauth reachability (--unauth)")

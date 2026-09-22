@@ -3,7 +3,7 @@
 **Spec ID**: `websec.calibration-honesty-structural-coverage`
 **Feature Branch**: `claude/eager-fermat-1f1b81` (specification only)
 **Created**: 2026-09-21
-**Status**: Approved 2026-09-21 (D1 two-step · D2 opt-in · D3 include · D4 include). W01 (scoring-rule constraint) and W02 (structural coverage) are IMPLEMENTED; W03/W04 planned.
+**Status**: Approved 2026-09-21 (D1 two-step · D2 opt-in · D3 include · D4 include). W01 (scoring-rule constraint), W02 (structural coverage) and W03 (feedback loop) are IMPLEMENTED; W04 planned.
 **Input**: Design review of Laya (Apache-2.0 local decision model; RLCD against strictly proper
 scoring rules, act/escalate head, per-shape temperature calibration, structural OOD detection)
 applied to websec-validator. Every claim below was verified against source and by execution on
@@ -245,7 +245,7 @@ alone — as three separately falsifiable fields.
 |----|-------|------------------|------------------|------|
 | W01 ✅ | 2 | `docs/METHODOLOGY.md`, `BENCHMARKS.md`, `calibration.py` (`SCORING_RULE`, `brier()`), `cli.py`, `CHANGELOG.md` | `test_calibration_scoring.py` (10) | LOW |
 | W02 ✅ | 1 | `extractors/base.py`, `coverage.py`, `inventory.py`, `briefing.py`, `gate.py`, `cli.py`, `CHANGELOG.md` | `test_unanalyzed_coverage.py` (24) + `test_unanalyzed_cli.py` (14) | MEDIUM |
-| W03 | 3 | `feedback.py`, `calibration.py`, `cli.py`, `explain.py`, `corpus.json`, `calibration.json` | feedback candidate, review, synthetic, relabel tests | HIGH |
+| W03 ✅ | 3 | `calibration.py` (candidates/review/synthetic/reviewed_classes), `synthetic.py` + `pairs.json` (new), `cli.py`, `explain.py`, `corpus.json` | `test_calibration_review.py` (30) + `test_synthetic_pairs.py` (11) + `test_feedback_calibration_loop.py` (12) | HIGH |
 | W04 | 4 | `findings.py`, `fixprompt.py`, `briefing.py`, `repairs.py`, `schemas/ledger.schema.json`, `cli.py` | triage derivation; gate invariance | MEDIUM |
 
 Order: W01 → W02 → W03 → W04. W01 is documentation and governs the rest. W02 is a reproduced defect
@@ -280,3 +280,32 @@ DocGuard only began evaluating once a second spec existed (pre-existing untraced
 created), and 4 spec-002 requirements (FR-010, FR-014, SC-006, SC-007) that belong to the
 unimplemented W03/W04 and are deliberately left untraced rather than given a false annotation.
 Every HIGH validator passes, and Spec-Registry moved from warning to ✅ 2/2.
+
+
+## Implementation record — W03 (2026-09-21)
+
+After W02: 1343 tests, DocGuard 188/208. After W03: **1396 tests OK**, DocGuard **182/188** with
+the same six pre-existing warnings as the original baseline (5 × FRS002 freshness heuristics, 1 ×
+SPK002 `.specify/` absent); Traceability and Spec-Registry are both ✅ HIGH. Findings across all six
+fixtures remain byte-identical to the 7b2f945 baseline, with no coverage gap added or lost.
+
+D1 was implemented as approved (two-step). Three guards make the bar real rather than nominal:
+acceptance without `--reason` is refused; acceptance of a candidate whose `detector_revision`
+differs from the running build is refused as STALE; and accepting twice cannot double-count. One
+accepted label deliberately does not move the probability, because `MIN_N` still governs whether a
+cell is measured at all — a single verdict must not become a number.
+
+D4 was implemented as approved (separate table). The pair manifest was rewritten mid-implementation:
+the first version invented snippets, and four of eight pairs did not hold — including a control
+(`DOMPurify.sanitize` assigned through an alias) that the tool fires on **by design**, per
+`test_detector_precision.test_alias_reassignment_and_branch_uncertainty_keep_html_leads`. Declaring
+that a false positive would have published a false claim about the detector. The manifest now uses
+only forms whose behaviour is pinned by existing tests, and all five pairs hold with zero errors.
+
+One gap found while implementing rather than while reviewing: `cmd_calibrate` computed
+`researched_classes` as every class appearing in `corpus.json`, so an unreviewed class could still
+be published as a class-specific cell. `calibration.reviewed_classes` now requires a reviewed entry
+with an explicit boolean. The shipped corpus has **zero** reviewed classes today, which is the
+honest state — relabelling requires cloning each pinned revision and reviewing findings by hand, and
+there is deliberately no code path that promotes an unreviewed entry. FR-014 (zero runtime
+dependencies) and SC-006/SC-007's remaining clauses stay untraced rather than falsely annotated.

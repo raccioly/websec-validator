@@ -198,6 +198,31 @@ something you can act on.
   The deliberately vulnerable corpus skews optimistic for production code; every rate must identify
   its detector revision, reviewed labels, sample size and interval. Historical unmatched-as-false
   measurements are legacy data, not a fresh precision estimate for the current detector.
+- **Operator feedback is a candidate, not a label.** `websec feedback --verdict false-positive`
+  queues a *calibration candidate* — visible in `websec calibrate --review`, counted nowhere. An
+  operator's verdict is evidence, not proof, and a wrong label would lower P(real) for that bucket
+  on every future run of every project on the machine, permanently. Promotion requires an explicit
+  `websec calibrate --accept <id> --reason "..."` by a human, and is refused when the candidate was
+  reported against a different `detector_revision` — the rule that produced it may no longer exist.
+  Acceptance goes through the same `record_samples` evidence bar as a dynamic-confirmed sample, so
+  there is no second, weaker door into a measured cell. `severity-wrong` and `false-negative`
+  reports queue nothing: one disputes severity rather than existence, the other describes a finding
+  that was never produced, and neither can be scored against a bucket.
+- **Authored pairs are measured separately and never merged.** `websec calibrate --synthetic`
+  scores the repository's paired fixtures (a vulnerable variant that must fire, a sanitized twin
+  that must not) into `calibration-synthetic.json`. Those are reviewed, reproducible labels, but
+  they measure whether a rule still handles what it was *built* to handle — regression precision on
+  anticipated cases, not the rate at which a finding in real code is a real vulnerability. Merging
+  them would launder the author's own coverage into P(real), so `apply()` never reads that table
+  and `websec explain` prints it on its own line with its own caveat. A detector that fails to fire
+  on a vulnerable variant is reported as a recall gap, never silently dropped — a harness that
+  scored nothing would otherwise publish a perfect table.
+- **A class earns a cell only from reviewed labels.** Appearing in `corpus.json` is not research:
+  the historical entries are class-level wildcards (`location_contains: "*"`, `is_real: null`) that
+  cannot separate a real vulnerability from a false positive inside the same class. A class is
+  published as a class-specific cell only when it has a truth entry with `review_status: "reviewed"`
+  and an explicit boolean `is_real`; otherwise it falls back to the wider, honest label tier. Every
+  shipped entry carries a `promotion_requires` block stating exactly what a reviewer must supply.
 - **Learning is gated by evidence.** Only scoped evidence-backed labels enter the local calibration
   overlay (`~/.cache/websec-validator/`). Legacy unproven records are quarantined. Unknown-only input
   reports no successful measurement and leaves fitted calibration unchanged. Evidence may support a

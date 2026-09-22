@@ -33,8 +33,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and `calibration.SCORING_RULE`; `websec calibrate` now prints the table's Brier score. Reported,
   never optimized — no runtime behavior depends on it.
 
+- **The feedback loop is closed, without lowering the evidence bar.** `feedback.jsonl` was
+  write-only: a false-positive report had no effect on any future confidence. Now a
+  `--verdict false-positive` report also queues a **calibration candidate** — visible in
+  `websec calibrate --review`, counted nowhere. Promotion requires an explicit
+  `websec calibrate --accept <id> --reason "..."`, and is refused when the candidate was reported
+  against a different `detector_revision`, because the rule that produced it may no longer exist.
+  Acceptance flows through the same `record_samples` evidence bar as a dynamic-confirmed sample.
+  `severity-wrong` and `false-negative` queue nothing: neither is a label about whether a reported
+  finding was real. `feedback.jsonl` keeps schema 1.0, and feedback still never suppresses.
+- **`websec calibrate --synthetic`** scores the repository's authored paired fixtures into a
+  SEPARATE `calibration-synthetic.json`. `apply()` never reads it and it is never summed into
+  `by_class_label`: pairs measure regression precision on cases the detector was written to handle,
+  not the rate in real code. `websec explain <class>` prints it on its own line with its own
+  caveat. A detector that fails to fire on a vulnerable variant is reported as a recall gap rather
+  than silently dropped — a harness that scored nothing would otherwise publish a perfect table.
+- **A class earns a published cell only from reviewed labels.** `websec calibrate` previously
+  treated any class appearing in `corpus.json` as researched, including the historical class-level
+  wildcards (`location_contains: "*"`, `is_real: null`) that cannot separate a real vulnerability
+  from a false positive within the same class. `calibration.reviewed_classes` now requires
+  `review_status: "reviewed"` plus an explicit boolean `is_real`; everything else falls back to the
+  wider label tier, and `calibrate` names the classes it excluded. Every shipped truth entry
+  carries a `promotion_requires` block stating what a reviewer must supply.
+
 All additive: no finding, severity, confidence, fingerprint or SARIF output changes on any existing
-fixture. New coverage gaps are scope limitations (`execution: false`), so `execution_complete` and
+fixture, and no probability moves without an explicit human acceptance. New coverage gaps are scope limitations (`execution: false`), so `execution_complete` and
 `--require-complete` semantics are untouched. Specification:
 `specs/002-calibration-honesty-and-structural-coverage/spec.md`.
 

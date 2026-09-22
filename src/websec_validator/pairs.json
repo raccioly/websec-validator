@@ -1,0 +1,52 @@
+[
+  {
+    "id": "xss-dom-write",
+    "note": "sanitized twin must not fire; the sink is document.write of location data",
+    "attack_class": "xss",
+    "confidence": "LOW",
+    "extractor": "SurfaceExtractor",
+    "file": "app.ts",
+    "vulnerable": "document.write(location.search);",
+    "control": "document.write(DOMPurify.sanitize(location.search));"
+  },
+  {
+    "id": "xss-innerhtml",
+    "note": "textContent is not an HTML sink",
+    "attack_class": "xss",
+    "confidence": "LOW",
+    "extractor": "SurfaceExtractor",
+    "file": "app.ts",
+    "vulnerable": "el.innerHTML = location.hash;",
+    "control": "el.textContent = location.hash;"
+  },
+  {
+    "id": "xss-commented-out",
+    "note": "a sink inside a comment is not product code",
+    "attack_class": "xss",
+    "confidence": "LOW",
+    "extractor": "SurfaceExtractor",
+    "file": "view.html",
+    "vulnerable": "<div v-html=\"content\"/>",
+    "control": "<!-- <div v-html=\"content\"/> -->"
+  },
+  {
+    "id": "command-injection-shell",
+    "note": "shell=False with an argv list is the safe form; shell=True with concatenation is not",
+    "attack_class": "command-injection",
+    "confidence": "LOW",
+    "extractor": "SurfaceExtractor",
+    "file": "app.py",
+    "vulnerable": "subprocess.run('echo '+request.args['x'], shell=True)\n",
+    "control": "subprocess.run(['echo',request.args['x']], shell=False)\n"
+  },
+  {
+    "id": "ssrf-server-route",
+    "note": "the same code behind 'use client' is a browser fetch, not a server-side SSRF",
+    "attack_class": "ssrf",
+    "confidence": "LOW",
+    "extractor": "SurfaceExtractor",
+    "file": "app/page.tsx",
+    "vulnerable": "export async function GET(req){ return fetch(req.query.url); }",
+    "control": "'use client';\nexport async function GET(req){ return fetch(req.query.url); }"
+  }
+]

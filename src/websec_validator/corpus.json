@@ -18,14 +18,24 @@
         "location_contains": "*",
         "note": "VAmPI is a broken-object/function-level-authorization demo: its API endpoints are intentionally missing or mis-applying auth",
         "review_status": "historical-class-level-unverified",
-        "is_real": null
+        "is_real": null,
+        "promotion_requires": {
+          "location_contains": "a substring that binds ONE finding, not '*'",
+          "is_real": "explicit true or false, reviewed against the pinned revision",
+          "review_status": "reviewed"
+        }
       },
       {
         "class": "sqli",
         "location_contains": "*",
         "note": "raw SQL string interpolation in the vulnerable code path",
         "review_status": "historical-class-level-unverified",
-        "is_real": null
+        "is_real": null,
+        "promotion_requires": {
+          "location_contains": "a substring that binds ONE finding, not '*'",
+          "is_real": "explicit true or false, reviewed against the pinned revision",
+          "review_status": "reviewed"
+        }
       }
     ],
     "revision": "f16052dce83f05847133ec98f01c5193a41de7d8",
@@ -54,21 +64,36 @@
         "location_contains": "*",
         "note": "broken access control across allocation/admin routes",
         "review_status": "historical-class-level-unverified",
-        "is_real": null
+        "is_real": null,
+        "promotion_requires": {
+          "location_contains": "a substring that binds ONE finding, not '*'",
+          "is_real": "explicit true or false, reviewed against the pinned revision",
+          "review_status": "reviewed"
+        }
       },
       {
         "class": "command-injection",
         "location_contains": "*",
         "note": "SSJS injection via eval in the contributions handler",
         "review_status": "historical-class-level-unverified",
-        "is_real": null
+        "is_real": null,
+        "promotion_requires": {
+          "location_contains": "a substring that binds ONE finding, not '*'",
+          "is_real": "explicit true or false, reviewed against the pinned revision",
+          "review_status": "reviewed"
+        }
       },
       {
         "class": "ssti",
         "location_contains": "*",
         "note": "server-side template injection demo",
         "review_status": "historical-class-level-unverified",
-        "is_real": null
+        "is_real": null,
+        "promotion_requires": {
+          "location_contains": "a substring that binds ONE finding, not '*'",
+          "is_real": "explicit true or false, reviewed against the pinned revision",
+          "review_status": "reviewed"
+        }
       }
     ],
     "revision": "c5cb68a7084e4ae7dcc60e6a98768720a81841e8",
@@ -95,14 +120,24 @@
         "location_contains": "*",
         "note": "introspection + playground enabled, no depth/complexity limits",
         "review_status": "historical-class-level-unverified",
-        "is_real": null
+        "is_real": null,
+        "promotion_requires": {
+          "location_contains": "a substring that binds ONE finding, not '*'",
+          "is_real": "explicit true or false, reviewed against the pinned revision",
+          "review_status": "reviewed"
+        }
       },
       {
         "class": "command-injection",
         "location_contains": "*",
         "note": "OS command injection via the system-diagnostics resolver",
         "review_status": "historical-class-level-unverified",
-        "is_real": null
+        "is_real": null,
+        "promotion_requires": {
+          "location_contains": "a substring that binds ONE finding, not '*'",
+          "is_real": "explicit true or false, reviewed against the pinned revision",
+          "review_status": "reviewed"
+        }
       }
     ],
     "revision": "a961308c02d1fb462b192681c336b0739e432da7",
