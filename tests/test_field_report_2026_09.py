@@ -7,6 +7,7 @@ removed, so every "this should be quieter" assertion is paired with a "this must
 
 from __future__ import annotations
 
+import contextlib
 import json
 import subprocess
 import sys
@@ -88,35 +89,58 @@ class OsvScannerInvocationTests(unittest.TestCase):
         osv = next(s for s in scanners.REGISTRY if s.key == "osv-scanner")
         self.assertEqual(osv.min_version, (2, 0, 0))
 
-    def test_version_check_flags_an_incompatible_build(self):
+    @contextlib.contextmanager
+    def _installed_at(self, version):
+        """Pretend osv-scanner is on PATH reporting `version`.
+
+        `check_version` asks `shutil.which` BEFORE it consults the version cache, so seeding the
+        cache alone leaves these tests asserting against whatever the developer happens to have
+        installed — green on a laptop with osv-scanner, `not_installed` on a CI runner without it.
+        What is under test is the version COMPARISON, so presence is stubbed and the suite stays
+        hermetic."""
         osv = next(s for s in scanners.REGISTRY if s.key == "osv-scanner")
-        scanners._VERSION_CACHE["osv-scanner"] = "1.9.2"
+        original = scanners.shutil.which
+        scanners._VERSION_CACHE["osv-scanner"] = version
+        scanners.shutil.which = lambda binary, *a, **k: (
+            "/usr/local/bin/osv-scanner" if binary == "osv-scanner" else original(binary, *a, **k))
         try:
-            result = scanners.check_version(osv)
-            self.assertEqual(result["status"], "too_old")
-            self.assertFalse(result["ok"])
-            self.assertIn("2.0.0", result["note"])
+            yield osv
         finally:
+            scanners.shutil.which = original
             scanners._VERSION_CACHE.pop("osv-scanner", None)
 
+    def test_version_check_flags_an_incompatible_build(self):
+        with self._installed_at("1.9.2") as osv:
+            result = scanners.check_version(osv)
+        self.assertEqual(result["status"], "too_old")
+        self.assertFalse(result["ok"])
+        self.assertIn("2.0.0", result["note"])
+
     def test_two_component_version_satisfies_three_component_minimum(self):
-        osv = next(s for s in scanners.REGISTRY if s.key == "osv-scanner")
-        scanners._VERSION_CACHE["osv-scanner"] = "2.4"
-        try:
+        with self._installed_at("2.4") as osv:
             self.assertEqual(scanners.check_version(osv)["status"], "ok")
-        finally:
-            scanners._VERSION_CACHE.pop("osv-scanner", None)
 
     def test_unreadable_version_is_unknown_not_a_failure(self):
         """A probe that cannot read a version must not block the scan."""
+        with self._installed_at(None) as osv:
+            result = scanners.check_version(osv)
+        self.assertEqual(result["status"], "unknown")
+        self.assertTrue(result["ok"])
+
+    def test_absent_binary_is_not_installed_not_too_old(self):
+        """The distinction the other three tests were accidentally exercising: a scanner that is
+        not on PATH is `not_installed`, which is a different operator problem from an incompatible
+        build and must never be reported as one."""
         osv = next(s for s in scanners.REGISTRY if s.key == "osv-scanner")
-        scanners._VERSION_CACHE["osv-scanner"] = None
+        original = scanners.shutil.which
+        scanners.shutil.which = lambda binary, *a, **k: (
+            None if binary == "osv-scanner" else original(binary, *a, **k))
         try:
             result = scanners.check_version(osv)
-            self.assertEqual(result["status"], "unknown")
-            self.assertTrue(result["ok"])
         finally:
-            scanners._VERSION_CACHE.pop("osv-scanner", None)
+            scanners.shutil.which = original
+        self.assertEqual(result["status"], "not_installed")
+        self.assertIsNone(result["version"])
 
 
 class HistoryProvenanceTests(unittest.TestCase):
