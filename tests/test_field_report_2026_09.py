@@ -158,5 +158,58 @@ class HistoryProvenanceTests(unittest.TestCase):
             self.assertNotIn("history_only", raw[0])
 
 
+class ClusteringTests(unittest.TestCase):
+    """#4 — 39 HIGHs that are really ~6 issues. Presentation only: nothing about gating changes."""
+
+    def setUp(self):
+        from websec_validator import clusters
+        self.clusters = clusters
+
+    def _ledger(self):
+        sites = [{"title": "secret: GitHub PAT", "rule_id": "github-pat", "category": "static-secret",
+                  "severity": "HIGH", "confidence": "HIGH", "location": f"src/a{i}.ts", "line": 1,
+                  "fingerprint": f"fp{i}", "instance_id": f"wv1_{i:016d}"} for i in range(13)]
+        incident = [{"title": "secret: AWS key", "rule_id": "aws-access-token",
+                     "category": "static-secret", "severity": "HIGH", "confidence": "HIGH",
+                     "location": f"legacy/c{i}.ini", "line": 1, "fingerprint": f"hfp{i}",
+                     "history_only": True, "in_tree": False, "commit": "614f9081d87b0000"}
+                    for i in range(22)]
+        lone = [{"title": "clickjacking", "rule_id": "missing-xfo", "category": "headers",
+                 "severity": "MEDIUM", "confidence": "LOW", "location": "app.ts", "fingerprint": "z"}]
+        return {"findings": sites + incident + lone, "total": 36}
+
+    def test_rule_and_incident_clusters_are_both_formed(self):
+        out = self.clusters.build(self._ledger())
+        kinds = {c["kind"]: c for c in out}
+        self.assertEqual(kinds["rule"]["site_count"], 13)
+        self.assertEqual(kinds["incident"]["site_count"], 22)
+        self.assertIn("614f9081d87b", kinds["incident"]["title"])
+
+    def test_summary_reports_distinct_issues(self):
+        led = self._ledger()
+        out = self.clusters.build(led)
+        summary = self.clusters.summary(out, led["total"])
+        self.assertEqual(summary["distinct_issues"], 3)   # 2 clusters + 1 unclustered finding
+        self.assertEqual(summary["total_findings"], 36)
+
+    def test_clustering_never_mutates_findings_or_totals(self):
+        """The gate, baselines and SARIF all count findings[] — clustering must not touch it."""
+        led = self._ledger()
+        before = json.dumps(led, sort_keys=True)
+        self.clusters.build(led)
+        self.assertEqual(json.dumps(led, sort_keys=True), before)
+
+    def test_every_site_keeps_its_own_addressable_ids(self):
+        out = self.clusters.build(self._ledger())
+        rule_cluster = next(c for c in out if c["kind"] == "rule")
+        self.assertEqual(len({s["fingerprint"] for s in rule_cluster["sites"]}), 13)
+        self.assertTrue(all(s.get("instance_id") for s in rule_cluster["sites"]))
+
+    def test_single_site_groups_are_not_clusters(self):
+        self.assertEqual(self.clusters.build({"findings": [
+            {"title": "x", "rule_id": "solo", "category": "c", "severity": "HIGH",
+             "location": "a.ts", "fingerprint": "f"}]}), [])
+
+
 if __name__ == "__main__":
     unittest.main()

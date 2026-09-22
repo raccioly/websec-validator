@@ -22,8 +22,10 @@ import uuid
 import sys
 from pathlib import Path
 
-from . import (__version__, baseline, briefing, calibration, constitution, diffscope, dynamic, feedback,
-               findings, coverage, formats, fpfilter, inventory, probes, proof, recon, report, scanners)
+from . import (__version__, baseline, briefing, calibration, clusters, constitution, diffscope, dynamic,
+               feedback, findings, coverage, formats, fpfilter, inventory, probes, proof, recon, report,
+               scanners)
+
 # --- process exit contract (field report #1) --------------------------------------------------
 # A CI caller has to be able to tell "this repo has a vulnerability" from "my toolchain is broken",
 # because the two demand opposite responses: one blocks the merge, the other pages whoever owns the
@@ -496,6 +498,12 @@ def cmd_run(args) -> int:
     # every repair plan emitted before this change.
     from . import attribution as _attribution
     ledger["attribution"] = _attribution.build(target, actor=getattr(args, "actor", None))
+    # PRESENTATION-ONLY grouping: 39 findings that are really ~6 issues make a well-managed repo
+    # look alarming (field report #4). `clusters[]` is a SIBLING of findings[] — it never changes
+    # `total`, the gate count, per-site fingerprints, SARIF results or the baseline, all of which
+    # other things already depend on. See clusters.py for why collapsing findings[] was rejected.
+    ledger["clusters"] = clusters.build(ledger)
+    ledger["cluster_summary"] = clusters.summary(ledger["clusters"], ledger.get("total", 0))
     # 4b. baseline / diff — only NEW findings gate CI when a baseline is supplied
     diff = None
     if getattr(args, "baseline", None):
@@ -583,6 +591,11 @@ def cmd_run(args) -> int:
     if ledger["total"]:
         log(f"\n  ledger: {ledger['total']} finding(s) · {ledger['by_severity']} · confidence {ledger['by_confidence']}"
             + (f" · {ledger['suppressed']} suppressed" if ledger["suppressed"] else ""))
+        _cs = ledger.get("cluster_summary") or {}
+        if _cs.get("clusters"):
+            log(f"    → {_cs['distinct_issues']} DISTINCT issue(s): {_cs['clusters']} cluster(s) cover "
+                f"{_cs['clustered_findings']} of those findings (largest: {_cs['largest']} sites). "
+                f"Each site still gates on its own.")
 
     # 5. briefing + comprehensive REPORT.md (immutable run record) + machine artifacts
     (out / "AGENT-BRIEFING.md").write_text(briefing.render(facts, det, scan_results, manifest, unified, ledger))
