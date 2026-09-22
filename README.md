@@ -105,12 +105,15 @@ No need to install Noir or the scanners separately — the image carries a worki
 ```bash
 docker build -t websec-validator .
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/scan" websec-validator run /scan --out /scan/websec-out
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/scan" websec-validator run /scan --out /scan/websec-out --scan   # …and execute the bundled scanners
 ```
 
 The image carries Noir + Trivy + Gitleaks + Semgrep + Checkov — not the full list above, so
 OSV-Scanner, Prowler and the per-language SAST tools (Bandit, gosec, Brakeman) are absent and are
-reported as missing rather than silently skipped. Mount your repo at `/scan`; artifacts land in
-`/scan/websec-out`.
+reported as missing rather than silently skipped. **Bundling them is not the same as running them:**
+Noir is the route engine and runs on every `run`, but the four static scanners execute only under
+`--scan` — a plain `run` lists them and prints `(add --scan to execute them)`, exactly as it does
+outside Docker. Mount your repo at `/scan`; artifacts land in `/scan/websec-out`.
 
 ## Usage
 
@@ -674,8 +677,9 @@ add the matching dated changelog and migration guidance, and validate the combin
 In the 0.x series, feature additions or incompatible contracts increment the minor version.
 
 After reviewing current main and overlapping PRs, merge the approved release PR only after its
-required CI checks pass. The resulting main commit subject must be `release: v0.16.0` for this
-release. [release-tag.yml](.github/workflows/release-tag.yml) validates that subject against the
+required CI checks pass. The resulting main commit subject must be `release: v<version>`, where
+`<version>` is whatever `pyproject.toml` currently declares — do not hard-code a number here, it
+drifts. [release-tag.yml](.github/workflows/release-tag.yml) validates that subject against the
 package version, creates the matching tag/GitHub Release, and explicitly dispatches
 [publish.yml](.github/workflows/publish.yml) at that tag. A version edit alone does not publish.
 
