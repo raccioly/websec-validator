@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.17.1] — 2026-09-22
+
+### Fixed
+- **The 0.17.0 CLI's own `--help` contradicted the binary.** `--require-complete` read "exit 2 when
+  requested checks cannot complete" while the command actually exits 3; `--fail-on` and `--scanners`
+  carried the same stale claim, as did two sentences in `docs-canonical/ENVIRONMENT.md` and one in
+  `docs-canonical/SECURITY.md`. The 0.17.0 exit-code split updated README, METHODOLOGY, the agent
+  instruction block and the shipped skill, but not the argparse help — the text a user is most
+  likely to read. Documentation that contradicts behaviour is worse than none, because a CI author
+  will believe it. A test now scans argparse help and the canonical docs for the stale claim.
+- **A timing-dependent test in `test_intel`.** `gzip.compress()` stamps the current epoch second
+  into the gzip header, and the feed fixture was built once per refresh, so two builds that straddled
+  a second boundary produced different source bytes — and `snapshot_id`, which hashes them, was right
+  to differ. Pinned with `mtime=0`, plus a test asserting the fixture is byte-stable across calls.
+
+### Unchanged
+- No behaviour change. Exit codes, the ledger schema, SARIF and baselines are all identical to
+  0.17.0; this release only corrects what the tool SAYS about itself.
+
 ## [0.17.0] — 2026-09-22
 
 ### Changed — BREAKING
