@@ -13,7 +13,13 @@ from websec_validator import intel, enrichment, calibration
 NOW = datetime(2026, 9, 12, tzinfo=timezone.utc)
 
 def feeds(epss='0.8', cve='CVE-2025-12345'):
-    return {intel.EPSS_URL: gzip.compress(('#model_version:v2026.06.15,score_date:2026-09-12\ncve,epss,percentile\n'+cve+','+epss+',0.95\n').encode()),
+    # mtime=0 is REQUIRED, not tidiness: gzip.compress() stamps the current epoch second into
+    # the header (bytes 4..8), so building the same feed twice yields different BYTES whenever
+    # the two calls straddle a second boundary. test_identical_refresh_source_keeps_semantic_id
+    # builds the feeds once per refresh and compares snapshot ids; the id hashes
+    # sources.epss.sha256, so it flipped at random — green locally, a rare red on CI. The
+    # snapshot id was right to differ: the source bytes really had changed.
+    return {intel.EPSS_URL: gzip.compress(('#model_version:v2026.06.15,score_date:2026-09-12\ncve,epss,percentile\n'+cve+','+epss+',0.95\n').encode(), mtime=0),
             intel.KEV_URL: json.dumps({'catalogVersion':'2026.09.12','dateReleased':'2026-09-12T10:00:00Z','count':1,
                                      'vulnerabilities':[{'cveID':cve,'dateAdded':'2026-09-11'}]}).encode()}
 
@@ -66,6 +72,12 @@ class IntelligenceTests(unittest.TestCase):
         self.assertFalse(original['findings'][0]['kev'])
         self.assertEqual(intel.reassess(result['ledger'],self.root,now=NOW)['events'],[])
         self.assertIn('inventory/advisory rescan',result['limitations'][0])
+    def test_feed_fixture_is_byte_stable_across_calls(self):
+        """Guards the flake above at its source: two builds of the same feed must be identical
+        bytes, or any test comparing snapshot ids is timing-dependent."""
+        self.assertEqual(feeds()[intel.EPSS_URL], feeds()[intel.EPSS_URL])
+        self.assertEqual(feeds()[intel.KEV_URL], feeds()[intel.KEV_URL])
+
     def test_identical_refresh_source_keeps_semantic_id(self):
         first=self.refresh(); second=intel.refresh(self.root,fetcher=feeds().__getitem__,now=datetime(2026,9,13,tzinfo=timezone.utc))
         self.assertEqual(first['snapshot_id'],second['snapshot_id'])
