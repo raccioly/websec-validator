@@ -113,6 +113,109 @@
           "type": "boolean"
         }
       }
+    },
+    "clusters": {
+      "type": "array",
+      "description": "PRESENTATION-ONLY grouping of findings[] into distinct issues. Never affects total, by_severity, the gate count, per-site fingerprints, SARIF results or baselines \u2014 every site remains its own gating finding.",
+      "items": {
+        "type": "object",
+        "required": [
+          "cluster_id",
+          "kind",
+          "site_count",
+          "sites"
+        ],
+        "properties": {
+          "cluster_id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "rule",
+              "incident"
+            ],
+            "description": "rule = one detector at N sites; incident = secrets removed from the working tree in the same commit."
+          },
+          "rule": {
+            "type": "string"
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attack_class": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "severity": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "confidence": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "site_count": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sites": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "representative": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remediation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commit": {
+            "type": "string"
+          },
+          "gating_note": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "cluster_summary": {
+      "type": "object",
+      "properties": {
+        "clusters": {
+          "type": "integer"
+        },
+        "clustered_findings": {
+          "type": "integer"
+        },
+        "distinct_issues": {
+          "type": "integer"
+        },
+        "total_findings": {
+          "type": "integer"
+        },
+        "largest": {
+          "type": "integer"
+        }
+      }
     }
   },
   "definitions": {

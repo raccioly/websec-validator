@@ -301,6 +301,12 @@ websec builds; that silence is indistinguishable from a clean result. `doctor` n
 scanner's version, marks one that is too old for our invocation, and exits `2` when any selected
 scanner is incompatible — so a CI preflight can gate on the toolchain before it trusts a scan.
 
+**One issue, N sites.** Thirteen findings from one `jwtSecret` pattern and twenty-two blobs from one
+deleted-file incident are six issues, not thirty-five. The ledger carries a `clusters[]` view (and
+REPORT.md a §1a section) that groups findings by rule, and history-only secrets by the commit that
+removed them. It is a **view, not a filter**: `total`, `--fail-on` counts, per-site fingerprints,
+SARIF results and baselines are all untouched, so every site still gates on its own.
+
 **Secrets say where they live.** Every gitleaks finding carries `in_tree`; a finding whose file is
 gone from the working tree is labelled `in-tree: false` with the commit it was last seen in. Deleting
 a file does not un-leak it — the blob stays fetchable — so the remediation is *rotate*, and the report
