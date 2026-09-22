@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-09-22
+
+Migration: **none required.** Every ledger and coverage field added here is additive, existing
+fingerprints and baselines keep matching, and SARIF gains a location on results that previously had
+none rather than changing any it already emitted. Two new flags are opt-in and default-off. The one
+behavioural change a CI author might notice is that `websec run` no longer version-probes scanners
+when `--scan` is absent — `doctor` and `--scan` are unaffected.
+
+**P(real) now carries measured numbers.** Findings previously shipped an uncalibrated prior with a
+`[0, 1]` interval; the corpus was relabelled finding-by-finding against source, so `LOW` is
+0.545 [0.28, 0.787] and `MEDIUM` is 0.70 [0.397, 0.892] (Brier 0.2244 against a constant-0.5
+reference of 0.25). Those rates were fitted **after** the four false-positive fixes below, so they
+describe the current detector; 35 of 56 corpus findings remain deliberately unknown and are
+excluded from every count rather than recorded as false.
+
 ### Added
 
 - **A scan that analyzed nothing can no longer read as clean.** `SOURCE_EXT` was defined as
