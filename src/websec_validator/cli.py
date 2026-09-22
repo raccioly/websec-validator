@@ -1430,15 +1430,17 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--scanners", metavar="A,B",
                    help="comma-separated scanners to REQUIRE and run with --scan (e.g. gitleaks,semgrep). "
                         "Selection is also a requirement: a selected scanner that is not installed is "
-                        "recorded as unavailable, makes the run incomplete, and exits 2 under --fail-on "
+                        "recorded as unavailable, makes the run incomplete, and exits 3 under --fail-on "
                         "or --require-complete — a gate never reports green from a scanner that never ran.")
     r.add_argument("--format", choices=["briefing", "sarif", "json"], default="briefing",
                    help="stdout format: briefing (human, default) | sarif (SARIF 2.1.0) | json (envelope). "
                         "results.sarif is ALWAYS written to the run dir regardless.")
     r.add_argument("--fail-on", choices=["critical", "high", "medium", "low"], dest="fail_on",
                    help="exit 1 if any finding at/above this severity remains (CI gate). With --baseline, "
-                        "new, changed and reopened findings count; incomplete execution exits 2.")
-    r.add_argument("--require-complete", action="store_true", help="exit 2 when requested checks cannot complete")
+                        "new, changed and reopened findings count; incomplete execution exits 3, not 1.")
+    r.add_argument("--require-complete", action="store_true",
+                   help="exit 3 when requested checks cannot complete (3 = toolchain/coverage, "
+                        "distinct from 1 = findings and 2 = usage/configuration error)")
     r.add_argument("--network", action="store_true",
                    help="opt in to checking whether declared dependencies EXIST on the public "
                         "registry (the AI-hallucinated-dependency / slopsquat class). ⚠ this sends "

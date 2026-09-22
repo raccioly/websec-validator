@@ -114,8 +114,8 @@ docguard guard                           # validate the documentation (CDD)
 ## Execution and HTTP MCP Options
 
 `websec run ./my-app --scan --scanners semgrep,gitleaks --require-complete` requires the selected
-checks to finish. `--fail-on high` also gates incomplete execution with exit 2; findings-only failure
-is exit 1. Without `--scanners`, `--scan` selects available runnable adapters. Missing unselected
+checks to finish. `--fail-on high` also gates incomplete execution, with exit 3; findings-only failure
+is exit 1, and exit 2 is reserved for a usage/configuration error in which nothing was scanned. Without `--scanners`, `--scan` selects available runnable adapters. Missing unselected
 optional tools remain reported coverage limitations. Each attempt has a unique run directory;
 `latest` continues to identify the most recent fully executed scan.
 
@@ -153,7 +153,7 @@ and the coverage manifest for protocol gaps, scope exclusions and report hashes.
 
 Bandit must already be installed by the operator. Its adapter bypasses target `.bandit`/YAML/project
 configuration and ignores inline `nosec`; coverage records that policy. Native errors, missing
-explicitly selected analyzers and oversized reports fail gated execution with exit 2.
+explicitly selected analyzers and oversized reports fail gated execution with exit 3.
 
 The package's control-scope regression corpus has a Python API and the explicit CLI selector
 `websec research catalog` / `websec research evaluate --suite control-scope`. It is separate from

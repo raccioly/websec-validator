@@ -69,6 +69,36 @@ class ExitCodeContractTests(unittest.TestCase):
             verify_secrets = False
         self.assertEqual(cli.cmd_run(A()), cli.EXIT_USAGE)
 
+    def test_no_shipped_text_still_claims_two_means_incomplete(self):
+        """The contract is stated in argparse help, docs-canonical and the agent instructions, and
+        those drifted: `--require-complete` still read "exit 2 when requested checks cannot
+        complete" in the released 0.17.0 wheel. Documentation that contradicts behaviour is worse
+        than none, because a CI author will believe it — so the claim is pinned here."""
+        import re
+        sources = {
+            "cli help": (ROOT / "src/websec_validator/cli.py").read_text(),
+            "ENVIRONMENT.md": (ROOT / "docs-canonical/ENVIRONMENT.md").read_text(),
+            "SECURITY.md": (ROOT / "docs-canonical/SECURITY.md").read_text(),
+            "METHODOLOGY.md": (ROOT / "docs/METHODOLOGY.md").read_text(),
+        }
+        # "exit 2" on the same line as an incompleteness word is the stale contract.
+        stale = re.compile(r"exits?\s+2\b[^\n]*?(incomplete|cannot complete|gated execution)"
+                           r"|(incomplete|cannot complete|gated execution)[^\n]*?exits?\s+2\b", re.I)
+        for name, text in sources.items():
+            for line in text.splitlines():
+                if line.lstrip().startswith("#") or line.lstrip().startswith("//"):
+                    continue          # comments may describe the pre-0.17.0 behaviour as history
+                with self.subTest(source=name):
+                    self.assertIsNone(stale.search(line),
+                                      f"{name} still says exit 2 means incomplete: {line.strip()[:110]}")
+
+    def test_require_complete_help_names_the_incomplete_code(self):
+        parser = cli.build_parser() if hasattr(cli, "build_parser") else None
+        if parser is None:
+            self.skipTest("no build_parser entry point")
+        text = parser.format_help()
+        self.assertNotIn("exit 2 when requested checks cannot complete", text)
+
     def test_agent_instructions_document_all_four_codes(self):
         from websec_validator import install
         for code in ("`0`", "`1`", "`2`", "`3`"):

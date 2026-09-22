@@ -56,8 +56,9 @@ Python read policy does not sandbox an external scanner's own filesystem or netw
 
 Failed reads, oversized inputs, traversal caps, and extractor/scanner failures enter the coverage
 manifest. Execution completeness is separate from scope exclusions and unsupported types, and
-`protection_complete` is always false. `--require-complete` or `--fail-on` exits 2 for incomplete
-requested execution while preserving partial artifacts. Explicit external graph/report inputs use
+`protection_complete` is always false. `--require-complete` or `--fail-on` exits 3 for incomplete
+requested execution while preserving partial artifacts; a run that is both incomplete and
+gate-failing exits 1 and records `gate.failure_kind: findings+incomplete`. Explicit external graph/report inputs use
 bounded regular-file readers and distinct input identities.
 
 ## The Dynamic-Phase Safety Model (explicit and non-negotiable)
