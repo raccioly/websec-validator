@@ -63,13 +63,42 @@ def _projected_binding(code: str, position: int, argument: str, scopes: list[dic
         return False
     body = code[scope["body_start"]:scope["end"]]
     name = re.escape(argument)
-    if len(re.findall(r"\b" + name + r"\b", body)) != 2:
+    if len(re.findall(r"\b" + re.escape(name) + r"\b", body)) != 2:
         return False
     prefix = code[scope["body_start"]:position]
-    binding = re.search(r"\bconst\s+" + name + r"\s*=\s*(\{[^{};]*\})\s*;\s*$", prefix)
-    if not binding or in_literal(prefix, binding.start()):
+
+    # Destructuring rest parameter: const { email, ...safeProfile } = user;
+    destruct_match = re.search(r"\b(?:const|let)\s*\{\s*([^}]*?)\.\.\.\s*" + re.escape(name) + r"\s*\}\s*=\s*[^;]+;", prefix)
+    if destruct_match:
+        destructured_fields = [f.strip() for f in destruct_match.group(1).split(",") if f.strip()]
+        if any(PII_FIELD.search(f) for f in destructured_fields):
+            return True
+
+    # Lodash omit equivalent: const safeAdmin = omit(admin, ['ssn', 'email']);
+    omit_match = re.search(r"\b(?:const|let)\s+" + re.escape(name) + r"\s*=\s*(?:_\.)?omit\s*\([^,]+,\s*\[(.*?)\]\s*\)", prefix)
+    if omit_match and bool(PII_FIELD.search(omit_match.group(1))):
+        return True
+
+    # Lodash pick equivalent: const safeAdmin = pick(admin, ['id', 'name']);
+    pick_match = re.search(r"\b(?:const|let)\s+" + re.escape(name) + r"\s*=\s*(?:_\.)?pick\s*\([^,]+,\s*\[(.*?)\]\s*\)", prefix)
+    if pick_match and not bool(PII_FIELD.search(pick_match.group(1))):
+        return True
+
+    # Array map destructuring: const safe = arr.map(({ pii, ...rest }) => rest)
+    map_destruct_match = re.search(r"\b(?:const|let)\s+" + re.escape(name) + r"\s*=\s*[\w$.]+\.map\s*\(\s*\(\s*\{\s*([^}]*?)\.\.\.\s*([A-Za-z_$][\w$]*)\s*\}\s*\)\s*=>\s*\2\s*\)\s*;", prefix)
+    if map_destruct_match:
+        destructured_fields = [f.strip() for f in map_destruct_match.group(1).split(",") if f.strip()]
+        if any(PII_FIELD.search(f) for f in destructured_fields):
+            return True
+
+    # Map projection to object literal: const safe = arr.map(u => ({ id: u.id }))
+    map_binding = re.search(r"\b(?:const|let)\s+" + re.escape(name) + r"\s*=\s*[\w$.]+\.map\s*\(\s*(?:[^)]+)\s*=>\s*\(?\s*(\{[^{}]*\})\s*\)?\s*\)\s*;", prefix)
+    binding = re.search(r"\bconst\s+" + re.escape(name) + r"\s*=\s*(\{[^{};]*\})\s*;\s*$", prefix)
+
+    match_literal = map_binding or binding
+    if not match_literal or in_literal(prefix, match_literal.start()):
         return False
-    fields = split_arguments(binding[1][1:-1])
+    fields = split_arguments(match_literal.group(1)[1:-1])
     return bool(fields) and all(re.fullmatch(r"[\w$]+\s*:\s*[\w$.]+", field)
                                and not PII_FIELD.search(field) for field in fields)
 

@@ -27,6 +27,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - README "Status / roadmap" refreshed, and `AGENTS.md`'s pinned test count updated — both are
   metrics-consistency anchors the brief is checked against.
 
+### Fixed — the substance of #142 and #143, with the near-miss controls
+
+- **A sender check behind an inert alias now counts** (`_sender_control`). `const { origin } = sender;`
+  before the guard is the common modern shape, and it was uncredited: `guarded_body` requires the
+  body to START with `if (`, so any binding in front of the check made the whole handler read as
+  unvalidated. That first-statement rule is right — a guard running after something already acted on
+  untrusted input is too late — but a binding acts on nothing. An inert prologue of sender aliases is
+  now rewritten back to direct `sender.<prop>` reads. Three things keep it from becoming a false
+  negative: only `const/let/var x = sender.<id|origin|url>` and `{ id, origin, url }` destructuring
+  count; anything else in the prologue (a call, an await) abandons the rewrite; and an alias **rebound**
+  anywhere in the body disqualifies the handler, because the value checked is not the value used.
+- **PII projections that demonstrably remove the field are no longer raw-entity exposures.**
+  Destructuring rest, `omit`/`_.omit` of PII fields, `pick`/`_.pick` of only non-PII fields, and the
+  `.map` forms of each. The near misses still report: a `pick` that KEEPS a PII field, an `omit` that
+  removes only non-PII, a rest-destructure that drops nothing sensitive, and a projection bound to a
+  different name while the raw entity is the one sent. The interpolated binding name is now
+  `re.escape`d — it originates in scanned third-party source.
+
+
 ### Fixed — two detector false-positive sources, with the controls
 
 Lands the verified parts of #128 and #143 against current `main`, each with the paired
