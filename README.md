@@ -21,9 +21,10 @@ A senior pentester's "here's what to test and how" handoff — auto-generated fr
 [![websec-validator demo](assets/demo.gif)](assets/demo.gif)
 
 **New here?** Read the eight-page technical brief — what it reads, how a finding earns its severity,
-what it refuses to say, and the field evidence: [PDF](docs/websec-explained.pdf) ·
-[HTML source](docs/websec-explained.html). Every number in it is asserted against this tree by
-`tests/test_explained_brief.py`.
+what it refuses to say, and the field evidence:
+**[raccioly.github.io/websec-validator](https://raccioly.github.io/websec-validator/websec-explained.html)**
+· [PDF](https://raccioly.github.io/websec-validator/websec-explained.pdf). Every number in it is
+asserted against this tree by `tests/test_explained_brief.py`, so it cannot drift silently.
 
 It is *not* an autonomous scanner and *not* a SaaS. It's the missing front-half: the thing that
 turns a repo into a precise, fact-grounded security brief an AI agent (with a human in the loop)
