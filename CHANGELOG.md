@@ -73,6 +73,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   to the generic "write a regression test". These were real gaps in the fix prompts independently of
   the triage work, and they are what make the agent-fixable invariant true rather than aspirational.
 
+### Fixed — the dynamic probe imposed its own login shape
+
+`mint()` sent `{"email": ..., "password": ...}` unconditionally, so any API that authenticates with
+`username` — VAmPI, and a large share of real ones — could never mint a token. The BOLA matrix was
+then skipped with "could not mint both agent tokens", which reads like a credential or network
+problem rather than a shape websec imposed on the target. The role object is now sent as written,
+so it carries whatever the app expects; `email` + `password` is simply one such shape and keeps
+working unchanged, `_`-prefixed keys stay comments, and the login-redirect refusal (bug-208) is
+unaffected. When the login response carries no user object, the identity falls back to the
+credential that was sent, so two agents remain distinguishable in the report.
+
 ### Fixed — SARIF results without `locations` no longer reject the whole upload (#147)
 
 GitHub Code Scanning rejects the **entire** SARIF file when any result carries no `locations`, so

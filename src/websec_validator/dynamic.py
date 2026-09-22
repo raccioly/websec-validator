@@ -104,7 +104,13 @@ def is_localhost(target: str) -> bool:
 def mint(cfg: dict, role: str) -> dict:
     """Log in one role → {token, tenant}. Returns {} on failure."""
     r = cfg["roles"][role]
-    body = json.dumps({"email": r["email"], "password": r["password"]}).encode()
+    # The credential FIELD NAME is the app's, not ours. This sent {"email": ...} unconditionally, so
+    # every API that logs in with `username` — VAmPI and a large share of real ones — failed to mint
+    # a token, and the whole BOLA matrix was skipped for a reason that read like a network error.
+    # The role object is now sent as-is, so it carries whatever the target expects; `email` +
+    # `password` keeps working unchanged because that is simply one such shape.
+    credentials = {key: value for key, value in r.items() if not str(key).startswith("_")}
+    body = json.dumps(credentials or {"email": r.get("email"), "password": r.get("password")}).encode()
     req = urllib.request.Request(cfg["target"] + cfg.get("login_path", "/api/auth/login"),
                                  data=body, headers={"Content-Type": "application/json"})
     try:
@@ -125,8 +131,11 @@ def mint(cfg: dict, role: str) -> dict:
         return {"error": f"{type(e).__name__}: {e}"}
     token = _dig(d, cfg.get("token_json_path", "tokens.accessToken"))
     user = _dig(d, cfg.get("user_json_path", "user")) or {}
+    # A login response need not echo the user object; fall back to the credential we sent so the
+    # two identities remain distinguishable in the report either way.
+    identity = user.get("email") or credentials.get("email") or credentials.get("username")
     return {"token": token, "tenant": _first_tenant(user.get(cfg.get("tenant_field", "groupIds"))),
-            "email": user.get("email"), "role": user.get("role")}
+            "email": identity, "role": user.get("role")}
 
 
 def _first_tenant(raw):
