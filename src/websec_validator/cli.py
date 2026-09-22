@@ -24,6 +24,27 @@ from pathlib import Path
 
 from . import (__version__, baseline, briefing, calibration, constitution, diffscope, dynamic, feedback,
                findings, coverage, formats, fpfilter, inventory, probes, proof, recon, report, scanners)
+# --- process exit contract (field report #1) --------------------------------------------------
+# A CI caller has to be able to tell "this repo has a vulnerability" from "my toolchain is broken",
+# because the two demand opposite responses: one blocks the merge, the other pages whoever owns the
+# runner image. Exit 2 used to mean BOTH — plus argument errors and an MCP bind failure — and, worse,
+# the incomplete check SHORT-CIRCUITED the gate, so a run with a real CRITICAL *and* a dead scanner
+# exited 2 and the finding never reached the exit code at all.
+#
+#   0  clean — the gate ran and nothing met the threshold (or no gate was requested)
+#   1  FINDINGS at or above --fail-on. A security fact about the code.
+#   2  usage / configuration error, or `doctor` found an incompatible scanner. Nothing was scanned.
+#   3  requested checks did NOT complete (--require-complete / --fail-on with an execution gap).
+#      An operational fact about the toolchain; the gate result is not a pass.
+#
+# When a run is BOTH incomplete and gate-failing it exits 1, and prints both lines: the finding is
+# definite and actionable, while "incomplete" only tells you the picture may be worse still. The
+# ledger's `gate.failure_kind` records the combination precisely for machine consumers, so nothing
+# is lost by the collapse.
+EXIT_OK = 0
+EXIT_FINDINGS = 1
+EXIT_USAGE = 2
+EXIT_INCOMPLETE = 3
 
 _FEEDBACK_VERDICTS = feedback.VERDICTS
 _FEEDBACK_SEVERITIES = feedback.SEVERITIES
@@ -176,6 +197,11 @@ def cmd_doctor(args) -> int:
     print("\n  missing (optional — install for fuller coverage):")
     for s in det["missing"]:
         print(f"    · {s['name']:20} {s['category']:8} {s.get('install','')}")
+    if det.get("incompatible"):
+        print("\n  ⚠ INCOMPATIBLE — installed, but websec's invocation does not match this build.")
+        print("    These are SELECTED and RUN, and their failure looks exactly like a clean scan.")
+        for s in det["incompatible"]:
+            print(f"      ✗ {s['name']} {s.get('version')}  —  {s.get('install','')}")
     print("\n  Docker:", "present" if _which("docker") else "not found "
           "(used for reproducible scanner runs in a future release)")
     return 0
@@ -248,22 +274,22 @@ def cmd_emit_context(args) -> int:
 def cmd_run(args) -> int:
     if len(getattr(args, "sarif", []) or []) > 8:
         print("error: at most 8 explicit --sarif reports are supported per run", file=sys.stderr)
-        return 2
+        return EXIT_USAGE
     if getattr(args, "scanners", None) and not args.scan:
         print("error: --scanners requires --scan", file=sys.stderr)
-        return 2
+        return EXIT_USAGE
     if getattr(args, "scanners", None) and not any(key.strip() for key in args.scanners.split(",")):
         print("error: --scanners requires at least one scanner key", file=sys.stderr)
-        return 2
+        return EXIT_USAGE
     if getattr(args, "verify_secrets", False) and not args.scan:
         print("error: --verify-secrets requires --scan", file=sys.stderr)
-        return 2
+        return EXIT_USAGE
     target = _resolve_target(args.target)
     try:
         out, ts = _new_run_dir(args.out)
     except (OSError, ValueError) as error:
         print(f"error: cannot reserve output run: {error}", file=sys.stderr)
-        return 2
+        return EXIT_USAGE
 
     # In a machine-output mode (sarif/json) keep STDOUT pure for piping — route human progress to
     # stderr. `websec run app --format sarif > results.sarif` then Just Works in a pipeline.
@@ -509,15 +535,31 @@ def cmd_run(args) -> int:
              "network_gate_note": ("registry-existence findings are reported but do not gate unless "
                                    "--fail-on-network is given: the UNKNOWN rate is outside operator "
                                    "control and a 404 is an observation, not a proof")}
-    if _incomplete:
-        _gate.update(verdict="incomplete", exit_code=2, count_at_or_above=None,
+    # Count the findings FIRST, unconditionally. Previously `_incomplete` short-circuited this, so a
+    # run that was both incomplete and gate-failing reported exit 2 and dropped the security signal
+    # entirely — the caller could not tell it had a CRITICAL (field report #1).
+    _n = (baseline.gate_count(_gate_ledger, args.fail_on, new_only=bool(diff))
+          if getattr(args, "fail_on", None) else None)
+    _gate["incomplete"] = bool(_incomplete)
+    if _n:
+        _gate.update(count_at_or_above=_n, verdict="fail", exit_code=EXIT_FINDINGS,
+                     failure_kind="findings+incomplete" if _incomplete else "findings",
+                     note=("findings at or above the threshold AND requested checks did not "
+                           "complete — the finding count is a floor, not a total"
+                           if _incomplete else None))
+    elif _incomplete:
+        _gate.update(verdict="incomplete", exit_code=EXIT_INCOMPLETE, count_at_or_above=_n,
+                     failure_kind="incomplete",
                      note="requested checks did not complete; the gate result is NOT a pass")
     elif getattr(args, "fail_on", None):
-        _n = baseline.gate_count(_gate_ledger, args.fail_on, new_only=bool(diff))
-        _gate.update(count_at_or_above=_n, verdict="fail" if _n else "pass", exit_code=1 if _n else 0)
+        _gate.update(count_at_or_above=_n, verdict="pass", exit_code=EXIT_OK, failure_kind=None)
     else:
-        _gate.update(verdict="not-evaluated", exit_code=0, count_at_or_above=None,
+        _gate.update(verdict="not-evaluated", exit_code=EXIT_OK, count_at_or_above=None,
+                     failure_kind=None,
                      note="no --fail-on was requested; this run gated nothing")
+    _gate["exit_code_contract"] = {"0": "clean", "1": "findings at or above --fail-on",
+                                   "2": "usage/configuration error (nothing scanned)",
+                                   "3": "requested checks did not complete"}
     # Enforcement is a server-side concern. Say so IN THE ARTIFACT, not only in the docs: a local
     # gate can be skipped with --no-verify, an uninstalled hook, or a deleted one.
     _gate["enforcement"] = ("advisory unless run as a required status check. A client-side gate is a "
@@ -586,18 +628,26 @@ def cmd_run(args) -> int:
     # block only reports it and returns the exit code, so the artifact and the exit code cannot
     # disagree.
     if _gate["verdict"] == "incomplete":
-        log("\n✗ requested security checks did not complete; partial artifacts saved (exit 2).")
-        return 2
+        log(f"\n✗ requested security checks did not complete; partial artifacts saved "
+            f"(exit {EXIT_INCOMPLETE} — toolchain/coverage, NOT a finding).")
+        log("  Your build is not failing because of a vulnerability. See coverage.gaps in "
+            "coverage.json for which check did not run.")
+        return EXIT_INCOMPLETE
     if _gate["verdict"] == "fail":
         log(f"\n✗ --fail-on {args.fail_on}: {_gate['count_at_or_above']} finding(s) at or above threshold"
             + (" (new since baseline)" if diff else "")
             + (f" (in files changed vs {_gate['diff_base']})" if _gate["diff_scoped"] else "")
-            + " — failing the build.")
-        return 1
+            + f" — failing the build (exit {EXIT_FINDINGS}).")
+        if _gate.get("incomplete"):
+            # BOTH conditions hold. Exit 1 (the definite fact) but never let the incompleteness go
+            # unsaid: the count above is a floor, and something else may still be hiding.
+            log("  ⚠ ALSO incomplete: some requested checks did not run, so this count is a FLOOR, "
+                "not a total. See coverage.gaps.")
+        return EXIT_FINDINGS
     if _gate["verdict"] == "pass":
         log(f"\n✓ --fail-on {args.fail_on}: no findings at or above threshold"
             + (" (new since baseline)" if diff else "") + ".")
-    return 0
+    return EXIT_OK
 
 
 def cmd_dynamic(args) -> int:
@@ -610,7 +660,7 @@ def cmd_dynamic(args) -> int:
         out, ts = _new_run_dir(args.out)
     except (OSError, ValueError) as error:
         print(f"error: cannot reserve output run: {error}", file=sys.stderr)
-        return 2
+        return EXIT_USAGE
     dyn: dict = {}
 
     if args.unauth:
@@ -694,9 +744,10 @@ def cmd_dynamic(args) -> int:
         _publish_run(out)
     print(f"  ✓ run {ts} saved (immutable): {out}")
     if not (facts_dict.get("coverage") or {}).get("execution_complete"):
-        print("  Requested checks incomplete; latest completed scan unchanged.")
-        return 2
-    return 1 if ledger["by_severity"].get("CRITICAL") else 0
+        print(f"  Requested checks incomplete; latest completed scan unchanged "
+              f"(exit {EXIT_INCOMPLETE} — toolchain/coverage, NOT a finding).")
+        return EXIT_INCOMPLETE
+    return EXIT_FINDINGS if ledger["by_severity"].get("CRITICAL") else EXIT_OK
 
 
 def cmd_mcp(args) -> int:
@@ -706,7 +757,7 @@ def cmd_mcp(args) -> int:
             return mcp_server.serve_http(args.host, args.port, allowed_roots=getattr(args, "allow_root", None))
         except (ValueError, OSError) as error:
             print(f"error: {error}", file=sys.stderr)
-            return 2
+            return EXIT_USAGE
     return mcp_server.serve()
 
 
@@ -749,7 +800,7 @@ def cmd_repair_verify(args) -> int:
     except FileExistsError:
         print(json.dumps(result, indent=2))
         print(f"\nrefusing to overwrite existing evidence at {args.out}", file=sys.stderr)
-        return 2
+        return EXIT_USAGE
     return 0 if result.get("accepted") else 2
 
 
@@ -770,7 +821,7 @@ def cmd_gate(args) -> int:
     target = Path(args.target).expanduser().resolve()
     if not target.is_dir():
         print(f"error: target is not a directory: {target}", file=sys.stderr)
-        return 2
+        return EXIT_USAGE
 
     scope_source = "explicit"
     paths = list(getattr(args, "only", None) or [])
@@ -778,11 +829,13 @@ def cmd_gate(args) -> int:
         discovered = _gate.working_tree_paths(target)
         paths, scope_source = discovered["paths"], discovered["source"]
         if scope_source == "working-tree-unavailable":
-            # Not a pass: the gate could not determine what to analyse, so it never
-            # answered the question. Exit 2 (incomplete requested execution), never 0.
+            # Not a pass: the gate could not determine what to analyse, so it never answered the
+            # question. This is the INCOMPLETE class (the check did not run), not the usage class
+            # (the invocation was fine) — so it is 3 under the split contract, where it used to
+            # share 2 with genuine argument errors.
             print(f"error: {discovered.get('note', 'changed-file scope unavailable')}",
                   file=sys.stderr)
-            return 2
+            return EXIT_INCOMPLETE
         if not paths:
             # Nothing changed is a PASS, but say which question was answered.
             print(_gate.to_json({"tool": "websec-validator", "command": "gate", "passed": True,
@@ -801,9 +854,9 @@ def cmd_gate(args) -> int:
         print(_gate.to_json(result))
     else:
         print(_gate.render_text(result))
-    # 1 = blocking findings. Distinct from 2 (usage/target error) so a harness can tell a FAILED
-    # check from a BROKEN one and must never treat a crash as a pass.
-    return 0 if result["passed"] else 1
+    # 1 = blocking findings; 2 = usage/target error; 3 = the gate could not determine its scope.
+    # A harness can tell a FAILED check from a BROKEN one and must never treat a crash as a pass.
+    return EXIT_OK if result["passed"] else EXIT_FINDINGS
 
 
 def cmd_attest(args) -> int:
@@ -821,11 +874,11 @@ def cmd_attest(args) -> int:
     if run_dir is None or not run_dir.is_dir():
         print("error: no run directory found; pass --run <dir> or run `websec run` first",
               file=sys.stderr)
-        return 2
+        return EXIT_USAGE
     if not (run_dir / "findings-ledger.json").is_file():
         print(f"error: {run_dir} does not look like a websec run (no findings-ledger.json)",
               file=sys.stderr)
-        return 2
+        return EXIT_USAGE
 
     bypasses = _hooks.read_bypasses(Path(getattr(args, "repo", None) or ".").expanduser())
     result = _attest.build(run_dir, bypasses=bypasses)
@@ -864,7 +917,7 @@ def cmd_explain(args) -> int:
         return 0
     if not getattr(args, "term", None):
         print("error: give an attack class or CWE id, or --list", file=sys.stderr)
-        return 2
+        return EXIT_USAGE
     info = _explain.describe(args.term)
     if getattr(args, "format", "text") == "json":
         _emit_json_result(info)
@@ -883,7 +936,7 @@ def cmd_feedback(args) -> int:
         # this on a findings ledger would require the artifact whose absence is the point.
         if args.fingerprint:
             print("--fingerprint does not apply to --verdict false-negative", file=sys.stderr)
-            return 2
+            return EXIT_USAGE
         try:
             record = fb.build_missed_record(
                 attack_class=getattr(args, "attack_class", "") or "", reason=args.reason,

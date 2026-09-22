@@ -39,7 +39,7 @@ class ActionContracts(unittest.TestCase):
     def test_incomplete_attempt_exports_its_own_sarif_and_preserves_previous_latest(self):
         self.assertEqual(self.run_action(), 0)
         old = self.outputs()["sarif_file"]
-        self.assertEqual(self.run_action(WEBSEC_INPUT_SCAN="true", WEBSEC_INPUT_SCANNERS="semgrep"), 2)
+        self.assertEqual(self.run_action(WEBSEC_INPUT_SCAN="true", WEBSEC_INPUT_SCANNERS="semgrep"), 3)
         outputs = self.outputs()
         self.assertNotEqual(outputs["sarif_file"], old)
         self.assertEqual(outputs["execution_complete"], "false")

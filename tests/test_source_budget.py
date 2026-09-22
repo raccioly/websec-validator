@@ -118,7 +118,7 @@ class SourceBudgetTests(unittest.TestCase):
             with patch('shutil.which',return_value=None),contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
                 return cli.main(['run',str(repo),'--out',str(out),'--require-complete'])
         self.assertEqual(invoke(),0);latest=(out/'latest').resolve()
-        with patch.object(base,'MAX_SOURCE_BYTES',1):self.assertEqual(invoke(),2)
+        with patch.object(base,'MAX_SOURCE_BYTES',1):self.assertEqual(invoke(),3)
         self.assertEqual((out/'latest').resolve(),latest)
         attempt=max((out/'runs').iterdir(),key=lambda p:p.stat().st_mtime_ns)
         cov=json.loads((attempt/'coverage.json').read_text())

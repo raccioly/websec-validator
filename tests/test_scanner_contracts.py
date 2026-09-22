@@ -290,7 +290,7 @@ class ScannerContractTests(unittest.TestCase):
             self.assertEqual(cli.main(argv), 0)
             previous = (self.out / "latest").resolve()
             path.write_text(json.dumps(self.checkov(1)))
-            self.assertEqual(cli.main(argv), 2)
+            self.assertEqual(cli.main(argv), 3)
             self.assertEqual((self.out / "latest").resolve(), previous)
             attempts = list((self.out / "runs").iterdir())
             self.assertEqual(len(attempts), 2)

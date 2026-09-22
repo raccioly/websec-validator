@@ -82,6 +82,37 @@
           "description": "Always evidenced:false \u2014 websec records the run side only."
         }
       }
+    },
+    "gate": {
+      "type": "object",
+      "properties": {
+        "failure_kind": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "findings",
+            "incomplete",
+            "findings+incomplete",
+            null
+          ],
+          "description": "Which condition produced a non-zero exit. A run that is BOTH gate-failing and incomplete exits 1 (the definite fact) and records 'findings+incomplete' here, so the collapse to one exit code loses nothing."
+        },
+        "exit_code": {
+          "type": "integer",
+          "enum": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "description": "0 clean \u00b7 1 findings at threshold \u00b7 2 usage/config error \u00b7 3 checks incomplete."
+        },
+        "incomplete": {
+          "type": "boolean"
+        }
+      }
     }
   },
   "definitions": {
