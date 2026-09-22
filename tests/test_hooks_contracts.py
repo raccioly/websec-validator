@@ -59,7 +59,7 @@ class HookContracts(unittest.TestCase):
         (self.repo / "app.py").write_text(UNSAFE)
         self.assertEqual(self.run_hook(WEBSEC_HOOK_FAIL_ON="high"), 0)
         self.assertEqual(self.run_hook(WEBSEC_HOOK_FAIL_ON="low"), 1)
-        self.assertEqual(self.run_hook(WEBSEC_HOOK_FAIL_ON="high", WEBSEC_HOOK_SCAN="1", WEBSEC_HOOK_SCANNERS="semgrep"), 2)
+        self.assertEqual(self.run_hook(WEBSEC_HOOK_FAIL_ON="high", WEBSEC_HOOK_SCAN="1", WEBSEC_HOOK_SCANNERS="semgrep"), 3)
 
     def test_lock_and_invalid_policy_fail_gate_but_advisory_is_nonblocking(self):
         self.guard.mkdir(); (self.guard / "running.lock").mkdir()

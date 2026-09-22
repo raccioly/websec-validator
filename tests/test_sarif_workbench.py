@@ -107,10 +107,10 @@ class SarifWorkbenchTests(unittest.TestCase):
         for doc in (document(success=None),document(success=False),{'version':'2.1.0','runs':[]},{}):
             path=self.write(doc)
             with self.subTest(doc=doc):
-                self.assertEqual(self.run_cli('--sarif',path,'--require-complete'),2)
+                self.assertEqual(self.run_cli('--sarif',path,'--require-complete'),3)
                 self.assertFalse(self.read('coverage.json')['execution_complete'])
                 self.assertEqual((self.out/'latest').resolve(),latest)
-        self.assertEqual(self.run_cli('--sarif',self.root/'missing.sarif','--fail-on','high'),2)
+        self.assertEqual(self.run_cli('--sarif',self.root/'missing.sarif','--fail-on','high'),3)
 
     def test_report_count_is_bounded_before_starting_run(self):
         arguments=[value for _ in range(9) for value in ('--sarif',self.root/'missing.sarif')]
@@ -122,7 +122,7 @@ class SarifWorkbenchTests(unittest.TestCase):
         loaded=sarif_ingest.load_report(first,self.repo)
         cap=len(json.dumps(loaded,ensure_ascii=True).encode())+100
         with patch.object(cli,'MAX_SARIF_TOTAL_BYTES',cap), patch.object(sarif_ingest,'load_report',wraps=sarif_ingest.load_report) as load:
-            self.assertEqual(self.run_cli('--sarif',first,'--sarif',second,'--sarif',third,'--require-complete'),2)
+            self.assertEqual(self.run_cli('--sarif',first,'--sarif',second,'--sarif',third,'--require-complete'),3)
         self.assertEqual(load.call_count,2)
         imports=self.read('coverage.json')['imports']
         self.assertTrue(imports[0]['import_complete']); self.assertFalse(imports[1]['import_complete'])
@@ -170,7 +170,7 @@ class SarifWorkbenchTests(unittest.TestCase):
         detected={'available':[{'key':'semgrep','name':'Semgrep','category':'sast'}],'missing':[]}
         with patch.object(scanners,'detect',return_value=detected), patch.object(scanners,'run_available',return_value=[
                 {'key':'semgrep','name':'Semgrep','status':'timeout'}]):
-            self.assertEqual(self.run_cli('--scan','--scanners','semgrep','--sarif',self.write(document()),'--require-complete'),2)
+            self.assertEqual(self.run_cli('--scan','--scanners','semgrep','--sarif',self.write(document()),'--require-complete'),3)
         cov=self.read('coverage.json')
         self.assertTrue(cov['imports'][0]['execution_complete'])
         self.assertEqual(cov['scanners']['semgrep']['outcome'],'timeout')

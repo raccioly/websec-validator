@@ -264,16 +264,37 @@ non-Claude agents. All stdlib, no new dependency.
 finding lands **inline on the PR diff** and in the **Security tab**, ranked by a security-severity band,
 with its CWE/ASVS/OWASP citation and remediation.
 
-**Gate the build.** `--fail-on {critical,high,medium,low}` exits 1 for matching findings and 2 when
-requested execution is incomplete. `--require-complete` gates execution without a severity threshold.
-Extractor failures, source read loss/caps, invalid scanner reports, timeouts, and explicitly selected
-missing scanners remain visible in `coverage.json`; partial artifacts are preserved. Optional missing
-unselected scanners are reported as unavailable. `--scanners` requires `--scan`.
+**Gate the build.** `--fail-on {critical,high,medium,low}` fails CI on matching findings;
+`--require-complete` gates execution without a severity threshold. Extractor failures, source read
+loss/caps, invalid scanner reports, timeouts, and explicitly selected missing scanners remain visible
+in `coverage.json`; partial artifacts are preserved. Optional missing unselected scanners are reported
+as unavailable. `--scanners` requires `--scan`.
+
+**Exit codes tell you WHICH kind of failure.** "You have a vulnerability" and "my toolchain is
+broken" need opposite responses — one blocks the merge, the other pages whoever owns the runner
+image — so they never share a code:
+
+| Code | Meaning | What to do |
+|------|---------|------------|
+| `0` | the gate ran and nothing met the threshold | ship (it does not prove protection) |
+| `1` | findings at or above `--fail-on` | a fact about the code — fix the findings |
+| `2` | usage/configuration error, or `websec doctor` found an incompatible scanner | nothing was scanned; fix the invocation or the toolchain |
+| `3` | requested checks did not complete | the gate result is **not** a pass; read `coverage.gaps` for which check did not run |
+
+A run that is **both** gate-failing and incomplete exits `1` — the definite fact wins — and says so
+on stderr, because the finding count in that case is a floor, not a total. `gate.failure_kind` in the
+ledger records the exact combination (`findings` · `incomplete` · `findings+incomplete`), so nothing
+is lost by the collapse.
+
+> **Upgrading:** exit `2` previously meant *incomplete execution*. It now means *usage/configuration
+> error*, and incomplete is `3`. A CI job that tested for `2` to detect an incomplete run should test
+> for `3` (or read `coverage.execution_complete`, which is unchanged).
 
 **Naming a scanner requires it.** `--scanners` is not only a subset filter: a scanner you select but
 have not installed is an incomplete run, not a clean one. `websec run . --scan --scanners trivy,osv-scanner
---require-complete` exits 2 with `trivy: unavailable` in `coverage.json`, so a CI job whose scanner
+--require-complete` exits 3 with `trivy: unavailable` in `coverage.json`, so a CI job whose scanner
 install failed fails instead of reporting zero findings from a scan that never ran.
+
 
 Every attempt receives a unique directory under `websec-out/runs/`. The atomic `latest` pointer
 advances only after a completed execution has written its artifacts; a partial attempt retains its

@@ -155,11 +155,11 @@ class InstallGuidanceTests(unittest.TestCase):
         (target / 'huge.py').write_bytes(b'#' * (MAX_BYTES + 1))
         with contextlib.redirect_stdout(io.StringIO()) as stdout:
             rc = main(args)
-        self.assertEqual(rc, 2)
+        self.assertEqual(rc, 3)
         partial = json.loads(stdout.getvalue())
         self.assertFalse(partial['coverage']['execution_complete'])
         selected = self.select(partial, rc)
-        self.assertEqual(selected.returncode, 2, selected.stderr)
+        self.assertEqual(selected.returncode, 3, selected.stderr)
         self.assertIn(partial['generated'], selected.stdout)
         self.assertNotIn(complete['generated'], selected.stdout)
         self.assertEqual((out / 'latest').resolve(), previous)

@@ -59,7 +59,7 @@ class CoverageTests(unittest.TestCase):
         self.assertEqual(self.run_cli(), 0)
         previous = (self.out / 'latest').resolve()
         result = [{'key': 'gitleaks', 'name': 'Gitleaks', 'status': 'timeout'}]
-        self.assertEqual(self.run_cli('--scan', '--fail-on', 'high', scanner_result=result), 2)
+        self.assertEqual(self.run_cli('--scan', '--fail-on', 'high', scanner_result=result), 3)
         cov = self.latest('coverage.json')
         self.assertFalse(cov['execution_complete'])
         self.assertEqual(cov['scanners']['gitleaks']['outcome'], 'timeout')
@@ -69,7 +69,7 @@ class CoverageTests(unittest.TestCase):
         self.assertEqual((self.out / 'latest').resolve(), previous)
 
     def test_selected_missing_scanner_is_incomplete_but_optional_missing_is_not(self):
-        self.assertEqual(self.run_cli('--scan', '--scanners', 'gitleaks', '--require-complete'), 2)
+        self.assertEqual(self.run_cli('--scan', '--scanners', 'gitleaks', '--require-complete'), 3)
         self.assertEqual(self.latest('coverage.json')['scanners']['gitleaks']['outcome'], 'unavailable')
         self.assertEqual(self.run_cli('--require-complete'), 0)
 
@@ -166,12 +166,12 @@ class CoverageTests(unittest.TestCase):
     def test_large_source_is_disclosed_after_lazy_reads(self):
         (self.repo / 'app.py').write_text('x' * 40)
         with patch('websec_validator.extractors.base.MAX_BYTES', 20):
-            self.assertEqual(self.run_cli('--fail-on', 'high'), 2)
+            self.assertEqual(self.run_cli('--fail-on', 'high'), 3)
         self.assertEqual(self.latest('coverage.json')['files']['oversized'], ['app.py'])
 
     def test_extractor_exception_is_disclosed(self):
         with patch('websec_validator.extractors.surface.SurfaceExtractor.extract', side_effect=RuntimeError('synthetic')):
-            self.assertEqual(self.run_cli('--require-complete'), 2)
+            self.assertEqual(self.run_cli('--require-complete'), 3)
         cov = self.latest('coverage.json')
         self.assertEqual(cov['extractors']['surface']['outcome'], 'error')
 
@@ -217,7 +217,7 @@ class CoverageTests(unittest.TestCase):
     def test_invalid_baseline_cannot_pass_gate(self):
         path = self.base / 'baseline.json'
         path.write_text('{broken')
-        self.assertEqual(self.run_cli('--baseline', str(path), '--fail-on', 'high'), 2)
+        self.assertEqual(self.run_cli('--baseline', str(path), '--fail-on', 'high'), 3)
         self.assertTrue(any(g['kind'] == 'baseline' for g in self.latest('coverage.json')['gaps']))
 
     def test_changed_hunk_findings_are_included_in_diff_gate(self):
@@ -260,7 +260,7 @@ class CoverageTests(unittest.TestCase):
                                      'summary':'unreachable','results':[], 'target_unreachable':True}}
         with patch.object(cli.dynamic, 'run_unauth', return_value=dyn), contextlib.redirect_stdout(io.StringIO()):
             code = cli.main(['dynamic','--unauth','--target','http://127.0.0.1:9','--out',str(self.out)])
-        self.assertEqual(code, 2)
+        self.assertEqual(code, 3)
         self.assertEqual((self.out / 'latest').resolve(), previous)
         self.assertFalse(self.latest('coverage.json')['execution_complete'])
         ledger = self.latest('findings-ledger.json')

@@ -162,7 +162,7 @@ class SqlFlowTests(unittest.TestCase):
                 stdout,stderr=io.StringIO(),io.StringIO()
                 with contextlib.redirect_stdout(stdout),contextlib.redirect_stderr(stderr):
                     status=cli.main(['run',str(root),'--out',str(output),'--format','json','--require-complete'])
-                self.assertEqual(status,2)
+                self.assertEqual(status,3)
                 envelope=json.loads(stdout.getvalue())
                 self.assertFalse(envelope['coverage']['execution_complete'])
                 saved=json.loads((output/'runs'/envelope['generated']/'FACTS.json').read_text())
