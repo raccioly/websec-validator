@@ -75,7 +75,22 @@
               "error",
               "parse_failed",
               "missing_output",
+              "partial",
               "completed"
+            ],
+            "description": "`partial` = the scanner ran and produced results, but named rules did not complete (see rules_incomplete). Distinct from `error` (the scanner itself failed) and from `completed`."
+          },
+          "rules_incomplete": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Rule IDs that did not complete (timeout/OOM). Their finding classes are UNMEASURED for this run, not clean."
+          },
+          "reported_version": {
+            "type": [
+              "string",
+              "null"
             ]
           }
         }
