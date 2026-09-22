@@ -256,6 +256,30 @@
           "items": {
             "type": "object"
           }
+        },
+        "in_tree": {
+          "type": "boolean",
+          "description": "Is the finding's file present in the working tree? false = the file is gone but the blob is still reachable in git history, so the credential is NOT remediated until it is rotated."
+        },
+        "history_only": {
+          "type": "boolean",
+          "description": "Secret found only in git history; the file no longer exists."
+        },
+        "commit": {
+          "type": "string",
+          "description": "Full commit SHA the secret was observed in (from the scanner's own record)."
+        },
+        "commit_short": {
+          "type": "string",
+          "description": "First 12 characters of `commit`, for display."
+        },
+        "commit_date": {
+          "type": "string",
+          "description": "ISO timestamp of that commit."
+        },
+        "commit_author": {
+          "type": "string",
+          "description": "Author recorded on that commit."
         }
       }
     }
