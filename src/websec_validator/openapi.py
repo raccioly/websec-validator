@@ -250,3 +250,117 @@ def render_md(res: dict, limit: int = 20) -> str:
     if um:
         out.append(um)
     return "\n".join(out)
+
+
+# --- Spec-first apps: resolve an operation to the code that implements it ---------------------
+# A connexion/spec-first API (VAmPI is the corpus example) has its OpenAPI document promoted to the
+# route list, because the spec IS the route contract — without that promotion the whole API reads as
+# zero routes. But the authz extractor then received the SPEC as each route's "handler file" and
+# looked for `requireAuth`/`@login_required` inside YAML. A spec never contains those, so every
+# route came back unguarded: on VAmPI that produced 12 missing-auth findings, of which the 6 whose
+# handlers DO validate a token inline were false. Asserting "no auth guard found in handler
+# openapi3.yml" is a statement about a file that is not a handler.
+#
+# Two signals recover the truth, in order of strength:
+#   1. `operationId: api_views.users.me` — a dotted path to the implementing function. Resolved to a
+#      real file, the existing guard detection runs against actual code.
+#   2. `security:` on the operation — the contract's own auth declaration, used when (1) cannot be
+#      resolved.
+# When neither is available the caller must treat the route as NOT ANALYSED rather than unguarded.
+_YAML_OPERATION_ID = re.compile(r"^\s*operationId\s*:\s*['\"]?([\w.\-/]+)['\"]?\s*$")
+_YAML_SECURITY_KEY = re.compile(r"^\s*security\s*:\s*(\[\s*\])?\s*$")
+
+
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+def operation_map(path: Path, *, context: RepoContext | None = None) -> dict:
+    """→ {(path, METHOD): {"operation_id": str|None, "declares_security": bool}}.
+
+    JSON specs are parsed exactly. YAML uses a RELATIVE-indent walk (path shallower than method,
+    method shallower than its keys) rather than fixed column counts, because real specs vary — the
+    corpus spec puts operation keys at 6 spaces under one path and 8 under another. Anything the
+    walk cannot place is simply absent from the result: a missing entry means "unknown", which the
+    caller must not read as "unauthenticated".
+    """
+    try:
+        text = context.text(path) if context is not None else path.read_text(errors="replace")
+    except Exception:
+        return {}
+    if not text:
+        return {}
+    out: dict = {}
+    stripped = text.lstrip()
+    if stripped.startswith("{"):
+        import json as _json
+        try:
+            doc = _json.loads(text)
+        except Exception:
+            return {}
+        has_global = bool(doc.get("security"))
+        for route, ops in (doc.get("paths") or {}).items():
+            if not isinstance(ops, dict):
+                continue
+            for method, op in ops.items():
+                if method.lower() not in _HTTP_METHODS or not isinstance(op, dict):
+                    continue
+                declared = op.get("security", None)
+                out[(route, method.upper())] = {
+                    "operation_id": op.get("operationId"),
+                    "declares_security": bool(declared) or (declared is None and has_global)}
+        return out
+
+    route = method = None
+    route_indent = method_indent = -1
+    for line in text.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = _indent(line)
+        match = _YAML_PATH.match(line)
+        if match:
+            route, route_indent = match.group(1), indent
+            method, method_indent = None, -1
+            continue
+        if route is None:
+            continue
+        if indent <= route_indent:          # dedented out of this path's block
+            route, method = None, None
+            continue
+        match = _YAML_METHOD.match(line)
+        if match and (method_indent < 0 or indent <= method_indent):
+            method, method_indent = match.group(1).upper(), indent
+            out.setdefault((route, method), {"operation_id": None, "declares_security": False})
+            continue
+        if method is None or indent <= method_indent:
+            continue
+        entry = out.setdefault((route, method), {"operation_id": None, "declares_security": False})
+        match = _YAML_OPERATION_ID.match(line)
+        if match:
+            entry["operation_id"] = match.group(1)
+        elif _YAML_SECURITY_KEY.match(line):
+            # `security: []` is an explicit OPT-OUT, not a guard.
+            entry["declares_security"] = not line.rstrip().endswith("[]")
+    return out
+
+
+def resolve_operation_file(operation_id: str, rel_paths) -> str:
+    """`api_views.users.me` → `api_views/users.py` when that file exists in the walked repo.
+
+    Matches the longest dotted prefix that maps to a real file, so the trailing function name is
+    dropped without guessing how many trailing segments are attributes. Returns "" when nothing
+    matches — the caller must then treat the route as unresolved, never as unguarded.
+    """
+    if not operation_id:
+        return ""
+    known = {str(p).replace("\\", "/") for p in rel_paths}
+    parts = [p for p in re.split(r"[.\-/]", operation_id) if p]
+    for cut in range(len(parts) - 1, 0, -1):
+        stem = "/".join(parts[:cut])
+        for suffix in (".py", ".js", ".ts", ".mjs", ".rb", ".go"):
+            if stem + suffix in known:
+                return stem + suffix
+        for index in ("__init__.py", "index.js", "index.ts"):
+            if f"{stem}/{index}" in known:
+                return f"{stem}/{index}"
+    return ""

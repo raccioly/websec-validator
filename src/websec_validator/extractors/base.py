@@ -97,6 +97,65 @@ def unanalyzed_languages(paths) -> dict:
     return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
 
 
+# --- Vendored third-party assets and generated bundles ---------------------------------------
+# `vendor/`, `dist/` and `node_modules/` are already skipped by name, but a library dropped into
+# `static/jquery/jquery.js` is none of those. On DVGA that single blind spot produced 100 of 128
+# findings (72 redos + 28 xss) — all inside jQuery and Bootstrap. jQuery's internal regex is not
+# your ReDoS and jQuery's `innerHTML` is not your XSS: you cannot fix it, it is not your code, and
+# it drowns the findings that are.
+#
+# Detected by CONTENT, not by a library-name allowlist, so a library this list never heard of is
+# still caught and an application file that happens to be called `jquery.js` is not:
+#   * a `/*!` preserved banner carrying a version or copyright — the near-universal convention for
+#     "this is third-party, keep this notice",
+#   * or any line beyond MINIFIED_LINE characters, which only minified output produces. Measured
+#     headroom: the longest line in this project's own source is 384, in its tests 253, and in the
+#     corpus apps' own code 155; the vendored bundles run to 32,000-89,000.
+# Skipped files are COUNTED and disclosed as a `walker_policy` scope gap, never silently dropped.
+VENDOR_PREFIX_BYTES = 4096
+MINIFIED_LINE = 1000
+MINIFIED_DENSITY = 0.9   # non-whitespace share of a long line; minified ~0.97, padded source ~0.01
+_VENDORABLE_EXT = {".js", ".mjs", ".cjs", ".jsx", ".css"}
+_MINIFIED_NAME = re.compile(r"[.\-]min\.(?:js|mjs|cjs|css)$", re.I)
+_VENDOR_BANNER = re.compile(r"^\s*/\*!.{0,400}?(?:\bv?\d+\.\d+\.\d+|copyright|\(c\)|licensed under)",
+                            re.I | re.S)
+
+
+def is_vendored_asset(path: Path) -> bool:
+    """True for a third-party library or a minified bundle — not the operator's own source.
+
+    Filename first (free), content only for the extensions where vendoring actually happens, and
+    only a bounded prefix. Any read error answers False: a file we cannot classify is analysed,
+    because skipping on uncertainty would hide real code.
+    """
+    suffix = path.suffix.lower()
+    if suffix not in _VENDORABLE_EXT:
+        return False
+    if _MINIFIED_NAME.search(path.name):
+        return True
+    try:
+        with path.open("rb") as handle:
+            prefix = handle.read(VENDOR_PREFIX_BYTES)
+    except OSError:
+        return False
+    text = prefix.decode("utf-8", errors="replace")
+    if _VENDOR_BANNER.match(text):
+        return True
+    # A long line alone is not minification: `tests/test_remaining_control_scope` builds a real
+    # source file padded with 25,000 SPACES, and an oversized scope like that must still be
+    # analysed. Minified output is DENSE — that is what minifying does. Measured non-whitespace
+    # density: minified bundles 0.97, ordinary source 0.84, the whitespace-padded case 0.007. So
+    # the long line must itself be dense before the file counts as generated.
+    # Every line counts, including one the prefix cut short: truncation can only stop us proving a
+    # line is SHORT. A 4 KB prefix with no newline at all is a single-line bundle, exactly this case.
+    for line in text.split("\n"):
+        if len(line) > MINIFIED_LINE:
+            dense = sum(1 for char in line if not char.isspace()) / len(line)
+            if dense > MINIFIED_DENSITY:
+                return True
+    return False
+
+
 def _glob_matches(relative: Path, pattern: str) -> bool:
     """Path.rglob semantics, including zero or many directories for **."""
     names = relative.parts
@@ -356,6 +415,12 @@ class RepoContext:
                 suffix = path.suffix.lower()
                 self.file_types[suffix or "<none>"] = self.file_types.get(suffix or "<none>", 0) + 1
                 if suffix in CODE_EXT:
+                    # A vendored library or minified bundle is not the operator's source and cannot
+                    # be fixed by them; analysing it buries the findings that can. Counted as a
+                    # walker-policy skip so the exclusion is disclosed, never silent.
+                    if is_vendored_asset(path):
+                        self._skip(path, "vendored_asset")
+                        continue
                     if len(self.code_files) >= MAX_FILES:
                         self.truncated = True
                     else:

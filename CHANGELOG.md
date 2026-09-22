@@ -71,6 +71,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   to the generic "write a regression test". These were real gaps in the fix prompts independently of
   the triage work, and they are what make the agent-fixable invariant true rather than aspirational.
 
+### Fixed — three systematic false-positive sources (corpus 184 -> 63 findings, -66%)
+
+Found by labelling the pinned corpus (VAmPI, NodeGoat, DVGA) finding by finding against source.
+Each fix ships with the control that must keep firing: the dangerous direction for a security tool
+is the false negative, so a guard credited too generously is worse than one missed.
+
+- **Vendored third-party assets are no longer scanned as your source.** `vendor/`, `dist/` and
+  `node_modules/` were skipped by name, but a library dropped in `static/jquery/jquery.js` is none
+  of those: on DVGA that produced **100 of 128 findings** (72 ReDoS + 28 XSS), all inside jQuery and
+  Bootstrap. jQuery's internal regex is not your ReDoS and you cannot fix it. Detected by CONTENT —
+  a `/*!` banner with a version or copyright, or a long line that is also DENSE — so an unknown
+  library is caught and an app file named `jquery.js` is not. Density matters: a real source file
+  padded with 25,000 spaces is an oversized scope that must still be analysed, not a bundle.
+  Skips are counted and disclosed as a `walker_policy` gap. DVGA: 128 -> 25 findings, 5.4x faster.
+- **A spec is no longer read as a handler.** A spec-first app has its OpenAPI document promoted to
+  the route list (without that, the whole API reads as zero routes) — but authz then searched that
+  YAML for `requireAuth`/`@login_required`, which a spec never contains, so every route came back
+  unguarded. VAmPI reported 12 missing-auth findings, 6 of them on handlers that DO validate a
+  token. `operationId` now resolves the operation to the file that implements it, falling back to
+  the contract's own `security:` declaration, and leaving the route UNANALYSED when neither is
+  available — a file never read cannot be said to lack a guard. The guard decision is scoped to the
+  named function, because nine operations can share a file and disagree: crediting the file would
+  have cleared `/users/v1/_debug`, an unauthenticated user dump. VAmPI: 17 -> 11, missing-auth 12 -> 6.
+- **Express per-route middleware is credited.** `app.get("/dashboard", isLoggedIn, handler)` is the
+  dominant Express guard form and was invisible: `alias_call` requires a CALL, and here the
+  middleware is an argument REFERENCE. All 20 NodeGoat routes reported unguarded when 12 are
+  protected. Now resolved per registration, through local bindings
+  (`const isLoggedIn = sessionHandler.isLoggedInMiddleware`), and only for names that read as
+  AUTHENTICATION — a role-only name or a `rateLimit` is not proof identity was established, and
+  every registration of a path must be guarded so one protected copy cannot vouch for an
+  unprotected twin. NodeGoat: 39 -> 27, missing-auth 15 -> 3.
+
+Also: target source is parsed with warnings suppressed, so a deprecation or invalid-escape warning
+in the code under analysis (VAmPI raises one) no longer surfaces as output from this tool.
+
+### Changed — README
+
+Corrected five inaccuracies and shortened the trailing review notes: the stale "first PyPI release"
+install caveat (0.16.0 is published), "four ways" over a five-row table, the opening and flow
+diagram implying the static scanners run without `--scan`, and the Docker section claiming the image
+bundles every scanner when it carries Noir + Trivy + Gitleaks + Semgrep + Checkov. Added
+reader-visible links to DocGuard and TestGuard near the introduction.
+
 All additive: no finding, severity, confidence, fingerprint or SARIF output changes on any existing
 fixture, and no probability moves without an explicit human acceptance. New coverage gaps are scope limitations (`execution: false`), so `execution_complete` and
 `--require-complete` semantics are untouched. Specification:

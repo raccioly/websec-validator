@@ -28,6 +28,156 @@ from .profiles import service_for
 from .syntax import without_comments, expression_end, in_literal, js_functions
 
 
+# --- Spec-first routes: find the code that actually implements the operation ------------------
+_SPEC_FILE = re.compile(r"\.(?:ya?ml|json)$", re.I)
+
+
+def _is_spec_derived(code_path: str) -> bool:
+    """A route whose 'handler' is an API description document rather than source."""
+    from .routes import SPEC_PATH
+    return bool(code_path) and bool(SPEC_PATH.search(code_path)) and bool(_SPEC_FILE.search(code_path))
+
+
+def operation_body(text: str, function_name: str, suffix: str) -> str:
+    """The source of ONE named function, or "" when it cannot be located exactly.
+
+    Guard detection is otherwise file-level, which is the right trade for a handler file written
+    one-route-per-file but wrong for a spec-first app: VAmPI puts nine operations in
+    `api_views/users.py`, six of which validate a token inline and three of which deliberately do
+    not. Crediting the file would mark `/users/v1/_debug` — an unauthenticated user dump — as
+    guarded, converting three true positives into false negatives. A false negative is the
+    dangerous direction for a security tool, so the guard decision is narrowed to the exact
+    function the spec's `operationId` names.
+
+    Python uses `ast`, which is exact. Returning "" on any doubt makes the caller fall back to
+    file-level analysis rather than silently crediting or clearing a route.
+    """
+    if not (text and function_name):
+        return ""
+    if suffix == ".py":
+        import ast as _ast
+        import warnings as _warnings
+        try:
+            # Target source is data. A deprecation or invalid-escape warning in THEIR code must not
+            # surface as output from OUR tool (VAmPI's users.py raises one), so parsing is silenced.
+            with _warnings.catch_warnings():
+                _warnings.simplefilter("ignore")
+                tree = _ast.parse(text)
+        except (SyntaxError, ValueError, RecursionError):
+            return ""
+        for node in _ast.walk(tree):
+            if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and node.name == function_name:
+                return _ast.get_source_segment(text, node) or ""
+        return ""
+    for scope in js_functions(text):
+        if scope.get("name") == function_name and scope.get("complete"):
+            return scope.get("body", "") or ""
+    return ""
+
+
+# --- Express per-route middleware: `app.get("/dashboard", isLoggedIn, handler)` ---------------
+# The dominant Express guard form, and one the file-level check cannot use: `/` and `/dashboard`
+# live in the same file and disagree, so crediting the FILE would clear the unguarded routes.
+# `alias_call` does not see it either — it requires a CALL (`withAuth(`), and here the middleware is
+# an argument REFERENCE. On NodeGoat this left all 20 routes reported unguarded when 14 are guarded.
+#
+# A name counts only when it reads as authentication, either directly (`requireAuth`) or through a
+# local binding whose right-hand side does (`const isLoggedIn = sessionHandler.isLoggedInMiddleware`).
+# Role-only names (`isAdmin`) are NOT credited on their own: a role check is not proof that identity
+# was ever established, and over-crediting hides the finding this tool exists to produce.
+_AUTHN_NAME = re.compile(
+    r"auth(?:enticat|oriz)?\w*|login|logged[_-]?in|session|token|jwt|passport|credential|verif\w*user",
+    re.I)
+_MW_BINDING = re.compile(r"\b(?:const|let|var)\s+(\w+)\s*=\s*([^;\n]{1,200})")
+_IDENTIFIER = re.compile(r"^[\w.$]+$")
+
+
+def _authn_middleware_names(text: str) -> set:
+    """Local names that resolve to authentication middleware."""
+    names = set()
+    for name, rhs in _MW_BINDING.findall(text or ""):
+        if _AUTHN_NAME.search(name) or _AUTHN_NAME.search(rhs):
+            names.add(name)
+    return names
+
+
+def _route_path_pattern(path: str) -> str:
+    """Match a normalized path against the source literal, tolerating `:id` vs `{id}` params."""
+    parts = []
+    for segment in (path or "").split("/"):
+        if segment.startswith("{") and segment.endswith("}"):
+            parts.append(r"(?::\w+|\{\w+\})")
+        else:
+            parts.append(re.escape(segment))
+    return "/".join(parts) + r"/?"
+
+
+def route_middleware_guarded(text: str, method: str, path: str) -> bool:
+    """True when THIS route's registration passes an authentication middleware argument.
+
+    Per-route by construction: the arguments between the path literal and the final handler are
+    read for this registration only. Every registration of the same method+path must be guarded —
+    one protected copy cannot vouch for an unprotected twin.
+    """
+    if not (text and method and path):
+        return False
+    names = _authn_middleware_names(text)
+    registration = re.compile(
+        r"\b[\w.]+\.(?:" + re.escape(method.lower()) + r")\s*\(\s*['\"]" + _route_path_pattern(path) + r"['\"]",
+        re.I)
+    found = False
+    for match in registration.finditer(text):
+        found = True
+        end = expression_end(text, text.index("(", match.start()), closing=")")
+        args = text[match.end():end]
+        pieces = [piece.strip() for piece in args.split(",")]
+        # Drop the trailing handler: only the middleware slots before it can be a guard.
+        middlewares = [piece for piece in pieces[:-1] if piece and _IDENTIFIER.match(piece)]
+        if not any(name in names or _AUTHN_NAME.search(name.split(".")[-1])
+                   for name in middlewares):
+            return False
+    return found
+
+
+def _spec_handler(ctx: RepoContext, spec: Path, endpoint: dict) -> tuple:
+    """→ (implementing_file | "", declares_security | None) for one spec-derived endpoint.
+
+    The operation map is parsed once per spec and cached on the context. A miss returns
+    ("", None), which the caller must treat as UNANALYSED — never as unguarded.
+    """
+    cache = getattr(ctx, "_spec_operation_cache", None)
+    if cache is None:
+        cache = {}
+        try:
+            ctx._spec_operation_cache = cache
+        except Exception:
+            pass
+    key = str(spec)
+    if key not in cache:
+        from .. import openapi as _openapi
+        try:
+            cache[key] = _openapi.operation_map(spec, context=ctx)
+        except Exception:
+            cache[key] = {}
+    operations = cache[key]
+    if not operations:
+        return "", None
+    entry = operations.get((endpoint.get("path", ""), str(endpoint.get("method", "")).upper()))
+    if entry is None:
+        return "", None
+    resolved = ""
+    if entry.get("operation_id"):
+        from .. import openapi as _openapi
+        try:
+            resolved = _openapi.resolve_operation_file(
+                entry["operation_id"], [ctx.rel(p) for p in ctx._files])
+        except Exception:
+            resolved = ""
+    function_name = entry["operation_id"].replace("/", ".").split(".")[-1] if entry.get("operation_id") else ""
+    return ((str(ctx.root / resolved) if resolved else ""), entry.get("declares_security"), function_name)
+
+
+
 class _ServiceContext:
     """A view of the existing reader, not another filesystem walk or read policy."""
     def __init__(self, context, service, inventory):
@@ -126,7 +276,11 @@ GUARD = re.compile(
 # NOT credit (that over-credit hid a real Next.js app's unauthenticated /api/auth/seed backdoor).
 INLINE_AUTHN = re.compile(
     r"await\s+auth\s*\(\s*\)|getServerSession\s*\(|getToken\s*\(|\bauth\s*\(\)\s*;|"
-    r"currentUser\s*\(|requireSession\s*\(|await\s+getSession\s*\(", re.I)
+    r"currentUser\s*\(|requireSession\s*\(|await\s+getSession\s*\(|"
+    # A *validator* call naming a credential — `token_validator(request.headers.get(...))` is how
+    # a connexion/Flask app authenticates without a decorator. Still only credited alongside an
+    # AUTHN_REJECT, so calling a validator and ignoring its verdict does NOT count as a guard.
+    r"\b\w*(?:token|auth|session|jwt)\w*valid\w*\s*\(|\bvalid\w*_?(?:token|auth|session|jwt)\w*\s*\(", re.I)
 AUTHN_REJECT = re.compile(
     r"\b401\b|Unauthorized|status:\s*40[13]\b|\.status\(\s*40[13]|redirect\([^)]*(?:login|signin|auth)"
     r"|throw\s+new\s+\w*(?:Auth|Unauthorized|Forbidden)|NextResponse\.redirect", re.I)
@@ -593,8 +747,21 @@ class AuthzExtractor(Extractor):
 
         for e in endpoints:
             cp = e.get("code_path", "")
+            # A spec-first app has its OpenAPI document promoted to the route list, so `cp` is the
+            # SPEC, not a handler. Looking for `requireAuth`/`@login_required` inside YAML always
+            # fails, which reported every route as unguarded. Resolve the operation to the code that
+            # implements it; failing that, use the contract's own `security:`; failing both, leave
+            # the route UNANALYSED — a file we never read cannot be said to lack a guard.
+            spec_security, operation_fn = None, ""
+            if cp and _is_spec_derived(str(cp).replace("\\", "/")):
+                resolved, spec_security, operation_fn = _spec_handler(ctx, Path(cp), e)
+                if resolved:
+                    cp = resolved
             text = ctx.text(Path(cp)) if cp else ""
-            guard_text = _without_hooks(text)
+            # Narrow to the named operation when the spec identified one: nine operations can share
+            # a file and disagree about auth, and crediting the file would clear the unguarded ones.
+            scoped = operation_body(text, operation_fn, Path(cp).suffix.lower()) if operation_fn else ""
+            guard_text = _without_hooks(scoped or text)
             _collect_roles(text, roles)
             relcp = ctx.rel(Path(cp)) if cp else ""
             # a matcher only counts as a guard when the middleware actually does auth — a
@@ -607,9 +774,17 @@ class AuthzExtractor(Extractor):
                        or _fastify_covers(text, e, (facts.get("stack") or {}).get("frameworks", []))
                        or (relcp and relcp in mount_covered)
                        or (mw_auth and _matcher_covers(e.get("path", ""), mw.get("matchers", [])))
-                       or _imported_guard(relcp, text))
+                       or _imported_guard(relcp, text)
+                       # Express per-route middleware, scoped to THIS registration.
+                       or route_middleware_guarded(text, e.get("method", ""), e.get("path", "")))
+            # The contract's declaration stands in when no implementing file was located: an
+            # operation carrying `security:` is guarded by the only evidence that exists. It is
+            # never used to REFUTE code analysis — if we read a handler, that reading wins.
+            analyzed = bool(text)
+            if spec_security is not None and not analyzed:
+                guarded, analyzed = bool(spec_security), True
             egs.append({"method": e.get("method"), "path": e.get("path"), "code_path": relcp,
-                        "guarded": bool(guarded), "analyzed": bool(text),
+                        "guarded": bool(guarded), "analyzed": analyzed,
                         "unverified_controls": (["Fastify hook presence does not establish this route's instance/registration scope"]
                                                 if fastify_global_auth and not guarded else []),
                         "public_hint": bool(PUBLIC_HINT.search(e.get("path", "")))})
