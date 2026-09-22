@@ -202,6 +202,14 @@ something you can act on.
   overlay (`~/.cache/websec-validator/`). Legacy unproven records are quarantined. Unknown-only input
   reports no successful measurement and leaves fitted calibration unchanged. Evidence may support a
   specific request/property without proving the entire endpoint or attack class safe.
+- **Objective — strictly proper scoring rules only.** Any quantity fitted from labels (a bucket
+  probability, a cut-off, a threshold default) is chosen by a **strictly proper scoring rule** —
+  Brier or log score — never by accuracy, precision, recall or F1. A strictly proper rule is
+  maximized only by reporting honest probabilities; accuracy-shaped objectives are maximized by
+  confident wrongness, which is the exact failure this layer exists to prevent. Those other metrics
+  may be *reported*; they must not be *optimized*. `websec calibrate` prints the table's Brier score
+  whenever it writes a measurable cell, so the honest metric exists before anyone is tempted to tune
+  on a dishonest one. No behavior currently depends on that number.
 
 This is the deterministic realization of the **CJE (Calibrated Judge Evaluation)** idea from the
 AITPG/TRACE research: the tool emits the evidence + citation + a calibrated confidence; the agent

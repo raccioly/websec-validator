@@ -58,7 +58,18 @@
           "total": 0
         },
         "implementationEvidence": [],
-        "testEvidence": []
+        "testEvidence": [
+          {
+            "requirementId": "FR-011",
+            "file": "tests/test_calibration_scoring.py",
+            "line": 43
+          },
+          {
+            "requirementId": "SC-008",
+            "file": "tests/test_calibration_scoring.py",
+            "line": 87
+          }
+        ]
       }
     },
     {

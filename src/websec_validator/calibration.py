@@ -29,6 +29,15 @@ Z95 = 1.959963984540054   # z for a 95% two-sided interval
 MIN_N = 5                 # a cell needs ≥ this many samples to be used (else fall back a tier)
 # uncalibrated fallback prior — used ONLY when we have no data; always labeled as such
 PRIOR = {"HIGH": 0.85, "MEDIUM": 0.5, "LOW": 0.25}
+
+# DESIGN CONSTRAINT — read this before fitting anything from labels.
+# Any quantity derived from labeled outcomes (a bucket probability, a cut-off, a threshold default)
+# must be chosen by a STRICTLY PROPER SCORING RULE — Brier or log score — never by accuracy,
+# precision, recall or F1. A strictly proper rule is maximized only by honest probabilities;
+# accuracy-shaped objectives are maximized by a confidently-wrong estimator, which is precisely the
+# failure this module exists to prevent. Report those other metrics if useful; never optimize them.
+# `brier()` below exists so the honest metric is available at the moment the temptation arises.
+SCORING_RULE = "strictly proper (Brier / log score) — never accuracy, precision, recall or F1"
 CAVEAT = ("indicative — calibrated on a deliberately-vulnerable app corpus; "
           "skews optimistic on clean production code")
 # Used when NO shipped corpus table is present and the numbers come only from the operator's own
@@ -65,6 +74,32 @@ def _cell(k: int, n: int) -> dict:
     lo, hi = wilson(k, n)
     return {"n": n, "k": k, "p": round(k / n, 3) if n else None,
             "ci": [round(lo, 3), round(hi, 3)]}
+
+
+def brier(labeled: list, table: dict) -> dict | None:
+    """Mean Brier score of `table`'s predictions against the labels that produced them.
+
+    Brier = mean((p - outcome)^2), lower is better; 0.25 is what a constant 0.5 scores. It is a
+    STRICTLY PROPER rule (see SCORING_RULE): it is minimized only by honest probabilities, so
+    unlike accuracy it cannot be improved by becoming more confident than the evidence warrants.
+
+    Reported, never optimized against — nothing in the runtime reads this. It exists so the honest
+    number is already on screen if anyone later reaches for a threshold to tune. Rows whose bucket
+    has no measured cell fall back through `apply()` exactly as a real finding would, so the score
+    describes the estimates the tool would actually have emitted, priors included.
+    """
+    rows = [r for r in (labeled or []) if isinstance(r.get("is_real"), bool)]
+    if not rows:
+        return None
+    total = 0.0
+    for row in rows:
+        est = apply(row.get("attack_class", ""), row.get("confidence", ""), table)
+        p = est["p"] if isinstance(est.get("p"), (int, float)) else 0.5
+        total += (p - float(row["is_real"])) ** 2
+    return {"brier": round(total / len(rows), 4), "n": len(rows),
+            "reference": {"always_0.5": 0.25},
+            "rule": SCORING_RULE,
+            "note": "reported for honesty; no runtime behavior depends on it"}
 
 
 def is_real(attack_class: str, location: str, truth: list) -> bool | None:

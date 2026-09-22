@@ -1250,6 +1250,12 @@ def cmd_calibrate(args) -> int:
     print(f"\n  fitted {table['meta']['n_total']} findings across {len(used)} app(s) → {out_path}")
     for k, v in table["by_label"].items():
         print(f"    {k:7} {v['k']}/{v['n']} real · p={v['p']} · 95% CI {v['ci']}")
+    # Strictly proper scoring rule, reported not optimized (calibration.SCORING_RULE).
+    score = calibration.brier(labeled, table)
+    if score:
+        print(f"\n  Brier {score['brier']} on {score['n']} label(s) "
+              f"(lower better; a constant 0.5 scores {score['reference']['always_0.5']}).")
+        print(f"  Fitting objective: {score['rule']}.")
     print(f"\n  NOTE: {table['meta']['caveat']}.")
     print("  Per-finding estimates carry n + basis; wide CI / basis=prior ⇒ trust the debate, not the number.")
     return 0
