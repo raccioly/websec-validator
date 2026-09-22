@@ -1050,6 +1050,81 @@ def _gitignored(target: Path | None, paths) -> set:
         return {rel_to_orig[r] for r in ignored_rel if r in rel_to_orig}
     except Exception:
         return set()
+# --- confidence + stable per-instance identity (field report #6) -----------------------------
+# The LEDGER carried a confidence for every finding, but the normalized SCANNER findings that feed
+# findings.json / the envelope carried one only when the scanner itself supplied it — bandit and
+# gosec, i.e. 2 of 11 adapters. Everything else rendered as `?`, which made a ledger described as
+# "calibrated" look uncalibrated. Derive it, and — because an unexplained confidence label is just
+# as unarguable as a missing one — say WHY in `confidence_basis`.
+_CONF_OK = {"HIGH", "MEDIUM", "LOW"}
+_GENERIC_CONF_NOTE = "generic/entropy rule — matches any high-entropy string, often a hash or public id"
+
+
+def _derive_confidence(f: dict, target=None) -> tuple:
+    """(confidence, basis) for a normalized scanner finding. Deterministic and explainable.
+
+    Confidence answers "how sure are we this MATCH is what it claims to be", which is independent
+    of severity ("how bad if it is"). A CVE matched against a pinned lockfile version is a HIGH-
+    confidence observation even at LOW severity; a generic-entropy secret hit is LOW confidence even
+    at HIGH severity."""
+    native = str(f.get("confidence") or "").upper()
+    if native in _CONF_OK:
+        return native, f"reported by {f.get('tool', 'the scanner')}"
+    if "confidence" in f:
+        # The scanner DID report a confidence and we could not parse it. That is a known state with
+        # an existing contract: the ledger records native_confidence="UNKNOWN" and routes the finding
+        # to LOW rather than inventing a value. Deriving a category default here would have silently
+        # overwritten that honesty with a confident-looking MEDIUM.
+        return "LOW", "scanner reported an unrecognized confidence value — treated as unknown"
+    cat, rel = f.get("category"), _rel_to(f.get("file", ""), target) or f.get("file", "")
+    key = str(f.get("key") or f.get("rule_id") or "")
+    if cat == "secret":
+        if f.get("verified"):
+            return "HIGH", "liveness VERIFIED against the provider"
+        if f.get("severity") == "INFO" or is_placeholder_value(str(f.get("secret", ""))):
+            return "LOW", "value is placeholder-shaped"
+        if is_example_file(rel):
+            return "LOW", "*.example/*.sample template file — values are fake by convention"
+        if is_doc_or_example(rel):
+            return "LOW", "documentation/example file"
+        if is_test_file(rel):
+            return "LOW", "test/fixture file — planted fakes are common"
+        if _generic_secret(key):
+            return "LOW", _GENERIC_CONF_NOTE
+        return "HIGH", "provider-specific rule matched a credential-shaped value"
+    if cat == "sca":
+        # A lockfile pins an exact version, so the advisory match itself is not in doubt; what is
+        # uncertain is whether the vulnerable code is REACHED — which is severity/triage, not
+        # identity. Only an unpinned/unresolved occurrence lowers identity confidence.
+        if f.get("reachability") == "not-imported":
+            return "MEDIUM", "advisory matches the pinned version, but the package is never imported"
+        return "HIGH", "advisory matched an exact pinned version from a lockfile"
+    if cat == "iac":
+        return "MEDIUM", "config-file policy check — deterministic match, deployment context unknown"
+    if cat == "sast":
+        if is_test_file(rel) or is_doc_or_example(rel):
+            return "LOW", "pattern matched in test/doc code, not the running product"
+        if f.get("semantic_id"):
+            return "MEDIUM", "semantic (dataflow-aware) rule match"
+        return "MEDIUM", "syntactic pattern match — confirm the sink is attacker-reachable"
+    return "MEDIUM", "no adapter-specific rule; defaulted"
+
+
+def _instance_id(f: dict, target=None) -> str:
+    """Stable, portable, per-INSTANCE identifier.
+
+    `key` is a RULE id (`generic-api-key`) — it names the detector, not the occurrence, so it cannot
+    address one finding for `websec feedback` or a baseline entry (field report #6). `fingerprint`
+    does identify the instance, but trivy and semgrep emit ABSOLUTE paths, so a fingerprint minted on
+    one machine does not match the same finding on another. This hashes the ROOT-RELATIVE identity,
+    so it is the same id for the same finding in CI, on a laptop, and after the repo is moved.
+    Emitted ALONGSIDE `fingerprint`, never replacing it — existing baselines keep matching."""
+    rel = _rel_to(f.get("file", ""), target) or f.get("file", "")
+    parts = [str(f.get("category") or ""), rel, str(f.get("key") or f.get("rule_id") or ""),
+             str(f.get("line") or 0), str(f.get("cve") or f.get("pkg") or "")]
+    return "wv1_" + hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
+
+
 # Rules that are SECRET DETECTION regardless of which adapter reported them. Semgrep ships a pile
 # of these ("AWS AppSync GraphQL Key detected", "hardcoded-api-key", …) and they arrive as category
 # `sast`, so the per-parser secret tiering in _norm_gitleaks/_norm_trivy never saw them: a `da2-`
@@ -1268,6 +1343,21 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
     # sharpen triage in the briefing; neither can reintroduce a false positive.
     reachability = enrichment.enrich_reachability(deduped, target)
     exploitability = enrichment.enrich_exploitability(deduped)
+    # Every finding gets a confidence + a stable per-instance id. Runs AFTER enrichment so the
+    # reachability signal can inform confidence, and after all the demotion passes so a finding
+    # already tiered to INFO/LOW is read as the placeholder it is (field report #6).
+    for f in deduped:
+        # Keep the scanner's ORIGINAL value verbatim: findings.py inspects it to decide whether the
+        # producer's own confidence was usable, and a derived value must never impersonate one.
+        if "confidence" in f:
+            f["native_confidence"] = f["confidence"]
+        conf, basis = _derive_confidence(f, target)
+        f["confidence"], f["confidence_basis"] = conf, basis
+        f["instance_id"] = _instance_id(f, target)
+    by_conf: dict = {}
+    for f in deduped:
+        by_conf[f["confidence"]] = by_conf.get(f["confidence"], 0) + 1
+
     (outdir / "findings.json").write_text(json.dumps(deduped, indent=2))
 
     by_sev, by_cat = {}, {}
@@ -1278,7 +1368,13 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
                   "file": f["file"], "tools": f["tools"],
                   **{k: f[k] for k in ("key", "rule_id", "id", "cve", "package", "pkg", "resource",
                                       "service", "symbol", "sink", "semantic_id", "line", "fingerprint",
-                                      "installed", "fixed", "ecosystem", "advisory_aliases", "confidence", "cwe") if k in f},
+                                      "installed", "fixed", "ecosystem", "advisory_aliases", "confidence", "cwe",
+                                      # field report #6: a per-INSTANCE id (`key` is a rule id) + why
+                                      # this confidence, so `feedback`/baselining can address one finding.
+                                      "instance_id", "confidence_basis", "native_confidence",
+                                      # field report #3: where the secret LIVES. in_tree=False means the
+                                      # file is gone from the working tree but the blob is still fetchable.
+                                      "in_tree", "history_only", "commit", "commit_short", "commit_date") if k in f},
                   # bug-218: which gitleaks surface produced the hit (git | dir | git+dir). Committed
                   # vs working-tree-only changes the remediation, so the ledger must see it.
                   **({"scan_mode": f["scan_mode"]} if isinstance(f.get("scan_mode"), str) else {}),
@@ -1291,6 +1387,7 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
                   **({"intel_status": f["intel_status"]} if isinstance(f.get("intel_status"), str) else {})}
                  for f in deduped]
     return {"total_raw": len(raw), "total": len(deduped),
+            "by_confidence": by_conf,
             "cross_tool_or_dup_merged": len(raw) - len(deduped),
             "contamination_dropped": contamination_dropped,
             "user_excluded_dropped": user_excluded_dropped,

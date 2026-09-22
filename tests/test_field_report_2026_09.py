@@ -251,5 +251,41 @@ class ExampleFileTierTests(unittest.TestCase):
         self.assertEqual(row["severity"], "HIGH")
 
 
+class ConfidenceAndIdentityTests(unittest.TestCase):
+    """#6 — confidence was unpopulated and `key` is a rule id, not a per-instance id."""
+
+    def test_confidence_is_derived_with_an_explanation(self):
+        conf, basis = scanners._derive_confidence(
+            {"category": "sca", "cve": "CVE-2021-23337", "file": "package-lock.json"})
+        self.assertEqual(conf, "HIGH")
+        self.assertTrue(basis)
+
+    def test_generic_secret_rule_is_low_confidence(self):
+        conf, _ = scanners._derive_confidence(
+            {"category": "secret", "key": "generic-api-key", "file": "src/a.ts"})
+        self.assertEqual(conf, "LOW")
+
+    def test_unparseable_native_confidence_stays_unknown_not_invented(self):
+        """bandit's explicit-UNKNOWN contract: a value we cannot parse must not become a
+        confident-looking derived MEDIUM."""
+        conf, basis = scanners._derive_confidence(
+            {"category": "sast", "tool": "bandit", "confidence": "CERTAIN", "file": "a.py"})
+        self.assertEqual(conf, "LOW")
+        self.assertIn("unrecognized", basis)
+
+    def test_instance_id_is_stable_and_path_relative(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            a = {"category": "secret", "file": str(root / "src/a.ts"), "key": "r", "line": 4}
+            b = {"category": "secret", "file": "src/a.ts", "key": "r", "line": 4}
+            self.assertEqual(scanners._instance_id(a, root), scanners._instance_id(b, root))
+            self.assertTrue(scanners._instance_id(a, root).startswith("wv1_"))
+
+    def test_instance_id_distinguishes_sites_that_share_a_rule(self):
+        one = scanners._instance_id({"category": "secret", "file": "a.ts", "key": "r", "line": 1})
+        two = scanners._instance_id({"category": "secret", "file": "b.ts", "key": "r", "line": 1})
+        self.assertNotEqual(one, two)
+
+
 if __name__ == "__main__":
     unittest.main()

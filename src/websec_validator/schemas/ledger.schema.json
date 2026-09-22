@@ -383,6 +383,18 @@
         "commit_author": {
           "type": "string",
           "description": "Author recorded on that commit."
+        },
+        "instance_id": {
+          "type": "string",
+          "description": "Stable, portable per-INSTANCE identifier (wv1_<16 hex>), derived from the ROOT-RELATIVE location. Unlike `rule_id`/`key` it names the occurrence, and unlike `fingerprint` it is machine-independent for adapters that emit absolute paths."
+        },
+        "confidence_basis": {
+          "type": "string",
+          "description": "Why this confidence was assigned, in one phrase."
+        },
+        "native_confidence": {
+          "type": "string",
+          "description": "The producing scanner's OWN confidence, verbatim. 'UNKNOWN' when the scanner reported a value websec could not parse \u2014 never replaced by a derived value."
         }
       }
     }
