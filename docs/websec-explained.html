@@ -1,0 +1,940 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>websec-validator — The Deterministic Half of a Pentest</title>
+<meta name="description" content="An eight-page technical brief on websec-validator: what it reads, how a finding earns its severity, what it refuses to say, the field evidence, and how the tool guards itself. Every number is checked against the source tree by tests/test_explained_brief.py.">
+<!--
+  Self-contained: no scripts, no external requests, prints to Letter as-is.
+  Every number in this document is asserted against the source tree by
+  tests/test_explained_brief.py, so it cannot drift silently.
+-->
+<style>
+  :root {
+    --paper:      #faf9f5;
+    --card:       #ffffff;
+    --ink:        #191917;
+    --ink-soft:   #565550;
+    --ink-faint:  #918d83;
+    --rule:       #e6e2d8;
+    --rule-soft:  #f0ede4;
+    --clay:       #d97757;
+    --clay-deep:  #b85636;
+    --clay-wash:  #fbf1ec;
+    --sage:       #3f6b5f;
+    --sage-wash:  #eef4f1;
+    --slate:      #4a5568;
+    --sans: "Helvetica Neue", Helvetica, "Inter", "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+    --mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+
+  @page { size: Letter; margin: 0; }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { margin: 0; background: var(--paper); color: var(--ink);
+         font-family: var(--sans); font-size: 9.5pt; line-height: 1.5; letter-spacing: -0.005em; }
+
+  .page { page-break-after: always; display: flex; flex-direction: column;
+          min-height: 279.4mm; padding: 14mm 15mm 11mm; background: var(--paper);
+          max-width: 215.9mm; margin: 0 auto; }
+  .page:last-child { page-break-after: auto; }
+  @media screen { body { padding: 0 16px; } .page { box-shadow: 0 0 0 1px var(--rule); margin: 16px auto; } }
+  @media screen and (max-width: 640px) {
+    body { padding: 0; }
+    .page { padding: 20px 16px; min-height: 0; margin: 0; box-shadow: none; }
+    .cols-2, .cols-3, .versus, .statband { grid-template-columns: 1fr; }
+    .versus > div:first-child { border-right: none; border-bottom: 1px solid var(--rule); }
+    .statband > div { border-right: none; border-bottom: 1px solid var(--rule); }
+    h1 { font-size: 20pt; }
+  }
+
+  .masthead { display: flex; align-items: baseline; justify-content: space-between;
+              border-bottom: 2px solid var(--ink); padding-bottom: 7px; }
+  .wordmark { font-size: 12.5pt; font-weight: 700; letter-spacing: -0.025em; }
+  .wordmark .mark { color: var(--clay); }
+  .meta { font-family: var(--mono); font-size: 6.8pt; color: var(--ink-faint);
+          letter-spacing: 0.07em; text-transform: uppercase; }
+
+  h1 { font-size: 24pt; line-height: 1.08; font-weight: 700; letter-spacing: -0.032em;
+       margin: 14px 0 0; max-width: 24ch; }
+  .standfirst { font-size: 11pt; line-height: 1.42; color: var(--ink-soft);
+                margin: 10px 0 0; max-width: 64ch; }
+
+  h2 { font-size: 7.8pt; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+       color: var(--clay-deep); margin: 0 0 9px; }
+  h3 { font-size: 10pt; font-weight: 700; margin: 0 0 5px; letter-spacing: -0.012em; }
+
+  p { margin: 0 0 9px; }
+  .lede { font-size: 10.3pt; }
+  code { font-family: var(--mono); font-size: 0.88em; background: var(--rule-soft);
+         padding: 1px 4px; border-radius: 3px; }
+  .note { font-size: 8.4pt; color: var(--ink-soft); }
+  a { color: inherit; }
+
+  section { margin-top: 19px; }
+  .rule-top { border-top: 1px solid var(--rule); padding-top: 13px; }
+  .cols-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+  .cols-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+
+  .exhibit { border: 1px solid var(--rule); border-left: 3px solid var(--clay);
+             background: var(--card); padding: 9px 12px; margin: 0 0 8px; }
+  .exhibit pre { font-family: var(--mono); font-size: 8pt; line-height: 1.5; margin: 0;
+                 white-space: pre-wrap; color: #23221e; }
+  .exhibit .cap { font-family: var(--mono); font-size: 6.6pt; letter-spacing: 0.09em;
+                  text-transform: uppercase; color: var(--ink-faint); margin-bottom: 7px; }
+  .kw { color: #7a4fbf; } .str { color: #2f6f4f; } .num { color: #2a5b9b; }
+  .cm { color: var(--ink-faint); font-style: italic; }
+
+  .verdict { border: 1px solid var(--rule); padding: 11px 13px; background: var(--card); }
+  .verdict.bad  { border-left: 3px solid var(--clay); background: var(--clay-wash); }
+  .verdict.good { border-left: 3px solid var(--sage); background: var(--sage-wash); }
+  .verdict .tag { font-family: var(--mono); font-size: 8.3pt; font-weight: 700;
+                  letter-spacing: 0.04em; display: block; margin-bottom: 4px; }
+  .verdict.bad .tag  { color: var(--clay-deep); }
+  .verdict.good .tag { color: var(--sage); }
+  .verdict p { margin: 0; font-size: 9pt; }
+  .verdict ul { margin: 4px 0 0; padding-left: 14px; font-size: 8.7pt; }
+  .verdict li { margin-bottom: 2px; }
+
+  .pull { border-top: 2px solid var(--ink); border-bottom: 1px solid var(--rule);
+          padding: 12px 0 11px; margin-top: 14px; }
+  .pull p { font-size: 12.4pt; line-height: 1.36; font-weight: 500;
+            letter-spacing: -0.018em; margin: 0; max-width: 64ch; }
+  .pull .attrib { font-family: var(--mono); font-size: 6.6pt; letter-spacing: 0.09em;
+                  text-transform: uppercase; color: var(--ink-faint); margin-top: 8px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 8.8pt; }
+  th { text-align: left; font-size: 6.9pt; letter-spacing: 0.1em; text-transform: uppercase;
+       color: var(--ink-faint); font-weight: 700; padding: 0 9px 6px 0;
+       border-bottom: 1.5px solid var(--ink); }
+  td { padding: 7px 9px 7px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  td:first-child { font-family: var(--mono); font-weight: 700; white-space: nowrap; width: 24%; }
+  tr:last-child td { border-bottom: none; }
+  .v-bad { color: var(--clay-deep); } .v-good { color: var(--sage); }
+
+  ul.ticks { list-style: none; margin: 0; padding: 0; }
+  ul.ticks li { position: relative; padding-left: 14px; margin-bottom: 6px; font-size: 8.7pt; }
+  ul.ticks li::before { content: "—"; position: absolute; left: 0; color: var(--clay); font-weight: 700; }
+
+  .versus { display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+            border: 1px solid var(--rule); background: var(--card); }
+  .versus > div { padding: 13px 15px; }
+  .versus > div:first-child { border-right: 1px solid var(--rule); background: #fbfaf7; }
+  .versus .q { font-family: var(--mono); font-size: 8.4pt; color: var(--ink-soft);
+               display: block; margin: 7px 0 8px; }
+  .versus .out { font-size: 9.1pt; font-weight: 600; }
+
+  .kicker { font-family: var(--mono); font-size: 6.7pt; letter-spacing: 0.11em;
+            text-transform: uppercase; color: var(--ink-faint); margin-bottom: 6px; }
+  .figcap { font-family: var(--mono); font-size: 6.6pt; letter-spacing: 0.08em;
+            text-transform: uppercase; color: var(--ink-faint); margin: 7px 0 0; }
+  figure { margin: 0; }
+  svg { display: block; width: 100%; height: auto; }
+
+  .footer { margin-top: auto; display: flex; justify-content: space-between;
+            font-family: var(--mono); font-size: 6.4pt; color: var(--ink-faint);
+            letter-spacing: 0.07em; text-transform: uppercase;
+            border-top: 1px solid var(--rule); padding-top: 5px; }
+
+  .statband { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0;
+              border: 1px solid var(--rule); background: var(--card); margin-top: 13px; }
+  .statband > div { padding: 13px 15px; border-right: 1px solid var(--rule); }
+  .statband > div:last-child { border-right: none; }
+  .statband .fig { font-size: 23pt; font-weight: 700; letter-spacing: -0.035em; line-height: 1; }
+  .statband .fig.clay { color: var(--clay-deep); }
+  .statband .fig.sage { color: var(--sage); }
+  .statband .cap { font-size: 7.9pt; color: var(--ink-soft); margin-top: 6px; line-height: 1.35; }
+  .statband .src { font-family: var(--mono); font-size: 6.2pt; letter-spacing: 0.07em;
+                   text-transform: uppercase; color: var(--ink-faint); margin-top: 7px; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 4px 5px; margin: 6px 0 0; }
+  section.tight { margin-top: 9px; padding-top: 7px; }
+  table.dense { font-size: 8.3pt; }
+  table.dense td { padding: 3px 8px 3px 0; line-height: 1.38; }
+  table.dense td:first-child { width: 26%; }
+  table.dense th { padding-bottom: 4px; }
+  .compact table { font-size: 8.2pt; } .compact td { padding: 4px 8px 4px 0; } .compact th { padding-bottom: 4px; }
+  .chip { font-family: var(--mono); font-size: 7.2pt; padding: 2px 7px; border-radius: 3px;
+          border: 1px solid var(--rule); background: var(--card); color: var(--ink-soft); }
+
+  /* svg type */
+  .s-lbl  { font-family: var(--mono); font-size: 7px; letter-spacing: 0.06em;
+            text-transform: uppercase; fill: var(--ink); font-weight: 700; }
+  .s-sub  { font-family: var(--sans); font-size: 7.4px; fill: var(--ink-soft); }
+  .s-tiny { font-family: var(--mono); font-size: 6.2px; letter-spacing: 0.07em;
+            text-transform: uppercase; fill: var(--ink-faint); }
+  .s-q    { font-family: var(--sans); font-size: 8.2px; fill: var(--ink); }
+  .s-v    { font-family: var(--mono); font-size: 7.4px; font-weight: 700; letter-spacing: 0.04em; }
+  .s-big  { font-family: var(--sans); font-size: 30px; font-weight: 700; letter-spacing: -0.035em; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ PAGE 1 — THE IDEA ═══════════════ -->
+<div class="page">
+  <div class="masthead">
+    <div class="wordmark">web<span class="mark">sec</span>-validator</div>
+    <div class="meta">Technical Brief · v0.18.0 · MIT</div>
+  </div>
+
+  <h1>A scanner gives you findings. A pentester gives you a plan.</h1>
+  <p class="standfirst">websec-validator reads a repository the way a senior pentester reads it on day one,
+  then hands your AI coding agent the plan: what the attack surface is, which findings are real,
+  and exactly what to test. No model inside, no server, no running app.</p>
+
+  <section class="rule-top">
+    <h2>The problem</h2>
+    <p class="lede"><strong>AI agents now write the code. Nobody briefs them on what to attack.</strong>
+    Static scanners answer “which patterns match?” and bury the answer under volume. A pentest answers
+    “what matters, and how would I prove it?” and happens once a year, if at all.</p>
+
+    <div class="exhibit">
+      <div class="cap">A real count, from this project's own changelog (0.17.0, bug-311)</div>
+<pre>findings-ledger.json   <span class="kw">total</span>: <span class="num">163</span>            <span class="cm"># what the scanners said</span>
+cluster_summary        <span class="kw">distinct issues</span>: <span class="num">13</span>   <span class="cm"># what a reviewer actually has to fix</span></pre>
+    </div>
+
+    <p>Same fixture, same run. The <strong>163</strong> is not wrong, and every one is kept for the machine
+    consumers. But a human, or an agent, has to be told they are <strong>13 problems</strong>, where they live,
+    and what would confirm each one. That handoff is the product.</p>
+
+    <figure style="margin-top:11px">
+      <svg viewBox="0 0 760 112" role="img" aria-label="A scanner asks which patterns match and reports 163; a pentester asks what to test first and reports 13 distinct issues, each with a probe">
+        <rect x="0" y="0" width="368" height="112" rx="5" fill="#ffffff" stroke="#e6e2d8"/>
+        <text class="s-tiny" x="20" y="22">A scanner asks</text>
+        <text x="20" y="41" style="font-family:var(--sans);font-size:10px;font-weight:700;fill:#191917">“Which patterns match?”</text>
+        <text class="s-big" x="20" y="79" style="fill:#565550">163</text>
+        <text class="s-sub" x="20" y="95" style="font-size:8px">findings — all true, none prioritised</text>
+        <rect x="20" y="102" width="328" height="5" rx="2.5" fill="#c9c5bb"/>
+
+        <rect x="392" y="0" width="368" height="112" rx="5" fill="#eef4f1" stroke="#3f6b5f"/>
+        <text class="s-tiny" x="412" y="22" style="fill:#3f6b5f">websec asks</text>
+        <text x="412" y="41" style="font-family:var(--sans);font-size:10px;font-weight:700;fill:#191917">“What would a pentester test first, and how?”</text>
+        <text class="s-big" x="412" y="79" style="fill:#3f6b5f">13</text>
+        <text class="s-sub" x="412" y="95" style="font-size:8px">distinct issues — each with a location and a probe</text>
+        <rect x="412" y="102" width="328" height="5" rx="2.5" fill="#3f6b5f"/>
+      </svg>
+      <p class="figcap">Fig. 1 — The same ledger, under two different questions. The second one is what a pentest report contains.</p>
+    </figure>
+  </section>
+
+  <section class="rule-top">
+    <h2>The method</h2>
+    <div class="cols-2">
+      <div class="verdict good">
+        <span class="tag">code in</span>
+        <p>Read the repository. Map every route, auth decision, tenant boundary, sink, secret and
+        dependency. Run the installed static scanners, de-duplicate them, and rank what is left by
+        whether it is reachable and exploited in the wild.</p>
+      </div>
+      <div class="verdict bad">
+        <span class="tag">artifacts out</span>
+        <p>A fact file, a findings ledger, a SARIF report, a probe library tailored to what was found,
+        and a briefing for the agent that will do the fixing. Then an exit code that says whether
+        the picture is <em>complete</em>.</p>
+      </div>
+    </div>
+    <p style="margin-top:10px"><strong>The rule that surprises people:</strong> there is no model in the tool.
+    Same repository, same output, every run. The model sits on the <em>other</em> side of the briefing, with a human beside it.</p>
+  </section>
+
+  <div class="pull">
+    <p>A tool that never says “incomplete” is a tool you cannot trust when it says “clean.”</p>
+    <div class="attrib">The design constraint everything else follows from</div>
+  </div>
+
+  <div class="footer"><span>websec-validator — Technical Brief</span><span>Page 1 of 8 · The idea</span></div>
+</div>
+
+<!-- ═══════════════ PAGE 2 — WHAT IT REFUSES TO SAY ═══════════════ -->
+<div class="page">
+  <div class="masthead">
+    <div class="wordmark">web<span class="mark">sec</span>-validator</div>
+    <div class="meta">02 — What it refuses to say</div>
+  </div>
+
+  <section style="margin-top:12px">
+    <h2>Every ambiguity rounds toward “incomplete”</h2>
+    <p class="lede">Most security tools have two outputs: findings, or a green check. This one has a third, and it is what makes the other two believable.</p>
+
+    <div class="exhibit">
+      <div class="cap">What this tool said about a deliberately vulnerable Elixir app, until September 2026</div>
+<pre><span class="cm"># raw SQL interpolation · System.cmd injection · a hardcoded credential · no auth plug</span>
+unsupported: []   gaps: []
+<span class="kw">REQUESTED CHECKS COMPLETED</span> — <span class="num">0</span> files read</pre>
+    </div>
+    <p>A suffix list had been absorbed into another, leaving the “language I cannot read” branch reachable for one language.
+    The fix does not make the tool read Elixir. It makes it <strong>say</strong> it did not: the banner leads with
+    <code>NO ANALYZABLE SOURCE</code>, and <code>--require-analyzed</code> turns that into exit 3.</p>
+    <figure>
+      <svg viewBox="0 0 760 126" role="img" aria-label="The four exit codes: 0 clean and complete, 1 findings at or above the threshold, 2 usage error or incompatible scanner, 3 incomplete because a requested check did not finish">
+        <defs>
+          <marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#918d83"/>
+          </marker>
+        </defs>
+        <line x1="14" y1="10" x2="14" y2="116" stroke="#e6e2d8" stroke-width="1.4"/>
+
+        <circle cx="14" cy="20" r="3.6" fill="#918d83"/>
+        <text class="s-q" x="28" y="23">Did every requested check actually finish?</text>
+        <line x1="332" y1="20" x2="392" y2="20" stroke="#918d83" stroke-width="1.1" marker-end="url(#ar1)"/>
+        <text class="s-tiny" x="340" y="15" style="fill:#918d83">no</text>
+        <rect x="400" y="9" width="116" height="22" rx="3" fill="#fbf1ec" stroke="#d97757"/>
+        <text class="s-v" x="412" y="24" style="fill:#b85636">exit 3 · incomplete</text>
+        <text class="s-sub" x="526" y="24" style="font-size:7.4px">a missing scanner, or nothing analyzable, is not a clean run</text>
+
+        <circle cx="14" cy="52" r="3.6" fill="#918d83"/>
+        <text class="s-q" x="28" y="55">Was the invocation itself valid, and every selected scanner compatible?</text>
+        <line x1="332" y1="52" x2="392" y2="52" stroke="#918d83" stroke-width="1.1" marker-end="url(#ar1)"/>
+        <text class="s-tiny" x="340" y="47" style="fill:#918d83">no</text>
+        <rect x="400" y="41" width="116" height="22" rx="3" fill="#ffffff" stroke="#e6e2d8"/>
+        <text class="s-v" x="412" y="56" style="fill:#565550">exit 2 · usage</text>
+        <text class="s-sub" x="526" y="56" style="font-size:7.4px">wrong flags, or a scanner below its minimum version</text>
+
+        <circle cx="14" cy="84" r="3.6" fill="#918d83"/>
+        <text class="s-q" x="28" y="87">Is there a finding at or above the threshold you asked to fail on?</text>
+        <line x1="332" y1="84" x2="392" y2="84" stroke="#918d83" stroke-width="1.1" marker-end="url(#ar1)"/>
+        <text class="s-tiny" x="340" y="79" style="fill:#918d83">yes</text>
+        <rect x="400" y="73" width="116" height="22" rx="3" fill="#ffffff" stroke="#d97757"/>
+        <text class="s-v" x="412" y="88" style="fill:#b85636">exit 1 · findings</text>
+        <text class="s-sub" x="526" y="88" style="font-size:7.4px">definite and actionable</text>
+
+        <circle cx="14" cy="112" r="3.6" fill="#3f6b5f"/>
+        <text class="s-q" x="28" y="115" style="font-weight:700">Everything ran, nothing crossed the threshold.</text>
+        <rect x="400" y="101" width="116" height="22" rx="3" fill="#eef4f1" stroke="#3f6b5f"/>
+        <text class="s-v" x="412" y="116" style="fill:#3f6b5f">exit 0 · clean</text>
+        <text class="s-sub" x="526" y="116" style="font-size:7.4px">“nothing blocking was found” — never “verified safe”</text>
+      </svg>
+      <p class="figcap">Fig. 2 — The exit-code contract. Incomplete outranks clean, so a check that silently did not run cannot produce a green build.</p>
+    </figure>
+  </section>
+
+  <section class="rule-top tight">
+    <h2>Nine things the tool will not do, and where that is enforced</h2>
+    <table class="dense">
+      <tr><th>Refusal</th><th>Why, and where</th></tr>
+      <tr><td>say “compliant”</td><td>The word appears in no output, and a test asserts that, so it cannot come back by accident. <span class="note">tests/test_attest.py</span></td></tr>
+      <tr><td>claim complete protection</td><td><code>protection_complete</code> is always false: static analysis cannot see a running system. <span class="note">docs-canonical/SECURITY.md</span></td></tr>
+      <tr><td>fill an evidence gap</td><td>The audit projection has 12 control rows; 5 carry an empty evidence list, with the reason. <span class="note">attest.py</span></td></tr>
+      <tr><td>count “unknown” as “false”</td><td>The old rule scored every unmatched finding as a false positive. Relabelling against pinned source left 21 reviewed labels and <strong>35 findings still unknown</strong>, excluded from both sides. <span class="note">calibration.json</span></td></tr>
+      <tr><td>optimize its own score</td><td>Anything fitted from labels uses a strictly proper rule, Brier or log score, never accuracy or F1, which reward confident wrongness. It is printed, never optimized. <span class="note">calibration.SCORING_RULE</span></td></tr>
+      <tr><td>run a scanner unasked</td><td>TruffleHog verifies secrets against live services, so it runs only when named. <span class="note">scanners.py</span></td></tr>
+      <tr><td>read a cell too thin to trust</td><td>A per-class probability needs at least five samples. One class reaches that today; the rest fall back a tier, and the output names which. <span class="note">calibration.MIN_N</span></td></tr>
+      <tr><td>guess reachability</td><td>A vulnerable dependency is tagged <code>imported</code>, <code>no-import-found</code> or <code>n/a</code>. It never rounds <code>n/a</code> to safe. <span class="note">enrichment.py</span></td></tr>
+      <tr><td>claim a benchmark it has not run</td><td>The competitor comparison exists as a written protocol. Until it runs, no head-to-head claim is made. <span class="note">BENCHMARKS.md</span></td></tr>
+    </table>
+  </section>
+
+  <section class="rule-top tight">
+    <h2>The one place it fails open, on purpose</h2>
+    <p>The in-editor hook that checks an agent's edit <strong>exits 0 when it cannot run</strong>, and says on stderr that the edit
+    was not checked: a check that blocks every edit when broken gets uninstalled, and then there is no check at all. It refuses an
+    environment-variable escape hatch, because the agent is what sets environment variables.</p>
+  </section>
+
+  <div class="footer"><span>websec-validator — Technical Brief</span><span>Page 2 of 8 · What it refuses to say</span></div>
+</div>
+
+<!-- ═══════════════ PAGE 3 — ANATOMY OF A RUN ═══════════════ -->
+<div class="page">
+  <div class="masthead">
+    <div class="wordmark">web<span class="mark">sec</span>-validator</div>
+    <div class="meta">03 — Anatomy of a run</div>
+  </div>
+
+  <section style="margin-top:17px">
+    <h2>One repository, start to briefing</h2>
+    <figure>
+      <svg viewBox="0 0 760 214" role="img" aria-label="Pipeline: read the repo, 22 extractors, static scanners de-duplicated, enrich by reachability and exploitability, stage probes, write the briefing; a hard boundary separates the tool from the agent and the test instance">
+        <defs>
+          <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#918d83"/>
+          </marker>
+        </defs>
+        <rect x="0" y="0" width="230" height="22" rx="3" fill="#f0ede4"/>
+        <text class="s-tiny" x="12" y="14.5">In → your repository, read as text</text>
+        <rect x="560" y="0" width="200" height="22" rx="3" fill="#f0ede4"/>
+        <text class="s-tiny" x="572" y="14.5">Out → websec-out/</text>
+
+        <g>
+          <rect x="0"   y="34" width="118" height="46" rx="4" fill="#ffffff" stroke="#3f6b5f"/>
+          <text class="s-lbl" x="12" y="54" style="fill:#3f6b5f">Recon</text>
+          <text class="s-sub" x="12" y="68">22 extractors → FACTS.json</text>
+
+          <rect x="132" y="34" width="118" height="46" rx="4" fill="#ffffff" stroke="#e6e2d8"/>
+          <text class="s-lbl" x="144" y="54">Scan</text>
+          <text class="s-sub" x="144" y="68">installed scanners, de-duplicated</text>
+
+          <rect x="264" y="34" width="118" height="46" rx="4" fill="#ffffff" stroke="#e6e2d8"/>
+          <text class="s-lbl" x="276" y="54">Enrich</text>
+          <text class="s-sub" x="276" y="68">reachable × exploitable</text>
+
+          <rect x="396" y="34" width="118" height="46" rx="4" fill="#fbf1ec" stroke="#d97757"/>
+          <text class="s-lbl" x="408" y="54" style="fill:#b85636">Stage</text>
+          <text class="s-sub" x="408" y="68">probes from 24 templates</text>
+
+          <rect x="528" y="34" width="118" height="46" rx="4" fill="#191917"/>
+          <text class="s-lbl" x="540" y="54" style="fill:#faf9f5">Brief</text>
+          <text class="s-sub" x="540" y="68" style="fill:#c9c5bb">AGENT-BRIEFING.md</text>
+
+          <rect x="660" y="34" width="100" height="46" rx="4" fill="#ffffff" stroke="#e6e2d8"/>
+          <text class="s-lbl" x="672" y="54">Exit</text>
+          <text class="s-sub" x="672" y="68">0 · 1 · 2 · 3</text>
+        </g>
+        <g stroke="#918d83" stroke-width="1.2" marker-end="url(#ar2)">
+          <line x1="120" y1="57" x2="130" y2="57"/>
+          <line x1="252" y1="57" x2="262" y2="57"/>
+          <line x1="384" y1="57" x2="394" y2="57"/>
+          <line x1="516" y1="57" x2="526" y2="57"/>
+          <line x1="648" y1="57" x2="658" y2="57"/>
+        </g>
+
+        <!-- de-dup + enrichment notes -->
+        <path d="M190 88 L190 102 L60 102" fill="none" stroke="#3f6b5f" stroke-width="1.2" stroke-dasharray="3 2.5"/>
+        <text class="s-tiny" x="0" y="116" style="fill:#3f6b5f">Zero runtime dependencies</text>
+        <text class="s-sub" x="0" y="129" style="font-size:7.2px">The tool shells out to Trivy, Gitleaks, Semgrep, Checkov and the</text>
+        <text class="s-sub" x="0" y="140" style="font-size:7.2px">per-stack SAST tools it finds. It never imports them, and never needs them.</text>
+
+        <path d="M323 88 L323 102 L300 102" fill="none" stroke="#918d83" stroke-width="1.2" stroke-dasharray="3 2.5"/>
+        <text class="s-tiny" x="300" y="116">Enrichment is local too</text>
+        <text class="s-sub" x="300" y="129" style="font-size:7.2px">EPSS scores and the CISA KEV list come from</text>
+        <text class="s-sub" x="300" y="140" style="font-size:7.2px">an on-disk cache. The default pass makes zero network calls.</text>
+
+        <!-- boundary -->
+        <line x1="0" y1="160" x2="760" y2="160" stroke="#b85636" stroke-width="1.6" stroke-dasharray="6 4"/>
+        <text class="s-tiny" x="0" y="175" style="fill:#b85636">Above the line: only the code. The tool never starts your app, never calls a model, never phones home.</text>
+        <text class="s-tiny" x="0" y="194" style="fill:#565550">Below the line: your agent and you, running the staged probes against a TEST instance you own, with credentials you supply.</text>
+        <text class="s-sub" x="0" y="208" style="font-size:7.2px">The dynamic phase that ships is GET-only by default; write probes require an explicit flag and a localhost target.</text>
+      </svg>
+      <p class="figcap">Fig. 3 — Code in, artifacts out. The dashed line is the whole safety model: nothing above it can touch a running system.</p>
+    </figure>
+  </section>
+
+  <section class="rule-top">
+    <h2>How a finding earns its severity</h2>
+    <p class="note" style="margin-bottom:10px">Severity is a rule, not a score. The same evidence yields the same label every run, and the rule is
+    written in the methodology before it is written in the code.</p>
+    <figure>
+      <svg viewBox="0 0 760 178" role="img" aria-label="Severity decision order: dynamic confirmation, verified secret or fixed-version high CVE gives HIGH; concrete static evidence gives MEDIUM; a single-source hypothesis gives LOW; reachability and exploitability re-rank within the label">
+        <defs>
+          <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#918d83"/>
+          </marker>
+        </defs>
+        <line x1="14" y1="12" x2="14" y2="120" stroke="#e6e2d8" stroke-width="1.4"/>
+
+        <circle cx="14" cy="20" r="3.6" fill="#918d83"/>
+        <text class="s-q" x="28" y="23">Confirmed dynamically, a verified live secret, or a fixed-version HIGH/CRITICAL CVE?</text>
+        <line x1="452" y1="24" x2="512" y2="24" stroke="#918d83" stroke-width="1.1" marker-end="url(#ar3)"/>
+        <text class="s-tiny" x="460" y="19" style="fill:#918d83">yes</text>
+        <rect x="520" y="13" width="72" height="22" rx="3" fill="#fbf1ec" stroke="#d97757"/>
+        <text class="s-v" x="532" y="28" style="fill:#b85636">HIGH</text>
+        <text class="s-sub" x="600" y="28" style="font-size:7.4px">something outside the code agrees</text>
+
+        <circle cx="14" cy="52" r="3.6" fill="#918d83"/>
+        <text class="s-q" x="28" y="55">Concrete static evidence: a sink fed by request input, a route with no auth decision?</text>
+        <line x1="452" y1="62" x2="512" y2="62" stroke="#918d83" stroke-width="1.1" marker-end="url(#ar3)"/>
+        <text class="s-tiny" x="460" y="57" style="fill:#918d83">yes</text>
+        <rect x="520" y="51" width="72" height="22" rx="3" fill="#ffffff" stroke="#d97757"/>
+        <text class="s-v" x="532" y="66" style="fill:#b85636">MEDIUM</text>
+        <text class="s-sub" x="600" y="66" style="font-size:7.4px">the default CI gate</text>
+
+        <circle cx="14" cy="84" r="3.6" fill="#918d83"/>
+        <text class="s-q" x="28" y="87">Otherwise: a single-source hypothesis.</text>
+        <line x1="452" y1="100" x2="512" y2="100" stroke="#918d83" stroke-width="1.1" marker-end="url(#ar3)"/>
+        <rect x="520" y="89" width="72" height="22" rx="3" fill="#ffffff" stroke="#e6e2d8"/>
+        <text class="s-v" x="532" y="104" style="fill:#565550">LOW</text>
+        <text class="s-sub" x="600" y="104" style="font-size:7.4px">kept visible, ranked last, never dropped</text>
+
+        <rect x="0" y="132" width="760" height="40" rx="3" fill="#ffffff" stroke="#e6e2d8"/>
+        <text class="s-tiny" x="12" y="147">Then, within the label</text>
+        <text class="s-sub" x="12" y="161" style="font-size:7.4px">Is the vulnerable package actually imported? Is the CVE on the KEV list, and what is its EPSS score? Does an invariant flip to VIOLATED? Only when a</text>
+        <text class="s-sub" x="12" y="170" style="font-size:7.4px">row is confirmed-vulnerable, its evidence is verified, and it came from the dynamic layer. A static hunch never changes the constitution.</text>
+        <text class="s-tiny" x="600" y="147" style="fill:#b85636">P(real), measured</text>
+        <text class="s-sub" x="600" y="160" style="font-size:7.2px">LOW 0.545 [0.28, 0.787] · n=11</text>
+        <text class="s-sub" x="600" y="170" style="font-size:7.2px">MEDIUM 0.7 [0.397, 0.892] · n=10</text>
+      </svg>
+      <p class="figcap">Fig. 4 — Severity order. A HIGH always has something outside the static analysis agreeing with it.</p>
+    </figure>
+  </section>
+
+  <section class="rule-top">
+    <h2>What lands in websec-out/</h2>
+    <table>
+      <tr><th>Artifact</th><th>What it is</th></tr>
+      <tr><td>AGENT-BRIEFING.md</td><td><strong>The product.</strong> Detected surface, the access-control map, targeting, findings, the method, and the staged probe list, written for the agent that will act on it.</td></tr>
+      <tr><td>FACTS.json</td><td>The full structured recon: every fact the 22 extractors produced, schema-versioned, with a coverage block that says what was skipped and why.</td></tr>
+      <tr><td>findings-ledger.json</td><td>The traceable ledger. Each finding carries its evidence chain, CWE / ASVS / OWASP-API citation, remediation, and a calibrated probability with its interval and sample size. <code>REPORT.md</code> is the same ledger for humans.</td></tr>
+      <tr><td>results.sarif</td><td>SARIF 2.1.0, always written. GitHub code scanning, GitLab, Azure DevOps and the VS Code SARIF viewer read it as-is.</td></tr>
+      <tr><td>probes/</td><td>Scripts staged from the 24 templates, pre-filled with the endpoints the recon found, for a human to review and run against a test instance.</td></tr>
+    </table>
+  </section>
+
+  <div class="footer"><span>websec-validator — Technical Brief</span><span>Page 3 of 8 · Anatomy</span></div>
+</div>
+
+<!-- ═══════════════ PAGE 4 — WHAT IT READS ═══════════════ -->
+<div class="page">
+  <div class="masthead">
+    <div class="wordmark">web<span class="mark">sec</span>-validator</div>
+    <div class="meta">04 — What it reads</div>
+  </div>
+
+  <section style="margin-top:12px">
+    <h2>Twenty-two extractors, seventeen sink classes, one fact file</h2>
+    <p class="lede">Each extractor answers one question a pentester asks on day one, and writes the answer into <code>FACTS.json</code> as data, never prose.</p>
+    <figure>
+      <svg viewBox="0 0 760 212" role="img" aria-label="The 22 extractors grouped by concern: identity and access, surface and data, client, platform and supply chain, AI and agents">
+        <g>
+          <text class="s-tiny" x="0" y="12" style="fill:#3f6b5f">Identity &amp; access · 5</text>
+          <rect x="0" y="20" width="140" height="18" rx="3" fill="#eef4f1" stroke="#3f6b5f"/><text class="s-v" x="8" y="32" style="fill:#3f6b5f">auth</text>
+          <rect x="0" y="44" width="140" height="18" rx="3" fill="#eef4f1" stroke="#3f6b5f"/><text class="s-v" x="8" y="56" style="fill:#3f6b5f">authz</text>
+          <rect x="0" y="68" width="140" height="18" rx="3" fill="#eef4f1" stroke="#3f6b5f"/><text class="s-v" x="8" y="80" style="fill:#3f6b5f">authz_dataflow</text>
+          <rect x="0" y="92" width="140" height="18" rx="3" fill="#eef4f1" stroke="#3f6b5f"/><text class="s-v" x="8" y="104" style="fill:#3f6b5f">tenant</text>
+          <rect x="0" y="116" width="140" height="18" rx="3" fill="#eef4f1" stroke="#3f6b5f"/><text class="s-v" x="8" y="128" style="fill:#3f6b5f">password_policy</text>
+          <text class="s-sub" x="0" y="150" style="font-size:7px">Who may call what, and does the</text>
+          <text class="s-sub" x="0" y="160" style="font-size:7px">code agree with itself about it.</text>
+        </g>
+        <g transform="translate(155,0)">
+          <text class="s-tiny" x="0" y="12">Surface &amp; data · 7</text>
+          <rect x="0" y="20" width="140" height="18" rx="3" fill="#ffffff" stroke="#e6e2d8"/><text class="s-v" x="8" y="32" style="fill:#191917">routes</text>
+          <rect x="0" y="44" width="140" height="18" rx="3" fill="#ffffff" stroke="#e6e2d8"/><text class="s-v" x="8" y="56" style="fill:#191917">surface</text>
+          <rect x="0" y="68" width="140" height="18" rx="3" fill="#ffffff" stroke="#e6e2d8"/><text class="s-v" x="8" y="80" style="fill:#191917">schemas</text>
+          <rect x="0" y="92" width="140" height="18" rx="3" fill="#ffffff" stroke="#e6e2d8"/><text class="s-v" x="8" y="104" style="fill:#191917">graphql</text>
+          <rect x="0" y="116" width="140" height="18" rx="3" fill="#ffffff" stroke="#e6e2d8"/><text class="s-v" x="8" y="128" style="fill:#191917">upload_security</text>
+          <rect x="0" y="140" width="140" height="18" rx="3" fill="#ffffff" stroke="#e6e2d8"/><text class="s-v" x="8" y="152" style="fill:#191917">pii_exposure</text>
+          <rect x="0" y="164" width="140" height="18" rx="3" fill="#ffffff" stroke="#e6e2d8"/><text class="s-v" x="8" y="176" style="fill:#191917">transport_security</text>
+          <text class="s-sub" x="0" y="198" style="font-size:7px">Every entry point, every sink,</text>
+          <text class="s-sub" x="0" y="208" style="font-size:7px">every field that carries PII.</text>
+        </g>
+        <g transform="translate(310,0)">
+          <text class="s-tiny" x="0" y="12">Client · 3</text>
+          <rect x="0" y="20" width="140" height="18" rx="3" fill="#ffffff" stroke="#e6e2d8"/><text class="s-v" x="8" y="32" style="fill:#191917">client_exposure</text>
+          <rect x="0" y="44" width="140" height="18" rx="3" fill="#ffffff" stroke="#e6e2d8"/><text class="s-v" x="8" y="56" style="fill:#191917">client_integrity</text>
+          <rect x="0" y="68" width="140" height="18" rx="3" fill="#ffffff" stroke="#e6e2d8"/><text class="s-v" x="8" y="80" style="fill:#191917">webext</text>
+          <text class="s-sub" x="0" y="102" style="font-size:7px">What the browser can see,</text>
+          <text class="s-sub" x="0" y="112" style="font-size:7px">tamper with, or be sold.</text>
+        </g>
+        <g transform="translate(465,0)">
+          <text class="s-tiny" x="0" y="12">Platform &amp; supply chain · 5</text>
+          <rect x="0" y="20" width="140" height="18" rx="3" fill="#ffffff" stroke="#e6e2d8"/><text class="s-v" x="8" y="32" style="fill:#191917">stack</text>
+          <rect x="0" y="44" width="140" height="18" rx="3" fill="#ffffff" stroke="#e6e2d8"/><text class="s-v" x="8" y="56" style="fill:#191917">iac_ci</text>
+          <rect x="0" y="68" width="140" height="18" rx="3" fill="#ffffff" stroke="#e6e2d8"/><text class="s-v" x="8" y="80" style="fill:#191917">integrations</text>
+          <rect x="0" y="92" width="140" height="18" rx="3" fill="#ffffff" stroke="#e6e2d8"/><text class="s-v" x="8" y="104" style="fill:#191917">dependencies</text>
+          <rect x="0" y="116" width="140" height="18" rx="3" fill="#ffffff" stroke="#e6e2d8"/><text class="s-v" x="8" y="128" style="fill:#191917">crypto_usage</text>
+          <text class="s-sub" x="0" y="150" style="font-size:7px">Infrastructure as code, CI, webhooks,</text>
+          <text class="s-sub" x="0" y="160" style="font-size:7px">lockfile drift, install scripts, hashing.</text>
+        </g>
+        <g transform="translate(612,0)">
+          <text class="s-tiny" x="0" y="12" style="fill:#b85636">AI &amp; agents · 2</text>
+          <rect x="0" y="20" width="140" height="18" rx="3" fill="#fbf1ec" stroke="#d97757"/><text class="s-v" x="8" y="32" style="fill:#b85636">llm_security</text>
+          <rect x="0" y="44" width="140" height="18" rx="3" fill="#fbf1ec" stroke="#d97757"/><text class="s-v" x="8" y="56" style="fill:#b85636">agent_config</text>
+          <text class="s-sub" x="0" y="78" style="font-size:7px">Prompt construction, tool dispatch,</text>
+          <text class="s-sub" x="0" y="88" style="font-size:7px">and whether the repo's own agent</text>
+          <text class="s-sub" x="0" y="98" style="font-size:7px">wiring has been poisoned.</text>
+        </g>
+      </svg>
+      <p class="figcap">Fig. 5 — The 22 extractors. Groups are editorial; the registry is flat. Each is isolated: one that crashes records an error in coverage and the run continues.</p>
+    </figure>
+  </section>
+
+  <section class="rule-top tight">
+    <h2>The seventeen sinks: request input reaching something dangerous, traced per route</h2>
+    <div class="chips">
+      <span class="chip">ssrf</span><span class="chip">command-injection</span><span class="chip">sql-injection</span><span class="chip">nosql-injection</span>
+      <span class="chip">path-traversal</span><span class="chip">ssti</span><span class="chip">open-redirect</span><span class="chip">insecure-deserialization</span>
+      <span class="chip">xxe</span><span class="chip">prototype-pollution</span><span class="chip">mass-assignment</span><span class="chip">redos</span>
+      <span class="chip">eval-injection</span><span class="chip">ssrf-outbound-http</span><span class="chip">error-disclosure</span><span class="chip">xss</span><span class="chip">log-injection</span>
+    </div>
+  </section>
+
+  <section class="rule-top tight">
+    <div class="cols-2">
+      <div>
+        <h3>Why these twenty-two</h3>
+        <p class="note">Not designed at a whiteboard. Three rows exist because dogfooding on a large LLM-agent monorepo, verified by a
+        15-agent adversarial pass, exposed two classes the route-and-auth model could not see. Four more grew because a real
+        authenticated pen test found its two Criticals and two Highs in files the recon never parsed: AWS-CDK auth config,
+        AppSync GraphQL schema, VTL resolvers. The walker reads those now.</p>
+      </div>
+      <div>
+        <h3>Mapped to what a reviewer will ask about</h3>
+        <p class="note">Every finding carries a CWE, an ASVS 4.0.3 reference and, where they apply, the OWASP API and OWASP LLM
+        Top 10 entries. The methodology publishes the map as a 41-row table; the findings module cites 77 distinct CWEs.
+        Two limits are stated up front: regex over CDK TypeScript is not an AST and can be evaded by aliasing, and
+        man-in-the-browser can never be a confident static catch, so it ships as LOW.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="rule-top tight">
+    <h2>The scanners it shells out to, and the version each one must be</h2>
+    <p class="note" style="margin-bottom:5px">Presence on PATH is not compatibility, so each entry carries the lowest version whose CLI matches the invocation the tool builds, and <code>doctor</code> reports it.</p>
+    <div class="cols-2 compact">
+      <table>
+        <tr><th>Scanner</th><th>Category · minimum</th></tr>
+        <tr><td>Trivy</td><td>vulnerabilities, secrets, misconfig · 0.38</td></tr>
+        <tr><td>Gitleaks</td><td>secrets in history · 8.0; plus a working-tree pass</td></tr>
+        <tr><td>Semgrep/OpenGrep</td><td>SAST, with two shipped rules · 1.0</td></tr>
+        <tr><td>Checkov</td><td>infrastructure as code · 2.0</td></tr>
+        <tr><td>OSV-Scanner</td><td>dependency advisories · 2.0</td></tr>
+        <tr><td>Prowler</td><td>cloud posture · detect only</td></tr>
+      </table>
+      <table>
+        <tr><th>Per stack</th><th>Runs only when the language is present</th></tr>
+        <tr><td>Bandit</td><td>Python · 1.7</td></tr>
+        <tr><td>gosec</td><td>Go · 2.0</td></tr>
+        <tr><td>Brakeman</td><td>Ruby · 4.0</td></tr>
+        <tr><td>TruffleHog</td><td>live secret verification · opt-in only, never implicit</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <div class="footer"><span>websec-validator — Technical Brief</span><span>Page 4 of 8 · What it reads</span></div>
+</div>
+
+<!-- ═══════════════ PAGE 5 — EVIDENCE ═══════════════ -->
+<div class="page">
+  <div class="masthead">
+    <div class="wordmark">web<span class="mark">sec</span>-validator</div>
+    <div class="meta">05 — Evidence from the field</div>
+  </div>
+
+  <section style="margin-top:17px">
+    <h2>Six public repositories, 116 leads, zero verified critical issues</h2>
+    <p class="lede"><strong>That is the headline, and it is the right one.</strong> A tool that reported a critical in every
+    public project it touched would be a tool that mislabels. The review ran source-only against pinned
+    revisions, executed nothing, sent nothing upstream, and wrote down what it could not conclude.</p>
+
+    <figure>
+      <svg viewBox="0 0 760 196" role="img" aria-label="One dot per emitted lead for six public repositories at pinned revisions: Linkding 21, Rustpad 5, Actual 70 marked incomplete, Flask 10, Angular RealWorld 7, Ignite 3">
+        <g class="s-sub" style="font-size:7.6px">
+          <text x="0" y="24" style="font-weight:700;fill:#191917">Linkding</text><text class="s-tiny" x="0" y="34">27b7303 · 21</text>
+          <text x="0" y="56" style="font-weight:700;fill:#191917">Rustpad</text><text class="s-tiny" x="0" y="66">54e4a93 · 5</text>
+          <text x="0" y="88" style="font-weight:700;fill:#191917">Actual</text><text class="s-tiny" x="0" y="98">f8ad7c0 · 70</text>
+          <text x="0" y="132" style="font-weight:700;fill:#191917">Flask</text><text class="s-tiny" x="0" y="142">d73fa1c · 10</text>
+          <text x="0" y="158" style="font-weight:700;fill:#191917">Angular RealWorld</text><text class="s-tiny" x="0" y="168">dd99ed2 · 7</text>
+          <text x="0" y="184" style="font-weight:700;fill:#191917">Ignite</text><text class="s-tiny" x="0" y="194">e829d2f · 3</text>
+        </g>
+        <!-- Linkding 21 -->
+        <g fill="#c9c5bb">
+          <circle cx="126" cy="27" r="3.6"/><circle cx="138" cy="27" r="3.6"/><circle cx="150" cy="27" r="3.6"/><circle cx="162" cy="27" r="3.6"/><circle cx="174" cy="27" r="3.6"/><circle cx="186" cy="27" r="3.6"/><circle cx="198" cy="27" r="3.6"/><circle cx="210" cy="27" r="3.6"/><circle cx="222" cy="27" r="3.6"/><circle cx="234" cy="27" r="3.6"/><circle cx="246" cy="27" r="3.6"/><circle cx="258" cy="27" r="3.6"/><circle cx="270" cy="27" r="3.6"/><circle cx="282" cy="27" r="3.6"/><circle cx="294" cy="27" r="3.6"/><circle cx="306" cy="27" r="3.6"/><circle cx="318" cy="27" r="3.6"/><circle cx="330" cy="27" r="3.6"/><circle cx="342" cy="27" r="3.6"/><circle cx="354" cy="27" r="3.6"/><circle cx="366" cy="27" r="3.6"/>
+        </g>
+        <!-- Rustpad 5 -->
+        <g fill="#c9c5bb">
+          <circle cx="126" cy="59" r="3.6"/><circle cx="138" cy="59" r="3.6"/><circle cx="150" cy="59" r="3.6"/><circle cx="162" cy="59" r="3.6"/><circle cx="174" cy="59" r="3.6"/>
+        </g>
+        <!-- Actual 70: two rows of 35; 3 adjudicated false-positive classes in clay -->
+        <g fill="#c9c5bb">
+          <circle cx="126" cy="91" r="3.6" fill="#d97757"/><circle cx="138" cy="91" r="3.6" fill="#d97757"/><circle cx="150" cy="91" r="3.6" fill="#d97757"/><circle cx="162" cy="91" r="3.6"/><circle cx="174" cy="91" r="3.6"/><circle cx="186" cy="91" r="3.6"/><circle cx="198" cy="91" r="3.6"/><circle cx="210" cy="91" r="3.6"/><circle cx="222" cy="91" r="3.6"/><circle cx="234" cy="91" r="3.6"/><circle cx="246" cy="91" r="3.6"/><circle cx="258" cy="91" r="3.6"/><circle cx="270" cy="91" r="3.6"/><circle cx="282" cy="91" r="3.6"/><circle cx="294" cy="91" r="3.6"/><circle cx="306" cy="91" r="3.6"/><circle cx="318" cy="91" r="3.6"/><circle cx="330" cy="91" r="3.6"/><circle cx="342" cy="91" r="3.6"/><circle cx="354" cy="91" r="3.6"/><circle cx="366" cy="91" r="3.6"/><circle cx="378" cy="91" r="3.6"/><circle cx="390" cy="91" r="3.6"/><circle cx="402" cy="91" r="3.6"/><circle cx="414" cy="91" r="3.6"/><circle cx="426" cy="91" r="3.6"/><circle cx="438" cy="91" r="3.6"/><circle cx="450" cy="91" r="3.6"/><circle cx="462" cy="91" r="3.6"/><circle cx="474" cy="91" r="3.6"/><circle cx="486" cy="91" r="3.6"/><circle cx="498" cy="91" r="3.6"/><circle cx="510" cy="91" r="3.6"/><circle cx="522" cy="91" r="3.6"/><circle cx="534" cy="91" r="3.6"/>
+          <circle cx="126" cy="105" r="3.6"/><circle cx="138" cy="105" r="3.6"/><circle cx="150" cy="105" r="3.6"/><circle cx="162" cy="105" r="3.6"/><circle cx="174" cy="105" r="3.6"/><circle cx="186" cy="105" r="3.6"/><circle cx="198" cy="105" r="3.6"/><circle cx="210" cy="105" r="3.6"/><circle cx="222" cy="105" r="3.6"/><circle cx="234" cy="105" r="3.6"/><circle cx="246" cy="105" r="3.6"/><circle cx="258" cy="105" r="3.6"/><circle cx="270" cy="105" r="3.6"/><circle cx="282" cy="105" r="3.6"/><circle cx="294" cy="105" r="3.6"/><circle cx="306" cy="105" r="3.6"/><circle cx="318" cy="105" r="3.6"/><circle cx="330" cy="105" r="3.6"/><circle cx="342" cy="105" r="3.6"/><circle cx="354" cy="105" r="3.6"/><circle cx="366" cy="105" r="3.6"/><circle cx="378" cy="105" r="3.6"/><circle cx="390" cy="105" r="3.6"/><circle cx="402" cy="105" r="3.6"/><circle cx="414" cy="105" r="3.6"/><circle cx="426" cy="105" r="3.6"/><circle cx="438" cy="105" r="3.6"/><circle cx="450" cy="105" r="3.6"/><circle cx="462" cy="105" r="3.6"/><circle cx="474" cy="105" r="3.6"/><circle cx="486" cy="105" r="3.6"/><circle cx="498" cy="105" r="3.6"/><circle cx="510" cy="105" r="3.6"/><circle cx="522" cy="105" r="3.6"/><circle cx="534" cy="105" r="3.6"/>
+        </g>
+        <text class="s-tiny" x="552" y="94" style="fill:#b85636">incomplete</text>
+        <text class="s-sub" x="552" y="105" style="font-size:6.8px">detector changed mid-scan;</text>
+        <text class="s-sub" x="552" y="114" style="font-size:6.8px">a Yarn bundle hit the source cap</text>
+        <!-- Flask 10 -->
+        <g fill="#c9c5bb">
+          <circle cx="126" cy="135" r="3.6"/><circle cx="138" cy="135" r="3.6"/><circle cx="150" cy="135" r="3.6"/><circle cx="162" cy="135" r="3.6"/><circle cx="174" cy="135" r="3.6"/><circle cx="186" cy="135" r="3.6"/><circle cx="198" cy="135" r="3.6"/><circle cx="210" cy="135" r="3.6"/><circle cx="222" cy="135" r="3.6"/><circle cx="234" cy="135" r="3.6"/>
+        </g>
+        <!-- Angular 7 -->
+        <g fill="#c9c5bb">
+          <circle cx="126" cy="161" r="3.6"/><circle cx="138" cy="161" r="3.6"/><circle cx="150" cy="161" r="3.6"/><circle cx="162" cy="161" r="3.6"/><circle cx="174" cy="161" r="3.6"/><circle cx="186" cy="161" r="3.6"/><circle cx="198" cy="161" r="3.6"/>
+        </g>
+        <!-- Ignite 3 -->
+        <g fill="#c9c5bb">
+          <circle cx="126" cy="187" r="3.6"/><circle cx="138" cy="187" r="3.6"/><circle cx="150" cy="187" r="3.6"/>
+        </g>
+        <circle cx="612" cy="27" r="3.6" fill="#c9c5bb"/><text class="s-sub" x="622" y="30" style="font-size:7.2px">an emitted lead, not a confirmed bug</text>
+        <circle cx="612" cy="43" r="3.6" fill="#d97757"/><text class="s-sub" x="622" y="46" style="font-size:7.2px">a false-positive class, adjudicated and fixed</text>
+      </svg>
+      <p class="figcap">Fig. 6 — One dot per lead. Counts are detector output at a pinned revision; the review says so on its first line.</p>
+    </figure>
+
+    <div class="statband">
+      <div><div class="fig">116</div><div class="cap">leads emitted across six repositories, none executed, nothing sent upstream</div><div class="src">docs/security-review/public-repository-review.md</div></div>
+      <div><div class="fig sage">0</div><div class="cap">verified critical issues. Written as the headline, not buried in a footnote</div><div class="src">same document, first paragraph</div></div>
+      <div><div class="fig clay">3 → 10</div><div class="cap">false-positive classes adjudicated with source links, each turned into paired regression tests</div><div class="src">tests/test_public_precision.py</div></div>
+    </div>
+  </section>
+
+  <section class="rule-top">
+    <div class="cols-2">
+      <div>
+        <h3>What the false positives taught</h3>
+        <ul class="ticks">
+          <li>An archive error helper that formats ZIP messages was read as an <strong>authentication decoder</strong> because its strings said “unauthorized.”</li>
+          <li>A local file stream piped to stdout was read as <strong>HTTP file serving</strong> because <code>createReadStream</code> alone counted as serving.</li>
+          <li>A numeric GitHub expression in a workflow was read as <strong>script injection</strong>.</li>
+        </ul>
+        <p class="note" style="margin-top:6px">Each fix ships with its opposite: the test that makes the tool quieter is paired with one that
+        proves the real case, the JWT decoded without verification, the stream piped to a response, still fires. The review
+        also records its own gap: <code>@angular/core</code> was not recognized in the framework inventory.</p>
+      </div>
+      <div>
+        <h3>The corpus, pinned</h3>
+        <p class="note">Three deliberately vulnerable apps at fixed commits, retrieved 2026-09-12: VAmPI <code>f16052d</code>,
+        NodeGoat <code>c5cb68a</code>, DVGA <code>a961308</code>. The proof harness passes <strong>10/10</strong> surface checks with
+        Noir present and <strong>8/10</strong> without it, with 7 truth labels left unknown. Both numbers are committed as
+        JSON with the detector revision hash, and the sentences that quote them are bound to those JSON fields by DocGuard,
+        so the prose cannot outrun the artifact.</p>
+        <p class="note">In September 2026 those 56 corpus findings were relabelled one at a time against the pinned
+        source, each with a note and the revision it was read at. That produced <strong>21 reviewed labels</strong> and a
+        measured probability per severity, replacing a prior that had been guessed. The other <strong>35 stay unknown</strong>
+        and are counted on neither side.</p>
+        <p class="note">And one real pentest: an authenticated engagement whose two Criticals and two Highs sat in the
+        managed-cloud boundary the recon did not yet parse. Those findings became extractor rows, and two of the retest
+        lessons corrected the tool's own earlier output.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="footer"><span>websec-validator — Technical Brief</span><span>Page 5 of 8 · Evidence</span></div>
+</div>
+
+<!-- ═══════════════ PAGE 6 — HOW THE TOOL GUARDS ITSELF ═══════════════ -->
+<div class="page">
+  <div class="masthead">
+    <div class="wordmark">web<span class="mark">sec</span>-validator</div>
+    <div class="meta">06 — How the tool guards itself</div>
+  </div>
+
+  <section style="margin-top:17px">
+    <h2>The suite is guarded the way the tool guards you</h2>
+    <p class="lede">Five checks gate the main branch. Two of them exist because of a specific, recorded failure.</p>
+    <figure>
+      <svg viewBox="0 0 760 170" role="img" aria-label="The five required checks: tests on Python 3.11, 3.12 and 3.13; hermeticity under a hostile git config; suite-integrity with a derived test floor, a sixty-second ceiling and a required-check-name cross-check">
+        <rect x="0" y="0" width="236" height="66" rx="4" fill="#ffffff" stroke="#e6e2d8"/>
+        <text class="s-lbl" x="12" y="18">tests · py3.11 · py3.12 · py3.13</text>
+        <text class="s-sub" x="12" y="33">Install the wheel, byte-compile the package,</text>
+        <text class="s-sub" x="12" y="44">smoke the CLI entry point, run the suite.</text>
+        <text class="s-tiny" x="12" y="58">three required checks</text>
+
+        <rect x="252" y="0" width="236" height="66" rx="4" fill="#fbf1ec" stroke="#d97757"/>
+        <text class="s-lbl" x="264" y="18" style="fill:#b85636">hermeticity · hostile git config</text>
+        <text class="s-sub" x="264" y="33">A global hooksPath, gpgsign, excludesFile and a</text>
+        <text class="s-sub" x="264" y="44">renamed default branch. The suite must still pass, and</text>
+        <text class="s-sub" x="264" y="55">sentinel hooks outside the temp repos must checksum clean.</text>
+
+        <rect x="504" y="0" width="256" height="66" rx="4" fill="#191917"/>
+        <text class="s-lbl" x="516" y="18" style="fill:#faf9f5">suite-integrity</text>
+        <text class="s-sub" x="516" y="33" style="fill:#c9c5bb">Derived test floor · 60 s ceiling · required-check</text>
+        <text class="s-sub" x="516" y="44" style="fill:#c9c5bb">names cross-checked against the jobs this run emits ·</text>
+        <text class="s-sub" x="516" y="55" style="fill:#c9c5bb">unit tests for the bot that merges without a human.</text>
+
+        <line x1="0" y1="84" x2="760" y2="84" stroke="#e6e2d8"/>
+        <text class="s-tiny" x="0" y="100">Why the floor has no number in it</text>
+        <text class="s-sub" x="0" y="113" style="font-size:7.4px">A stored MIN_TESTS was bumped 1241 → 1243 by two branches at once. Both merged cleanly, because the values matched, and the floor</text>
+        <text class="s-sub" x="0" y="124" style="font-size:7.4px">ended two below the real suite: two tests deletable unnoticed. So the baseline is now counted from the base commit at CI time, with the</text>
+        <text class="s-sub" x="0" y="135" style="font-size:7.4px">unittest loader, in a separate process per tree. A module that fails to import is a hard failure, not a count of one.</text>
+        <text class="s-tiny" x="0" y="153">Why sixty seconds</text>
+        <text class="s-sub" x="0" y="166" style="font-size:7.4px">The suite runs in about ten. The known failure in this class was a 7.6× blowup that stayed green throughout. Sixty catches that shape and tolerates a slow runner.</text>
+      </svg>
+      <p class="figcap">Fig. 7 — The gate stack. The names in required-checks.json are the single source of truth; a required check that never runs would block every PR forever.</p>
+    </figure>
+
+    <div class="statband">
+      <div><div class="fig">1,549</div><div class="cap">tests across 80 files, stdlib only, no public network, at the time of writing</div><div class="src">tests/ · counted by the unittest loader</div></div>
+      <div><div class="fig clay">0</div><div class="cap">runtime dependencies. The tool shells out to scanners and never imports them</div><div class="src">pyproject.toml · dependencies = []</div></div>
+      <div><div class="fig sage">5</div><div class="cap">required checks, cross-verified against the jobs the run actually emits</div><div class="src">.github/required-checks.json</div></div>
+    </div>
+  </section>
+
+  <section class="rule-top">
+    <div class="cols-2">
+      <div>
+        <h3>Docs are checked like code</h3>
+        <p class="note">DocGuard runs with 27 of its 29 validators on, pinned explicitly rather than inherited. Four canonical
+        documents are review-gated. Five sentences in the validation record are bound to JSON pointers inside the committed
+        proof artifacts, so a number in prose cannot differ from the number in the file. Every conscious deviation from those documents is logged
+        in a drift file with its reason.</p>
+        <p class="note"><strong>This brief is held to the same standard.</strong> Every count on these pages, from the 22 extractors to the
+        116 leads, is asserted against the source tree by <code>tests/test_explained_brief.py</code>. If the code changes and the
+        page does not, the suite fails.</p>
+      </div>
+      <div>
+        <h3>A release train that stops for a human</h3>
+        <p class="note">Every Monday a workflow proposes a version bump as a pull request and stops. A tag is cut only when a commit
+        whose subject starts with <code>release:</code> lands on main, never from a version diff. Publishing to PyPI uses
+        Trusted Publishing over OIDC, with no long-lived token, and refuses if the tag does not match the package version.
+        The triage bot that labels and merges bot PRs never checks out the PR's code, and its classifier has its own unit tests
+        in the required checks.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="rule-top">
+    <h2>Every fix cites its bug, and every quieting test has a loud twin</h2>
+    <div class="cols-2">
+      <div>
+        <p class="note">A field report from 2026-09-18 listed nine problems. They became <strong>50 tests</strong> in one file, and the
+        fixes carry the bug number as a comment at the line that changed, in the CLI, the scanner adapters, the findings
+        module, the coverage contract and the dynamic phase, so a reader can walk from the report to the code and back.</p>
+      </div>
+      <div>
+        <p class="note">The test file's own docstring states the rule: every “this should be quieter” assertion is paired with a
+        “this must stay loud” one. A precision fix that is not paired with the true-positive it must preserve is not accepted.
+        That is the mechanical form of the no-regression bar this project holds itself to.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="footer"><span>websec-validator — Technical Brief</span><span>Page 6 of 8 · Self-guarding</span></div>
+</div>
+
+<!-- ═══════════════ PAGE 7 — PRIOR ART & DIFFERENCE ═══════════════ -->
+<div class="page">
+  <div class="masthead">
+    <div class="wordmark">web<span class="mark">sec</span>-validator</div>
+    <div class="meta">07 — Prior art</div>
+  </div>
+
+  <section style="margin-top:17px">
+    <h2>What is not new, and who solved which part</h2>
+    <p>Static analysis, secret detection, dependency scanning and attack-surface mapping are all solved problems with
+    excellent open-source tools. Anyone claiming otherwise is selling something. This tool <strong>uses</strong> them and adds the
+    layer none of them ship: the plan.</p>
+    <div class="cols-3">
+      <div>
+        <h3>The scanners</h3>
+        <p class="note">Semgrep, Trivy, Gitleaks, Checkov, OSV-Scanner, Prowler and the per-stack SAST tools: Bandit, gosec, Brakeman.
+        Eleven registry entries, each with a minimum version that <code>doctor</code> checks, because presence on PATH is not
+        compatibility. The tool shells out, parses, de-duplicates, and cites each finding back to the scanner that produced it.</p>
+      </div>
+      <div>
+        <h3>Attack-surface detection</h3>
+        <p class="note">OWASP Noir finds routes in a codebase better than a fallback regex ever will. When it is installed the proof
+        harness scores 10/10; when it is absent, 8/10. Both numbers are published, because a user without Noir deserves to
+        know what they are missing.</p>
+      </div>
+      <div>
+        <h3>Dynamic scanners</h3>
+        <p class="note">ZAP, Nuclei and sqlmap rediscover at runtime, expensively, much of what is visible in the source. So the
+        briefing <strong>aims</strong> them: each static finding is mapped to the scanner signature it will produce, and the classes
+        no scanner finds, BOLA, missing auth, mass assignment, row-level-security gaps, are listed as blind spots. A clean
+        DAST run is not “safe,” and the briefing says why.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="rule-top">
+    <h2>What is different: the question being asked</h2>
+    <div class="versus">
+      <div>
+        <div class="kicker">A scanner</div>
+        <h3>Matches patterns, reports all of them</h3>
+        <span class="q">“Which lines look dangerous?”</span>
+        <p class="out">→ 163 findings, one severity each</p>
+        <p class="note" style="margin:8px 0 0">A list. Every entry may be true. Nothing says which one a pentester would open first,
+        what request would prove it, or which findings are the same bug seen from six files.</p>
+      </div>
+      <div>
+        <div class="kicker">websec-validator</div>
+        <h3>Assembles a pentester's handoff</h3>
+        <span class="q">“What would I test first, against which endpoint, and what would confirm it?”</span>
+        <p class="out">→ 13 issues, each with a location, a phase, an oracle, and a probe file</p>
+        <p class="note" style="margin:8px 0 0">A briefing. Phase 1 safe recon, Phase 2 authorization with two identities,
+        Phase 3 injection fired only at sink-backed endpoints and gated behind an explicit warning.</p>
+      </div>
+    </div>
+    <figure style="margin-top:12px">
+      <svg viewBox="0 0 760 92" role="img" aria-label="Illustrative briefing item: phase two, authorization, a specific route, two identities, and the oracle that would confirm a broken object-level authorization">
+        <rect x="0" y="0" width="760" height="92" rx="4" fill="#ffffff" stroke="#e6e2d8"/>
+        <text class="s-tiny" x="14" y="18">Illustrative briefing item — the shape, not a real finding</text>
+        <text class="s-v" x="14" y="38" style="fill:#b85636">§5b · Phase 2 · authz · two identities</text>
+        <text class="s-q" x="14" y="56" style="font-family:var(--mono);font-size:7.6px">GET /api/orgs/{id}/invoices   ← route with no per-object ownership check (authz_dataflow)</text>
+        <text class="s-q" x="14" y="72" style="font-size:7.6px">Oracle: authenticate as tenant B, request tenant A's id. A 200 with a body is BOLA. A 403 or an empty 200 is not.</text>
+        <text class="s-tiny" x="14" y="86">probes/bola-cross-tenant.sh · confirm/disconfirm in one request · a scanner cannot see this class</text>
+      </svg>
+      <p class="figcap">Fig. 8 — A finding keeps its name, its endpoint and its oracle. That is the difference between a metric and a plan.</p>
+    </figure>
+  </section>
+
+  <section class="rule-top">
+    <h2>What it deliberately is not</h2>
+    <ul class="ticks">
+      <li><strong>Not a scanner.</strong> It runs the ones you have installed and would be poorer without them.</li>
+      <li><strong>Not a SaaS.</strong> No server, no account, no telemetry, and zero runtime dependencies. It runs where the code is.</li>
+      <li><strong>Not a DAST.</strong> The shipped dynamic phase is read-only and GET-only by default; write probes need an explicit flag and a localhost target.</li>
+      <li><strong>Not a compliance tool.</strong> No verdict, no score, no badge, and no signed attestation, because a websec-signed attestation would only attest that websec ran.</li>
+      <li><strong>Not an autonomous fixer.</strong> It never edits your repository. The agent proposes fixes; a human approves them.</li>
+    </ul>
+  </section>
+
+  <div class="footer"><span>websec-validator — Technical Brief</span><span>Page 7 of 8 · Prior art</span></div>
+</div>
+
+<!-- ═══════════════ PAGE 8 — WHERE IT PLUGS IN ═══════════════ -->
+<div class="page">
+  <div class="masthead">
+    <div class="wordmark">web<span class="mark">sec</span>-validator</div>
+    <div class="meta">08 — Where it plugs in</div>
+  </div>
+
+  <section style="margin-top:17px">
+    <h2>One engine, seven surfaces</h2>
+    <table>
+      <tr><th>Surface</th><th>What it gives you</th></tr>
+      <tr><td>CLI</td><td><code>websec run .</code> is the whole pipeline. <code>gate</code> is the fast scoped pass on the files you just changed; <code>attest</code> projects a run into an audit-evidence table; <code>feedback</code> records that a finding is wrong, metadata-only by default, because a hardcoded-secret finding's snippet <em>is</em> the secret.</td></tr>
+      <tr><td>SARIF 2.1.0</td><td>Written on every run and importable back in, so GitHub code scanning, IDEs and other tools read the same ledger.</td></tr>
+      <tr><td>GitHub Action</td><td>Composite action with a <code>fail-on</code> threshold, a baseline for legacy repositories, and SARIF upload. Every third-party action it calls is pinned by commit SHA. It installs the engine from its own checkout, never from the target repository.</td></tr>
+      <tr><td>Docker</td><td>Everything bundled on a slim Python 3.14 image, running as a non-root user, with Noir 1.0.0, Gitleaks 8.30.1 and Trivy 0.74.0 pinned by version.</td></tr>
+      <tr><td>MCP server</td><td>Four read-only tools, <code>websec_recon</code>, <code>websec_findings</code>, <code>websec_sarif</code> and <code>websec_briefing</code>, over stdio or loopback-only HTTP that requires a token. Non-loopback bindings are rejected before listening.</td></tr>
+      <tr><td>pre-commit</td><td>One hook id, defaulting to <code>--require-complete --fail-on high</code>, so a partial run cannot pass the commit.</td></tr>
+      <tr><td>Claude Code plugin</td><td>A skill that runs the security pass, and a <code>PostToolUse</code> hook that checks each edit as it lands, failing open and loudly.</td></tr>
+    </table>
+  </section>
+
+  <section class="rule-top">
+    <h2>Sixteen weeks, twenty-eight releases, one breaking change</h2>
+    <figure>
+      <svg viewBox="0 0 760 130" role="img" aria-label="Timeline from the first public release on 30 May 2026 to 0.18.0 on 22 September 2026, with milestones for CDK and AppSync parsing, LLM security, SARIF and CI gate, MCP over HTTP, hermeticity, schema 2.0, the in-loop gate and attest, the exit-code contract, and the 0.18.0 measured calibration">
+        <line x1="10" y1="40" x2="750" y2="40" stroke="#191917" stroke-width="1.4"/>
+        <g fill="#191917">
+          <circle cx="10" cy="40" r="3.4"/><circle cx="60" cy="40" r="3.4"/><circle cx="150" cy="40" r="3.4"/><circle cx="215" cy="40" r="3.4"/>
+          <circle cx="270" cy="40" r="3.4"/><circle cx="330" cy="40" r="3.4"/><circle cx="560" cy="40" r="3.4"/><circle cx="600" cy="40" r="3.4"/>
+          <circle cx="660" cy="40" r="3.4"/>
+        </g>
+        <circle cx="750" cy="40" r="4.6" fill="#d97757"/>
+        <g class="s-tiny">
+          <text x="10" y="24">0.2 · 30 May</text>
+          <text x="60" y="58">0.3 · 7 Jun</text>
+          <text x="150" y="24">0.7 · 22 Jun</text>
+          <text x="215" y="58">0.10 · 3 Jul</text>
+          <text x="270" y="24">0.11 · 11 Jul</text>
+          <text x="330" y="58">0.12 · 11 Sep</text>
+          <text x="560" y="24">0.14 · 14 Sep</text>
+          <text x="600" y="58">0.16 · 18 Sep</text>
+          <text x="648" y="24">0.17 · 22 Sep</text>
+          <text x="706" y="58" style="fill:#b85636">0.18 · 22 Sep</text>
+        </g>
+        <g class="s-sub" style="font-size:6.9px">
+          <text x="10" y="80">First public line. PyPI via Trusted Publishing from day one.</text>
+          <text x="10" y="91">0.3 walks AWS-CDK, AppSync SDL and VTL: the managed-cloud boundary a real pentest exposed.</text>
+          <text x="10" y="102">0.7 adds the LLM / agent extractor. 0.10 adds SARIF output and the CI gate. 0.11 adds MCP over HTTP and the benchmark protocol.</text>
+          <text x="10" y="113">0.12 fixes the hermeticity bug and adds branch protection. 0.14 ships schema 2.0. 0.16 adds the in-loop gate and attest. 0.17 splits the exit codes: the one breaking change.</text>
+          <text x="10" y="124">0.18 relabels the corpus for a measured P(real), and makes a scan that read nothing report as NO ANALYZABLE SOURCE rather than as complete.</text>
+        </g>
+        <text class="s-sub" x="395" y="24" style="font-size:6.6px;fill:#918d83">← gap: July to September →</text>
+      </svg>
+      <p class="figcap">Fig. 9 — Release cadence. Two of the last three releases corrected what the tool says about itself rather than what it detects.</p>
+    </figure>
+  </section>
+
+  <div class="pull">
+    <p>Code in, briefing out. Everything it could not check, it says so.</p>
+    <div class="attrib">pip install websec-validator · github.com/raccioly/websec-validator · MIT</div>
+  </div>
+
+  <section class="rule-top">
+    <p class="note">Every number on these pages carries a path in the repository and is asserted by the test suite against the
+    source tree at the version in the masthead. The field review, the proof artifacts, the calibration table and the CI
+    workflows are all committed and readable. If you find a claim here that the code does not back, that is a bug: please
+    open an issue.</p>
+  </section>
+
+  <div class="footer"><span>websec-validator — Technical Brief · v0.18.0</span><span>Page 8 of 8 · Where it plugs in</span></div>
+</div>
+
+</body>
+</html>

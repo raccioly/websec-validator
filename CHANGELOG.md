@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **README links the rendered brief, not the repository blob.** GitHub serves an `.html` blob as
+  source rather than as a page, so the previous in-repo link showed markup to anyone who clicked it.
+  GitHub Pages now serves `docs/` at https://raccioly.github.io/websec-validator/ and the README
+  points there.
+
+### Added
+- **Technical brief** (`docs/websec-explained.html`, printed to `docs/websec-explained.pdf`). An
+  eight-page, self-contained explainer — the idea, what the tool refuses to say, the anatomy of a
+  run, the 22 extractors and 17 sinks, the public-repository evidence, how the suite guards itself,
+  prior art, and the integration surfaces. No scripts, no external requests. Every number on it is
+  re-derived from the tree by `tests/test_explained_brief.py` (extractor/sink counts, corpus pins,
+  proof results, field-review totals, required checks, Docker pins), so the page cannot drift
+  silently; the stated test count is checked as a floor, never an equality, so release PRs are
+  not blocked by it.
+
+### Changed
+- README "Status / roadmap" refreshed, and `AGENTS.md`'s pinned test count updated — both are
+  metrics-consistency anchors the brief is checked against.
+
 ### Fixed — the substance of #142 and #143, with the near-miss controls
 
 - **A sender check behind an inert alias now counts** (`_sender_control`). `const { origin } = sender;`
@@ -48,6 +68,14 @@ Alias resolution from #143 is deliberately **not** included: it never fired end-
 carried no test for it. Crediting a local alias would need a control proving a reassigned alias is
 still reported, since an alias can be rebound between the binding and the check.
 
+### Fixed — the calibration table's prose contradicted its own counts
+
+- **The calibration table's `limitation` contradicted its own counts.** It stated "per-class cells
+  are all below min_n=5, so the runtime falls back to the per-label tier", while
+  `missing-auth|MEDIUM` carries n=7 and is therefore served from the class tier. Caught while
+  binding the technical brief to the artifact. The text now names the one cell that reaches the
+  threshold, and a test fails if a usable cell is ever absent from that sentence — prose about
+  evidence is held to the same bar as the evidence.
 
 ## [0.18.0] — 2026-09-22
 
