@@ -74,5 +74,50 @@ class ExitCodeContractTests(unittest.TestCase):
             self.assertIn(code, install._INSTRUCTION_BODY)
 
 
+class OsvScannerInvocationTests(unittest.TestCase):
+    """#2 — osv-scanner was silently producing nothing on every repo with nested lockfiles."""
+
+    def test_recursive_flag_is_present(self):
+        argv = scanners._osv(Path("/repo"), Path("/out/osv.json"))
+        self.assertIn("--recursive", argv,
+                      "without --recursive osv-scanner only extracts from the top-level directory, "
+                      "so any repo whose lockfiles live in subdirectories yields 'No package sources "
+                      "found' and writes no output at all")
+
+    def test_registry_declares_a_minimum_version(self):
+        osv = next(s for s in scanners.REGISTRY if s.key == "osv-scanner")
+        self.assertEqual(osv.min_version, (2, 0, 0))
+
+    def test_version_check_flags_an_incompatible_build(self):
+        osv = next(s for s in scanners.REGISTRY if s.key == "osv-scanner")
+        scanners._VERSION_CACHE["osv-scanner"] = "1.9.2"
+        try:
+            result = scanners.check_version(osv)
+            self.assertEqual(result["status"], "too_old")
+            self.assertFalse(result["ok"])
+            self.assertIn("2.0.0", result["note"])
+        finally:
+            scanners._VERSION_CACHE.pop("osv-scanner", None)
+
+    def test_two_component_version_satisfies_three_component_minimum(self):
+        osv = next(s for s in scanners.REGISTRY if s.key == "osv-scanner")
+        scanners._VERSION_CACHE["osv-scanner"] = "2.4"
+        try:
+            self.assertEqual(scanners.check_version(osv)["status"], "ok")
+        finally:
+            scanners._VERSION_CACHE.pop("osv-scanner", None)
+
+    def test_unreadable_version_is_unknown_not_a_failure(self):
+        """A probe that cannot read a version must not block the scan."""
+        osv = next(s for s in scanners.REGISTRY if s.key == "osv-scanner")
+        scanners._VERSION_CACHE["osv-scanner"] = None
+        try:
+            result = scanners.check_version(osv)
+            self.assertEqual(result["status"], "unknown")
+            self.assertTrue(result["ok"])
+        finally:
+            scanners._VERSION_CACHE.pop("osv-scanner", None)
+
+
 if __name__ == "__main__":
     unittest.main()
