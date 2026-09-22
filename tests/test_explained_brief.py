@@ -33,7 +33,7 @@ PKG = REPO / "src" / "websec_validator"
 # The version the brief was written at. It is NOT required to equal pyproject's current
 # version — the weekly release-propose workflow bumps pyproject without touching docs, and a
 # hard equality would fail every release PR. It IS required to be a version that shipped.
-STATED_VERSION = "0.17.1"
+STATED_VERSION = "0.18.0"
 
 
 class _Text(HTMLParser):
@@ -90,10 +90,34 @@ class BriefIsSelfContained(unittest.TestCase):
         self.assertIn(f"## [{STATED_VERSION}]", changelog)
         self.assertTrue(_has(f"Technical Brief · v{STATED_VERSION}"))
         releases = len(re.findall(r"^## \[\d+\.\d+", changelog, flags=re.M))
-        self.assertTrue(_has("twenty-seven releases"), "release count wording drifted")
-        self.assertEqual(releases, 27)
+        self.assertTrue(_has("twenty-eight releases"), "release count wording drifted")
+        self.assertEqual(releases, 28)
         breaking = changelog.count("### Changed — BREAKING")
         self.assertEqual(breaking, 1, "the brief says 'one breaking change'")
+
+
+class LandingPageIsConsistent(unittest.TestCase):
+    """docs/index.html is the GitHub Pages entry point; it must not outlive its own claims."""
+
+    INDEX = REPO / "docs" / "index.html"
+
+    def test_links_the_brief_and_states_a_shipped_version(self):
+        raw = self.INDEX.read_text(encoding="utf-8")
+        self.assertNotIn("<script", raw)
+        self.assertIn('href="websec-explained.html"', raw)
+        self.assertIn('href="websec-explained.pdf"', raw)
+        self.assertIn("github.com/raccioly/websec-validator", raw)
+        self.assertIn(f"v{STATED_VERSION}", raw)
+        for f in ("websec-explained.html", "websec-explained.pdf", "METHODOLOGY.md"):
+            self.assertTrue((REPO / "docs" / f).exists(), f"index.html links a missing file: {f}")
+        # Pages must serve these byte-for-byte rather than running them through Jekyll
+        self.assertTrue((REPO / "docs" / ".nojekyll").exists())
+
+    def test_install_line_names_the_published_package(self):
+        raw = self.INDEX.read_text(encoding="utf-8")
+        pyproject = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+        name = re.search(r'^name = "([^"]+)"', pyproject, flags=re.M).group(1)
+        self.assertIn(f"pip install {name}", raw)
 
 
 class BriefMatchesDetectionPipeline(unittest.TestCase):
@@ -115,14 +139,53 @@ class BriefMatchesDetectionPipeline(unittest.TestCase):
         for label in ("exit 3 · incomplete", "exit 2 · usage", "exit 1 · findings", "exit 0 · clean"):
             self.assertTrue(_has(label), label)
 
-    def test_calibration_is_quarantined_at_runtime(self):
+    def test_calibration_counts_and_scoring_rule(self):
+        # 0.18.0 relabelled the corpus: the table is now reviewed and live, and "unknown" is
+        # excluded from BOTH sides rather than scored as a false positive. The brief's claim
+        # is about that split, so both halves are checked.
         shipped = json.loads((PKG / "calibration.json").read_text(encoding="utf-8"))
-        self.assertEqual(shipped["meta"]["n_total"], 59)
-        self.assertTrue(_has("59 historical samples"))
+        meta = shipped["meta"]
+        self.assertEqual(meta["evidence_status"], "reviewed")
+        self.assertTrue(_has(f"{meta['n_total']} reviewed labels"), f"n_total drifted (now {meta['n_total']})")
+        self.assertTrue(_has(f"{meta['n_unknown']} findings still unknown"), f"n_unknown drifted (now {meta['n_unknown']})")
+        self.assertTrue(_has(f"{meta['n_unknown']} stay unknown"))
+        self.assertIn("unknown", meta["unmatched_rule"])
+        self.assertNotIn("false positive", meta["unmatched_rule"])
+        # the runtime serves the same reviewed table, not a quarantined stub
         loaded = calibration.load_shipped()
-        self.assertIsInstance(loaded, dict)
-        self.assertEqual(loaded["meta"].get("evidence_status"), "historical-quarantined")
-        self.assertEqual(loaded["meta"].get("n_total"), 0)
+        self.assertEqual(loaded["meta"]["n_total"], meta["n_total"])
+        for label, cell in loaded["by_label"].items():
+            self.assertTrue(_has(f"{label} {cell['p']} [{cell['ci'][0]}, {cell['ci'][1]}] · n={cell['n']}"),
+                            f"{label} cell drifted: {cell}")
+        # every per-class cell is below MIN_N, which is why the brief says it falls back
+        thin = [k for k, c in loaded["by_class_label"].items() if c["n"] < calibration.MIN_N]
+        usable = [k for k, c in loaded["by_class_label"].items() if c["n"] >= calibration.MIN_N]
+        self.assertEqual(len(usable), 1, f"the brief says one class reaches min_n; usable={usable}")
+        self.assertTrue(thin)
+        self.assertTrue(_has("at least five samples"))
+        self.assertTrue(_has("One class reaches that today"))
+        # the table's own prose must not contradict its own counts (it did, before this test)
+        limitation = meta["limitation"]
+        self.assertNotIn("all below min_n", limitation)
+        for key in usable:
+            self.assertIn(key.split("|")[0], limitation, "a usable cell must be named in the limitation text")
+        self.assertIn("never accuracy", calibration.SCORING_RULE)
+        self.assertTrue(_has("never accuracy or F1"))
+
+    def test_unanalyzed_source_disclosure(self):
+        # The 0.18.0 headline: a tree with no analyzable source must not read as a clean, complete run.
+        from websec_validator.extractors.base import UNANALYZED_LANG, UNANALYZED_SOURCE_EXT
+
+        cov = (PKG / "coverage.py").read_text(encoding="utf-8")
+        self.assertIn("NO ANALYZABLE SOURCE", cov)
+        self.assertIn("thin_language_coverage", cov)
+        self.assertTrue(_has("NO ANALYZABLE SOURCE"))
+        self.assertTrue(_has("REQUESTED CHECKS COMPLETED"))
+        cli_src = (PKG / "cli.py").read_text(encoding="utf-8")
+        self.assertIn("--require-analyzed", cli_src)
+        self.assertTrue(_has("--require-analyzed"))
+        langs = {UNANALYZED_LANG[x] for x in UNANALYZED_SOURCE_EXT if x in UNANALYZED_LANG}
+        self.assertIn("elixir", langs, "the brief's worked example is the Elixir case")
 
     def test_attest_rows_and_empty_evidence(self):
         rows = attest._CONTROLS

@@ -43,6 +43,15 @@ Alias resolution from #143 is deliberately **not** included: it never fired end-
 carried no test for it. Crediting a local alias would need a control proving a reassigned alias is
 still reported, since an alias can be rebound between the binding and the check.
 
+### Fixed — the calibration table's prose contradicted its own counts
+
+- **The calibration table's `limitation` contradicted its own counts.** It stated "per-class cells
+  are all below min_n=5, so the runtime falls back to the per-label tier", while
+  `missing-auth|MEDIUM` carries n=7 and is therefore served from the class tier. Caught while
+  binding the technical brief to the artifact. The text now names the one cell that reaches the
+  threshold, and a test fails if a usable cell is ever absent from that sentence — prose about
+  evidence is held to the same bar as the evidence.
+
 ## [0.18.0] — 2026-09-22
 
 Migration: **none required.** Every ledger and coverage field added here is additive, existing

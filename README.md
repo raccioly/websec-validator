@@ -689,7 +689,7 @@ omit an independent version field. Check both sources when diagnosing stale inst
 
 ## Status / roadmap
 
-Version 0.17.1 provides 22 recon extractors, eleven optional scanner entries, nine named profiles,
+Version 0.18.0 provides 22 recon extractors, eleven optional scanner entries, nine named profiles,
 SARIF import/export, bounded source/query analysis, explicit coverage and lifecycle evidence,
 intelligence/research commands, and opt-in agent/hook/CI adoption. It adds an in-loop security gate
 (`websec gate` and a `PostToolUse` hook), analysis scoping with `--only`, an opt-in dependency
@@ -705,6 +705,8 @@ changes. 0.16.0 added the claimspec calibration export over 0.15.3 and needed no
 0.17.0 split the exit codes (`2` = usage error, `3` = incomplete run) — the one breaking change in the
 project's history; CI scripts that tested for `2` as "incomplete" must test for `3`. 0.17.1 changed no
 behaviour: it corrected only what the tool says about itself.
+0.18.0 adds a measured `P(real)` from a relabelled corpus, and stops a scan that could read no
+analyzable source from reporting as a completed clean run (`--require-analyzed`, exit 3).
 The [remaining-work specification](specs/001-continuous-security-improvement/spec.md) consolidates
 unresolved gaps and acceptance tests so overlapping old-base PRs do not become competing roadmaps.
 Existing runtime probes are opt-in; their earlier isolated results are not current deployment proofs.

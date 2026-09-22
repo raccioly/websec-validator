@@ -78,7 +78,7 @@
   .cols-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 
   .exhibit { border: 1px solid var(--rule); border-left: 3px solid var(--clay);
-             background: var(--card); padding: 11px 13px; margin: 0 0 9px; }
+             background: var(--card); padding: 9px 12px; margin: 0 0 8px; }
   .exhibit pre { font-family: var(--mono); font-size: 8pt; line-height: 1.5; margin: 0;
                  white-space: pre-wrap; color: #23221e; }
   .exhibit .cap { font-family: var(--mono); font-size: 6.6pt; letter-spacing: 0.09em;
@@ -149,7 +149,11 @@
                    text-transform: uppercase; color: var(--ink-faint); margin-top: 7px; }
 
   .chips { display: flex; flex-wrap: wrap; gap: 4px 5px; margin: 6px 0 0; }
-  section.tight { margin-top: 12px; padding-top: 9px; }
+  section.tight { margin-top: 9px; padding-top: 7px; }
+  table.dense { font-size: 8.3pt; }
+  table.dense td { padding: 3px 8px 3px 0; line-height: 1.38; }
+  table.dense td:first-child { width: 26%; }
+  table.dense th { padding-bottom: 4px; }
   .compact table { font-size: 8.2pt; } .compact td { padding: 4px 8px 4px 0; } .compact th { padding-bottom: 4px; }
   .chip { font-family: var(--mono); font-size: 7.2pt; padding: 2px 7px; border-radius: 3px;
           border: 1px solid var(--rule); background: var(--card); color: var(--ink-soft); }
@@ -171,7 +175,7 @@
 <div class="page">
   <div class="masthead">
     <div class="wordmark">web<span class="mark">sec</span>-validator</div>
-    <div class="meta">Technical Brief · v0.17.1 · MIT</div>
+    <div class="meta">Technical Brief · v0.18.0 · MIT</div>
   </div>
 
   <h1>A scanner gives you findings. A pentester gives you a plan.</h1>
@@ -250,75 +254,83 @@ cluster_summary        <span class="kw">distinct issues</span>: <span class="num
     <div class="meta">02 — What it refuses to say</div>
   </div>
 
-  <section style="margin-top:17px">
+  <section style="margin-top:12px">
     <h2>Every ambiguity rounds toward “incomplete”</h2>
-    <p class="lede">Most security tools have two outputs: findings, or a green check. This one has a third,
-    and it is the one that makes the other two believable.</p>
+    <p class="lede">Most security tools have two outputs: findings, or a green check. This one has a third, and it is what makes the other two believable.</p>
+
+    <div class="exhibit">
+      <div class="cap">What this tool said about a deliberately vulnerable Elixir app, until September 2026</div>
+<pre><span class="cm"># raw SQL interpolation · System.cmd injection · a hardcoded credential · no auth plug</span>
+unsupported: []   gaps: []
+<span class="kw">REQUESTED CHECKS COMPLETED</span> — <span class="num">0</span> files read</pre>
+    </div>
+    <p>A suffix list had been absorbed into another, leaving the “language I cannot read” branch reachable for one language.
+    The fix does not make the tool read Elixir. It makes it <strong>say</strong> it did not: the banner leads with
+    <code>NO ANALYZABLE SOURCE</code>, and <code>--require-analyzed</code> turns that into exit 3.</p>
     <figure>
-      <svg viewBox="0 0 760 150" role="img" aria-label="The four exit codes: 0 clean and complete, 1 findings at or above the threshold, 2 usage error or incompatible scanner, 3 incomplete because a requested check did not finish">
+      <svg viewBox="0 0 760 126" role="img" aria-label="The four exit codes: 0 clean and complete, 1 findings at or above the threshold, 2 usage error or incompatible scanner, 3 incomplete because a requested check did not finish">
         <defs>
           <marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
             <path d="M 0 0 L 10 5 L 0 10 z" fill="#918d83"/>
           </marker>
         </defs>
-        <line x1="14" y1="12" x2="14" y2="138" stroke="#e6e2d8" stroke-width="1.4"/>
+        <line x1="14" y1="10" x2="14" y2="116" stroke="#e6e2d8" stroke-width="1.4"/>
 
-        <circle cx="14" cy="24" r="3.6" fill="#918d83"/>
-        <text class="s-q" x="28" y="27">Did every requested check actually finish?</text>
-        <line x1="332" y1="24" x2="392" y2="24" stroke="#918d83" stroke-width="1.1" marker-end="url(#ar1)"/>
-        <text class="s-tiny" x="340" y="19" style="fill:#918d83">no</text>
-        <rect x="400" y="13" width="116" height="22" rx="3" fill="#fbf1ec" stroke="#d97757"/>
-        <text class="s-v" x="412" y="28" style="fill:#b85636">exit 3 · incomplete</text>
-        <text class="s-sub" x="526" y="28" style="font-size:7.4px">a missing scanner is not a clean run</text>
+        <circle cx="14" cy="20" r="3.6" fill="#918d83"/>
+        <text class="s-q" x="28" y="23">Did every requested check actually finish?</text>
+        <line x1="332" y1="20" x2="392" y2="20" stroke="#918d83" stroke-width="1.1" marker-end="url(#ar1)"/>
+        <text class="s-tiny" x="340" y="15" style="fill:#918d83">no</text>
+        <rect x="400" y="9" width="116" height="22" rx="3" fill="#fbf1ec" stroke="#d97757"/>
+        <text class="s-v" x="412" y="24" style="fill:#b85636">exit 3 · incomplete</text>
+        <text class="s-sub" x="526" y="24" style="font-size:7.4px">a missing scanner, or nothing analyzable, is not a clean run</text>
 
-        <circle cx="14" cy="62" r="3.6" fill="#918d83"/>
-        <text class="s-q" x="28" y="65">Was the invocation itself valid, and every selected scanner compatible?</text>
-        <line x1="332" y1="62" x2="392" y2="62" stroke="#918d83" stroke-width="1.1" marker-end="url(#ar1)"/>
-        <text class="s-tiny" x="340" y="57" style="fill:#918d83">no</text>
-        <rect x="400" y="51" width="116" height="22" rx="3" fill="#ffffff" stroke="#e6e2d8"/>
-        <text class="s-v" x="412" y="66" style="fill:#565550">exit 2 · usage</text>
-        <text class="s-sub" x="526" y="66" style="font-size:7.4px">wrong flags, or a scanner below its minimum version</text>
+        <circle cx="14" cy="52" r="3.6" fill="#918d83"/>
+        <text class="s-q" x="28" y="55">Was the invocation itself valid, and every selected scanner compatible?</text>
+        <line x1="332" y1="52" x2="392" y2="52" stroke="#918d83" stroke-width="1.1" marker-end="url(#ar1)"/>
+        <text class="s-tiny" x="340" y="47" style="fill:#918d83">no</text>
+        <rect x="400" y="41" width="116" height="22" rx="3" fill="#ffffff" stroke="#e6e2d8"/>
+        <text class="s-v" x="412" y="56" style="fill:#565550">exit 2 · usage</text>
+        <text class="s-sub" x="526" y="56" style="font-size:7.4px">wrong flags, or a scanner below its minimum version</text>
 
-        <circle cx="14" cy="100" r="3.6" fill="#918d83"/>
-        <text class="s-q" x="28" y="103">Is there a finding at or above the threshold you asked to fail on?</text>
-        <line x1="332" y1="100" x2="392" y2="100" stroke="#918d83" stroke-width="1.1" marker-end="url(#ar1)"/>
-        <text class="s-tiny" x="340" y="95" style="fill:#918d83">yes</text>
-        <rect x="400" y="89" width="116" height="22" rx="3" fill="#ffffff" stroke="#d97757"/>
-        <text class="s-v" x="412" y="104" style="fill:#b85636">exit 1 · findings</text>
-        <text class="s-sub" x="526" y="104" style="font-size:7.4px">definite and actionable</text>
+        <circle cx="14" cy="84" r="3.6" fill="#918d83"/>
+        <text class="s-q" x="28" y="87">Is there a finding at or above the threshold you asked to fail on?</text>
+        <line x1="332" y1="84" x2="392" y2="84" stroke="#918d83" stroke-width="1.1" marker-end="url(#ar1)"/>
+        <text class="s-tiny" x="340" y="79" style="fill:#918d83">yes</text>
+        <rect x="400" y="73" width="116" height="22" rx="3" fill="#ffffff" stroke="#d97757"/>
+        <text class="s-v" x="412" y="88" style="fill:#b85636">exit 1 · findings</text>
+        <text class="s-sub" x="526" y="88" style="font-size:7.4px">definite and actionable</text>
 
-        <circle cx="14" cy="134" r="3.6" fill="#3f6b5f"/>
-        <text class="s-q" x="28" y="137" style="font-weight:700">Everything ran, nothing crossed the threshold.</text>
-        <rect x="400" y="123" width="116" height="22" rx="3" fill="#eef4f1" stroke="#3f6b5f"/>
-        <text class="s-v" x="412" y="138" style="fill:#3f6b5f">exit 0 · clean</text>
-        <text class="s-sub" x="526" y="138" style="font-size:7.4px">“nothing blocking was found” — never “verified safe”</text>
+        <circle cx="14" cy="112" r="3.6" fill="#3f6b5f"/>
+        <text class="s-q" x="28" y="115" style="font-weight:700">Everything ran, nothing crossed the threshold.</text>
+        <rect x="400" y="101" width="116" height="22" rx="3" fill="#eef4f1" stroke="#3f6b5f"/>
+        <text class="s-v" x="412" y="116" style="fill:#3f6b5f">exit 0 · clean</text>
+        <text class="s-sub" x="526" y="116" style="font-size:7.4px">“nothing blocking was found” — never “verified safe”</text>
       </svg>
       <p class="figcap">Fig. 2 — The exit-code contract. Incomplete outranks clean, so a check that silently did not run cannot produce a green build.</p>
     </figure>
   </section>
 
-  <section class="rule-top">
-    <h2>Eight things the tool will not do, and where that is enforced</h2>
-    <table>
+  <section class="rule-top tight">
+    <h2>Nine things the tool will not do, and where that is enforced</h2>
+    <table class="dense">
       <tr><th>Refusal</th><th>Why, and where</th></tr>
-      <tr><td>say “compliant”</td><td>The word never appears in any output. A test asserts it, so it cannot be reintroduced by accident. <span class="note">tests/test_attest.py</span></td></tr>
-      <tr><td>claim complete protection</td><td><code>protection_complete</code> is always false. Static analysis cannot see a running system, and the schema says so. <span class="note">docs-canonical/SECURITY.md</span></td></tr>
-      <tr><td>fill an evidence gap</td><td>The audit projection has 12 control rows; 5 carry an empty evidence list, with the reason, rather than a borrowed citation. <span class="note">attest.py</span></td></tr>
-      <tr><td>use unverified calibration</td><td>The shipped precision table has 59 historical samples. At runtime every one of them is quarantined: retained for audit, excluded from any probability. <span class="note">calibration.py</span></td></tr>
-      <tr><td>call coverage “recall”</td><td>The corpus truth labels are <code>null</code> on purpose. The 10/10 proof measures whether the surface was found, not whether a vulnerability was. <span class="note">corpus.json</span></td></tr>
-      <tr><td>run a scanner unasked</td><td>TruffleHog performs live secret verification, so it runs only when named, even when installed. <span class="note">scanners.py</span></td></tr>
-      <tr><td>guess reachability</td><td>A vulnerable dependency is tagged <code>imported</code>, <code>no-import-found</code>, or <code>n/a</code> for ecosystems whose imports are not parsed. It never rounds <code>n/a</code> to safe. <span class="note">enrichment.py</span></td></tr>
-      <tr><td>claim a benchmark it has not run</td><td>The competitor comparison exists as a written protocol. Until it is executed, no head-to-head precision claim is made. <span class="note">BENCHMARKS.md</span></td></tr>
+      <tr><td>say “compliant”</td><td>The word appears in no output, and a test asserts that, so it cannot come back by accident. <span class="note">tests/test_attest.py</span></td></tr>
+      <tr><td>claim complete protection</td><td><code>protection_complete</code> is always false: static analysis cannot see a running system. <span class="note">docs-canonical/SECURITY.md</span></td></tr>
+      <tr><td>fill an evidence gap</td><td>The audit projection has 12 control rows; 5 carry an empty evidence list, with the reason. <span class="note">attest.py</span></td></tr>
+      <tr><td>count “unknown” as “false”</td><td>The old rule scored every unmatched finding as a false positive. Relabelling against pinned source left 21 reviewed labels and <strong>35 findings still unknown</strong>, excluded from both sides. <span class="note">calibration.json</span></td></tr>
+      <tr><td>optimize its own score</td><td>Anything fitted from labels uses a strictly proper rule, Brier or log score, never accuracy or F1, which reward confident wrongness. It is printed, never optimized. <span class="note">calibration.SCORING_RULE</span></td></tr>
+      <tr><td>run a scanner unasked</td><td>TruffleHog verifies secrets against live services, so it runs only when named. <span class="note">scanners.py</span></td></tr>
+      <tr><td>read a cell too thin to trust</td><td>A per-class probability needs at least five samples. One class reaches that today; the rest fall back a tier, and the output names which. <span class="note">calibration.MIN_N</span></td></tr>
+      <tr><td>guess reachability</td><td>A vulnerable dependency is tagged <code>imported</code>, <code>no-import-found</code> or <code>n/a</code>. It never rounds <code>n/a</code> to safe. <span class="note">enrichment.py</span></td></tr>
+      <tr><td>claim a benchmark it has not run</td><td>The competitor comparison exists as a written protocol. Until it runs, no head-to-head claim is made. <span class="note">BENCHMARKS.md</span></td></tr>
     </table>
   </section>
 
-  <section class="rule-top">
+  <section class="rule-top tight">
     <h2>The one place it fails open, on purpose</h2>
-    <p>The in-editor hook that checks an agent's edit as it lands <strong>exits 0 when it cannot run</strong>, and
-    says on stderr that the edit was not checked. The reasoning is written into the README: a check that
-    blocks every edit when broken gets uninstalled, and then there is no check at all. The same hook refuses
-    an environment-variable escape hatch, because the agent is the one that can set environment variables.
-    It is documented as developer ergonomics, not a compliance control.</p>
+    <p>The in-editor hook that checks an agent's edit <strong>exits 0 when it cannot run</strong>, and says on stderr that the edit
+    was not checked: a check that blocks every edit when broken gets uninstalled, and then there is no check at all. It refuses an
+    environment-variable escape hatch, because the agent is what sets environment variables.</p>
   </section>
 
   <div class="footer"><span>websec-validator — Technical Brief</span><span>Page 2 of 8 · What it refuses to say</span></div>
@@ -412,24 +424,24 @@ cluster_summary        <span class="kw">distinct issues</span>: <span class="num
         </defs>
         <line x1="14" y1="12" x2="14" y2="120" stroke="#e6e2d8" stroke-width="1.4"/>
 
-        <circle cx="14" cy="24" r="3.6" fill="#918d83"/>
-        <text class="s-q" x="28" y="27">Confirmed dynamically, a verified live secret, or a fixed-version HIGH/CRITICAL CVE?</text>
+        <circle cx="14" cy="20" r="3.6" fill="#918d83"/>
+        <text class="s-q" x="28" y="23">Confirmed dynamically, a verified live secret, or a fixed-version HIGH/CRITICAL CVE?</text>
         <line x1="452" y1="24" x2="512" y2="24" stroke="#918d83" stroke-width="1.1" marker-end="url(#ar3)"/>
         <text class="s-tiny" x="460" y="19" style="fill:#918d83">yes</text>
         <rect x="520" y="13" width="72" height="22" rx="3" fill="#fbf1ec" stroke="#d97757"/>
         <text class="s-v" x="532" y="28" style="fill:#b85636">HIGH</text>
         <text class="s-sub" x="600" y="28" style="font-size:7.4px">something outside the code agrees</text>
 
-        <circle cx="14" cy="62" r="3.6" fill="#918d83"/>
-        <text class="s-q" x="28" y="65">Concrete static evidence: a sink fed by request input, a route with no auth decision?</text>
+        <circle cx="14" cy="52" r="3.6" fill="#918d83"/>
+        <text class="s-q" x="28" y="55">Concrete static evidence: a sink fed by request input, a route with no auth decision?</text>
         <line x1="452" y1="62" x2="512" y2="62" stroke="#918d83" stroke-width="1.1" marker-end="url(#ar3)"/>
         <text class="s-tiny" x="460" y="57" style="fill:#918d83">yes</text>
         <rect x="520" y="51" width="72" height="22" rx="3" fill="#ffffff" stroke="#d97757"/>
         <text class="s-v" x="532" y="66" style="fill:#b85636">MEDIUM</text>
         <text class="s-sub" x="600" y="66" style="font-size:7.4px">the default CI gate</text>
 
-        <circle cx="14" cy="100" r="3.6" fill="#918d83"/>
-        <text class="s-q" x="28" y="103">Otherwise: a single-source hypothesis.</text>
+        <circle cx="14" cy="84" r="3.6" fill="#918d83"/>
+        <text class="s-q" x="28" y="87">Otherwise: a single-source hypothesis.</text>
         <line x1="452" y1="100" x2="512" y2="100" stroke="#918d83" stroke-width="1.1" marker-end="url(#ar3)"/>
         <rect x="520" y="89" width="72" height="22" rx="3" fill="#ffffff" stroke="#e6e2d8"/>
         <text class="s-v" x="532" y="104" style="fill:#565550">LOW</text>
@@ -439,6 +451,9 @@ cluster_summary        <span class="kw">distinct issues</span>: <span class="num
         <text class="s-tiny" x="12" y="147">Then, within the label</text>
         <text class="s-sub" x="12" y="161" style="font-size:7.4px">Is the vulnerable package actually imported? Is the CVE on the KEV list, and what is its EPSS score? Does an invariant flip to VIOLATED? Only when a</text>
         <text class="s-sub" x="12" y="170" style="font-size:7.4px">row is confirmed-vulnerable, its evidence is verified, and it came from the dynamic layer. A static hunch never changes the constitution.</text>
+        <text class="s-tiny" x="600" y="147" style="fill:#b85636">P(real), measured</text>
+        <text class="s-sub" x="600" y="160" style="font-size:7.2px">LOW 0.545 [0.28, 0.787] · n=11</text>
+        <text class="s-sub" x="600" y="170" style="font-size:7.2px">MEDIUM 0.7 [0.397, 0.892] · n=10</text>
       </svg>
       <p class="figcap">Fig. 4 — Severity order. A HIGH always has something outside the static analysis agreeing with it.</p>
     </figure>
@@ -663,6 +678,10 @@ cluster_summary        <span class="kw">distinct issues</span>: <span class="num
         Noir present and <strong>8/10</strong> without it, with 7 truth labels left unknown. Both numbers are committed as
         JSON with the detector revision hash, and the sentences that quote them are bound to those JSON fields by DocGuard,
         so the prose cannot outrun the artifact.</p>
+        <p class="note">In September 2026 those 56 corpus findings were relabelled one at a time against the pinned
+        source, each with a note and the revision it was read at. That produced <strong>21 reviewed labels</strong> and a
+        measured probability per severity, replacing a prior that had been guessed. The other <strong>35 stay unknown</strong>
+        and are counted on neither side.</p>
         <p class="note">And one real pentest: an authenticated engagement whose two Criticals and two Highs sat in the
         managed-cloud boundary the recon did not yet parse. Those findings became extractor rows, and two of the retest
         lessons corrected the tool's own earlier output.</p>
@@ -715,7 +734,7 @@ cluster_summary        <span class="kw">distinct issues</span>: <span class="num
     </figure>
 
     <div class="statband">
-      <div><div class="fig">1,363</div><div class="cap">tests across 68 files, stdlib only, no public network, at the time of writing</div><div class="src">tests/ · counted by the unittest loader</div></div>
+      <div><div class="fig">1,533</div><div class="cap">tests across 79 files, stdlib only, no public network, at the time of writing</div><div class="src">tests/ · counted by the unittest loader</div></div>
       <div><div class="fig clay">0</div><div class="cap">runtime dependencies. The tool shells out to scanners and never imports them</div><div class="src">pyproject.toml · dependencies = []</div></div>
       <div><div class="fig sage">5</div><div class="cap">required checks, cross-verified against the jobs the run actually emits</div><div class="src">.github/required-checks.json</div></div>
     </div>
@@ -867,9 +886,9 @@ cluster_summary        <span class="kw">distinct issues</span>: <span class="num
   </section>
 
   <section class="rule-top">
-    <h2>Sixteen weeks, twenty-seven releases, one breaking change</h2>
+    <h2>Sixteen weeks, twenty-eight releases, one breaking change</h2>
     <figure>
-      <svg viewBox="0 0 760 118" role="img" aria-label="Timeline from the first public release on 30 May 2026 to 0.17.1 on 22 September 2026, with milestones for CDK and AppSync parsing, LLM security, SARIF and CI gate, MCP over HTTP, hermeticity, schema 2.0, the in-loop gate and attest, and the exit-code contract">
+      <svg viewBox="0 0 760 130" role="img" aria-label="Timeline from the first public release on 30 May 2026 to 0.18.0 on 22 September 2026, with milestones for CDK and AppSync parsing, LLM security, SARIF and CI gate, MCP over HTTP, hermeticity, schema 2.0, the in-loop gate and attest, the exit-code contract, and the 0.18.0 measured calibration">
         <line x1="10" y1="40" x2="750" y2="40" stroke="#191917" stroke-width="1.4"/>
         <g fill="#191917">
           <circle cx="10" cy="40" r="3.4"/><circle cx="60" cy="40" r="3.4"/><circle cx="150" cy="40" r="3.4"/><circle cx="215" cy="40" r="3.4"/>
@@ -886,18 +905,19 @@ cluster_summary        <span class="kw">distinct issues</span>: <span class="num
           <text x="330" y="58">0.12 · 11 Sep</text>
           <text x="560" y="24">0.14 · 14 Sep</text>
           <text x="600" y="58">0.16 · 18 Sep</text>
-          <text x="660" y="24">0.17 · 22 Sep</text>
-          <text x="720" y="58" style="fill:#b85636">0.17.1</text>
+          <text x="648" y="24">0.17 · 22 Sep</text>
+          <text x="706" y="58" style="fill:#b85636">0.18 · 22 Sep</text>
         </g>
         <g class="s-sub" style="font-size:6.9px">
           <text x="10" y="80">First public line. PyPI via Trusted Publishing from day one.</text>
           <text x="10" y="91">0.3 walks AWS-CDK, AppSync SDL and VTL: the managed-cloud boundary a real pentest exposed.</text>
           <text x="10" y="102">0.7 adds the LLM / agent extractor. 0.10 adds SARIF output and the CI gate. 0.11 adds MCP over HTTP and the benchmark protocol.</text>
           <text x="10" y="113">0.12 fixes the hermeticity bug and adds branch protection. 0.14 ships schema 2.0. 0.16 adds the in-loop gate and attest. 0.17 splits the exit codes: the one breaking change.</text>
+          <text x="10" y="124">0.18 relabels the corpus for a measured P(real), and makes a scan that read nothing report as NO ANALYZABLE SOURCE rather than as complete.</text>
         </g>
         <text class="s-sub" x="395" y="24" style="font-size:6.6px;fill:#918d83">← gap: July to September →</text>
       </svg>
-      <p class="figcap">Fig. 9 — Release cadence. 0.17.1 changed no behaviour: it corrected only what the tool says about itself.</p>
+      <p class="figcap">Fig. 9 — Release cadence. Two of the last three releases corrected what the tool says about itself rather than what it detects.</p>
     </figure>
   </section>
 
@@ -913,7 +933,7 @@ cluster_summary        <span class="kw">distinct issues</span>: <span class="num
     open an issue.</p>
   </section>
 
-  <div class="footer"><span>websec-validator — Technical Brief · v0.17.1</span><span>Page 8 of 8 · Where it plugs in</span></div>
+  <div class="footer"><span>websec-validator — Technical Brief · v0.18.0</span><span>Page 8 of 8 · Where it plugs in</span></div>
 </div>
 
 </body>
