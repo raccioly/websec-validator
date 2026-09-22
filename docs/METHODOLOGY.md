@@ -465,7 +465,12 @@ map into a full ASVS index lookup.)
 `coverage.json` records requested extractor/scanner execution separately from scope exclusions,
 unsupported inputs and optional unavailable tools. Read failures, file/report caps, parse errors,
 timeouts and missing explicitly selected tools cannot silently produce a clean completed gate.
-`--require-complete` and `--fail-on` return exit 2 on these execution gaps and preserve partial output.
+`--require-complete` and `--fail-on` return exit **3** on these execution gaps and preserve partial
+output (exit 2 is reserved for usage/configuration errors, so a CI caller can separate "the code has
+a problem" from "the toolchain has a problem"). A run that is both gate-failing and incomplete exits
+1 and records `gate.failure_kind: findings+incomplete`. A scanner that RAN but whose individual rules
+timed out is recorded as `outcome: partial` with the rule IDs in `rules_incomplete` — "the scanner
+errored" and "these five rules did not run" are different facts and get different words.
 The analyzed-input digest hashes the successfully read source/config content; detector revision hashes
 actual implementation/rule data, so a dirty checkout is distinguishable from the package version.
 

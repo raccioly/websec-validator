@@ -200,7 +200,7 @@ class AdoptionEntrypointTests(unittest.TestCase):
 
     def test_documented_gate_blocks_read_loss_with_partial_artifact(self):
         status, envelope = self.run_hook('x=1\n', oversized=True)
-        self.assertEqual(status, 2)
+        self.assertEqual(status, 3)
         self.assertFalse(envelope['coverage']['execution_complete'])
 
 

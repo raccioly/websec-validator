@@ -643,7 +643,13 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
     _auth = facts.get("auth", {}) or {}
     _jwt_used = bool((_auth.get("signal_counts") or {}).get("jwt")) or bool(_auth.get("jwt_sign_verify_present"))
     for sd in (_auth.get("insecure_secret_defaults", []) or []):
-        if sd.get("dev_ish") and _jwt_used:
+        if sd.get("guarded_by_startup_assertion"):
+            # field report #9: the app asserts this env var at startup and will not boot without it,
+            # so the literal cannot be reached in any environment that runs. Still reported — the
+            # literal should be deleted so the guarantee is local rather than one import away, and an
+            # assertion on a path that never executes would leave the fallback live.
+            sev, conf = "LOW", "MEDIUM"
+        elif sd.get("dev_ish") and _jwt_used:
             sev, conf = "CRITICAL", "MEDIUM"        # dev placeholder + the repo signs JWTs → forgeable
         elif sd.get("dev_ish"):
             sev, conf = "HIGH", "MEDIUM"
@@ -655,6 +661,10 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                         f"{sd.get('literal')!r} — if that fallback is reached at runtime, anyone who reads the "
                         f"source can forge tokens."
                         + (" The repo signs/verifies JWTs." if _jwt_used else "")
+                        + (f" A startup assertion enforces {sd.get('env_var')}, so this fallback is "
+                           "UNREACHABLE in any environment that boots — demoted, not dropped: verify "
+                           "the assertion runs on the path that reads this value, and delete the literal."
+                           if sd.get("guarded_by_startup_assertion") else "")
                         + " Confirm reachability with the forged-token / hs256 probe (it seeds this literal)."}]))
 
     # ---- 1b2. Explicitly-public serverless endpoints (Function URL AuthType: NONE) ----
@@ -695,7 +705,10 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         conf = "HIGH" if (cat in ("secret", "sca") and sev in ("HIGH", "CRITICAL")) else "MEDIUM"
         native_confidence = None
         if "bandit" in (t.get("tools") or []):
-            value = t.get("confidence")
+            # `native_confidence` is the producer's OWN value, preserved verbatim by
+            # normalize_findings; `confidence` may now be a websec-derived one, which must never be
+            # mistaken for the scanner having reported it.
+            value = t.get("native_confidence", t.get("confidence"))
             native_confidence = value if isinstance(value, str) and value in CONF_RANK else "UNKNOWN"
             # The ledger's categorical policy currently has no UNKNOWN bucket.
             # Route conservatively and retain the actual unknown producer label.
@@ -745,7 +758,14 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
             scanner_finding["standards"]["cwe"] = sorted(set(scanner_finding["standards"]["cwe"] + cwes))
         for key in ("rule_id", "rule", "check_id", "package", "pkg", "cve", "vulnerability_id", "resource",
                     "installed", "fixed", "ecosystem", "advisory_aliases",
-                    "resource_id", "service", "symbol", "sink", "semantic_id", "epss", "epss_pct", "kev", "reachability", "intel", "intel_status"):
+                    "resource_id", "service", "symbol", "sink", "semantic_id", "epss", "epss_pct", "kev", "reachability", "intel", "intel_status",
+                    # field report #3: WHERE the secret lives. `in_tree=False` means the file is gone
+                    # from the working tree but the blob is still fetchable — the reader could only
+                    # discover that by running `git log`. `commit`/`commit_date` come from gitleaks'
+                    # own record, so this costs no extra subprocess.
+                    "in_tree", "history_only", "commit", "commit_short", "commit_date", "commit_author",
+                    # field report #6: a stable per-INSTANCE id + why this confidence was assigned.
+                    "instance_id", "confidence_basis"):
             if key in t:
                 scanner_finding[key] = t[key]
         if not scanner_finding.get("rule_id") and t.get("key"):
@@ -877,6 +897,28 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         out.append(_f(f"Secret exposed to client: {leak}", "client-exposure", "client-exposure",
                       "HIGH", "HIGH", leak, [{"layer": "recon", "detail": "a secret (by name, value-shape, or CDK "
                        "build-injection) reaches the browser bundle"}]))
+    # A credential-shaped literal in a COMMITTED (tracked, non-example) dotenv file. Nothing caught
+    # this before: no bundled scanner has an AppSync rule, and every extractor was extension-gated
+    # so `.env` was never read at all. A gitignored `.env` is local-only and excluded upstream.
+    for leak in _cx.get("committed_env_secrets", []):
+        out.append(_f(f"Credential in a committed .env file: {leak}", "client-exposure",
+                      "client-exposure", "HIGH", "HIGH", leak,
+                      [{"layer": "recon", "detail": "a credential-shaped value in a dotenv file that git "
+                        "TRACKS (not gitignored, not a *.example template) — it is in the repository for "
+                        "anyone with clone access. Rotate it, remove the file from the index, and gitignore it; "
+                        "removing it from HEAD alone leaves the blob fetchable from history."}]))
+    # field report #5: a secret SHAPE matched inside a `*.example`/`*.sample`/doc file, or a value
+    # that announces itself as a placeholder (`da2-xxxxxxxxxxxxxxxxxxxxxxxxxx`). Its own tier at INFO:
+    # flagging a documented placeholder as a HIGH AppSync key is a precision bug, because that file
+    # exists to contain placeholders. Still REPORTED, never dropped — a real key does occasionally get
+    # pasted into `.env.example`, and that is precisely the mistake worth surfacing.
+    for ex in _cx.get("placeholder_secret_examples", []):
+        out.append(_f(f"Placeholder secret in an example/doc file: {ex}", "client-exposure",
+                      "client-exposure", "INFO", "LOW", ex,
+                      [{"layer": "recon", "detail": "a credential-shaped value in a file whose purpose is to "
+                        "hold placeholders, or a value that is self-evidently a fill-me-in placeholder. Not "
+                        "counted as a browser leak. Confirm it really is fake — if a real key was pasted here, "
+                        "it is committed and must be rotated."}]))
     # intended-public analytics ingest tokens (PostHog/Usertour/…) — INFO, designed to ship; surfaced
     # for completeness so they're acknowledged-and-cleared, not silently treated as a HIGH leak.
     for tok in _cx.get("intended_public_analytics", []):

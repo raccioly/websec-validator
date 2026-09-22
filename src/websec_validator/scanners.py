@@ -25,7 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import enrichment
-from .extractors.base import SKIP_DIRS, is_test_file, path_in_skip_dir, read_artifact
+from .extractors.base import (SKIP_DIRS, is_doc_or_example, is_example_file, is_placeholder_value,
+                             is_test_file, path_in_skip_dir, read_artifact)
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,13 @@ class Scanner:
     install: str = ""      # one-line install hint for the briefing
     # argv builder: (target, out_file) -> list[str]; None means "detect only" for now
     argv: object = None
+    # Lowest version whose CLI matches the argv WE build. Presence on PATH is not compatibility:
+    # osv-scanner 2.4.0 was installed, detected, selected, and produced nothing usable because the
+    # adapter's invocation was wrong for it — `doctor` reported a green ✓ the whole time (field
+    # report #2). A version below this is reported LOUDLY but never blocks: the operator's binary is
+    # the operator's business, and we would rather run and report a gap than refuse to run.
+    min_version: tuple = ()
+    version_note: str = ""
 
 
 # ONE source of truth for "don't scan here": the walker's SKIP_DIRS (extractors/base.py).
@@ -117,9 +125,15 @@ def _annotate_history_only_secrets(raw: list, target: Path | None) -> int:
     for f in raw:
         if f.get("tool") != "gitleaks" or f.get("category") != "secret":
             continue
-        # A working-tree hit is by definition present in the tree; only history mode can be
-        # history-ONLY. Guard on the recorded mode rather than re-deriving it from the filesystem.
+        # EVERY gitleaks finding is labelled with where it lives, not only the history-only ones.
+        # Previously a history-mode hit on a file that still exists carried no marker at all, and a
+        # hit on a DELETED file was flagged only by appending prose to the title — so a reader
+        # scanning a table of 22 HIGHs had no column that said "these are commit-graph blobs, not
+        # your working tree" and had to run `git log` to find out (field report #3). `in_tree` is a
+        # first-class field; `scan_mode` already says which surface produced it.
         if f.get("scan_mode") == "dir":
+            # A working-tree hit is present in the tree by definition — no filesystem probe needed.
+            f.setdefault("in_tree", True)
             continue
         rel = _rel_to(f.get("file", ""), target)
         if not rel:
@@ -128,13 +142,18 @@ def _annotate_history_only_secrets(raw: list, target: Path | None) -> int:
             exists = (Path(target) / rel).exists()
         except OSError:
             continue
+        f["in_tree"] = exists
         # guard on the FIELD, not a title substring: several provider notes already mention the word
         # "history" ("…does NOT scrub pushed history"), which silently suppressed this annotation.
         if not exists and not f.get("history_only"):
             f["history_only"] = True
-            f["title"] += (" [HISTORY-ONLY: the file is already gone from the working tree — someone "
-                           "likely 'fixed' this by deleting it. The blob is still reachable in the "
-                           "repo, so it is NOT fixed until the credential is rotated.]")
+            seen = f.get("commit_short") or f.get("commit") or ""
+            where = f" last seen in commit {seen}" if seen else ""
+            when = f" ({f['commit_date']})" if f.get("commit_date") else ""
+            f["title"] += (f" [HISTORY-ONLY — not in the working tree;{where or ' reachable in git history'}"
+                           f"{when}. Someone likely 'fixed' this by deleting the file. The blob is still "
+                           "fetchable by anyone with the repo, so it is NOT fixed until the credential "
+                           "is rotated.]")
             n += 1
     return n
 
@@ -223,7 +242,16 @@ def _osv(target: Path, out: Path, excludes=()) -> list:
     # the shared `cve|pkg|CVE` fingerprint (→ tools:[trivy,osv-scanner]), while OSV catches lockfile
     # formats Trivy misses. Like Trivy's DB, it consults an advisory source about YOUR deps — not the
     # target app. Exit 1 = "vulns found" (not an error); the run loop writes output regardless.
-    return ["osv-scanner", "scan", "--format", "json", "--output", str(out), str(target)]
+    #
+    # `--recursive` IS LOAD-BEARING, not a tuning flag. osv-scanner only extracts from the directory
+    # it is handed unless told to descend, so on any repo whose lockfiles are not at the root —
+    # `backend/package-lock.json`, a monorepo, basically every real project — the walk finished with
+    # "0 Extract calls" and exited with `No package sources found`, writing NO output file at all.
+    # websec then recorded `osv-scanner: error` and reported zero dependency findings. Reproduced
+    # against osv-scanner 2.4.0 with two nested package-lock.json: without -r, 0 packages; with -r,
+    # both lockfiles scanned. Dependency CVEs are the highest-frequency true-positive class in any
+    # repo, so this silently removed the single most productive scanner in the set (field report #2).
+    return ["osv-scanner", "scan", "--recursive", "--format", "json", "--output", str(out), str(target)]
 
 
 def _gosec(target: Path, out: Path, excludes=()) -> list:
@@ -258,26 +286,39 @@ def _bandit(target: Path, out: Path, excludes=()) -> list:
 
 REGISTRY: tuple = (
     Scanner("trivy", "Trivy", "sca", "trivy",
-            install="brew install trivy  # pin by digest in CI", argv=_trivy),
+            install="brew install trivy  # pin by digest in CI", argv=_trivy,
+            min_version=(0, 38, 0),
+            version_note="`--scanners vuln,secret,misconfig` replaced `--security-checks` in 0.38"),
     Scanner("gitleaks", "Gitleaks", "secrets", "gitleaks",
-            install="brew install gitleaks", argv=_gitleaks),
+            install="brew install gitleaks", argv=_gitleaks,
+            min_version=(8, 0, 0),
+            version_note="8.19+ adds the `git`/`dir` subcommands; older builds fall back to the "
+                         "deprecated `detect` spelling automatically"),
     # Same binary, second pass: history mode and working-tree mode are DISJOINT surfaces in gitleaks
     # and neither subsumes the other. Kept as its own registry entry so the existing one-argv-per-
     # scanner runner is untouched; `--scanners gitleaks` selects both (see _expand_only).
     Scanner("gitleaks-dir", "Gitleaks (working tree)", "secrets", "gitleaks",
             install="brew install gitleaks", argv=_gitleaks_dir),
     Scanner("semgrep", "Semgrep/OpenGrep", "sast", "semgrep",
-            install="pipx install semgrep  # or opengrep for fully-OSS", argv=_semgrep),
+            install="pipx install semgrep  # or opengrep for fully-OSS", argv=_semgrep,
+            min_version=(1, 0, 0), version_note="`semgrep scan` + repeatable `--config` need 1.x"),
     Scanner("checkov", "Checkov", "iac", "checkov",
-            install="pipx install checkov", argv=_checkov),
+            install="pipx install checkov", argv=_checkov,
+            min_version=(2, 0, 0), version_note="the parsed JSON summary shape is 2.x+"),
     Scanner("bandit", "Bandit", "sast", "bandit", languages=("python",),
-            install="pipx install bandit", argv=_bandit),
+            install="pipx install bandit", argv=_bandit,
+            min_version=(1, 7, 0), version_note="`--ignore-nosec` + `metrics._totals` need 1.7+"),
     Scanner("gosec", "gosec", "sast", "gosec", languages=("go",),
-            install="brew install gosec  # Go SAST", argv=_gosec),
+            install="brew install gosec  # Go SAST", argv=_gosec,
+            min_version=(2, 0, 0), version_note="`-no-fail` and JSON `Issues[]` are 2.x"),
     Scanner("brakeman", "Brakeman", "sast", "brakeman", languages=("ruby",),
-            install="gem install brakeman  # Rails SAST", argv=_brakeman),
+            install="gem install brakeman  # Rails SAST", argv=_brakeman,
+            min_version=(4, 0, 0), version_note="`--no-exit-on-warn/--no-exit-on-error` need 4.x"),
     Scanner("osv-scanner", "OSV-Scanner", "sca", "osv-scanner",
-            install="brew install osv-scanner", argv=_osv),
+            install="brew install osv-scanner", argv=_osv,
+            min_version=(2, 0, 0),
+            version_note="the `scan` subcommand is 2.x; 1.x takes the directory as a bare "
+                         "argument and will reject this invocation"),
     # OPT-IN ONLY (--verify-secrets): verification calls third-party APIs with the found credential.
     # run_available() skips this unless explicitly enabled, even when the binary is installed.
     Scanner("trufflehog", "TruffleHog (live verification)", "secrets", "trufflehog",
@@ -287,7 +328,68 @@ REGISTRY: tuple = (
 )
 
 
-def detect(stack_languages: list | None = None) -> dict:
+_VERSION_RE = re.compile(r"(\d+)\.(\d+)(?:\.(\d+))?")
+_VERSION_CACHE: dict = {}
+
+
+def probe_version(binary: str, timeout: int = 15) -> str | None:
+    """`<binary> --version` → the first dotted version in its output, or None.
+
+    Every scanner in the registry prints a version in a slightly different shape ("osv-scanner
+    version: 2.4.0", "gitleaks version 8.30.1", "Version: 0.72.0", bare "1.177.0"), so we take the
+    first dotted number rather than teaching this nine formats. Cached per process. NEVER raises:
+    a version probe that fails must degrade to "unknown", never break `doctor` or a scan."""
+    if binary in _VERSION_CACHE:
+        return _VERSION_CACHE[binary]
+    version = None
+    try:
+        proc = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=timeout)
+        m = _VERSION_RE.search((proc.stdout or "") + "\n" + (proc.stderr or ""))
+        if m:
+            version = ".".join(part for part in m.groups() if part is not None)
+    except Exception:
+        version = None
+    _VERSION_CACHE[binary] = version
+    return version
+
+
+def _parse_version(text: str | None) -> tuple:
+    m = _VERSION_RE.search(text or "")
+    return tuple(int(part) for part in m.groups() if part is not None) if m else ()
+
+
+def check_version(scanner: Scanner) -> dict:
+    """Is the INSTALLED build one this adapter's argv actually works with?
+
+    `doctor` used to answer only "is the binary on PATH", which is a different and much weaker
+    question. An incompatible-but-present scanner is the worst state to be in: it is selected, it
+    runs, it fails in its own idiom, and its silence is indistinguishable from a clean result.
+    Returns {version, ok, status, note}; status is one of ok | too_old | unknown | not_installed."""
+    if not shutil.which(scanner.binary):
+        return {"version": None, "ok": False, "status": "not_installed", "note": ""}
+    version = probe_version(scanner.binary)
+    if not scanner.min_version:
+        return {"version": version, "ok": True,
+                "status": "ok" if version else "unknown", "note": ""}
+    parsed = _parse_version(version)
+    if not parsed:
+        return {"version": version, "ok": True, "status": "unknown",
+                "note": (f"could not read a version; websec's invocation expects "
+                         f">= {'.'.join(map(str, scanner.min_version))}"
+                         + (f" — {scanner.version_note}" if scanner.version_note else ""))}
+    # Compare on the components the minimum actually specifies, so a "2.4" reading satisfies
+    # a (2, 0, 0) minimum instead of being judged against a missing patch component.
+    want = scanner.min_version[:len(parsed)] or scanner.min_version
+    got = parsed[:len(want)]
+    if got < want:
+        return {"version": version, "ok": False, "status": "too_old",
+                "note": (f"websec builds an invocation that needs "
+                         f">= {'.'.join(map(str, scanner.min_version))}, but {version} is installed"
+                         + (f" — {scanner.version_note}" if scanner.version_note else ""))}
+    return {"version": version, "ok": True, "status": "ok", "note": ""}
+
+
+def detect(stack_languages: list | None = None, check_versions: bool = True) -> dict:
     """Return {'available': [...], 'missing': [...]} for the relevant scanners.
 
     A language-specific scanner (e.g. Bandit/python) is only considered relevant
@@ -305,10 +407,15 @@ def detect(stack_languages: list | None = None) -> dict:
         entry = {"key": s.key, "name": s.name, "category": s.category,
                  "runnable": s.argv is not None}
         if shutil.which(s.binary):
+            if check_versions:
+                entry.update(check_version(s))
             available.append(entry)
         else:
             missing.append({**entry, "install": s.install})
-    return {"available": available, "missing": missing}
+    # A present-but-incompatible scanner is NOT the same as a missing one and must not hide in the
+    # green ✓ list — it is the failure mode that reads as "scanned clean" (field report #2).
+    incompatible = [e for e in available if e.get("status") == "too_old"]
+    return {"available": available, "missing": missing, "incompatible": incompatible}
 
 
 def run_available(target: Path, outdir: Path, stack_languages: list | None = None,
@@ -522,31 +629,52 @@ def _generic_secret(rule: str) -> bool:
 
 # Secrets matched in DOCUMENTATION / EXAMPLE files are overwhelmingly placeholders, not live
 # credentials — e.g. `curl -H "Authorization: Bearer <token>"` in a README/API doc, or a
-# value in `.env.example`. Tier those to LOW + a verify note (still visible — a real key CAN be
+# value in `.env.example`. Tier those down + a verify note (still visible — a real key CAN be
 # pasted into docs by mistake). Dogfooding flagged 4 HIGH curl-auth-header FPs across an API's
 # README + docs/*.md (bug below).
-_DOC_EXT = (".md", ".mdx", ".markdown", ".rst", ".txt", ".adoc")
-_DOC_DIR_MARKERS = ("/docs/", "/doc/", "/examples/", "/example/", "/samples/", "/sample/", "/.github/")
-# …but NOT these: a hardcoded token in a GitHub Actions workflow is live in CI (one of the highest-
-# yield real-world leaks), and a dependency manifest can carry an index URL with embedded credentials.
-# Both live under paths the doc-demotion would otherwise silently tier down to LOW "placeholder".
-_NEVER_DOC = ("/.github/workflows/", "/requirements", "/pipfile", "/poetry.lock")
-_DOC_NAME_PREFIX = ("readme", "changelog", "contributing", "license", "authors", "history", "notice")
-_EXAMPLE_SUFFIX = (".example", ".sample", ".dist", ".template", ".tmpl")
+#
+# The marker tables now live in extractors/base.py so the recon EXTRACTORS share one definition
+# with this pipeline. They had drifted: `client_exposure`'s AppSync `da2-` detector had no
+# doc/example tier at all, so a placeholder in `.env.example` stayed HIGH while the very same
+# file's gitleaks hits were LOW (field report #5).
 _DOC_NOTE = "in a documentation/example file — almost always a placeholder, verify before treating as real"
+# `.env.example` / `config.sample.yml` are a STRONGER signal than a README: the naming convention
+# exists precisely to say "these values are fake, copy me and fill them in". Its own tier + note.
+_EXAMPLE_NOTE = ("in a *.example/*.sample template file — this file exists to hold placeholder values, "
+                 "so a match here is a placeholder unless the value itself looks real")
+_PLACEHOLDER_NOTE = ("the matched VALUE is self-evidently a placeholder (fill-me-in shape), not a "
+                     "credential")
 
 
 def _is_doc_or_example(path: str) -> bool:
-    # "/" prefix so ROOT-LEVEL dirs match the /marker/ patterns too — `examples/app.js`
-    # previously slipped past `/examples/` and kept HIGH (DocGuard field report F1).
-    p = "/" + (path or "").replace("\\", "/").lower().lstrip("/")
-    if any(m in p for m in _NEVER_DOC):
-        return False
-    base = p.rsplit("/", 1)[-1]
-    return (p.endswith(_DOC_EXT)
-            or any(m in p for m in _DOC_DIR_MARKERS)
-            or any(base.startswith(m) for m in _DOC_NAME_PREFIX)
-            or any(s in base for s in _EXAMPLE_SUFFIX))
+    """Thin alias kept for the existing call sites + unit tests; the definition is shared."""
+    return is_doc_or_example(path)
+
+
+def _placeholder_tier(path: str, value: str = "", provider_identified: bool = False) -> tuple:
+    """(severity, note) for a secret match that is a placeholder by FILE or by VALUE — else (None, "").
+
+    Three tiers, weakest to strongest evidence that this is not a credential:
+      * documentation file            → LOW  (a README can still hold a real pasted key)
+      * *.example/*.sample template   → LOW  (the file's whole purpose is fake values)
+      * placeholder-shaped VALUE      → INFO (`da2-xxxxxxxx…`, `your-api-key`, `<TOKEN>`)
+    A placeholder VALUE is decisive wherever it appears, so it wins over the file tiers. Nothing is
+    ever DROPPED — a real key pasted into `.env.example` is precisely the mistake worth catching.
+
+    `provider_identified` DISABLES the value check, and that guard is load-bearing. A provider tier
+    fires on a structural PREFIX — `sk_live_`, `whsec_`, `AKIA` — which is issued by the provider and
+    is itself the evidence. The body after that prefix is opaque, so a low-entropy body proves
+    nothing: `sk_live_aaaaaaaaaaaaaaaaaaaa` matches "a run of identical characters" and is still a
+    Stripe LIVE key. Demoting it to INFO would have been a false NEGATIVE on the single highest-value
+    secret class this tool detects — caught by test_named_provider_key_is_high_not_generic_via_gitleaks.
+    The FILE tiers still apply: a `sk_live_` in `.env.example` is very likely fake, just not INFO-fake."""
+    if not provider_identified and is_placeholder_value(value):
+        return "INFO", _PLACEHOLDER_NOTE
+    if is_example_file(path):
+        return "LOW", _EXAMPLE_NOTE
+    if is_doc_or_example(path):
+        return "LOW", _DOC_NOTE
+    return None, ""
 
 
 def _norm_trivy(data: dict) -> list:
@@ -571,8 +699,10 @@ def _norm_trivy(data: dict) -> list:
                 sev, note = _provider_secret_tier(f"{s.get('Match','')} {s.get('Code','') or ''}")
             if not sev and _generic_secret(rid):
                 sev, note = "MEDIUM", _GENERIC_NOTE
-            if _is_doc_or_example(tgt):
-                sev, note = "LOW", (note + "; " if note else "") + _DOC_NOTE
+            ph_sev, ph_note = _placeholder_tier(tgt, s.get("Match", "") or s.get("Secret", ""),
+                                                provider_identified=bool(sev))
+            if ph_sev and not (sev and ph_sev == "INFO"):
+                sev, note = ph_sev, (note + "; " if note else "") + ph_note
             title = f"secret: {s.get('Title') or rid}" + (f" — {note}" if note else "")
             out.append({"tool": "trivy", "category": "secret", "severity": sev or _sev(s.get("Severity") or "HIGH"),
                         "key": rid, "file": tgt, "line": s.get("StartLine", 0),
@@ -667,11 +797,22 @@ def _norm_gitleaks(data) -> list:
             sev, note = _provider_secret_tier(f"{x.get('Secret','')} {x.get('Match','')}")
         if not sev and _generic_secret(rule):
             sev, note = "MEDIUM", _GENERIC_NOTE
-        if _is_doc_or_example(f):
-            sev, note = "LOW", (note + "; " if note else "") + _DOC_NOTE
+        # `sev` is set above ONLY by _aws_secret_tier / _provider_secret_tier — i.e. a rule that
+        # identified a specific provider. Generic/entropy matches leave it None.
+        ph_sev, ph_note = _placeholder_tier(f, x.get("Secret", ""), provider_identified=bool(sev))
+        if ph_sev and not (sev and ph_sev == "INFO"):
+            sev, note = ph_sev, (note + "; " if note else "") + ph_note
         title = f"secret: {(x.get('Description') or rule)[:80]}" + (f" — {note}" if note else "")
+        # Commit provenance, straight from gitleaks' own record — no `git log` needed. In history
+        # ("git") mode EVERY hit came out of the commit graph, so the reader must be told that up
+        # front; without it 22 HIGHs pointing at files that no longer exist read as live findings
+        # and the only way to work out otherwise was to run `git log` by hand (field report #3).
+        commit = x.get("Commit") or ""
         out.append({"tool": "gitleaks", "category": "secret", "severity": sev or "HIGH",
                     "key": rule, "file": f, "line": x.get("StartLine", 0),
+                    **({"commit": commit, "commit_short": commit[:12]} if commit else {}),
+                    **({"commit_date": x["Date"]} if x.get("Date") else {}),
+                    **({"commit_author": x["Author"]} if x.get("Author") else {}),
                     "title": title, "fingerprint": f"secret|{f}|{rule}|{x.get('StartLine', 0)}"})
     return out
 
@@ -834,12 +975,71 @@ def _sca_occurrence(finding: dict, target: Path | None) -> None:
     finding["fingerprint"] = finding["semantic_id"]
 
 
+# Semgrep classifies its own per-rule failures in `errors[].type`. A Timeout means THAT RULE did not
+# run — the other rules did — which is a completely different fact from "semgrep crashed", and by far
+# the more common one on a large repo.
+_SEMGREP_RULE_FAILURE = {"Timeout", "TimeoutDuringInterfile", "OutOfMemory",
+                         "OutOfMemoryDuringInterfile", "StackOverflow", "PartialParsing",
+                         "MaxMemory", "Timeout during interfile analysis"}
+
+
+def _semgrep_rule_errors(doc: dict) -> list:
+    """Per-RULE execution failures from semgrep's `errors[]`, as structured rows.
+
+    `coverage.gaps` used to say `semgrep: error` for this. That sentence is true and useless: it
+    reads as "the scanner is broken", when what actually happened was that five specific rules —
+    Express-SSRF, XSS, React-unsanitized, i.e. the highest-value rules in the set — timed out while
+    every other rule ran fine. "Scanner errored" and "your five best rules did not run" call for
+    different reactions, so they get different words (field report #7)."""
+    rows = []
+    for e in (doc.get("errors") or []):
+        if not isinstance(e, dict):
+            continue
+        # `type` is a string in some versions and a [tag, payload] list in others.
+        raw = e.get("type")
+        kinds = [raw] if isinstance(raw, str) else [x for x in (raw or []) if isinstance(x, str)]
+        kind = next((k for k in kinds if k in _SEMGREP_RULE_FAILURE), kinds[0] if kinds else "")
+        rule = e.get("rule_id") or e.get("check_id") or ""
+        # An error row we cannot classify is STILL an error. Dropping it would make an unrecognized
+        # diagnostic shape read as a clean scan — the exact silent failure this tool exists to
+        # prevent, and it regressed a test that pins "reported errors are distinct from empty".
+        # Unattributed rows fall through to the scanner-level bucket, which fails loud.
+        rows.append({"rule_id": rule, "kind": kind or "error",
+                     "path": e.get("path") or (e.get("location") or {}).get("path") or "",
+                     "level": e.get("level") or "",
+                     "message": str(e.get("message") or "")[:200],
+                     "rule_scoped": bool(rule) and kind in _SEMGREP_RULE_FAILURE})
+    return rows
+
+
 def _report_details(key: str, doc) -> dict:
     """Native diagnostics are execution evidence even with a successful exit."""
     details = {"errors": [], "skipped_checks": 0}
     rows = doc if key == "checkov" and isinstance(doc, list) else [doc]
     for row in rows:
         if not isinstance(row, dict):
+            continue
+        if key == "semgrep":
+            rule_errors = _semgrep_rule_errors(row)
+            scoped = [r for r in rule_errors if r["rule_scoped"]]
+            if rule_errors:
+                details["rule_errors"] = rule_errors
+            if scoped:
+                # Name the rules. A gap the operator can act on ("raise --timeout, or drop this
+                # rule") instead of one they can only shrug at.
+                details["rules_incomplete"] = sorted({r["rule_id"] for r in scoped})
+                details["rules_incomplete_kinds"] = sorted({r["kind"] for r in scoped})
+            # Rules that failed WHOLESALE stay in `errors` (the scanner-level bucket); per-rule
+            # timeouts do NOT, because they are a partial result, not a broken scanner.
+            whole = [r for r in rule_errors if not r["rule_scoped"]]
+            if whole:
+                details["errors"].append(
+                    f"semgrep: {len(whole)} scanner-level error(s): "
+                    + ", ".join(sorted({r["kind"] for r in whole})[:4]))
+            if isinstance(row.get("skipped_rules"), list) and row["skipped_rules"]:
+                details["skipped_rules"] = [str(r.get("rule_id") or r)[:120]
+                                            for r in row["skipped_rules"][:40]
+                                            if isinstance(r, (str, dict))]
             continue
         if row.get("errors") or row.get("Errors"):
             details["errors"].append("scanner reported errors")
@@ -909,6 +1109,226 @@ def _gitignored(target: Path | None, paths) -> set:
         return {rel_to_orig[r] for r in ignored_rel if r in rel_to_orig}
     except Exception:
         return set()
+
+
+# --- confidence + stable per-instance identity (field report #6) -----------------------------
+# The LEDGER carried a confidence for every finding, but the normalized SCANNER findings that feed
+# findings.json / the envelope carried one only when the scanner itself supplied it — bandit and
+# gosec, i.e. 2 of 11 adapters. Everything else rendered as `?`, which made a ledger described as
+# "calibrated" look uncalibrated. Derive it, and — because an unexplained confidence label is just
+# as unarguable as a missing one — say WHY in `confidence_basis`.
+_CONF_OK = {"HIGH", "MEDIUM", "LOW"}
+_GENERIC_CONF_NOTE = "generic/entropy rule — matches any high-entropy string, often a hash or public id"
+
+
+def _derive_confidence(f: dict, target=None) -> tuple:
+    """(confidence, basis) for a normalized scanner finding. Deterministic and explainable.
+
+    Confidence answers "how sure are we this MATCH is what it claims to be", which is independent
+    of severity ("how bad if it is"). A CVE matched against a pinned lockfile version is a HIGH-
+    confidence observation even at LOW severity; a generic-entropy secret hit is LOW confidence even
+    at HIGH severity."""
+    native = str(f.get("confidence") or "").upper()
+    if native in _CONF_OK:
+        return native, f"reported by {f.get('tool', 'the scanner')}"
+    if "confidence" in f:
+        # The scanner DID report a confidence and we could not parse it. That is a known state with
+        # an existing contract: the ledger records native_confidence="UNKNOWN" and routes the finding
+        # to LOW rather than inventing a value. Deriving a category default here would have silently
+        # overwritten that honesty with a confident-looking MEDIUM.
+        return "LOW", "scanner reported an unrecognized confidence value — treated as unknown"
+    cat, rel = f.get("category"), _rel_to(f.get("file", ""), target) or f.get("file", "")
+    key = str(f.get("key") or f.get("rule_id") or "")
+    if cat == "secret":
+        if f.get("verified"):
+            return "HIGH", "liveness VERIFIED against the provider"
+        if f.get("severity") == "INFO" or is_placeholder_value(str(f.get("secret", ""))):
+            return "LOW", "value is placeholder-shaped"
+        if is_example_file(rel):
+            return "LOW", "*.example/*.sample template file — values are fake by convention"
+        if is_doc_or_example(rel):
+            return "LOW", "documentation/example file"
+        if is_test_file(rel):
+            return "LOW", "test/fixture file — planted fakes are common"
+        if _generic_secret(key):
+            return "LOW", _GENERIC_CONF_NOTE
+        return "HIGH", "provider-specific rule matched a credential-shaped value"
+    if cat == "sca":
+        # A lockfile pins an exact version, so the advisory match itself is not in doubt; what is
+        # uncertain is whether the vulnerable code is REACHED — which is severity/triage, not
+        # identity. Only an unpinned/unresolved occurrence lowers identity confidence.
+        if f.get("reachability") == "not-imported":
+            return "MEDIUM", "advisory matches the pinned version, but the package is never imported"
+        return "HIGH", "advisory matched an exact pinned version from a lockfile"
+    if cat == "iac":
+        return "MEDIUM", "config-file policy check — deterministic match, deployment context unknown"
+    if cat == "sast":
+        if is_test_file(rel) or is_doc_or_example(rel):
+            return "LOW", "pattern matched in test/doc code, not the running product"
+        if f.get("semantic_id"):
+            return "MEDIUM", "semantic (dataflow-aware) rule match"
+        return "MEDIUM", "syntactic pattern match — confirm the sink is attacker-reachable"
+    return "MEDIUM", "no adapter-specific rule; defaulted"
+
+
+def _instance_id(f: dict, target=None) -> str:
+    """Stable, portable, per-INSTANCE identifier.
+
+    `key` is a RULE id (`generic-api-key`) — it names the detector, not the occurrence, so it cannot
+    address one finding for `websec feedback` or a baseline entry (field report #6). `fingerprint`
+    does identify the instance, but trivy and semgrep emit ABSOLUTE paths, so a fingerprint minted on
+    one machine does not match the same finding on another. This hashes the ROOT-RELATIVE identity,
+    so it is the same id for the same finding in CI, on a laptop, and after the repo is moved.
+    Emitted ALONGSIDE `fingerprint`, never replacing it — existing baselines keep matching."""
+    rel = _rel_to(f.get("file", ""), target) or f.get("file", "")
+    parts = [str(f.get("category") or ""), rel, str(f.get("key") or f.get("rule_id") or ""),
+             str(f.get("line") or 0), str(f.get("cve") or f.get("pkg") or "")]
+    return "wv1_" + hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
+
+
+# --- guarded env-var fallback (field report #9) ------------------------------------------------
+# `const jwtSecret = process.env.JWT_SECRET || 'dev-default'` is a genuine hard-coded-credential
+# pattern and the bundled `insecure-default-signing-secret` rule is right to match it — but ONLY if
+# the fallback can actually be reached. In the idiom this FP came from, it cannot: the app asserts
+# the real value at startup and refuses to boot without it, so the literal is dead code that exists
+# to keep types happy and local dev quiet.
+#
+# Semgrep cannot see this, and not because the rule is badly written: the assertion routinely lives
+# in a DIFFERENT file (config/env.ts, a zod schema, an `assertEnv()` bootstrap) from the fallback,
+# and semgrep's per-rule analysis is single-file. So the correction belongs here, as a post-pass
+# with the whole repo in hand. Demote + explain; never drop — an assertion that is itself never
+# invoked leaves the fallback live, and we cannot prove invocation statically.
+_ENV_ASSERT_TEMPLATES = (
+    # if (!process.env.X) throw / process.exit / assert
+    r"(?:if\s*\(\s*!\s*(?:process\.env\.{v}|process\.env\[['\"]{v}['\"]\])[^)]*\)\s*\{{?[^}}]{{0,200}}?"
+    r"(?:throw|process\.exit|assert|fatal))",
+    # invariant/assert/ok(process.env.X, …)
+    r"(?:invariant|assert|ok|required|requireEnv|assertEnv|mustGetEnv|getRequiredEnv)\s*\([^)]{{0,120}}{v}",
+    # zod / joi / envalid / t3-env schema entries: X: z.string().min(1) — a parse failure is a throw
+    r"['\"]?{v}['\"]?\s*:\s*(?:z|Joi|joi|yup|v|type|envalid|str|num)\b[^,\n]{{0,160}}",
+    # explicit throw naming the variable
+    r"throw\s+new\s+\w*Error\s*\([^)]{{0,200}}{v}",
+)
+# The fallback literal itself, so we can recover WHICH env var the finding is about from the line.
+_ENV_FALLBACK_VAR = re.compile(
+    r"process\.env(?:\.([A-Z0-9_]+)|\[['\"]([A-Z0-9_]+)['\"]\])\s*(?:\|\||\?\?)")
+_GUARDED_FALLBACK_NOTE = (
+    "a startup assertion enforces this env var, so the literal fallback is unreachable in any "
+    "environment that boots — demoted, not dropped: verify the assertion actually runs on the "
+    "path that reads this value, and delete the literal so the guarantee is local"
+)
+
+
+def _env_var_of(f: dict, target) -> str:
+    """Which env var this insecure-default finding is about, read from its own source line."""
+    rel = _rel_to(f.get("file", ""), target)
+    line = f.get("line") or 0
+    if not (rel and target and line):
+        return ""
+    try:
+        text = read_artifact(Path(target) / rel, max_bytes=2 * 1024 * 1024)
+    except Exception:
+        return ""
+    rows = text.splitlines()
+    # Look at the finding's line and its immediate neighbours — the match may span a wrap.
+    window = "\n".join(rows[max(0, line - 2):line + 1])
+    m = _ENV_FALLBACK_VAR.search(window)
+    return (m.group(1) or m.group(2)) if m else ""
+
+
+def _demote_guarded_env_fallbacks(raw: list, target) -> int:
+    """Demote `insecure-default-signing-secret` hits whose env var is asserted at startup."""
+    if not target:
+        return 0
+    candidates = [f for f in raw
+                  if f.get("category") == "sast"
+                  and "insecure-default" in str(f.get("rule_id") or f.get("key") or "")]
+    if not candidates:
+        return 0
+    wanted = {}
+    for f in candidates:
+        var = _env_var_of(f, target)
+        if var:
+            wanted.setdefault(var, []).append(f)
+    if not wanted:
+        return 0
+    # One pass over the repo's config-ish + source files, checking every wanted var at once.
+    asserted: set = set()
+    patterns = {var: [re.compile(t.format(v=re.escape(var)), re.I) for t in _ENV_ASSERT_TEMPLATES]
+                for var in wanted}
+    try:
+        root = Path(target)
+        for path in root.rglob("*"):
+            if len(asserted) == len(wanted):
+                break
+            if not path.is_file() or path.suffix.lower() not in {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"}:
+                continue
+            if path_in_skip_dir(str(path), target):
+                continue
+            try:
+                text = read_artifact(path, max_bytes=1024 * 1024)
+            except Exception:
+                continue
+            for var, rxs in patterns.items():
+                if var in asserted or var not in text:
+                    continue
+                if any(rx.search(text) for rx in rxs):
+                    asserted.add(var)
+    except Exception:
+        return 0
+    n = 0
+    for var in asserted:
+        for f in wanted[var]:
+            if SEV_ORDER.get(f.get("severity"), 0) > SEV_ORDER["LOW"]:
+                f["severity"] = "LOW"
+            f["guarded_env_fallback"] = var
+            if "startup assertion" not in f.get("title", ""):
+                f["title"] += f" — {_GUARDED_FALLBACK_NOTE} ({var})"
+            n += 1
+    return n
+
+
+# Rules that are SECRET DETECTION regardless of which adapter reported them. Semgrep ships a pile
+# of these ("AWS AppSync GraphQL Key detected", "hardcoded-api-key", …) and they arrive as category
+# `sast`, so the per-parser secret tiering in _norm_gitleaks/_norm_trivy never saw them: a `da2-`
+# placeholder in `.env.example` was demoted to INFO by one detector and reported HIGH by another,
+# in the same run, on the same line (field report #5). Tiering belongs to the FINDING, not to the
+# adapter that happened to produce it.
+_SECRETISH_RULE = re.compile(
+    r"secret|credential|api[_-]?key|token|password|passwd|private[_-]?key|appsync|"
+    r"access[_-]?key|auth[_-]?header|hardcoded", re.I)
+
+
+def _is_secret_like(f: dict) -> bool:
+    if f.get("category") == "secret":
+        return True
+    return bool(_SECRETISH_RULE.search(
+        f"{f.get('rule_id') or ''} {f.get('key') or ''} {f.get('title') or ''}"))
+
+
+def _tier_placeholder_matches(raw: list, target) -> int:
+    """Apply the doc/example/placeholder tier to EVERY secret-like finding, whatever produced it.
+
+    Idempotent: a parser that already tiered its own finding is left alone. Never drops anything —
+    the finding stays in the ledger, in SARIF and in the report, with the reason attached."""
+    n = 0
+    for f in raw:
+        if not _is_secret_like(f) or f.get("placeholder_tier"):
+            continue
+        rel = _rel_to(f.get("file", ""), target) or f.get("file", "")
+        # A provider-identified credential is never demoted on value shape — see _placeholder_tier.
+        value = str(f.get("secret") or f.get("match") or "")
+        sev, note = _placeholder_tier(rel, value)
+        if not sev:
+            continue
+        if SEV_ORDER.get(f.get("severity"), 0) <= SEV_ORDER.get(sev, 0):
+            continue                      # already at or below the tier — nothing to do
+        f["severity"] = sev
+        f["placeholder_tier"] = "example-file" if is_example_file(rel) else "doc-file"
+        if note not in f.get("title", ""):
+            f["title"] += f" — {note}"
+        n += 1
+    return n
 
 
 def normalize_findings(scan_results: list, outdir: Path, target: Path | None = None,
@@ -1033,6 +1453,14 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
                 f["title"] += " — local-only (gitignored, never committed; rotate if real, not a repo leak)"
             local_only_downgraded += 1
 
+    # field report #5: the doc/example/placeholder tier applies to every secret-like finding, not
+    # just the ones the secret parsers produced. Runs BEFORE dedup so a cross-tool duplicate cannot
+    # resurrect the higher severity through the max() in the fingerprint merge.
+    placeholder_tiered = _tier_placeholder_matches(raw, target)
+
+    # field report #9: a hard-coded fallback whose env var is asserted at startup is unreachable.
+    guarded_env_fallbacks = _demote_guarded_env_fallbacks(raw, target)
+
     # A gitleaks hit whose file is gone from the tree is a HISTORY-only leak — deleting the file did
     # not un-leak it. Annotate so the remediation is ROTATE, not "already removed".
     history_only = _annotate_history_only_secrets(raw, target)
@@ -1081,6 +1509,22 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
     # sharpen triage in the briefing; neither can reintroduce a false positive.
     reachability = enrichment.enrich_reachability(deduped, target)
     exploitability = enrichment.enrich_exploitability(deduped)
+
+    # Every finding gets a confidence + a stable per-instance id. Runs AFTER enrichment so the
+    # reachability signal can inform confidence, and after all the demotion passes so a finding
+    # already tiered to INFO/LOW is read as the placeholder it is (field report #6).
+    for f in deduped:
+        # Keep the scanner's ORIGINAL value verbatim: findings.py inspects it to decide whether the
+        # producer's own confidence was usable, and a derived value must never impersonate one.
+        if "confidence" in f:
+            f["native_confidence"] = f["confidence"]
+        conf, basis = _derive_confidence(f, target)
+        f["confidence"], f["confidence_basis"] = conf, basis
+        f["instance_id"] = _instance_id(f, target)
+    by_conf: dict = {}
+    for f in deduped:
+        by_conf[f["confidence"]] = by_conf.get(f["confidence"], 0) + 1
+
     (outdir / "findings.json").write_text(json.dumps(deduped, indent=2))
 
     by_sev, by_cat = {}, {}
@@ -1091,7 +1535,13 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
                   "file": f["file"], "tools": f["tools"],
                   **{k: f[k] for k in ("key", "rule_id", "id", "cve", "package", "pkg", "resource",
                                       "service", "symbol", "sink", "semantic_id", "line", "fingerprint",
-                                      "installed", "fixed", "ecosystem", "advisory_aliases", "confidence", "cwe") if k in f},
+                                      "installed", "fixed", "ecosystem", "advisory_aliases", "confidence", "cwe",
+                                      # field report #6: a per-INSTANCE id (`key` is a rule id) + why
+                                      # this confidence, so `feedback`/baselining can address one finding.
+                                      "instance_id", "confidence_basis", "native_confidence",
+                                      # field report #3: where the secret LIVES. in_tree=False means the
+                                      # file is gone from the working tree but the blob is still fetchable.
+                                      "in_tree", "history_only", "commit", "commit_short", "commit_date") if k in f},
                   # bug-218: which gitleaks surface produced the hit (git | dir | git+dir). Committed
                   # vs working-tree-only changes the remediation, so the ledger must see it.
                   **({"scan_mode": f["scan_mode"]} if isinstance(f.get("scan_mode"), str) else {}),
@@ -1104,12 +1554,15 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
                   **({"intel_status": f["intel_status"]} if isinstance(f.get("intel_status"), str) else {})}
                  for f in deduped]
     return {"total_raw": len(raw), "total": len(deduped),
+            "by_confidence": by_conf,
             "cross_tool_or_dup_merged": len(raw) - len(deduped),
             "contamination_dropped": contamination_dropped,
             "user_excluded_dropped": user_excluded_dropped,
             "local_only_downgraded": local_only_downgraded,
             "test_fixture_downgraded": test_fixture_downgraded,
             "history_only_secrets": history_only,
+            "guarded_env_fallbacks_demoted": guarded_env_fallbacks,
+            "placeholder_tiered": placeholder_tiered,
             "reachability": reachability,
             "exploitability": exploitability,
             "parse_failed": sorted(set(parse_failed)),

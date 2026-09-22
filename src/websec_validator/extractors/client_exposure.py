@@ -12,7 +12,8 @@ import json
 import posixpath
 import re
 
-from .base import Extractor, RepoContext, is_test_file
+from .base import (CODE_EXT, Extractor, RepoContext, is_doc_or_example, is_example_file,
+                   is_placeholder_value, is_test_file)
 
 # Browser-inlined env prefixes. `PUBLIC_*` is SvelteKit-only, so it is gated to svelte packages
 # (handled below) — without that gate it matched a non-frontend Fastify backend service's
@@ -141,6 +142,8 @@ class ClientExposureExtractor(Extractor):
         intended_public = []          # analytics/telemetry ingest tokens — INFO, designed to ship
         server_secret_in_client = []  # server secret referenced from a 'use client' file
         public_value_leaks = []       # secret-SHAPE literal in client-reachable code (rename-proof, #3)
+        placeholder_examples = []     # INFO — secret SHAPE matched, but it is a documented placeholder
+        committed_env_secrets = []    # HIGH — credential-shaped literal in a COMMITTED dotenv file
         public_var_from_cfn = []      # CDK output/secret injected into a public build var (#3)
         supabase_anon = []            # Supabase anon/publishable key — INFO, intended-public (RLS-protected)
         supabase_service = []         # Supabase service_role key literal — HIGH, must never ship
@@ -174,11 +177,26 @@ class ClientExposureExtractor(Extractor):
                         continue
                     server_secret_in_client.append(f"{s}  ({rel})")
             client_reachable = bool(PUBLIC_ENV.search(text)) or "use client" in text[:400]
+            # A `*.example`/`*.sample` file is a DISTINCT tier, not a weaker test fixture: its entire
+            # purpose is to be committed full of fake values for someone to copy and fill in. The
+            # scanner-normalization pipeline already tiered these down; this extractor did not, so
+            # `da2-xxxxxxxxxxxxxxxxxxxxxxxxxx` in `.env.example` was reported as a HIGH AppSync key
+            # while the same file's gitleaks hits were LOW. That is a precision bug, not a judgement
+            # call (field report #5). Both signals are checked — the file's ROLE and the value's
+            # SHAPE — because either one alone is enough to know this is not a credential.
+            example_file = is_example_file(rel) or is_doc_or_example(rel)
             for rx, label, always in SECRET_SHAPES:
-                if (always or client_reachable) and rx.search(text):
+                if (always or client_reachable) and (m := rx.search(text)):
                     # a Supabase anon/publishable key is a JWT by shape but intended-public — don't
                     # double-report it here as a value leak (it's surfaced at INFO below instead).
                     if label.startswith("JWT") and sb_anon and not sb_service:
+                        continue
+                    # NEVER dropped: a real key pasted into `.env.example` is exactly the mistake
+                    # worth catching, so it stays visible — just not as a HIGH browser-leak claim.
+                    if example_file or is_placeholder_value(m.group(0)):
+                        why = ("placeholder value" if is_placeholder_value(m.group(0))
+                               else "*.example/*.sample template file")
+                        placeholder_examples.append(f"{label}  ({rel}) — {why}")
                         continue
                     public_value_leaks.append(f"{label}  ({rel})")
             for m in CFN_TO_PUBLIC.finditer(text):
@@ -188,6 +206,39 @@ class ClientExposureExtractor(Extractor):
                 if not (SECRETISH.search(m.group(1)) or re.search(r"\bSecret\b", m.group(2))):
                     continue
                 public_var_from_cfn.append(f"{m.group(1)} ← {m.group(2)}  ({rel})")
+
+        # --- dotenv files -------------------------------------------------------------------
+        # Found while verifying field report #5: NO extractor reads `.env*` at all (iter_code is
+        # extension-gated and `.env.example` has no code extension), and no bundled scanner has an
+        # AppSync rule — SECRET_SHAPES exists precisely because `da2-` keys are otherwise invisible.
+        # So a committed `.env` holding a LIVE AppSync key was caught by nothing. Closing that is
+        # strictly additive: real `.env` → the normal leak path; `.env.example` → the INFO
+        # placeholder tier this change introduces. A gitignored `.env` is local-only, never
+        # committed, and is left alone — the same reasoning the scanner pipeline already applies.
+        for env_path in ctx.glob("**/.env*", limit=200):
+            rel = ctx.rel(env_path).replace("\\", "/")
+            # `**/.env*` also matches code files like `.env.config.ts`; those already went through
+            # iter_code above, so skip them here rather than reporting the same literal twice.
+            if env_path.suffix.lower() in CODE_EXT:
+                continue
+            if is_test_file(rel) or ctx.is_gitignored(rel):
+                continue
+            text = ctx.text(env_path)
+            if not text:
+                continue
+            example = is_example_file(rel) or is_doc_or_example(rel)
+            for rx, label, _always in SECRET_SHAPES:
+                m = rx.search(text)
+                if not m:
+                    continue
+                if example or is_placeholder_value(m.group(0)):
+                    why = ("placeholder value" if is_placeholder_value(m.group(0))
+                           else "*.example/*.sample template file")
+                    placeholder_examples.append(f"{label}  ({rel}) — {why}")
+                else:
+                    # A real-looking credential in a COMMITTED dotenv is a leak regardless of whether
+                    # it also ships to the browser: it is in the repo.
+                    committed_env_secrets.append(f"{label}  ({rel})")
 
         nextcfg = (ctx.manifest("next.config.js") + ctx.manifest("next.config.mjs")
                    + ctx.manifest("next.config.ts"))
@@ -199,6 +250,11 @@ class ClientExposureExtractor(Extractor):
             "intended_public_analytics": sorted(set(intended_public))[:40],  # INFO — designed to ship
             "server_secret_in_client_component": sorted(set(server_secret_in_client)),  # HIGH if non-empty
             "public_secret_value_leaks": sorted(set(public_value_leaks)),   # HIGH — value-detected, rename-proof
+            # INFO — secret SHAPE matched in a file whose job is to hold placeholders, or a value
+            # that announces itself as fake. Reported, never hidden; just not a HIGH leak claim.
+            "placeholder_secret_examples": sorted(set(placeholder_examples))[:40],
+            # HIGH — a credential-shaped value in a committed (non-gitignored, non-example) dotenv.
+            "committed_env_secrets": sorted(set(committed_env_secrets))[:40],
             "public_var_from_cfn_output": sorted(set(public_var_from_cfn)),  # HIGH — CDK build-injected to client
             "intended_public_supabase": sorted(set(supabase_anon)),  # INFO — anon/publishable key, RLS-protected
             "supabase_service_role_in_client": sorted(set(supabase_service)),  # HIGH — service_role key must never ship
@@ -208,5 +264,8 @@ class ClientExposureExtractor(Extractor):
                     "Name-based leaks are gated to packages with a frontend bundler (a backend service's "
                     "NEXT_PUBLIC_*/PUBLIC_* fallback-key reference is not a browser leak); analytics ingest "
                     "tokens (PostHog/Usertour/…) are reported separately at INFO (designed to ship). "
+                    "Secret shapes in *.example/*.sample/doc files, or values that are self-evidently "
+                    "placeholders, land in placeholder_secret_examples at INFO — visible, because a "
+                    "real key CAN be pasted into an example file, but not counted as a browser leak. "
                     "Value/CFN-injection detection survives a benign var rename (the #3 gap).",
         }

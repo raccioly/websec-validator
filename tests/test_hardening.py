@@ -452,7 +452,8 @@ class SecretPrecisionTests(unittest.TestCase):
 
     def test_gitleaks_generic_is_medium_specific_is_high(self):
         rows = [
-            {"File": "src/lib/chains.ts", "RuleID": "generic-api-key", "Secret": "x" * 40, "Match": "x" * 40, "StartLine": 1},
+            {"File": "src/lib/chains.ts", "RuleID": "generic-api-key", "Secret": "9fK2mQ7xTz5pLw8nR3vB6cJ4hD1gY0sZ2aE7uP4t",
+             "Match": "9fK2mQ7xTz5pLw8nR3vB6cJ4hD1gY0sZ2aE7uP4t", "StartLine": 1},
             {"File": "src/k.pem", "RuleID": "private-key", "Secret": "-----BEGIN", "Match": "-----BEGIN", "StartLine": 1},
             {"File": "src/a.ts", "RuleID": "aws-access-token", "Secret": "AKIA" + "A" * 16, "Match": "AKIA" + "A" * 16, "StartLine": 1},
         ]
@@ -464,7 +465,8 @@ class SecretPrecisionTests(unittest.TestCase):
 
     def test_trivy_generic_secret_is_medium(self):
         data = {"Results": [{"Target": "src/x.ts", "Secrets": [
-            {"RuleID": "generic-api-key", "Title": "Generic API Key", "Match": "y" * 40, "StartLine": 2}]}]}
+            {"RuleID": "generic-api-key", "Title": "Generic API Key",
+             "Match": "7hV3nQ8wRt2mZx5bK9cF4jL6pD1sY0gA3eU8iO5r", "StartLine": 2}]}]}
         secs = [f for f in scanners._norm_trivy(data) if f["category"] == "secret"]
         self.assertEqual(secs[0]["severity"], "MEDIUM")
 
@@ -489,7 +491,8 @@ class DocExampleSecretTests(unittest.TestCase):
 
     def test_gitleaks_doc_secret_to_low_code_stays_high(self):
         rows = [
-            {"File": "README.md", "RuleID": "curl-auth-header", "Secret": "x" * 30, "Match": "Authorization: Bearer x", "StartLine": 1},
+            {"File": "README.md", "RuleID": "curl-auth-header", "Secret": "4tR8mK2wQ7zX5nB9vC3jH6pL1dF0sY",
+             "Match": "Authorization: Bearer 4tR8mK2wQ7zX5nB9vC3jH6pL1dF0sY", "StartLine": 1},
             {"File": "src/server.ts", "RuleID": "private-key", "Secret": "-----BEGIN", "Match": "-----BEGIN", "StartLine": 1},
         ]
         by = {r["file"]: r for r in scanners._norm_gitleaks(rows)}

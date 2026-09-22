@@ -170,7 +170,7 @@ class GateTests(unittest.TestCase):
         err = io.StringIO()
         with patch.object(gate, "_git", flaky), contextlib.redirect_stderr(err):
             code = cli.main(["gate", str(self.repo), "--format", "json"])
-        self.assertEqual(code, 2)
+        self.assertEqual(code, 3)
         self.assertIn("changed-file set is unknown", err.getvalue())
 
     def test_genuinely_clean_tree_still_passes(self):

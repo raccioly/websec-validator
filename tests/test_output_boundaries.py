@@ -86,7 +86,7 @@ class OutputBoundaryTests(unittest.TestCase):
         self.assertEqual(self.invoke('--require-complete'), 0)
         previous = (self.out / 'latest').resolve()
         previous_facts = (previous / 'FACTS.json').read_bytes()
-        self.assertEqual(self.invoke('--scan', '--scanners', 'semgrep', '--require-complete'), 2)
+        self.assertEqual(self.invoke('--scan', '--scanners', 'semgrep', '--require-complete'), 3)
         self.assertEqual((self.out / 'latest').resolve(), previous)
         self.assertEqual((previous / 'FACTS.json').read_bytes(), previous_facts)
         attempts = list((self.out / 'runs').iterdir())

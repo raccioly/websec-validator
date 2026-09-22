@@ -82,6 +82,140 @@
           "description": "Always evidenced:false \u2014 websec records the run side only."
         }
       }
+    },
+    "gate": {
+      "type": "object",
+      "properties": {
+        "failure_kind": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "findings",
+            "incomplete",
+            "findings+incomplete",
+            null
+          ],
+          "description": "Which condition produced a non-zero exit. A run that is BOTH gate-failing and incomplete exits 1 (the definite fact) and records 'findings+incomplete' here, so the collapse to one exit code loses nothing."
+        },
+        "exit_code": {
+          "type": "integer",
+          "enum": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "description": "0 clean \u00b7 1 findings at threshold \u00b7 2 usage/config error \u00b7 3 checks incomplete."
+        },
+        "incomplete": {
+          "type": "boolean"
+        }
+      }
+    },
+    "clusters": {
+      "type": "array",
+      "description": "PRESENTATION-ONLY grouping of findings[] into distinct issues. Never affects total, by_severity, the gate count, per-site fingerprints, SARIF results or baselines \u2014 every site remains its own gating finding.",
+      "items": {
+        "type": "object",
+        "required": [
+          "cluster_id",
+          "kind",
+          "site_count",
+          "sites"
+        ],
+        "properties": {
+          "cluster_id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "rule",
+              "incident"
+            ],
+            "description": "rule = one detector at N sites; incident = secrets removed from the working tree in the same commit."
+          },
+          "rule": {
+            "type": "string"
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attack_class": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "severity": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "confidence": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "site_count": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sites": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "representative": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remediation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "commit": {
+            "type": "string"
+          },
+          "gating_note": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "cluster_summary": {
+      "type": "object",
+      "properties": {
+        "clusters": {
+          "type": "integer"
+        },
+        "clustered_findings": {
+          "type": "integer"
+        },
+        "distinct_issues": {
+          "type": "integer"
+        },
+        "total_findings": {
+          "type": "integer"
+        },
+        "largest": {
+          "type": "integer"
+        }
+      }
     }
   },
   "definitions": {
@@ -252,6 +386,46 @@
             "reason",
             "basis"
           ]
+        },
+        "in_tree": {
+          "type": "boolean",
+          "description": "Is the finding's file present in the working tree? false = the file is gone but the blob is still reachable in git history, so the credential is NOT remediated until it is rotated."
+        },
+        "history_only": {
+          "type": "boolean",
+          "description": "Secret found only in git history; the file no longer exists."
+        },
+        "commit": {
+          "type": "string",
+          "description": "Full commit SHA the secret was observed in (from the scanner's own record)."
+        },
+        "commit_short": {
+          "type": "string",
+          "description": "First 12 characters of `commit`, for display."
+        },
+        "commit_date": {
+          "type": "string",
+          "description": "ISO timestamp of that commit."
+        },
+        "commit_author": {
+          "type": "string",
+          "description": "Author recorded on that commit."
+        },
+        "instance_id": {
+          "type": "string",
+          "description": "Stable, portable per-INSTANCE identifier (wv1_<16 hex>), derived from the ROOT-RELATIVE location. Unlike `rule_id`/`key` it names the occurrence, and unlike `fingerprint` it is machine-independent for adapters that emit absolute paths."
+        },
+        "confidence_basis": {
+          "type": "string",
+          "description": "Why this confidence was assigned, in one phrase."
+        },
+        "native_confidence": {
+          "type": "string",
+          "description": "The producing scanner's OWN confidence, verbatim. 'UNKNOWN' when the scanner reported a value websec could not parse \u2014 never replaced by a derived value."
+        },
+        "guarded_env_fallback": {
+          "type": "string",
+          "description": "Env var whose value is asserted at startup, making this hard-coded fallback unreachable. Demoted, not dropped."
         }
       }
     }

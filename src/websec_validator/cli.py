@@ -3,6 +3,7 @@
 Commands:
   websec run <repo> [--scan] [--out DIR]   full pipeline → FACTS.json + AGENT-BRIEFING.md + probes/
   websec recon <repo> [--out DIR]          recon only → FACTS.json
+  websec init [<repo>]                     scaffold a .websec-ignore scoped to this repo
   websec doctor [<repo>]                    show which scanners are present / missing
 
 Code-in, artifacts-out. No LLM, no server, no running app. Point your AI coding
@@ -22,8 +23,31 @@ import uuid
 import sys
 from pathlib import Path
 
-from . import (__version__, baseline, briefing, calibration, constitution, diffscope, dynamic, feedback,
-               findings, coverage, formats, fpfilter, inventory, probes, proof, recon, report, scanners)
+from . import (__version__, baseline, briefing, calibration, clusters, constitution, diffscope, dynamic,
+               feedback, findings, coverage, formats, fpfilter, inventory, probes, proof, recon, report,
+               scanners)
+
+# --- process exit contract (field report #1) --------------------------------------------------
+# A CI caller has to be able to tell "this repo has a vulnerability" from "my toolchain is broken",
+# because the two demand opposite responses: one blocks the merge, the other pages whoever owns the
+# runner image. Exit 2 used to mean BOTH — plus argument errors and an MCP bind failure — and, worse,
+# the incomplete check SHORT-CIRCUITED the gate, so a run with a real CRITICAL *and* a dead scanner
+# exited 2 and the finding never reached the exit code at all.
+#
+#   0  clean — the gate ran and nothing met the threshold (or no gate was requested)
+#   1  FINDINGS at or above --fail-on. A security fact about the code.
+#   2  usage / configuration error, or `doctor` found an incompatible scanner. Nothing was scanned.
+#   3  requested checks did NOT complete (--require-complete / --fail-on with an execution gap).
+#      An operational fact about the toolchain; the gate result is not a pass.
+#
+# When a run is BOTH incomplete and gate-failing it exits 1, and prints both lines: the finding is
+# definite and actionable, while "incomplete" only tells you the picture may be worse still. The
+# ledger's `gate.failure_kind` records the combination precisely for machine consumers, so nothing
+# is lost by the collapse.
+EXIT_OK = 0
+EXIT_FINDINGS = 1
+EXIT_USAGE = 2
+EXIT_INCOMPLETE = 3
 
 _FEEDBACK_VERDICTS = feedback.VERDICTS
 _FEEDBACK_SEVERITIES = feedback.SEVERITIES
@@ -170,15 +194,68 @@ def cmd_doctor(args) -> int:
         print(line)
     print("\n  available:")
     for s in det["available"]:
-        print(f"    ✓ {s['name']:20} {s['category']}")
+        # Presence is not compatibility. `doctor` printed a green ✓ for an osv-scanner whose CLI
+        # did not match our invocation, so the most productive scanner in the set was dead for
+        # every run and nothing said so (field report #2). Version is now part of the answer.
+        mark = "✗" if s.get("status") == "too_old" else ("?" if s.get("status") == "unknown" else "✓")
+        ver = f"v{s['version']}" if s.get("version") else "version unknown"
+        print(f"    {mark} {s['name']:20} {s['category']:8} {ver}")
+        if s.get("note"):
+            print(f"        ↳ {s['note']}")
     if not det["available"]:
         print("    (none on PATH)")
     print("\n  missing (optional — install for fuller coverage):")
     for s in det["missing"]:
         print(f"    · {s['name']:20} {s['category']:8} {s.get('install','')}")
+    if det.get("incompatible"):
+        print("\n  ⚠ INCOMPATIBLE — installed, but websec's invocation does not match this build.")
+        print("    These are SELECTED and RUN, and their failure looks exactly like a clean scan.")
+        for s in det["incompatible"]:
+            print(f"      ✗ {s['name']} {s.get('version')}  —  {s.get('install','')}")
     print("\n  Docker:", "present" if _which("docker") else "not found "
           "(used for reproducible scanner runs in a future release)")
-    return 0
+    # A stale/incompatible analyzer is an operational defect, not just an FYI: exit non-zero so a
+    # CI preflight `websec doctor .` can gate on it. 2 = the usage/config class (see EXIT_* in this
+    # module) — the toolchain is misconfigured, no scan was attempted and no finding was missed.
+    return EXIT_USAGE if det.get("incompatible") else 0
+
+
+def cmd_init(args) -> int:
+    """Scaffold a `.websec-ignore` scoped to THIS repository (field report #8).
+
+    Setup-time scoping is the cheapest noise reduction there is: path-scoping a repo's fixture and
+    seed directories removes most of the noise before it ever reaches a report, and doing it after
+    the first run means reading a hundred findings to learn something the directory names already
+    said. Proposals are evidence-based and always printed before anything is written."""
+    from . import init_scope
+    target = _resolve_target(args.target)
+    proposal = init_scope.propose(target)
+    print(f"websec-validator v{__version__} — scope setup for {target}\n")
+    if proposal["entries"]:
+        print("  proposed scope exclusions (detected in this repo):")
+        for e in proposal["entries"]:
+            print(f"    {e['path']:<44} {e['files']:>5} file(s)  — {e['reason']}")
+        print(f"\n  covers {proposal['covered_files']} of {proposal['analyzed_files']} analyzed file(s).")
+    else:
+        print("  no test/fixture/seed/vendor directories detected — nothing to scope out.")
+    # Never suppress silently: the operator sees the list before the file exists.
+    print("\n  Suppression is SCOPE, not a verdict: a secret in a fixture is still committed.\n"
+          "  For a known, accepted finding prefer a `fingerprint:` acknowledgement — it stays\n"
+          "  visible in the report, carries a reason and expires.")
+    if getattr(args, "dry_run", False):
+        print("\n--- .websec-ignore (dry run, not written) ---")
+        print(init_scope.render(proposal))
+        return EXIT_OK
+    result = init_scope.write(target, proposal, force=getattr(args, "force", False))
+    if not result["written"]:
+        print(f"\n  ✗ not written: {result['reason']}\n    {result['path']}")
+        print("    An existing .websec-ignore is a policy document — it may hold reviewed "
+              "`fingerprint:`\n    acknowledgements that regenerating would discard. Review it, "
+              "or re-run with --force.")
+        return EXIT_USAGE
+    print(f"\n  ✓ wrote {result['path']} ({result['entries']} scope entr(ies))")
+    print("    Review it, delete what you disagree with, and commit it.")
+    return EXIT_OK
 
 
 def cmd_recon(args) -> int:
@@ -248,22 +325,22 @@ def cmd_emit_context(args) -> int:
 def cmd_run(args) -> int:
     if len(getattr(args, "sarif", []) or []) > 8:
         print("error: at most 8 explicit --sarif reports are supported per run", file=sys.stderr)
-        return 2
+        return EXIT_USAGE
     if getattr(args, "scanners", None) and not args.scan:
         print("error: --scanners requires --scan", file=sys.stderr)
-        return 2
+        return EXIT_USAGE
     if getattr(args, "scanners", None) and not any(key.strip() for key in args.scanners.split(",")):
         print("error: --scanners requires at least one scanner key", file=sys.stderr)
-        return 2
+        return EXIT_USAGE
     if getattr(args, "verify_secrets", False) and not args.scan:
         print("error: --verify-secrets requires --scan", file=sys.stderr)
-        return 2
+        return EXIT_USAGE
     target = _resolve_target(args.target)
     try:
         out, ts = _new_run_dir(args.out)
     except (OSError, ValueError) as error:
         print(f"error: cannot reserve output run: {error}", file=sys.stderr)
-        return 2
+        return EXIT_USAGE
 
     # In a machine-output mode (sarif/json) keep STDOUT pure for piping — route human progress to
     # stderr. `websec run app --format sarif > results.sarif` then Just Works in a pipeline.
@@ -314,8 +391,13 @@ def cmd_run(args) -> int:
     langs = facts.get("stack", {}).get("languages", [])
     _print_facts_summary(facts, log)
 
-    # 2. scanners: detect, optionally run
-    det = scanners.detect(langs)
+    # 2. scanners: detect, optionally run.
+    # Version-probing spawns `<binary> --version` for every scanner on PATH, which measured 3.4s of
+    # a 3.5s run on a machine with the full toolchain installed. The version answers "is this build
+    # compatible with the adapter's argv" — a question that only arises when the scanner is about to
+    # RUN. Without --scan none of them execute, so the probe buys nothing and is skipped; `doctor`,
+    # whose entire job is answering whether the toolchain is usable, still probes every time.
+    det = scanners.detect(langs, check_versions=bool(args.scan))
     scan_results = []
     unified = None
     if args.scan:
@@ -463,6 +545,12 @@ def cmd_run(args) -> int:
     # every repair plan emitted before this change.
     from . import attribution as _attribution
     ledger["attribution"] = _attribution.build(target, actor=getattr(args, "actor", None))
+    # PRESENTATION-ONLY grouping: 39 findings that are really ~6 issues make a well-managed repo
+    # look alarming (field report #4). `clusters[]` is a SIBLING of findings[] — it never changes
+    # `total`, the gate count, per-site fingerprints, SARIF results or the baseline, all of which
+    # other things already depend on. See clusters.py for why collapsing findings[] was rejected.
+    ledger["clusters"] = clusters.build(ledger)
+    ledger["cluster_summary"] = clusters.summary(ledger["clusters"], ledger.get("total", 0))
     # 4b. baseline / diff — only NEW findings gate CI when a baseline is supplied
     diff = None
     if getattr(args, "baseline", None):
@@ -516,19 +604,39 @@ def cmd_run(args) -> int:
     _unanalyzed = (getattr(args, "require_analyzed", False)
                    and facts["coverage"].get("files", {}).get("no_analyzable_source"))
     _gate["require_analyzed"] = bool(getattr(args, "require_analyzed", False))
-    if _incomplete:
-        _gate.update(verdict="incomplete", exit_code=2, count_at_or_above=None,
+    # Count the findings FIRST, unconditionally. Previously `_incomplete` short-circuited this, so a
+    # run that was both incomplete and gate-failing reported exit 2 and dropped the security signal
+    # entirely — the caller could not tell it had a CRITICAL (field report #1). The same ordering
+    # applies to --require-analyzed: a real finding outranks "I could not read the rest".
+    _n = (baseline.gate_count(_gate_ledger, args.fail_on, new_only=bool(diff))
+          if getattr(args, "fail_on", None) else None)
+    _gate["incomplete"] = bool(_incomplete)
+    if _n:
+        _gate.update(count_at_or_above=_n, verdict="fail", exit_code=EXIT_FINDINGS,
+                     failure_kind="findings+incomplete" if _incomplete else "findings",
+                     note=("findings at or above the threshold AND requested checks did not "
+                           "complete — the finding count is a floor, not a total"
+                           if _incomplete else None))
+    elif _incomplete:
+        _gate.update(verdict="incomplete", exit_code=EXIT_INCOMPLETE, count_at_or_above=_n,
+                     failure_kind="incomplete",
                      note="requested checks did not complete; the gate result is NOT a pass")
     elif _unanalyzed:
-        _gate.update(verdict="no-analyzable-source", exit_code=2, count_at_or_above=None,
+        # EXIT_INCOMPLETE, not EXIT_USAGE: nothing was misconfigured and nothing crashed — the scan
+        # simply covered no code, which is a coverage outcome in exactly the sense code 3 names.
+        _gate.update(verdict="no-analyzable-source", exit_code=EXIT_INCOMPLETE,
+                     count_at_or_above=_n, failure_kind="no-analyzable-source",
                      note="source files were present but none could be analyzed; an empty findings "
                           "list means NOT CHECKED and --require-analyzed refuses to report it as a pass")
     elif getattr(args, "fail_on", None):
-        _n = baseline.gate_count(_gate_ledger, args.fail_on, new_only=bool(diff))
-        _gate.update(count_at_or_above=_n, verdict="fail" if _n else "pass", exit_code=1 if _n else 0)
+        _gate.update(count_at_or_above=_n, verdict="pass", exit_code=EXIT_OK, failure_kind=None)
     else:
-        _gate.update(verdict="not-evaluated", exit_code=0, count_at_or_above=None,
+        _gate.update(verdict="not-evaluated", exit_code=EXIT_OK, count_at_or_above=None,
+                     failure_kind=None,
                      note="no --fail-on was requested; this run gated nothing")
+    _gate["exit_code_contract"] = {"0": "clean", "1": "findings at or above --fail-on",
+                                   "2": "usage/configuration error (nothing scanned)",
+                                   "3": "requested checks did not complete, or --require-analyzed and nothing was analyzable"}
     # Enforcement is a server-side concern. Say so IN THE ARTIFACT, not only in the docs: a local
     # gate can be skipped with --no-verify, an uninstalled hook, or a deleted one.
     _gate["enforcement"] = ("advisory unless run as a required status check. A client-side gate is a "
@@ -545,6 +653,11 @@ def cmd_run(args) -> int:
     if ledger["total"]:
         log(f"\n  ledger: {ledger['total']} finding(s) · {ledger['by_severity']} · confidence {ledger['by_confidence']}"
             + (f" · {ledger['suppressed']} suppressed" if ledger["suppressed"] else ""))
+        _cs = ledger.get("cluster_summary") or {}
+        if _cs.get("clusters"):
+            log(f"    → {_cs['distinct_issues']} DISTINCT issue(s): {_cs['clusters']} cluster(s) cover "
+                f"{_cs['clustered_findings']} of those findings (largest: {_cs['largest']} sites). "
+                f"Each site still gates on its own.")
 
     # 5. briefing + comprehensive REPORT.md (immutable run record) + machine artifacts
     (out / "AGENT-BRIEFING.md").write_text(briefing.render(facts, det, scan_results, manifest, unified, ledger))
@@ -597,22 +710,32 @@ def cmd_run(args) -> int:
     # block only reports it and returns the exit code, so the artifact and the exit code cannot
     # disagree.
     if _gate["verdict"] == "incomplete":
-        log("\n✗ requested security checks did not complete; partial artifacts saved (exit 2).")
-        return 2
+        log(f"\n✗ requested security checks did not complete; partial artifacts saved "
+            f"(exit {EXIT_INCOMPLETE} — toolchain/coverage, NOT a finding).")
+        log("  Your build is not failing because of a vulnerability. See coverage.gaps in "
+            "coverage.json for which check did not run.")
+        return EXIT_INCOMPLETE
     if _gate["verdict"] == "no-analyzable-source":
-        log("\n✗ --require-analyzed: source files are present but websec has no analyzer for any of "
-            "them; an empty findings list here means NOT CHECKED (exit 2).")
-        return 2
+        log(f"\n✗ --require-analyzed: source files are present but websec has no analyzer for any "
+            f"of them (exit {EXIT_INCOMPLETE} — coverage, NOT a finding).")
+        log("  An empty findings list here means NOT CHECKED, not secure. See "
+            "coverage.files.unanalyzed_languages for which languages were skipped.")
+        return EXIT_INCOMPLETE
     if _gate["verdict"] == "fail":
         log(f"\n✗ --fail-on {args.fail_on}: {_gate['count_at_or_above']} finding(s) at or above threshold"
             + (" (new since baseline)" if diff else "")
             + (f" (in files changed vs {_gate['diff_base']})" if _gate["diff_scoped"] else "")
-            + " — failing the build.")
-        return 1
+            + f" — failing the build (exit {EXIT_FINDINGS}).")
+        if _gate.get("incomplete"):
+            # BOTH conditions hold. Exit 1 (the definite fact) but never let the incompleteness go
+            # unsaid: the count above is a floor, and something else may still be hiding.
+            log("  ⚠ ALSO incomplete: some requested checks did not run, so this count is a FLOOR, "
+                "not a total. See coverage.gaps.")
+        return EXIT_FINDINGS
     if _gate["verdict"] == "pass":
         log(f"\n✓ --fail-on {args.fail_on}: no findings at or above threshold"
             + (" (new since baseline)" if diff else "") + ".")
-    return 0
+    return EXIT_OK
 
 
 def cmd_dynamic(args) -> int:
@@ -625,7 +748,7 @@ def cmd_dynamic(args) -> int:
         out, ts = _new_run_dir(args.out)
     except (OSError, ValueError) as error:
         print(f"error: cannot reserve output run: {error}", file=sys.stderr)
-        return 2
+        return EXIT_USAGE
     dyn: dict = {}
 
     if args.unauth:
@@ -709,9 +832,10 @@ def cmd_dynamic(args) -> int:
         _publish_run(out)
     print(f"  ✓ run {ts} saved (immutable): {out}")
     if not (facts_dict.get("coverage") or {}).get("execution_complete"):
-        print("  Requested checks incomplete; latest completed scan unchanged.")
-        return 2
-    return 1 if ledger["by_severity"].get("CRITICAL") else 0
+        print(f"  Requested checks incomplete; latest completed scan unchanged "
+              f"(exit {EXIT_INCOMPLETE} — toolchain/coverage, NOT a finding).")
+        return EXIT_INCOMPLETE
+    return EXIT_FINDINGS if ledger["by_severity"].get("CRITICAL") else EXIT_OK
 
 
 def cmd_mcp(args) -> int:
@@ -721,7 +845,7 @@ def cmd_mcp(args) -> int:
             return mcp_server.serve_http(args.host, args.port, allowed_roots=getattr(args, "allow_root", None))
         except (ValueError, OSError) as error:
             print(f"error: {error}", file=sys.stderr)
-            return 2
+            return EXIT_USAGE
     return mcp_server.serve()
 
 
@@ -764,7 +888,7 @@ def cmd_repair_verify(args) -> int:
     except FileExistsError:
         print(json.dumps(result, indent=2))
         print(f"\nrefusing to overwrite existing evidence at {args.out}", file=sys.stderr)
-        return 2
+        return EXIT_USAGE
     return 0 if result.get("accepted") else 2
 
 
@@ -785,7 +909,7 @@ def cmd_gate(args) -> int:
     target = Path(args.target).expanduser().resolve()
     if not target.is_dir():
         print(f"error: target is not a directory: {target}", file=sys.stderr)
-        return 2
+        return EXIT_USAGE
 
     scope_source = "explicit"
     paths = list(getattr(args, "only", None) or [])
@@ -793,11 +917,13 @@ def cmd_gate(args) -> int:
         discovered = _gate.working_tree_paths(target)
         paths, scope_source = discovered["paths"], discovered["source"]
         if scope_source == "working-tree-unavailable":
-            # Not a pass: the gate could not determine what to analyse, so it never
-            # answered the question. Exit 2 (incomplete requested execution), never 0.
+            # Not a pass: the gate could not determine what to analyse, so it never answered the
+            # question. This is the INCOMPLETE class (the check did not run), not the usage class
+            # (the invocation was fine) — so it is 3 under the split contract, where it used to
+            # share 2 with genuine argument errors.
             print(f"error: {discovered.get('note', 'changed-file scope unavailable')}",
                   file=sys.stderr)
-            return 2
+            return EXIT_INCOMPLETE
         if not paths:
             # Nothing changed is a PASS, but say which question was answered.
             print(_gate.to_json({"tool": "websec-validator", "command": "gate", "passed": True,
@@ -823,10 +949,10 @@ def cmd_gate(args) -> int:
     if result["passed"] and result.get("missed") and getattr(args, "fail_on_missed", False):
         print(f"websec gate: --fail-on-missed — {len(result['missed'])} requested path(s) were never "
               "analyzed; refusing to report this as a pass.", file=sys.stderr)
-        return 1
-    # 1 = blocking findings. Distinct from 2 (usage/target error) so a harness can tell a FAILED
-    # check from a BROKEN one and must never treat a crash as a pass.
-    return 0 if result["passed"] else 1
+        return EXIT_FINDINGS
+    # 1 = blocking findings; 2 = usage/target error; 3 = the gate could not determine its scope.
+    # A harness can tell a FAILED check from a BROKEN one and must never treat a crash as a pass.
+    return EXIT_OK if result["passed"] else EXIT_FINDINGS
 
 
 def cmd_attest(args) -> int:
@@ -844,11 +970,11 @@ def cmd_attest(args) -> int:
     if run_dir is None or not run_dir.is_dir():
         print("error: no run directory found; pass --run <dir> or run `websec run` first",
               file=sys.stderr)
-        return 2
+        return EXIT_USAGE
     if not (run_dir / "findings-ledger.json").is_file():
         print(f"error: {run_dir} does not look like a websec run (no findings-ledger.json)",
               file=sys.stderr)
-        return 2
+        return EXIT_USAGE
 
     bypasses = _hooks.read_bypasses(Path(getattr(args, "repo", None) or ".").expanduser())
     result = _attest.build(run_dir, bypasses=bypasses)
@@ -891,7 +1017,7 @@ def cmd_explain(args) -> int:
         return 0
     if not getattr(args, "term", None):
         print("error: give an attack class or CWE id, or --list", file=sys.stderr)
-        return 2
+        return EXIT_USAGE
     info = _explain.describe(args.term)
     if getattr(args, "format", "text") == "json":
         _emit_json_result(info)
@@ -910,7 +1036,7 @@ def cmd_feedback(args) -> int:
         # this on a findings ledger would require the artifact whose absence is the point.
         if args.fingerprint:
             print("--fingerprint does not apply to --verdict false-negative", file=sys.stderr)
-            return 2
+            return EXIT_USAGE
         try:
             record = fb.build_missed_record(
                 attack_class=getattr(args, "attack_class", "") or "", reason=args.reason,
@@ -1435,7 +1561,7 @@ def build_parser() -> argparse.ArgumentParser:
     # metavar lists only the user-facing commands; recon/proof/calibrate still work but are
     # omitted (they get no `help=`, so argparse leaves them out of the listing entirely).
     sub = p.add_subparsers(dest="cmd", required=True,
-                          metavar="{run,doctor,dynamic,mcp,capabilities,demo,explain,feedback,intel,research,repair-verify,install,hooks}")
+                          metavar="{run,init,doctor,dynamic,mcp,capabilities,demo,explain,feedback,intel,research,repair-verify,install,hooks}")
 
     r = sub.add_parser("run", help="full pipeline → briefing + tailored probes")
     r.add_argument("target")
@@ -1514,6 +1640,14 @@ def build_parser() -> argparse.ArgumentParser:
     rc.add_argument("target")
     rc.add_argument("--out", help="output dir (default: ./websec-out)")
     rc.set_defaults(func=cmd_recon)
+
+    i = sub.add_parser("init", help="scaffold a .websec-ignore scoped to this repo")
+    i.add_argument("target", nargs="?", default=".")
+    i.add_argument("--dry-run", action="store_true", dest="dry_run",
+                   help="print the proposed .websec-ignore without writing it")
+    i.add_argument("--force", action="store_true",
+                   help="replace an existing .websec-ignore (it may hold reviewed acknowledgements)")
+    i.set_defaults(func=cmd_init)
 
     d = sub.add_parser("doctor", help="show which scanners are installed")
     d.add_argument("target", nargs="?", help="optional repo to scope scanner relevance")
@@ -1710,7 +1844,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-_COMMANDS = {"run", "recon", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks", "repair-verify", "capabilities", "intel", "research", "feedback", "gate", "attest", "explain", "demo"}
+_COMMANDS = {"run", "recon", "init", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks", "repair-verify", "capabilities", "intel", "research", "feedback", "gate", "attest", "explain", "demo"}
 
 
 def main(argv=None) -> int:

@@ -216,14 +216,34 @@ def add_scanners(facts: dict, detected: dict, results: list, unified: dict | Non
                 outcome = "missing_output"
             else:
                 outcome = "completed"
+            # A scanner that ran but whose individual RULES did not complete is neither "completed"
+            # nor "error" — it is PARTIAL, and saying so is the whole point. `semgrep: error` told
+            # the operator their scanner was broken when in fact five named high-value rules timed
+            # out and everything else ran (field report #7).
+            rule_details = (unified or {}).get("report_details", {}).get(key, {}) or {}
+            incomplete_rules = rule_details.get("rules_incomplete") or []
+            if outcome == "completed" and incomplete_rules:
+                outcome = "partial"
             if outcome != "completed":
                 add_gap(facts, "scanner", f"{key}: {outcome}")
+            if incomplete_rules:
+                kinds = ", ".join(rule_details.get("rules_incomplete_kinds") or ["did not complete"])
+                shown = ", ".join(incomplete_rules[:8])
+                more = f" (+{len(incomplete_rules) - 8} more)" if len(incomplete_rules) > 8 else ""
+                # Its own gap KIND: a consumer filtering on "scanner" gaps is asking "did a tool
+                # fail", which is a different question from "did a rule fail".
+                add_gap(facts, "scanner_rules",
+                        f"{key}: {len(incomplete_rules)} rule(s) did not complete ({kinds}) — "
+                        f"{shown}{more}. The scanner ran; these specific rules produced no result, "
+                        f"so their finding classes are UNMEASURED, not clean.")
         cov["scanners"][key] = {"installed": key in installed, "runnable": runnable,
                                  "selected": chosen, "ran": result is not None, "outcome": outcome,
                                  "reported_version": (unified or {}).get("report_versions", {}).get(key),
                                  "version_verified": bool((unified or {}).get("report_versions", {}).get(key))}
         details = (unified or {}).get("report_details", {}).get(key, {})
         cov["scanners"][key]["report_details"] = details
+        if details.get("rules_incomplete"):
+            cov["scanners"][key]["rules_incomplete"] = details["rules_incomplete"]
         for policy in ("configuration_policy", "suppression_policy"):
             if result and policy in result:
                 cov["scanners"][key][policy] = result[policy]

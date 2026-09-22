@@ -77,7 +77,7 @@
           {
             "requirementId": "FR-009",
             "file": "tests/test_unanalyzed_cli.py",
-            "line": 149
+            "line": 152
           },
           {
             "requirementId": "FR-010",
@@ -107,7 +107,7 @@
           {
             "requirementId": "FR-013",
             "file": "tests/test_unanalyzed_cli.py",
-            "line": 55
+            "line": 56
           },
           {
             "requirementId": "SC-005",

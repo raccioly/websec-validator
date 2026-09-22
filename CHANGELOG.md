@@ -23,10 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   secret or authorization rule (Swift, Kotlin, Rust, C/C++ — only the named configuration checks in
   `profiles`). Derived from the published `capabilities()` catalog, so adding a real ruleset removes
   the warning automatically.
-- **`websec run --require-analyzed`** (exit 2) and **`websec gate --fail-on-missed`** (exit 1) —
+- **`websec run --require-analyzed`** (exit 3) and **`websec gate --fail-on-missed`** (exit 1) —
   both opt-in. Default exit codes and the gate's recorded `passed` verdict are unchanged; only the
   text a model reads gains the disclosure. `--require-complete` deliberately stays silent for this
-  case: nothing failed to execute, there was nothing executable.
+  case: nothing failed to execute, there was nothing executable. `--require-analyzed` shares exit
+  code 3 with it, because covering no code is a coverage outcome rather than a usage error or a
+  finding — it is never reported as a vulnerability.
 - **Fitting objective recorded as a design constraint.** Any quantity fitted from labels is chosen
   by a strictly proper scoring rule (Brier or log score), never accuracy/precision/recall/F1, which
   are maximized by confident wrongness. Stated in `METHODOLOGY.md` § Layer 3b, `BENCHMARKS.md` § 2
@@ -70,6 +72,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `content-sniffing`, `subresource-integrity`, `timing-unsafe-compare`), which previously fell back
   to the generic "write a regression test". These were real gaps in the fix prompts independently of
   the triage work, and they are what make the agent-fixable invariant true rather than aspirational.
+
+### Fixed — `websec run` no longer version-probes scanners it will not run
+
+Scanner version-checking (0.17.0) spawns `<binary> --version` for every scanner on PATH. Measured on
+a machine with the full toolchain, that was **3.4s of a 3.5s run** — on the default path, where
+`--scan` was not given and none of those scanners execute. The version answers "is this build
+compatible with the adapter's argv", which only matters when the scanner is about to run, so it is
+now probed only with `--scan`. `doctor`, whose entire job is reporting whether the toolchain is
+usable, still probes every time, and `--scan` records `reported_version`/`version_verified` exactly
+as before. `websec run` on a small repo: **3.53s -> 0.14s**.
 
 ### Fixed — three systematic false-positive sources (corpus 184 -> 63 findings, -66%)
 
@@ -118,6 +130,54 @@ All additive: no finding, severity, confidence, fingerprint or SARIF output chan
 fixture, and no probability moves without an explicit human acceptance. New coverage gaps are scope limitations (`execution: false`), so `execution_complete` and
 `--require-complete` semantics are untouched. Specification:
 `specs/002-calibration-honesty-and-structural-coverage/spec.md`.
+## [0.17.0] — 2026-09-22
+
+### Changed — BREAKING
+- **Exit codes split so CI can tell a vulnerability from a broken toolchain.** `0` clean · `1`
+  findings at or above `--fail-on` · `2` usage/configuration error · `3` requested checks did not
+  complete. Exit `2` previously meant *incomplete*; a CI job that tested for `2` to detect an
+  incomplete run must now test for `3` (or read `coverage.execution_complete`, unchanged).
+  A run that is both gate-failing and incomplete exits `1` and warns that the count is a floor;
+  `gate.failure_kind` records `findings` / `incomplete` / `findings+incomplete`.
+
+### Fixed
+- **osv-scanner produced nothing on most repos.** The adapter omitted `--recursive`, so v2 only
+  extracted from the top-level directory: any repo with lockfiles in subdirectories aborted with
+  "No package sources found", wrote no output, and was recorded as `osv-scanner: error`. Dependency
+  CVEs are the highest-frequency true-positive class, so this disabled the most productive scanner
+  in the set. (bug-308)
+- **A placeholder in `.env.example` was reported as a HIGH key.** The scanner and recon pipelines had
+  drifted apart on secret tiering, and semgrep's secret rules (category `sast`) bypassed both. The
+  doc/example/placeholder predicates now live in `extractors/base.py` and are applied as a post-pass
+  to every secret-like finding. A provider-identified key (`sk_live_`, `AKIA`, …) is never demoted on
+  value shape. (bug-312)
+- **`X || 'dev-default'` guarded by a startup assertion no longer reports HIGH.** Both the semgrep
+  post-pass and the recon detector now sweep the repo for an assertion on that env var
+  (`if (!process.env.X) throw`, `assertEnv`, zod/joi/envalid schemas, Python `raise`/`os.environ[]`).
+  Demoted and explained, never dropped; an unguarded fallback keeps its severity. (bug-316)
+- **Unclassifiable scanner diagnostics fail loud** instead of reading as a clean scan. (bug-314)
+
+### Added
+- **`websec init`** scaffolds a `.websec-ignore` from what is actually in the repo — proposing only
+  directories that exist and hold files, each annotated with its file count and reason. Prints every
+  proposal before writing; `--dry-run`; refuses to overwrite an existing policy file without
+  `--force`. (bug-315)
+- **`websec doctor` version-checks.** Presence on PATH is not compatibility: a scanner whose CLI does
+  not match our invocation runs and fails silently. Registry entries carry `min_version`; `doctor`
+  reports each version and exits `2` when a selected scanner is incompatible. (bug-308)
+- **Clustered view.** `clusters[]` + `cluster_summary` in the ledger and a §1a section in REPORT.md
+  group findings by rule, and history-only secrets by the commit that removed them — 163 findings
+  read as 13 distinct issues on the verification fixture. Presentation only: `total`, `--fail-on`
+  counts, per-site fingerprints, SARIF results and baselines are untouched. (bug-311)
+- **Secret provenance.** Every gitleaks finding carries `in_tree`; a finding whose file is gone is
+  labelled `in-tree: false` with `commit`/`commit_date` (from gitleaks' own record) and the
+  rotate-not-delete remediation. (bug-310)
+- **Confidence on every finding**, with a `confidence_basis` explaining it, plus `instance_id` — a
+  portable per-occurrence id (`rule_id` names the detector, not the site). Emitted alongside
+  `fingerprint`, so existing baselines keep matching. (bug-313)
+- **Rule-level coverage gaps.** A scanner that ran but whose rules timed out is `outcome: partial`
+  with the rule IDs named in a `scanner_rules` gap, instead of a bare `semgrep: error`. (bug-314)
+
 
 ## [0.16.0] — 2026-09-18
 

@@ -17,6 +17,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from websec_validator import cli, gate
+from websec_validator.cli import EXIT_FINDINGS, EXIT_INCOMPLETE, EXIT_OK
 
 ELIXIR = 'defmodule W do\n  def f(c, %{"id" => i}) do\n    q("SELECT * FROM u WHERE id = #{i}")\n  end\nend\n'
 
@@ -48,15 +49,17 @@ class RequireAnalyzedTests(_Run):
     def test_default_run_over_unanalyzable_source_still_exits_zero_but_says_so(self):
         (self.repo / "worker.ex").write_text(ELIXIR)
         code, output = self.run_cli()
-        self.assertEqual(code, 0, "the default must not start failing; disclosure is not a gate")
+        self.assertEqual(code, EXIT_OK, "the default must not start failing; disclosure is not a gate")
         self.assertIn("NO ANALYZABLE SOURCE", output)
         self.assertIn("NOT CHECKED", output)
 
     # @req specs/002-calibration-honesty-and-structural-coverage/spec.md#FR-013
     def test_require_analyzed_refuses_to_report_it_as_a_pass(self):
+        """Exit 3, sharing the coverage code: nothing was misconfigured and nothing is a finding."""
         (self.repo / "worker.ex").write_text(ELIXIR)
         code, output = self.run_cli("--require-analyzed")
-        self.assertEqual(code, 2)
+        self.assertEqual(code, EXIT_INCOMPLETE)
+        self.assertNotIn("vulnerability", output.lower().split("not a finding")[0][-200:])
         self.assertIn("--require-analyzed", output)
         self.assertEqual(self.latest("findings-ledger.json")["gate"]["verdict"], "no-analyzable-source")
 

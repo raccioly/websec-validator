@@ -274,16 +274,59 @@ non-Claude agents. All stdlib, no new dependency.
 finding lands **inline on the PR diff** and in the **Security tab**, ranked by a security-severity band,
 with its CWE/ASVS/OWASP citation and remediation.
 
-**Gate the build.** `--fail-on {critical,high,medium,low}` exits 1 for matching findings and 2 when
-requested execution is incomplete. `--require-complete` gates execution without a severity threshold.
-Extractor failures, source read loss/caps, invalid scanner reports, timeouts, and explicitly selected
-missing scanners remain visible in `coverage.json`; partial artifacts are preserved. Optional missing
-unselected scanners are reported as unavailable. `--scanners` requires `--scan`.
+**Gate the build.** `--fail-on {critical,high,medium,low}` fails CI on matching findings;
+`--require-complete` gates execution without a severity threshold. Extractor failures, source read
+loss/caps, invalid scanner reports, timeouts, and explicitly selected missing scanners remain visible
+in `coverage.json`; partial artifacts are preserved. Optional missing unselected scanners are reported
+as unavailable. `--scanners` requires `--scan`.
+
+**Exit codes tell you WHICH kind of failure.** "You have a vulnerability" and "my toolchain is
+broken" need opposite responses — one blocks the merge, the other pages whoever owns the runner
+image — so they never share a code:
+
+| Code | Meaning | What to do |
+|------|---------|------------|
+| `0` | the gate ran and nothing met the threshold | ship (it does not prove protection) |
+| `1` | findings at or above `--fail-on` | a fact about the code — fix the findings |
+| `2` | usage/configuration error, or `websec doctor` found an incompatible scanner | nothing was scanned; fix the invocation or the toolchain |
+| `3` | requested checks did not complete | the gate result is **not** a pass; read `coverage.gaps` for which check did not run |
+
+A run that is **both** gate-failing and incomplete exits `1` — the definite fact wins — and says so
+on stderr, because the finding count in that case is a floor, not a total. `gate.failure_kind` in the
+ledger records the exact combination (`findings` · `incomplete` · `findings+incomplete`), so nothing
+is lost by the collapse.
+
+> **Upgrading:** exit `2` previously meant *incomplete execution*. It now means *usage/configuration
+> error*, and incomplete is `3`. A CI job that tested for `2` to detect an incomplete run should test
+> for `3` (or read `coverage.execution_complete`, which is unchanged).
 
 **Naming a scanner requires it.** `--scanners` is not only a subset filter: a scanner you select but
 have not installed is an incomplete run, not a clean one. `websec run . --scan --scanners trivy,osv-scanner
---require-complete` exits 2 with `trivy: unavailable` in `coverage.json`, so a CI job whose scanner
+--require-complete` exits 3 with `trivy: unavailable` in `coverage.json`, so a CI job whose scanner
 install failed fails instead of reporting zero findings from a scan that never ran.
+
+**Presence is not compatibility — `websec doctor` version-checks.** A scanner can be installed,
+detected, selected, run, and still produce nothing because its CLI does not match the invocation
+websec builds; that silence is indistinguishable from a clean result. `doctor` now reports each
+scanner's version, marks one that is too old for our invocation, and exits `2` when any selected
+scanner is incompatible — so a CI preflight can gate on the toolchain before it trusts a scan.
+
+**Scope the noise at setup, not after the first report.** `websec init` walks the repo, finds the
+directories that are not your product (`backend/capacity-test/`, `seed/`, `fixtures/`, `vendor/` …),
+and writes a `.websec-ignore` where every entry carries the file count that justifies it. It prints
+every proposal before writing, supports `--dry-run`, and refuses to overwrite an existing policy file
+without `--force` — that file may hold reviewed `fingerprint:` acknowledgements.
+
+**One issue, N sites.** Thirteen findings from one `jwtSecret` pattern and twenty-two blobs from one
+deleted-file incident are six issues, not thirty-five. The ledger carries a `clusters[]` view (and
+REPORT.md a §1a section) that groups findings by rule, and history-only secrets by the commit that
+removed them. It is a **view, not a filter**: `total`, `--fail-on` counts, per-site fingerprints,
+SARIF results and baselines are all untouched, so every site still gates on its own.
+
+**Secrets say where they live.** Every gitleaks finding carries `in_tree`; a finding whose file is
+gone from the working tree is labelled `in-tree: false` with the commit it was last seen in. Deleting
+a file does not un-leak it — the blob stays fetchable — so the remediation is *rotate*, and the report
+says that instead of leaving you to run `git log`.
 
 Every attempt receives a unique directory under `websec-out/runs/`. The atomic `latest` pointer
 advances only after a completed execution has written its artifacts; a partial attempt retains its

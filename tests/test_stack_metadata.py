@@ -79,7 +79,7 @@ class StackMetadataTests(unittest.TestCase):
             self.assertEqual(invoke(), 0)
             latest = (out / 'latest').resolve()
             package.write_text('{"dependencies":["express"]}')
-            self.assertEqual(invoke(), 2)
+            self.assertEqual(invoke(), 3)
             self.assertEqual((out / 'latest').resolve(), latest)
             attempt = max((out / 'runs').iterdir(), key=lambda path: path.stat().st_mtime_ns)
             coverage = json.loads((attempt / 'coverage.json').read_text())
