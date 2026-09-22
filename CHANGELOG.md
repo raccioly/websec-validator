@@ -5,7 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.19.0] — 2026-09-22
+
+Migration: **none required.** The one new surface is an opt-in flag, and nothing existing changes
+shape. The change a CI author should expect is **fewer findings**: four false-positive sources are
+fixed here, so a `--fail-on` gate or a baseline diff that previously tripped on a
+`timing-unsafe-compare` against a length, a `weak-password-hash` over an identifier, a
+browser-extension handler whose sender check sat behind an alias, or a PII projection that actually
+removed the field will now come back clean. That is a precision gain, not a coverage loss — each fix
+ships with the paired true-positive control proving the real case still fires.
+
+**Precision work, with the controls attached.** The theme of this release is that a detector fix is
+only accepted alongside a test proving it did not go quiet. Every false-positive fix below names the
+near misses that must still report, and one piece of #143 is deliberately left out because it never
+fired end-to-end and carried no control. The claimspec `ignore` writer applies the same standard to
+an export format: entries whose reason cannot be established honestly are omitted **and counted**,
+so a partial policy can never read as a whole one.
+
 
 ### Added — the claimspec `ignore` writer
 

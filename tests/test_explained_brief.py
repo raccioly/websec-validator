@@ -89,7 +89,15 @@ class BriefIsSelfContained(unittest.TestCase):
         changelog = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
         self.assertIn(f"## [{STATED_VERSION}]", changelog)
         self.assertTrue(_has(f"Technical Brief · v{STATED_VERSION}"))
-        releases = len(re.findall(r"^## \[\d+\.\d+", changelog, flags=re.M))
+        # The brief is a SNAPSHOT of STATED_VERSION and says so ("asserted ... at the version in
+        # the masthead"), so it must count the releases that existed at that version -- not the
+        # running total. Binding it to the total made every future release fail this assertion
+        # while proving nothing extra: a brief cannot overstate a release that shipped after it.
+        # Same counting basis as before (a grouped heading like "[0.2.x]" counts once),
+        # newest first, so slicing from STATED_VERSION keeps only what had shipped by then.
+        shipped = re.findall(r"^## \[(\d+\.\d+[^\]]*)\]", changelog, flags=re.M)
+        self.assertIn(STATED_VERSION, shipped)
+        releases = len(shipped[shipped.index(STATED_VERSION):])
         self.assertTrue(_has("twenty-eight releases"), "release count wording drifted")
         self.assertEqual(releases, 28)
         breaking = changelog.count("### Changed — BREAKING")
