@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-09-22
+
 ### Changed — BREAKING
 - **Exit codes split so CI can tell a vulnerability from a broken toolchain.** `0` clean · `1`
   findings at or above `--fail-on` · `2` usage/configuration error · `3` requested checks did not
@@ -53,7 +55,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Rule-level coverage gaps.** A scanner that ran but whose rules timed out is `outcome: partial`
   with the rule IDs named in a `scanner_rules` gap, instead of a bare `semgrep: error`. (bug-314)
 
-## [Unreleased]
 
 ## [0.16.0] — 2026-09-18
 
