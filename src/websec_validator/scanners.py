@@ -25,7 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import enrichment
-from .extractors.base import SKIP_DIRS, is_test_file, path_in_skip_dir, read_artifact
+from .extractors.base import (SKIP_DIRS, is_doc_or_example, is_example_file, is_placeholder_value,
+                             is_test_file, path_in_skip_dir, read_artifact)
 
 
 @dataclass(frozen=True)
@@ -628,31 +629,52 @@ def _generic_secret(rule: str) -> bool:
 
 # Secrets matched in DOCUMENTATION / EXAMPLE files are overwhelmingly placeholders, not live
 # credentials — e.g. `curl -H "Authorization: Bearer <token>"` in a README/API doc, or a
-# value in `.env.example`. Tier those to LOW + a verify note (still visible — a real key CAN be
+# value in `.env.example`. Tier those down + a verify note (still visible — a real key CAN be
 # pasted into docs by mistake). Dogfooding flagged 4 HIGH curl-auth-header FPs across an API's
 # README + docs/*.md (bug below).
-_DOC_EXT = (".md", ".mdx", ".markdown", ".rst", ".txt", ".adoc")
-_DOC_DIR_MARKERS = ("/docs/", "/doc/", "/examples/", "/example/", "/samples/", "/sample/", "/.github/")
-# …but NOT these: a hardcoded token in a GitHub Actions workflow is live in CI (one of the highest-
-# yield real-world leaks), and a dependency manifest can carry an index URL with embedded credentials.
-# Both live under paths the doc-demotion would otherwise silently tier down to LOW "placeholder".
-_NEVER_DOC = ("/.github/workflows/", "/requirements", "/pipfile", "/poetry.lock")
-_DOC_NAME_PREFIX = ("readme", "changelog", "contributing", "license", "authors", "history", "notice")
-_EXAMPLE_SUFFIX = (".example", ".sample", ".dist", ".template", ".tmpl")
+#
+# The marker tables now live in extractors/base.py so the recon EXTRACTORS share one definition
+# with this pipeline. They had drifted: `client_exposure`'s AppSync `da2-` detector had no
+# doc/example tier at all, so a placeholder in `.env.example` stayed HIGH while the very same
+# file's gitleaks hits were LOW (field report #5).
 _DOC_NOTE = "in a documentation/example file — almost always a placeholder, verify before treating as real"
+# `.env.example` / `config.sample.yml` are a STRONGER signal than a README: the naming convention
+# exists precisely to say "these values are fake, copy me and fill them in". Its own tier + note.
+_EXAMPLE_NOTE = ("in a *.example/*.sample template file — this file exists to hold placeholder values, "
+                 "so a match here is a placeholder unless the value itself looks real")
+_PLACEHOLDER_NOTE = ("the matched VALUE is self-evidently a placeholder (fill-me-in shape), not a "
+                     "credential")
 
 
 def _is_doc_or_example(path: str) -> bool:
-    # "/" prefix so ROOT-LEVEL dirs match the /marker/ patterns too — `examples/app.js`
-    # previously slipped past `/examples/` and kept HIGH (DocGuard field report F1).
-    p = "/" + (path or "").replace("\\", "/").lower().lstrip("/")
-    if any(m in p for m in _NEVER_DOC):
-        return False
-    base = p.rsplit("/", 1)[-1]
-    return (p.endswith(_DOC_EXT)
-            or any(m in p for m in _DOC_DIR_MARKERS)
-            or any(base.startswith(m) for m in _DOC_NAME_PREFIX)
-            or any(s in base for s in _EXAMPLE_SUFFIX))
+    """Thin alias kept for the existing call sites + unit tests; the definition is shared."""
+    return is_doc_or_example(path)
+
+
+def _placeholder_tier(path: str, value: str = "", provider_identified: bool = False) -> tuple:
+    """(severity, note) for a secret match that is a placeholder by FILE or by VALUE — else (None, "").
+
+    Three tiers, weakest to strongest evidence that this is not a credential:
+      * documentation file            → LOW  (a README can still hold a real pasted key)
+      * *.example/*.sample template   → LOW  (the file's whole purpose is fake values)
+      * placeholder-shaped VALUE      → INFO (`da2-xxxxxxxx…`, `your-api-key`, `<TOKEN>`)
+    A placeholder VALUE is decisive wherever it appears, so it wins over the file tiers. Nothing is
+    ever DROPPED — a real key pasted into `.env.example` is precisely the mistake worth catching.
+
+    `provider_identified` DISABLES the value check, and that guard is load-bearing. A provider tier
+    fires on a structural PREFIX — `sk_live_`, `whsec_`, `AKIA` — which is issued by the provider and
+    is itself the evidence. The body after that prefix is opaque, so a low-entropy body proves
+    nothing: `sk_live_aaaaaaaaaaaaaaaaaaaa` matches "a run of identical characters" and is still a
+    Stripe LIVE key. Demoting it to INFO would have been a false NEGATIVE on the single highest-value
+    secret class this tool detects — caught by test_named_provider_key_is_high_not_generic_via_gitleaks.
+    The FILE tiers still apply: a `sk_live_` in `.env.example` is very likely fake, just not INFO-fake."""
+    if not provider_identified and is_placeholder_value(value):
+        return "INFO", _PLACEHOLDER_NOTE
+    if is_example_file(path):
+        return "LOW", _EXAMPLE_NOTE
+    if is_doc_or_example(path):
+        return "LOW", _DOC_NOTE
+    return None, ""
 
 
 def _norm_trivy(data: dict) -> list:
@@ -677,8 +699,10 @@ def _norm_trivy(data: dict) -> list:
                 sev, note = _provider_secret_tier(f"{s.get('Match','')} {s.get('Code','') or ''}")
             if not sev and _generic_secret(rid):
                 sev, note = "MEDIUM", _GENERIC_NOTE
-            if _is_doc_or_example(tgt):
-                sev, note = "LOW", (note + "; " if note else "") + _DOC_NOTE
+            ph_sev, ph_note = _placeholder_tier(tgt, s.get("Match", "") or s.get("Secret", ""),
+                                                provider_identified=bool(sev))
+            if ph_sev and not (sev and ph_sev == "INFO"):
+                sev, note = ph_sev, (note + "; " if note else "") + ph_note
             title = f"secret: {s.get('Title') or rid}" + (f" — {note}" if note else "")
             out.append({"tool": "trivy", "category": "secret", "severity": sev or _sev(s.get("Severity") or "HIGH"),
                         "key": rid, "file": tgt, "line": s.get("StartLine", 0),
@@ -773,8 +797,11 @@ def _norm_gitleaks(data) -> list:
             sev, note = _provider_secret_tier(f"{x.get('Secret','')} {x.get('Match','')}")
         if not sev and _generic_secret(rule):
             sev, note = "MEDIUM", _GENERIC_NOTE
-        if _is_doc_or_example(f):
-            sev, note = "LOW", (note + "; " if note else "") + _DOC_NOTE
+        # `sev` is set above ONLY by _aws_secret_tier / _provider_secret_tier — i.e. a rule that
+        # identified a specific provider. Generic/entropy matches leave it None.
+        ph_sev, ph_note = _placeholder_tier(f, x.get("Secret", ""), provider_identified=bool(sev))
+        if ph_sev and not (sev and ph_sev == "INFO"):
+            sev, note = ph_sev, (note + "; " if note else "") + ph_note
         title = f"secret: {(x.get('Description') or rule)[:80]}" + (f" — {note}" if note else "")
         # Commit provenance, straight from gitleaks' own record — no `git log` needed. In history
         # ("git") mode EVERY hit came out of the commit graph, so the reader must be told that up
@@ -1023,6 +1050,47 @@ def _gitignored(target: Path | None, paths) -> set:
         return {rel_to_orig[r] for r in ignored_rel if r in rel_to_orig}
     except Exception:
         return set()
+# Rules that are SECRET DETECTION regardless of which adapter reported them. Semgrep ships a pile
+# of these ("AWS AppSync GraphQL Key detected", "hardcoded-api-key", …) and they arrive as category
+# `sast`, so the per-parser secret tiering in _norm_gitleaks/_norm_trivy never saw them: a `da2-`
+# placeholder in `.env.example` was demoted to INFO by one detector and reported HIGH by another,
+# in the same run, on the same line (field report #5). Tiering belongs to the FINDING, not to the
+# adapter that happened to produce it.
+_SECRETISH_RULE = re.compile(
+    r"secret|credential|api[_-]?key|token|password|passwd|private[_-]?key|appsync|"
+    r"access[_-]?key|auth[_-]?header|hardcoded", re.I)
+
+
+def _is_secret_like(f: dict) -> bool:
+    if f.get("category") == "secret":
+        return True
+    return bool(_SECRETISH_RULE.search(
+        f"{f.get('rule_id') or ''} {f.get('key') or ''} {f.get('title') or ''}"))
+
+
+def _tier_placeholder_matches(raw: list, target) -> int:
+    """Apply the doc/example/placeholder tier to EVERY secret-like finding, whatever produced it.
+
+    Idempotent: a parser that already tiered its own finding is left alone. Never drops anything —
+    the finding stays in the ledger, in SARIF and in the report, with the reason attached."""
+    n = 0
+    for f in raw:
+        if not _is_secret_like(f) or f.get("placeholder_tier"):
+            continue
+        rel = _rel_to(f.get("file", ""), target) or f.get("file", "")
+        # A provider-identified credential is never demoted on value shape — see _placeholder_tier.
+        value = str(f.get("secret") or f.get("match") or "")
+        sev, note = _placeholder_tier(rel, value)
+        if not sev:
+            continue
+        if SEV_ORDER.get(f.get("severity"), 0) <= SEV_ORDER.get(sev, 0):
+            continue                      # already at or below the tier — nothing to do
+        f["severity"] = sev
+        f["placeholder_tier"] = "example-file" if is_example_file(rel) else "doc-file"
+        if note not in f.get("title", ""):
+            f["title"] += f" — {note}"
+        n += 1
+    return n
 
 
 def normalize_findings(scan_results: list, outdir: Path, target: Path | None = None,
@@ -1147,6 +1215,11 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
                 f["title"] += " — local-only (gitignored, never committed; rotate if real, not a repo leak)"
             local_only_downgraded += 1
 
+    # field report #5: the doc/example/placeholder tier applies to every secret-like finding, not
+    # just the ones the secret parsers produced. Runs BEFORE dedup so a cross-tool duplicate cannot
+    # resurrect the higher severity through the max() in the fingerprint merge.
+    placeholder_tiered = _tier_placeholder_matches(raw, target)
+
     # A gitleaks hit whose file is gone from the tree is a HISTORY-only leak — deleting the file did
     # not un-leak it. Annotate so the remediation is ROTATE, not "already removed".
     history_only = _annotate_history_only_secrets(raw, target)
@@ -1224,6 +1297,7 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
             "local_only_downgraded": local_only_downgraded,
             "test_fixture_downgraded": test_fixture_downgraded,
             "history_only_secrets": history_only,
+            "placeholder_tiered": placeholder_tiered,
             "reachability": reachability,
             "exploitability": exploitability,
             "parse_failed": sorted(set(parse_failed)),

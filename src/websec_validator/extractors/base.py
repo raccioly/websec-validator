@@ -13,7 +13,9 @@ import fnmatch
 import hashlib
 import os
 import re
+import shutil
 import stat
+import subprocess
 from functools import lru_cache
 from pathlib import Path
 
@@ -143,6 +145,7 @@ class RepoContext:
         # Keep the caller's spelling for returned paths (macOS /var aliases
         # /private/var), with a separate canonical root for containment.
         self.root = Path(root).absolute()
+        self._gitignored = None   # lazily filled by is_gitignored(); None == "not yet asked"
         self._resolved_root = self.root.resolve()
         self._root_identity = self._identity(self.root.stat())
         if expected_root is not None:
@@ -335,6 +338,29 @@ class RepoContext:
         except ValueError:
             return str(path)
 
+    def is_gitignored(self, rel: str) -> bool:
+        """Does git IGNORE this repo-relative path? Cached; one `git check-ignore` per context.
+
+        A gitignored `.env` is a developer's LOCAL file — it was never committed, so a credential in
+        it is not a repo leak and reporting it is noise on almost every repo that exists. A tracked
+        `.env` is the opposite: it is in the repository, for everyone, forever. The distinction is
+        the difference between a true positive and an FP on nearly every Node project, so it is
+        worth the single subprocess. Fails OPEN (returns False, i.e. "treat as committed") when git
+        is absent or this is not a repo: over-reporting a secret is the safe direction."""
+        if self._gitignored is None:
+            self._gitignored = set()
+            candidates = sorted({self.rel(p) for p in self.all_code_files or self.code_files}
+                                | {self.rel(p) for p in self.glob("**/.env*", limit=200)})
+            if candidates and shutil.which("git"):
+                try:
+                    proc = subprocess.run(["git", "-C", str(self.root), "check-ignore", "--stdin"],
+                                          input="\n".join(candidates), capture_output=True,
+                                          text=True, timeout=30)
+                    self._gitignored = {ln.strip() for ln in proc.stdout.splitlines() if ln.strip()}
+                except Exception:
+                    self._gitignored = set()
+        return (rel or "").replace("\\", "/") in self._gitignored
+
     def _open_file(self, resolved: Path, expected: os.stat_result) -> int:
         """Open a validated regular file, anchoring each component on POSIX.
 
@@ -501,3 +527,68 @@ class Extractor:
         """Return this extractor's slice of FACTS. `facts` holds prior extractors'
         results (stack runs first), so later extractors can branch on them."""
         raise NotImplementedError
+
+
+# --- Documentation / example / placeholder tiering -------------------------------------------
+# ONE definition of "this file exists to hold fake values", shared by the scanner-normalization
+# pipeline (scanners._is_doc_or_example) and the recon extractors. They had DRIFTED: scanner
+# secrets got a four-tier demotion (doc/example, gitignored-local, test-fixture, generic-entropy)
+# while extractor secrets got only `is_test_file`, so an AppSync `da2-` key in `.env.example` —
+# an extractor-only detector — stayed HIGH while the same file's gitleaks hits were LOW.
+# A `.example`/`.sample` file is a DISTINCT tier from a test fixture: a fixture MIGHT hold a real
+# key pasted by mistake, but a `.example` file's entire purpose is to be committed with fake
+# values. Demote, annotate, never drop — a real key CAN be pasted into one.
+_DOC_EXT = (".md", ".mdx", ".markdown", ".rst", ".txt", ".adoc")
+_DOC_DIR_MARKERS = ("/docs/", "/doc/", "/examples/", "/example/", "/samples/", "/sample/", "/.github/")
+# …but NOT these: a hardcoded token in a GitHub Actions workflow is live in CI (one of the highest-
+# yield real-world leaks), and a dependency manifest can carry an index URL with embedded credentials.
+_NEVER_DOC = ("/.github/workflows/", "/requirements", "/pipfile", "/poetry.lock")
+_DOC_NAME_PREFIX = ("readme", "changelog", "contributing", "license", "authors", "history", "notice")
+# Suffix/infix markers for "template meant to be copied and filled in".
+_EXAMPLE_SUFFIX = (".example", ".sample", ".dist", ".template", ".tmpl")
+
+
+def is_example_file(rel: str) -> bool:
+    """True for a file whose PURPOSE is to carry placeholder values — `.env.example`, `config.sample.yml`,
+    `settings.dist.ini`. Narrower than `is_doc_or_example`: this is the strongest placeholder signal
+    there is, because the naming convention is what tells a human to copy-and-fill it."""
+    base = ("/" + (rel or "").replace("\\", "/").lower().lstrip("/")).rsplit("/", 1)[-1]
+    return any(s in base for s in _EXAMPLE_SUFFIX)
+
+
+def is_doc_or_example(rel: str) -> bool:
+    """True for documentation, examples/ and `*.example`-style template files. Secrets matched here
+    are overwhelmingly placeholders (`Bearer <token>` in a README, a value in `.env.example`)."""
+    p = "/" + (rel or "").replace("\\", "/").lower().lstrip("/")
+    if any(m in p for m in _NEVER_DOC):
+        return False
+    base = p.rsplit("/", 1)[-1]
+    return (p.endswith(_DOC_EXT)
+            or any(m in p for m in _DOC_DIR_MARKERS)
+            or any(base.startswith(m) for m in _DOC_NAME_PREFIX)
+            or is_example_file(rel))
+
+
+# Values that ANNOUNCE themselves as fake. Checked on the matched VALUE, independently of the file:
+# `da2-xxxxxxxxxxxxxxxxxxxxxxxxxx` is a placeholder wherever it appears, and a real key never looks
+# like this. Deliberately conservative — every pattern here is one a credential generator cannot
+# plausibly emit, so a true positive is never silenced by accident.
+_PLACEHOLDER_WORDS = re.compile(
+    r"your[-_]?(?:api|key|token|secret|password|value|here)|replace[-_]?me|changeme|change[-_]me|"
+    r"placeholder|example[-_]?(?:key|token|secret|value)|dummy|fake[-_]?(?:key|token|secret)|"
+    r"insert[-_]?(?:key|token|here)|todo|xxx+|<[^>]{2,40}>|\.\.\.|s3cr3t|notarealkey|"
+    r"abcdef(?:0123|ghij)|deadbeef|0123456789abcdef", re.I)
+# A run of ≥6 identical characters (xxxxxx, 000000, aaaaaa) — the universal "fill this in" shape.
+_PLACEHOLDER_RUN = re.compile(r"(.)\1{5,}")
+
+
+def is_placeholder_value(value: str) -> bool:
+    """True when the matched secret VALUE is self-evidently a fill-me-in placeholder.
+
+    Complements `is_example_file`: together they are the two independent signals that a secret-shaped
+    match is not a credential. Either alone is enough to demote; neither is ever enough to DROP —
+    a real key pasted into an example file is exactly the mistake this tool exists to catch."""
+    v = (value or "").strip()
+    if not v or len(v) < 4:
+        return False
+    return bool(_PLACEHOLDER_RUN.search(v) or _PLACEHOLDER_WORDS.search(v))

@@ -301,6 +301,7 @@ websec builds; that silence is indistinguishable from a clean result. `doctor` n
 scanner's version, marks one that is too old for our invocation, and exits `2` when any selected
 scanner is incompatible — so a CI preflight can gate on the toolchain before it trusts a scan.
 
+
 **One issue, N sites.** Thirteen findings from one `jwtSecret` pattern and twenty-two blobs from one
 deleted-file incident are six issues, not thirty-five. The ledger carries a `clusters[]` view (and
 REPORT.md a §1a section) that groups findings by rule, and history-only secrets by the commit that

@@ -211,5 +211,45 @@ class ClusteringTests(unittest.TestCase):
              "location": "a.ts", "fingerprint": "f"}]}), [])
 
 
+class ExampleFileTierTests(unittest.TestCase):
+    """#5 — a placeholder in `.env.example` was reported as a HIGH AppSync key."""
+
+    def test_example_and_placeholder_helpers(self):
+        self.assertTrue(ebase.is_example_file(".env.example"))
+        self.assertTrue(ebase.is_example_file("config/settings.sample.json"))
+        self.assertFalse(ebase.is_example_file("src/example.ts"))
+        self.assertTrue(ebase.is_placeholder_value("da2-xxxxxxxxxxxxxxxxxxxxxxxxxx"))
+        self.assertTrue(ebase.is_placeholder_value("<YOUR_TOKEN>"))
+        self.assertFalse(ebase.is_placeholder_value("da2-k7f3m9q2xz8p4w1n6b5v0c3jhs"))
+
+    def test_secret_like_sast_rule_is_tiered_whatever_adapter_found_it(self):
+        """The HIGH came from SEMGREP (category `sast`), so per-parser tiering never saw it."""
+        raw = [{"category": "sast", "rule_id": "generic.secrets.detected-aws-appsync-graphql-key",
+                "severity": "HIGH", "file": ".env.example", "title": "AWS AppSync GraphQL Key detected"}]
+        self.assertEqual(scanners._tier_placeholder_matches(raw, None), 1)
+        self.assertEqual(raw[0]["severity"], "LOW")
+
+    def test_a_non_secret_finding_in_an_example_file_is_untouched(self):
+        raw = [{"category": "sast", "rule_id": "javascript.express.sqli", "severity": "HIGH",
+                "file": ".env.example", "title": "SQL injection"}]
+        self.assertEqual(scanners._tier_placeholder_matches(raw, None), 0)
+        self.assertEqual(raw[0]["severity"], "HIGH")
+
+    def test_provider_identified_key_is_never_demoted_on_value_shape(self):
+        """`sk_live_aaaaaaaaaaaaaaaaaaaa` matches "a run of identical characters" and is still a
+        Stripe LIVE key — the prefix is the evidence, the body is opaque."""
+        row = scanners._norm_gitleaks({"findings": [
+            {"File": "cfg.ts", "RuleID": "generic-api-key", "Secret": "sk_live_" + "a" * 20,
+             "Match": "sk_live_...", "StartLine": 1}]})[0]
+        self.assertEqual(row["severity"], "HIGH")
+        self.assertIn("ROTATE", row["title"])
+
+    def test_real_key_in_real_code_still_high(self):
+        row = scanners._norm_gitleaks([
+            {"File": "src/app.ts", "RuleID": "private-key", "Secret": "-----BEGIN",
+             "Match": "-----BEGIN", "StartLine": 1}])[0]
+        self.assertEqual(row["severity"], "HIGH")
+
+
 if __name__ == "__main__":
     unittest.main()
