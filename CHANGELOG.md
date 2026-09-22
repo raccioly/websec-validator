@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **README links the rendered brief, not the repository blob.** GitHub serves an `.html` blob as
+  source rather than as a page, so the previous in-repo link showed markup to anyone who clicked it.
+  GitHub Pages now serves `docs/` at https://raccioly.github.io/websec-validator/ and the README
+  points there.
+
 ### Added
 - **Technical brief** (`docs/websec-explained.html`, printed to `docs/websec-explained.pdf`). An
   eight-page, self-contained explainer — the idea, what the tool refuses to say, the anatomy of a
