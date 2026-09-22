@@ -695,7 +695,10 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         conf = "HIGH" if (cat in ("secret", "sca") and sev in ("HIGH", "CRITICAL")) else "MEDIUM"
         native_confidence = None
         if "bandit" in (t.get("tools") or []):
-            value = t.get("confidence")
+            # `native_confidence` is the producer's OWN value, preserved verbatim by
+            # normalize_findings; `confidence` may now be a websec-derived one, which must never be
+            # mistaken for the scanner having reported it.
+            value = t.get("native_confidence", t.get("confidence"))
             native_confidence = value if isinstance(value, str) and value in CONF_RANK else "UNKNOWN"
             # The ledger's categorical policy currently has no UNKNOWN bucket.
             # Route conservatively and retain the actual unknown producer label.
@@ -745,7 +748,14 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
             scanner_finding["standards"]["cwe"] = sorted(set(scanner_finding["standards"]["cwe"] + cwes))
         for key in ("rule_id", "rule", "check_id", "package", "pkg", "cve", "vulnerability_id", "resource",
                     "installed", "fixed", "ecosystem", "advisory_aliases",
-                    "resource_id", "service", "symbol", "sink", "semantic_id", "epss", "epss_pct", "kev", "reachability", "intel", "intel_status"):
+                    "resource_id", "service", "symbol", "sink", "semantic_id", "epss", "epss_pct", "kev", "reachability", "intel", "intel_status",
+                    # field report #3: WHERE the secret lives. `in_tree=False` means the file is gone
+                    # from the working tree but the blob is still fetchable — the reader could only
+                    # discover that by running `git log`. `commit`/`commit_date` come from gitleaks'
+                    # own record, so this costs no extra subprocess.
+                    "in_tree", "history_only", "commit", "commit_short", "commit_date", "commit_author",
+                    # field report #6: a stable per-INSTANCE id + why this confidence was assigned.
+                    "instance_id", "confidence_basis"):
             if key in t:
                 scanner_finding[key] = t[key]
         if not scanner_finding.get("rule_id") and t.get("key"):
