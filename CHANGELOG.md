@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — two detector false-positive sources, with the controls
+
+Lands the verified parts of #128 and #143 against current `main`, each with the paired
+true-positive control the original PRs omitted.
+
+- **`timing-unsafe-compare`** no longer fires on `password.length === 0`, `api_key.type === 'test'`
+  or a `0`/`"0"` sentinel — a length is not a credential and a zero comparison is a presence check.
+  A real `password === req.body.password` or `apiKey === suppliedKey` still fires, including when a
+  length guard sits beside it.
+- **`weak-password-hash`** no longer fires on `md5(req.body.id)` inside a password-ish function: an
+  identifier is not a credential, and hashing one to mint a token is a different bug class rather
+  than an absence of one. The exemption belongs to its own argument and never to the function — a
+  real `md5(password)` beside an exempt hash still fires in either order.
+- **`_sender_control`** (browser extensions) recognises four more shapes of the same check:
+  optional chaining, `!`-negation, loose `==`/`!=`, and Yoda conditions. A handler with no sender
+  check, a wildcard origin, a check on the *message* rather than the sender, and a reassigned
+  `sender` are all still reported.
+
+Alias resolution from #143 is deliberately **not** included: it never fired end-to-end and the PR
+carried no test for it. Crediting a local alias would need a control proving a reassigned alias is
+still reported, since an alias can be rebound between the binding and the check.
+
+
 ## [0.18.0] — 2026-09-22
 
 Migration: **none required.** Every ledger and coverage field added here is additive, existing

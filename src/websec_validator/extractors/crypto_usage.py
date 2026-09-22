@@ -99,8 +99,14 @@ def _unparenthesized(value: str) -> str:
     return value
 
 
+# Identifier-shaped arguments: not credentials, so hashing them weakly is not a password-hash bug.
+_NON_CREDENTIAL_ARGUMENT = re.compile(r"(?:^|\.)(?:id|email|userId|user_id|tenantId|tenant_id)$", re.I)
+
+
 def _credential_operand(value: str) -> bool:
     # Literal words in arbitrary message strings aren't credential variables.
+    if re.search(r'\.(?:length|size|byteLength|type)$', value):
+        return False
     bare = re.sub(_TIMING_LITERAL, "''", value)
     if _CREDENTIAL_NAME.search(bare):
         return True
@@ -112,7 +118,7 @@ def _credential_operand(value: str) -> bool:
 
 def _presence_literal(value: str, suffix: str) -> bool:
     value = _unparenthesized(value)
-    if value in {"''", '""'}:
+    if value in {"''", '""', '0', '"0"', "'0'"}:
         return True
     if suffix == ".py":
         return value in {"None", "True", "False"}
@@ -244,7 +250,18 @@ class CryptoUsageExtractor(Extractor):
                             arg_start = end + update.end()
                             arg_end = expression_end(body, arg_start-1, closing=")")
                             argument = body[arg_start:arg_end-1].strip()
-                        if argument not in {"codeVerifier", "code_verifier"}:
+                        # A PKCE verifier is hashed by design, and an identifier is not a
+                        # credential: `md5(user.id)` inside a password-ish function is a cache key,
+                        # not a password hash. Hashing an identifier to MINT a token is a different
+                        # bug (predictable token), not this one, so it is skipped here rather than
+                        # reported under a class that would misdescribe it.
+                        # These arguments CONTRIBUTE NOTHING; they must not clear a weak hash found
+                        # earlier in the same function. Assigning False here instead let a later
+                        # PKCE/identifier hash clobber a real `md5(password)` above it —
+                        # test_pkce_exception_belongs_only_to_its_own_hash_argument catches exactly
+                        # that, and the exception belongs to its own argument, not to the function.
+                        if argument not in {"codeVerifier", "code_verifier"} \
+                                and not _NON_CREDENTIAL_ARGUMENT.search(argument):
                             weak = True
             if weak:
                 add("HIGH", "weak-password-hash", "weak-password-hash", rel,
