@@ -56,6 +56,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   wider label tier, and `calibrate` names the classes it excluded. Every shipped truth entry
   carries a `promotion_requires` block stating what a reviewer must supply.
 
+- **Disposition — a third axis, advisory and separate from severity and confidence.** Each finding
+  gains a `triage` block saying whether an agent can act alone. `agent-fixable` requires BOTH a
+  local code/config remediation AND a mechanical verification in the fix prompt; everything else,
+  including unknown classes, is `human-required` with a per-class reason. 9 classes of 73 qualify.
+  Derived from a static policy published by `websec capabilities` alongside the verification that
+  justifies each entry, so the rule can be argued with rather than inferred. Nothing gates on it:
+  `gate.verdict`, `--fail-on`, `fpfilter` and the baseline ignore it and it is absent from SARIF, so
+  a HIGH-severity agent-fixable finding blocks a gate exactly as before. `agent-fixable` means an
+  agent may PROPOSE the patch; repair-plan prerequisites are unchanged and a human reviews every
+  diff. New briefing section §4d shows the three axes, sorted by severity → P(real) → disposition.
+- **Four missing mechanical verifications added to the fix prompts** (`incomplete-hsts`,
+  `content-sniffing`, `subresource-integrity`, `timing-unsafe-compare`), which previously fell back
+  to the generic "write a regression test". These were real gaps in the fix prompts independently of
+  the triage work, and they are what make the agent-fixable invariant true rather than aspirational.
+
 All additive: no finding, severity, confidence, fingerprint or SARIF output changes on any existing
 fixture, and no probability moves without an explicit human acceptance. New coverage gaps are scope limitations (`execution: false`), so `execution_complete` and
 `--require-complete` semantics are untouched. Specification:

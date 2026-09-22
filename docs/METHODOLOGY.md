@@ -242,6 +242,44 @@ runs the judging.
 
 ---
 
+## Layer 3d — Disposition: the third axis
+
+A finding has always answered two questions — **how bad if real** (`severity`) and **is it real**
+(`calibrated.p`). It never answered the third: **can an agent act on this alone?** That question was
+carried implicitly, and answered "no" for everything: every repair plan requires a human to confirm
+the finding first. Safe, but uninformative — it gives an agent no way to distinguish a missing
+`nosniff` header from a missing authorization decision.
+
+Each finding now carries an additive `triage` block:
+
+```json
+{"disposition": "agent-fixable", "reason": "...", "basis": "attack-class policy", "advisory": "..."}
+```
+
+- **The rule has two necessary conditions.** A class is `agent-fixable` only when the remediation is
+  a local code/config change **and** the fix prompt names a **mechanical** verification — something
+  that passes or fails without judgement (`curl -I` shows the header, a `none`-algorithm token is
+  rejected, a unit test pins the constant-time comparison). The second condition is load-bearing: if
+  a fix cannot be demonstrated, an agent cannot know it worked, so a human must look however local
+  the edit was. Today that is 9 classes out of 73.
+- **Everything else, including unknown classes, is `human-required`,** with a reason stated per
+  class rather than one generic sentence — an agent reading "human-required" with no reason learns
+  nothing about what to ask the human for. The asymmetry is deliberate: wrongly calling something
+  human-required costs a review that was going to happen anyway, while wrongly calling something
+  agent-fixable invites an unattended change to a security control. A new detector therefore cannot
+  silently widen what an agent may touch.
+- **It is derived, not asserted.** The value comes from a static per-attack-class policy published
+  by `websec capabilities`, together with the verification that justifies each `agent-fixable`
+  entry — so a reader who disagrees can argue with the rule instead of inferring it from behaviour.
+- **Nothing gates on it.** `gate.verdict`, `--fail-on`, `fpfilter` and the baseline all ignore it,
+  and it is absent from SARIF. A HIGH-severity `agent-fixable` finding blocks a gate exactly as it
+  did before. `agent-fixable` means an agent may **propose** the patch; a human still reviews every
+  diff. The briefing sorts by severity, then P(real), then disposition — disposition is the *last*
+  key on purpose, because ordering by actionability first would put a trivially-fixable header above
+  a critical authorization hole.
+
+---
+
 ## Layer 3c — The security constitution
 
 From the same recon facts the tool derives a set of **Given/When/Then invariants** the app *should*

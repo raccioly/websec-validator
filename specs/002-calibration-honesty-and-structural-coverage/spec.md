@@ -3,7 +3,7 @@
 **Spec ID**: `websec.calibration-honesty-structural-coverage`
 **Feature Branch**: `claude/eager-fermat-1f1b81` (specification only)
 **Created**: 2026-09-21
-**Status**: Approved 2026-09-21 (D1 two-step · D2 opt-in · D3 include · D4 include). W01 (scoring-rule constraint), W02 (structural coverage) and W03 (feedback loop) are IMPLEMENTED; W04 planned.
+**Status**: Approved 2026-09-21 (D1 two-step · D2 opt-in · D3 include · D4 include). ALL FOUR WORKSTREAMS IMPLEMENTED (W01 scoring-rule constraint, W02 structural coverage, W03 feedback loop, W04 disposition axis).
 **Input**: Design review of Laya (Apache-2.0 local decision model; RLCD against strictly proper
 scoring rules, act/escalate head, per-shape temperature calibration, structural OOD detection)
 applied to websec-validator. Every claim below was verified against source and by execution on
@@ -246,7 +246,7 @@ alone — as three separately falsifiable fields.
 | W01 ✅ | 2 | `docs/METHODOLOGY.md`, `BENCHMARKS.md`, `calibration.py` (`SCORING_RULE`, `brier()`), `cli.py`, `CHANGELOG.md` | `test_calibration_scoring.py` (10) | LOW |
 | W02 ✅ | 1 | `extractors/base.py`, `coverage.py`, `inventory.py`, `briefing.py`, `gate.py`, `cli.py`, `CHANGELOG.md` | `test_unanalyzed_coverage.py` (24) + `test_unanalyzed_cli.py` (14) | MEDIUM |
 | W03 ✅ | 3 | `calibration.py` (candidates/review/synthetic/reviewed_classes), `synthetic.py` + `pairs.json` (new), `cli.py`, `explain.py`, `corpus.json` | `test_calibration_review.py` (30) + `test_synthetic_pairs.py` (11) + `test_feedback_calibration_loop.py` (12) | HIGH |
-| W04 | 4 | `findings.py`, `fixprompt.py`, `briefing.py`, `repairs.py`, `schemas/ledger.schema.json`, `cli.py` | triage derivation; gate invariance | MEDIUM |
+| W04 ✅ | 4 | `fixprompt.py` (policy + 4 new verifications), `findings.py`, `briefing.py` (§4d), `repairs.py`, `schemas/ledger.schema.json`, `cli.py` | `test_triage.py` (21) | MEDIUM |
 
 Order: W01 → W02 → W03 → W04. W01 is documentation and governs the rest. W02 is a reproduced defect
 with the evidence already collected. W03 needs D1. W04 needs D3. Each workstream lands as its own PR
@@ -309,3 +309,32 @@ with an explicit boolean. The shipped corpus has **zero** reviewed classes today
 honest state — relabelling requires cloning each pinned revision and reviewing findings by hand, and
 there is deliberately no code path that promotes an unreviewed entry. FR-014 (zero runtime
 dependencies) and SC-006/SC-007's remaining clauses stay untraced rather than falsely annotated.
+
+
+## Implementation record — W04 (2026-09-22)
+
+After W03: 1396 tests, DocGuard 182/188. After W04: **1417 tests OK**, DocGuard **181/187** with the
+same six pre-existing warnings as the 7b2f945 baseline (5 × FRS002, 1 × SPK002); Traceability and
+Spec-Registry remain ✅ HIGH. Findings across all six fixtures are byte-identical to that baseline,
+with no coverage gap added or lost — notable here because `triage` touches every finding.
+
+The spec tied `agent-fixable` to having a mechanical `fixprompt._VERIFY` entry, but four header and
+comparison classes had none and fell back to the generic "write a regression test". Rather than
+weaken the rule to fit, the missing verifications were written (`incomplete-hsts`,
+`content-sniffing`, `subresource-integrity`, `timing-unsafe-compare`) — genuine gaps in the fix
+prompts independent of this work — so the invariant is now exactly true and is pinned by
+`test_agent_fixable_always_has_a_mechanical_verification`.
+
+`findings.REMEDIATION` turned out **not** to be the authoritative class registry: it holds only the
+63 classes with bespoke remediation text, so sink classes including `sqli`, `command-injection` and
+`path-traversal` are absent from it. `explain.STANDARDS` (73) is the real registry. The first
+version of the policy test asserted against the wrong one and failed, which is how this surfaced;
+all 73 classes now resolve to a stated reason, with the generic fallback reserved for classes that
+do not exist yet.
+
+Disposition is the LAST sort key in §4d, after severity and P(real). Ordering by actionability first
+would rank a trivially-fixable header above a critical authorization hole, which inverts the
+meaning of the briefing; it breaks ties between findings that are otherwise equally urgent and
+equally likely. Scope is deliberately narrow — 9 of 73 classes — and
+`test_agent_fixable_is_limited_to_header_flag_and_config_shaped_fixes` caps it, so growth requires a
+deliberate decision rather than accretion.

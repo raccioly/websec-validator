@@ -865,7 +865,11 @@ def cmd_attest(args) -> int:
 
 def cmd_capabilities(args) -> int:
     from .extractors.profiles import capabilities
-    _emit_json_result(capabilities())
+    from . import fixprompt as _fixprompt
+    # The disposition policy ships here rather than only in code so it can be read, quoted and
+    # ARGUED WITH: a consumer who disagrees that a class is agent-fixable can see the exact rule
+    # and the verification that justified it, instead of inferring it from behaviour.
+    _emit_json_result({**capabilities(), "disposition_policy": _fixprompt.disposition_catalog()})
     return 0
 
 

@@ -50,7 +50,7 @@
         "artifacts": [
           {
             "path": "specs/002-calibration-honesty-and-structural-coverage/spec.md",
-            "digest": "sha256:6efc70b2ff2eb50d6d4d1d4cfd91ce71846581169bd9517de276f3790b3089e6"
+            "digest": "sha256:a6f9bcb9e9deefa282a208c316fb4725b40e11e73244befdc26526550552e472"
           }
         ],
         "taskCompletion": {
@@ -96,6 +96,11 @@
           },
           {
             "requirementId": "FR-012",
+            "file": "tests/test_triage.py",
+            "line": 32
+          },
+          {
+            "requirementId": "FR-012",
             "file": "tests/test_unanalyzed_coverage.py",
             "line": 134
           },
@@ -118,6 +123,11 @@
             "requirementId": "SC-008",
             "file": "tests/test_calibration_scoring.py",
             "line": 87
+          },
+          {
+            "requirementId": "SC-009",
+            "file": "tests/test_triage.py",
+            "line": 153
           },
           {
             "requirementId": "SC-009",

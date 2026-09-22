@@ -225,6 +225,33 @@
           "items": {
             "type": "object"
           }
+        },
+        "triage": {
+          "type": "object",
+          "description": "Advisory disposition \u2014 whether an agent can act alone. Never gates; derived from the published per-attack-class policy in `websec capabilities`.",
+          "properties": {
+            "disposition": {
+              "type": "string",
+              "enum": [
+                "agent-fixable",
+                "human-required"
+              ]
+            },
+            "reason": {
+              "type": "string"
+            },
+            "basis": {
+              "type": "string"
+            },
+            "advisory": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "disposition",
+            "reason",
+            "basis"
+          ]
         }
       }
     }
