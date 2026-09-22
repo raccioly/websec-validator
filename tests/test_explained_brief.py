@@ -285,7 +285,13 @@ class BriefMatchesSurfacesAndStandards(unittest.TestCase):
         tools = sorted(set(re.findall(r'"(websec_[a-z_]+)"', raw)))
         self.assertEqual(tools, ["websec_briefing", "websec_findings", "websec_recon", "websec_sarif"])
         self.assertTrue(_has("Four read-only tools"))
-        probes = list((PKG / "templates/probes").iterdir())
+        # Count template FILES, not directory entries: CI byte-compiles the package, which drops a
+        # __pycache__ beside the .py probes and made a bare iterdir() count 25 on the runner and 24
+        # locally. An environment-dependent assertion in a drift test is worse than no assertion.
+        probes = [
+            p for p in (PKG / "templates/probes").iterdir()
+            if p.is_file() and p.suffix in {".sh", ".py"} and not p.name.endswith(".pyc")
+        ]
         self.assertEqual(len(probes), 24)
         self.assertTrue(_has("probes from 24 templates"))
         docker = (REPO / "Dockerfile").read_text(encoding="utf-8")
