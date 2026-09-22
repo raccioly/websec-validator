@@ -395,6 +395,10 @@
         "native_confidence": {
           "type": "string",
           "description": "The producing scanner's OWN confidence, verbatim. 'UNKNOWN' when the scanner reported a value websec could not parse \u2014 never replaced by a derived value."
+        },
+        "guarded_env_fallback": {
+          "type": "string",
+          "description": "Env var whose value is asserted at startup, making this hard-coded fallback unreachable. Demoted, not dropped."
         }
       }
     }

@@ -380,5 +380,116 @@ class InitScopeTests(unittest.TestCase):
             self.assertIn("tests/", list(loaded))
 
 
+class GuardedEnvFallbackTests(unittest.TestCase):
+    """#9 — `X || 'dev-default'` where a startup assertion enforces the real value."""
+
+    def _repo(self, tmp, *, guarded):
+        root = Path(tmp)
+        (root / "src").mkdir(parents=True)
+        (root / "src" / "auth.ts").write_text(
+            "const jwtSecret = process.env.JWT_SECRET || 'dev-default';\n")
+        if guarded:
+            (root / "src" / "env.ts").write_text(
+                "if (!process.env.JWT_SECRET) { throw new Error('JWT_SECRET must be set'); }\n")
+        return root
+
+    def _finding(self):
+        return [{"category": "sast", "rule_id": "insecure-default-signing-secret",
+                 "severity": "HIGH", "file": "src/auth.ts", "line": 1,
+                 "title": "Hard-coded fallback signing secret"}]
+
+    def test_guarded_fallback_is_demoted_and_explained(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = self._finding()
+            self.assertEqual(scanners._demote_guarded_env_fallbacks(raw, self._repo(tmp, guarded=True)), 1)
+            self.assertEqual(raw[0]["severity"], "LOW")
+            self.assertEqual(raw[0]["guarded_env_fallback"], "JWT_SECRET")
+
+    def test_unguarded_fallback_keeps_its_severity(self):
+        """The true positive this rule exists for must survive the precision fix."""
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = self._finding()
+            self.assertEqual(scanners._demote_guarded_env_fallbacks(raw, self._repo(tmp, guarded=False)), 0)
+            self.assertEqual(raw[0]["severity"], "HIGH")
+
+    def test_recon_extractor_recognises_the_same_idioms(self):
+        from websec_validator.extractors.auth import _asserted_env_vars
+        for text in ("if (!process.env.JWT_SECRET) { throw new Error('x'); }",
+                     "const env = z.object({ JWT_SECRET: z.string().min(1) })",
+                     "assertEnv('JWT_SECRET')",
+                     "SECRET = os.environ['JWT_SECRET']"):
+            with self.subTest(text=text[:40]):
+                self.assertEqual(_asserted_env_vars([text], {"JWT_SECRET"}), {"JWT_SECRET"})
+
+    def test_recon_does_not_claim_a_guard_for_a_different_variable(self):
+        from websec_validator.extractors.auth import _asserted_env_vars
+        self.assertEqual(
+            _asserted_env_vars(["if (!process.env.JWT_SECRET) { throw new Error('x'); }"],
+                               {"SESSION_SECRET"}), set())
+
+
+class EndToEndFieldReportTests(unittest.TestCase):
+    """The reported symptoms, reproduced against a real repo and a real `websec run`."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        root = Path(cls.tmp) / "repo"
+        (root / "backend/src").mkdir(parents=True)
+        (root / "frontend").mkdir(parents=True)
+        lock = json.dumps({"name": "b", "version": "1.0.0", "lockfileVersion": 3, "requires": True,
+                           "packages": {"": {"name": "b", "version": "1.0.0",
+                                             "dependencies": {"lodash": "4.17.20"}},
+                                        "node_modules/lodash": {"version": "4.17.20"}}})
+        (root / "backend/package-lock.json").write_text(lock)
+        (root / "frontend/package-lock.json").write_text(lock)
+        (root / ".env.example").write_text("VITE_APPSYNC_API_KEY=da2-xxxxxxxxxxxxxxxxxxxxxxxxxx\n")
+        (root / "backend/src/auth.ts").write_text(
+            "const jwtSecret = process.env.JWT_SECRET || 'dev-default';\n")
+        (root / "backend/src/env.ts").write_text(
+            "if (!process.env.JWT_SECRET) { throw new Error('JWT_SECRET must be set'); }\n")
+        (root / "backend/src/session.ts").write_text(
+            "const s = process.env.SESSION_SECRET || 'dev-default';\n")
+        cls.root = root
+        out = root / "wsout"
+        subprocess.run([sys.executable, "-m", "websec_validator.cli", "run", str(root),
+                        "--out", str(out)],
+                       capture_output=True, text=True, timeout=600,
+                       env={"PYTHONPATH": str(ROOT / "src"), "PATH": "/usr/bin:/bin"})
+        runs = sorted((out / "runs").glob("2026*"))
+        cls.ledger = json.loads((runs[-1] / "findings-ledger.json").read_text()) if runs else None
+
+    def setUp(self):
+        if not self.ledger:
+            self.skipTest("websec run did not produce a ledger in this environment")
+
+    def test_no_high_severity_finding_points_at_the_example_file(self):
+        highs = [f for f in self.ledger["findings"]
+                 if ".env.example" in f.get("location", "")
+                 and f["severity"] in ("CRITICAL", "HIGH")]
+        self.assertEqual(highs, [], "a documented placeholder must not be a HIGH finding")
+
+    def test_the_placeholder_is_still_reported_somewhere(self):
+        """Demoted, never dropped — a real key pasted into `.env.example` is still committed."""
+        self.assertTrue(any(".env.example" in f.get("location", "") or ".env.example" in f["title"]
+                            for f in self.ledger["findings"]))
+
+    def test_guarded_and_unguarded_fallbacks_are_tiered_differently(self):
+        by_file = {}
+        for f in self.ledger["findings"]:
+            if "fallback signing secret" in f["title"].lower():
+                by_file.setdefault(Path(f.get("location", "")).name, set()).add(f["severity"])
+        self.assertIn("LOW", by_file.get("auth.ts", set()), "guarded fallback should be demoted")
+        self.assertTrue({"HIGH", "CRITICAL"} & by_file.get("session.ts", set()),
+                        "unguarded fallback must keep its severity")
+
+    def test_every_finding_carries_a_confidence(self):
+        self.assertEqual([f["title"] for f in self.ledger["findings"] if not f.get("confidence")], [])
+
+    def test_gate_records_the_exit_contract(self):
+        self.assertIn("failure_kind", self.ledger["gate"])
+        self.assertIn("exit_code_contract", self.ledger["gate"])
+
+
 if __name__ == "__main__":
     unittest.main()

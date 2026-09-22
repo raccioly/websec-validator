@@ -1186,6 +1186,106 @@ def _instance_id(f: dict, target=None) -> str:
     return "wv1_" + hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
 
 
+# --- guarded env-var fallback (field report #9) ------------------------------------------------
+# `const jwtSecret = process.env.JWT_SECRET || 'dev-default'` is a genuine hard-coded-credential
+# pattern and the bundled `insecure-default-signing-secret` rule is right to match it — but ONLY if
+# the fallback can actually be reached. In the idiom this FP came from, it cannot: the app asserts
+# the real value at startup and refuses to boot without it, so the literal is dead code that exists
+# to keep types happy and local dev quiet.
+#
+# Semgrep cannot see this, and not because the rule is badly written: the assertion routinely lives
+# in a DIFFERENT file (config/env.ts, a zod schema, an `assertEnv()` bootstrap) from the fallback,
+# and semgrep's per-rule analysis is single-file. So the correction belongs here, as a post-pass
+# with the whole repo in hand. Demote + explain; never drop — an assertion that is itself never
+# invoked leaves the fallback live, and we cannot prove invocation statically.
+_ENV_ASSERT_TEMPLATES = (
+    # if (!process.env.X) throw / process.exit / assert
+    r"(?:if\s*\(\s*!\s*(?:process\.env\.{v}|process\.env\[['\"]{v}['\"]\])[^)]*\)\s*\{{?[^}}]{{0,200}}?"
+    r"(?:throw|process\.exit|assert|fatal))",
+    # invariant/assert/ok(process.env.X, …)
+    r"(?:invariant|assert|ok|required|requireEnv|assertEnv|mustGetEnv|getRequiredEnv)\s*\([^)]{{0,120}}{v}",
+    # zod / joi / envalid / t3-env schema entries: X: z.string().min(1) — a parse failure is a throw
+    r"['\"]?{v}['\"]?\s*:\s*(?:z|Joi|joi|yup|v|type|envalid|str|num)\b[^,\n]{{0,160}}",
+    # explicit throw naming the variable
+    r"throw\s+new\s+\w*Error\s*\([^)]{{0,200}}{v}",
+)
+# The fallback literal itself, so we can recover WHICH env var the finding is about from the line.
+_ENV_FALLBACK_VAR = re.compile(
+    r"process\.env(?:\.([A-Z0-9_]+)|\[['\"]([A-Z0-9_]+)['\"]\])\s*(?:\|\||\?\?)")
+_GUARDED_FALLBACK_NOTE = (
+    "a startup assertion enforces this env var, so the literal fallback is unreachable in any "
+    "environment that boots — demoted, not dropped: verify the assertion actually runs on the "
+    "path that reads this value, and delete the literal so the guarantee is local"
+)
+
+
+def _env_var_of(f: dict, target) -> str:
+    """Which env var this insecure-default finding is about, read from its own source line."""
+    rel = _rel_to(f.get("file", ""), target)
+    line = f.get("line") or 0
+    if not (rel and target and line):
+        return ""
+    try:
+        text = read_artifact(Path(target) / rel, max_bytes=2 * 1024 * 1024)
+    except Exception:
+        return ""
+    rows = text.splitlines()
+    # Look at the finding's line and its immediate neighbours — the match may span a wrap.
+    window = "\n".join(rows[max(0, line - 2):line + 1])
+    m = _ENV_FALLBACK_VAR.search(window)
+    return (m.group(1) or m.group(2)) if m else ""
+
+
+def _demote_guarded_env_fallbacks(raw: list, target) -> int:
+    """Demote `insecure-default-signing-secret` hits whose env var is asserted at startup."""
+    if not target:
+        return 0
+    candidates = [f for f in raw
+                  if f.get("category") == "sast"
+                  and "insecure-default" in str(f.get("rule_id") or f.get("key") or "")]
+    if not candidates:
+        return 0
+    wanted = {}
+    for f in candidates:
+        var = _env_var_of(f, target)
+        if var:
+            wanted.setdefault(var, []).append(f)
+    if not wanted:
+        return 0
+    # One pass over the repo's config-ish + source files, checking every wanted var at once.
+    asserted: set = set()
+    patterns = {var: [re.compile(t.format(v=re.escape(var)), re.I) for t in _ENV_ASSERT_TEMPLATES]
+                for var in wanted}
+    try:
+        root = Path(target)
+        for path in root.rglob("*"):
+            if len(asserted) == len(wanted):
+                break
+            if not path.is_file() or path.suffix.lower() not in {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"}:
+                continue
+            if path_in_skip_dir(str(path), target):
+                continue
+            try:
+                text = read_artifact(path, max_bytes=1024 * 1024)
+            except Exception:
+                continue
+            for var, rxs in patterns.items():
+                if var in asserted or var not in text:
+                    continue
+                if any(rx.search(text) for rx in rxs):
+                    asserted.add(var)
+    except Exception:
+        return 0
+    n = 0
+    for var in asserted:
+        for f in wanted[var]:
+            if SEV_ORDER.get(f.get("severity"), 0) > SEV_ORDER["LOW"]:
+                f["severity"] = "LOW"
+            f["guarded_env_fallback"] = var
+            if "startup assertion" not in f.get("title", ""):
+                f["title"] += f" — {_GUARDED_FALLBACK_NOTE} ({var})"
+            n += 1
+    return n
 
 
 # Rules that are SECRET DETECTION regardless of which adapter reported them. Semgrep ships a pile
@@ -1358,6 +1458,9 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
     # resurrect the higher severity through the max() in the fingerprint merge.
     placeholder_tiered = _tier_placeholder_matches(raw, target)
 
+    # field report #9: a hard-coded fallback whose env var is asserted at startup is unreachable.
+    guarded_env_fallbacks = _demote_guarded_env_fallbacks(raw, target)
+
     # A gitleaks hit whose file is gone from the tree is a HISTORY-only leak — deleting the file did
     # not un-leak it. Annotate so the remediation is ROTATE, not "already removed".
     history_only = _annotate_history_only_secrets(raw, target)
@@ -1406,6 +1509,7 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
     # sharpen triage in the briefing; neither can reintroduce a false positive.
     reachability = enrichment.enrich_reachability(deduped, target)
     exploitability = enrichment.enrich_exploitability(deduped)
+
     # Every finding gets a confidence + a stable per-instance id. Runs AFTER enrichment so the
     # reachability signal can inform confidence, and after all the demotion passes so a finding
     # already tiered to INFO/LOW is read as the placeholder it is (field report #6).
@@ -1457,6 +1561,7 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
             "local_only_downgraded": local_only_downgraded,
             "test_fixture_downgraded": test_fixture_downgraded,
             "history_only_secrets": history_only,
+            "guarded_env_fallbacks_demoted": guarded_env_fallbacks,
             "placeholder_tiered": placeholder_tiered,
             "reachability": reachability,
             "exploitability": exploitability,
