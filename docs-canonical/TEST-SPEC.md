@@ -88,6 +88,7 @@ Additional protocol and assurance contracts:
 | Evidence consumers | `test_assurance_regressions.py`: contradictory completion metadata, per-feed rollback, publication locking and honest proof exits |
 | Value-scoped controls | `test_remaining_control_scope.py`, `test_extension_controls.py`, `test_transport_pii_scope.py`: webhook/upload/hash/message controls, individual cookie setters and actual PII response projections |
 | Public-source precision | `test_public_precision.py`: executable authentication decisions, browser-response file delivery, and exact numeric GitHub expressions paired with unsafe text controls |
+| Technical brief drift | `test_explained_brief.py`: every number quoted in `docs/websec-explained.html` re-derived from its source (extractor/sink registries, corpus pins, proof JSON, field-review table, required checks, CI ceiling, Docker pins, standards map), suite size checked as a floor |
 
 Imported report tests must preserve usable sibling findings while reporting failures, keep report
 hashes separate from source evidence, and prove no referenced source, network resource or command is

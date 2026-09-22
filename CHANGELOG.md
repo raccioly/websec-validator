@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Technical brief** (`docs/websec-explained.html`, printed to `docs/websec-explained.pdf`). An
+  eight-page, self-contained explainer — the idea, what the tool refuses to say, the anatomy of a
+  run, the 22 extractors and 17 sinks, the public-repository evidence, how the suite guards itself,
+  prior art, and the integration surfaces. No scripts, no external requests. Every number on it is
+  re-derived from the tree by `tests/test_explained_brief.py` (extractor/sink counts, corpus pins,
+  proof results, field-review totals, required checks, Docker pins), so the page cannot drift
+  silently; the stated test count is checked as a floor, never an equality, so release PRs are
+  not blocked by it.
+
+### Changed
+- README "Status / roadmap" refreshed, and `AGENTS.md`'s pinned test count updated — both are
+  metrics-consistency anchors the brief is checked against.
+
 ### Fixed — two detector false-positive sources, with the controls
 
 Lands the verified parts of #128 and #143 against current `main`, each with the paired
@@ -28,7 +42,6 @@ true-positive control the original PRs omitted.
 Alias resolution from #143 is deliberately **not** included: it never fired end-to-end and the PR
 carried no test for it. Crediting a local alias would need a control proving a reassigned alias is
 still reported, since an alias can be rebound between the binding and the check.
-
 
 ## [0.18.0] — 2026-09-22
 
