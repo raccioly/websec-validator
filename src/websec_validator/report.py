@@ -57,8 +57,23 @@ def render(facts: dict, scanners: dict, scan_results: list, unified: dict | None
                 deps = ", ".join(gr.get("dependents", [])[:3])
                 graphstr = (f"  \n  _blast radius:_ **{radius}** module(s) depend on this"
                             + (f" (e.g. {deps}{'…' if gr.get('truncated') else ''})" if deps else ""))
+            # field report #3: say WHERE this lives, in the row itself. 22 HIGHs pointing at files
+            # that no longer exist read as live findings; the only way to learn otherwise was to
+            # run `git log` by hand. A finding whose file is gone gets an explicit in-tree: false.
+            prov = ""
+            if f.get("in_tree") is False:
+                seen = f.get("commit_short") or f.get("commit") or ""
+                prov = ("  \n  ⏳ **in-tree: false** — not in the working tree"
+                        + (f"; last seen in commit `{_data(seen)}`" if seen else "")
+                        + (f" ({_data(f['commit_date'])})" if f.get("commit_date") else "")
+                        + ". The blob is still fetchable from the repo: **rotate the credential** — "
+                          "deleting the file did not un-leak it.")
+            elif f.get("in_tree") is True:
+                prov = "  \n  📄 in-tree: true — present in the working tree right now."
+            basis = f"  \n  _confidence basis:_ {_data(f['confidence_basis'])}" if f.get("confidence_basis") else ""
+            ident = f"  \n  _id:_ `{_data(f.get('instance_id'))}`" if f.get("instance_id") else ""
             _ll.append(f"- **[{f['severity']}/{f['confidence']}]** {_data(f['title'])}  \n"
-                       f"  {_data(f['location'])} · evidence: {chain} · {cwe}{api}{calstr}{graphstr}  \n"
+                       f"  {_data(f['location'])} · evidence: {chain} · {cwe}{api}{calstr}{graphstr}{prov}{basis}{ident}  \n"
                        f"  _fix:_ {_data(f['remediation'])}")
         ledger_block = "\n".join(_ll)
         ledger_hdr = (f"**{ledger['total']} findings** · {ledger['by_severity']} · "
@@ -67,6 +82,7 @@ def render(facts: dict, scanners: dict, scan_results: list, unified: dict | None
                       + (f" · {ledger['acknowledged_n']} acknowledged" if ledger.get('acknowledged_n') else ""))
     else:
         ledger_block, ledger_hdr = top_findings, sev_line
+
 
     # Acknowledged findings — human-reviewed known results (fingerprint acks in .websec-ignore):
     # kept VISIBLE + attributable here but excluded from the gating total above.

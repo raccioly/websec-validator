@@ -301,6 +301,10 @@ websec builds; that silence is indistinguishable from a clean result. `doctor` n
 scanner's version, marks one that is too old for our invocation, and exits `2` when any selected
 scanner is incompatible — so a CI preflight can gate on the toolchain before it trusts a scan.
 
+**Secrets say where they live.** Every gitleaks finding carries `in_tree`; a finding whose file is
+gone from the working tree is labelled `in-tree: false` with the commit it was last seen in. Deleting
+a file does not un-leak it — the blob stays fetchable — so the remediation is *rotate*, and the report
+says that instead of leaving you to run `git log`.
 
 Every attempt receives a unique directory under `websec-out/runs/`. The atomic `latest` pointer
 advances only after a completed execution has written its artifacts; a partial attempt retains its

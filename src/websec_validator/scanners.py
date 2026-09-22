@@ -124,9 +124,15 @@ def _annotate_history_only_secrets(raw: list, target: Path | None) -> int:
     for f in raw:
         if f.get("tool") != "gitleaks" or f.get("category") != "secret":
             continue
-        # A working-tree hit is by definition present in the tree; only history mode can be
-        # history-ONLY. Guard on the recorded mode rather than re-deriving it from the filesystem.
+        # EVERY gitleaks finding is labelled with where it lives, not only the history-only ones.
+        # Previously a history-mode hit on a file that still exists carried no marker at all, and a
+        # hit on a DELETED file was flagged only by appending prose to the title — so a reader
+        # scanning a table of 22 HIGHs had no column that said "these are commit-graph blobs, not
+        # your working tree" and had to run `git log` to find out (field report #3). `in_tree` is a
+        # first-class field; `scan_mode` already says which surface produced it.
         if f.get("scan_mode") == "dir":
+            # A working-tree hit is present in the tree by definition — no filesystem probe needed.
+            f.setdefault("in_tree", True)
             continue
         rel = _rel_to(f.get("file", ""), target)
         if not rel:
@@ -135,13 +141,18 @@ def _annotate_history_only_secrets(raw: list, target: Path | None) -> int:
             exists = (Path(target) / rel).exists()
         except OSError:
             continue
+        f["in_tree"] = exists
         # guard on the FIELD, not a title substring: several provider notes already mention the word
         # "history" ("…does NOT scrub pushed history"), which silently suppressed this annotation.
         if not exists and not f.get("history_only"):
             f["history_only"] = True
-            f["title"] += (" [HISTORY-ONLY: the file is already gone from the working tree — someone "
-                           "likely 'fixed' this by deleting it. The blob is still reachable in the "
-                           "repo, so it is NOT fixed until the credential is rotated.]")
+            seen = f.get("commit_short") or f.get("commit") or ""
+            where = f" last seen in commit {seen}" if seen else ""
+            when = f" ({f['commit_date']})" if f.get("commit_date") else ""
+            f["title"] += (f" [HISTORY-ONLY — not in the working tree;{where or ' reachable in git history'}"
+                           f"{when}. Someone likely 'fixed' this by deleting the file. The blob is still "
+                           "fetchable by anyone with the repo, so it is NOT fixed until the credential "
+                           "is rotated.]")
             n += 1
     return n
 
@@ -765,8 +776,16 @@ def _norm_gitleaks(data) -> list:
         if _is_doc_or_example(f):
             sev, note = "LOW", (note + "; " if note else "") + _DOC_NOTE
         title = f"secret: {(x.get('Description') or rule)[:80]}" + (f" — {note}" if note else "")
+        # Commit provenance, straight from gitleaks' own record — no `git log` needed. In history
+        # ("git") mode EVERY hit came out of the commit graph, so the reader must be told that up
+        # front; without it 22 HIGHs pointing at files that no longer exist read as live findings
+        # and the only way to work out otherwise was to run `git log` by hand (field report #3).
+        commit = x.get("Commit") or ""
         out.append({"tool": "gitleaks", "category": "secret", "severity": sev or "HIGH",
                     "key": rule, "file": f, "line": x.get("StartLine", 0),
+                    **({"commit": commit, "commit_short": commit[:12]} if commit else {}),
+                    **({"commit_date": x["Date"]} if x.get("Date") else {}),
+                    **({"commit_author": x["Author"]} if x.get("Author") else {}),
                     "title": title, "fingerprint": f"secret|{f}|{rule}|{x.get('StartLine', 0)}"})
     return out
 

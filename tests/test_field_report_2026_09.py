@@ -119,5 +119,44 @@ class OsvScannerInvocationTests(unittest.TestCase):
             scanners._VERSION_CACHE.pop("osv-scanner", None)
 
 
+class HistoryProvenanceTests(unittest.TestCase):
+    """#3 — 22 HIGHs pointed at files that no longer exist, with nothing saying so."""
+
+    def _rows(self):
+        return [{"File": "gone/cfg.ini", "RuleID": "github-pat",
+                 "Secret": "ghp_3xK9mQ7wRt2nZx5bK9cF4jL6pD1sY0gA1", "Match": "k",
+                 "StartLine": 1, "Commit": "614f9081d87b1234567890abcdef",
+                 "Date": "2026-09-19T01:20:02Z", "Author": "Someone"}]
+
+    def test_commit_provenance_is_carried_from_the_scanner_record(self):
+        row = scanners._norm_gitleaks(self._rows())[0]
+        self.assertEqual(row["commit_short"], "614f9081d87b")
+        self.assertEqual(row["commit_date"], "2026-09-19T01:20:02Z")
+
+    def test_deleted_file_is_labelled_in_tree_false_with_the_commit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = scanners._norm_gitleaks(self._rows())
+            for f in raw:
+                f["scan_mode"] = "git"
+            scanners._annotate_history_only_secrets(raw, Path(tmp))
+            self.assertIs(raw[0]["in_tree"], False)
+            self.assertIs(raw[0]["history_only"], True)
+            self.assertIn("614f9081d87b", raw[0]["title"])
+            self.assertIn("rotate", raw[0]["title"].lower())
+
+    def test_present_file_is_labelled_in_tree_true(self):
+        """Every gitleaks finding is labelled, not only the deleted ones — otherwise the reader
+        still cannot tell which rows are about the working tree."""
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "gone").mkdir()
+            (Path(tmp) / "gone" / "cfg.ini").write_text("x")
+            raw = scanners._norm_gitleaks(self._rows())
+            for f in raw:
+                f["scan_mode"] = "git"
+            scanners._annotate_history_only_secrets(raw, Path(tmp))
+            self.assertIs(raw[0]["in_tree"], True)
+            self.assertNotIn("history_only", raw[0])
+
+
 if __name__ == "__main__":
     unittest.main()
