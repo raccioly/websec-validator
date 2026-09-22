@@ -877,6 +877,28 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         out.append(_f(f"Secret exposed to client: {leak}", "client-exposure", "client-exposure",
                       "HIGH", "HIGH", leak, [{"layer": "recon", "detail": "a secret (by name, value-shape, or CDK "
                        "build-injection) reaches the browser bundle"}]))
+    # A credential-shaped literal in a COMMITTED (tracked, non-example) dotenv file. Nothing caught
+    # this before: no bundled scanner has an AppSync rule, and every extractor was extension-gated
+    # so `.env` was never read at all. A gitignored `.env` is local-only and excluded upstream.
+    for leak in _cx.get("committed_env_secrets", []):
+        out.append(_f(f"Credential in a committed .env file: {leak}", "client-exposure",
+                      "client-exposure", "HIGH", "HIGH", leak,
+                      [{"layer": "recon", "detail": "a credential-shaped value in a dotenv file that git "
+                        "TRACKS (not gitignored, not a *.example template) — it is in the repository for "
+                        "anyone with clone access. Rotate it, remove the file from the index, and gitignore it; "
+                        "removing it from HEAD alone leaves the blob fetchable from history."}]))
+    # field report #5: a secret SHAPE matched inside a `*.example`/`*.sample`/doc file, or a value
+    # that announces itself as a placeholder (`da2-xxxxxxxxxxxxxxxxxxxxxxxxxx`). Its own tier at INFO:
+    # flagging a documented placeholder as a HIGH AppSync key is a precision bug, because that file
+    # exists to contain placeholders. Still REPORTED, never dropped — a real key does occasionally get
+    # pasted into `.env.example`, and that is precisely the mistake worth surfacing.
+    for ex in _cx.get("placeholder_secret_examples", []):
+        out.append(_f(f"Placeholder secret in an example/doc file: {ex}", "client-exposure",
+                      "client-exposure", "INFO", "LOW", ex,
+                      [{"layer": "recon", "detail": "a credential-shaped value in a file whose purpose is to "
+                        "hold placeholders, or a value that is self-evidently a fill-me-in placeholder. Not "
+                        "counted as a browser leak. Confirm it really is fake — if a real key was pasted here, "
+                        "it is committed and must be rotated."}]))
     # intended-public analytics ingest tokens (PostHog/Usertour/…) — INFO, designed to ship; surfaced
     # for completeness so they're acknowledged-and-cleared, not silently treated as a HIGH leak.
     for tok in _cx.get("intended_public_analytics", []):
