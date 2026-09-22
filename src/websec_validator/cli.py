@@ -191,7 +191,14 @@ def cmd_doctor(args) -> int:
         print(line)
     print("\n  available:")
     for s in det["available"]:
-        print(f"    ✓ {s['name']:20} {s['category']}")
+        # Presence is not compatibility. `doctor` printed a green ✓ for an osv-scanner whose CLI
+        # did not match our invocation, so the most productive scanner in the set was dead for
+        # every run and nothing said so (field report #2). Version is now part of the answer.
+        mark = "✗" if s.get("status") == "too_old" else ("?" if s.get("status") == "unknown" else "✓")
+        ver = f"v{s['version']}" if s.get("version") else "version unknown"
+        print(f"    {mark} {s['name']:20} {s['category']:8} {ver}")
+        if s.get("note"):
+            print(f"        ↳ {s['note']}")
     if not det["available"]:
         print("    (none on PATH)")
     print("\n  missing (optional — install for fuller coverage):")

@@ -295,6 +295,12 @@ have not installed is an incomplete run, not a clean one. `websec run . --scan -
 --require-complete` exits 3 with `trivy: unavailable` in `coverage.json`, so a CI job whose scanner
 install failed fails instead of reporting zero findings from a scan that never ran.
 
+**Presence is not compatibility — `websec doctor` version-checks.** A scanner can be installed,
+detected, selected, run, and still produce nothing because its CLI does not match the invocation
+websec builds; that silence is indistinguishable from a clean result. `doctor` now reports each
+scanner's version, marks one that is too old for our invocation, and exits `2` when any selected
+scanner is incompatible — so a CI preflight can gate on the toolchain before it trusts a scan.
+
 
 Every attempt receives a unique directory under `websec-out/runs/`. The atomic `latest` pointer
 advances only after a completed execution has written its artifacts; a partial attempt retains its

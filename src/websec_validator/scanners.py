@@ -38,6 +38,13 @@ class Scanner:
     install: str = ""      # one-line install hint for the briefing
     # argv builder: (target, out_file) -> list[str]; None means "detect only" for now
     argv: object = None
+    # Lowest version whose CLI matches the argv WE build. Presence on PATH is not compatibility:
+    # osv-scanner 2.4.0 was installed, detected, selected, and produced nothing usable because the
+    # adapter's invocation was wrong for it — `doctor` reported a green ✓ the whole time (field
+    # report #2). A version below this is reported LOUDLY but never blocks: the operator's binary is
+    # the operator's business, and we would rather run and report a gap than refuse to run.
+    min_version: tuple = ()
+    version_note: str = ""
 
 
 # ONE source of truth for "don't scan here": the walker's SKIP_DIRS (extractors/base.py).
@@ -223,7 +230,16 @@ def _osv(target: Path, out: Path, excludes=()) -> list:
     # the shared `cve|pkg|CVE` fingerprint (→ tools:[trivy,osv-scanner]), while OSV catches lockfile
     # formats Trivy misses. Like Trivy's DB, it consults an advisory source about YOUR deps — not the
     # target app. Exit 1 = "vulns found" (not an error); the run loop writes output regardless.
-    return ["osv-scanner", "scan", "--format", "json", "--output", str(out), str(target)]
+    #
+    # `--recursive` IS LOAD-BEARING, not a tuning flag. osv-scanner only extracts from the directory
+    # it is handed unless told to descend, so on any repo whose lockfiles are not at the root —
+    # `backend/package-lock.json`, a monorepo, basically every real project — the walk finished with
+    # "0 Extract calls" and exited with `No package sources found`, writing NO output file at all.
+    # websec then recorded `osv-scanner: error` and reported zero dependency findings. Reproduced
+    # against osv-scanner 2.4.0 with two nested package-lock.json: without -r, 0 packages; with -r,
+    # both lockfiles scanned. Dependency CVEs are the highest-frequency true-positive class in any
+    # repo, so this silently removed the single most productive scanner in the set (field report #2).
+    return ["osv-scanner", "scan", "--recursive", "--format", "json", "--output", str(out), str(target)]
 
 
 def _gosec(target: Path, out: Path, excludes=()) -> list:
@@ -258,26 +274,39 @@ def _bandit(target: Path, out: Path, excludes=()) -> list:
 
 REGISTRY: tuple = (
     Scanner("trivy", "Trivy", "sca", "trivy",
-            install="brew install trivy  # pin by digest in CI", argv=_trivy),
+            install="brew install trivy  # pin by digest in CI", argv=_trivy,
+            min_version=(0, 38, 0),
+            version_note="`--scanners vuln,secret,misconfig` replaced `--security-checks` in 0.38"),
     Scanner("gitleaks", "Gitleaks", "secrets", "gitleaks",
-            install="brew install gitleaks", argv=_gitleaks),
+            install="brew install gitleaks", argv=_gitleaks,
+            min_version=(8, 0, 0),
+            version_note="8.19+ adds the `git`/`dir` subcommands; older builds fall back to the "
+                         "deprecated `detect` spelling automatically"),
     # Same binary, second pass: history mode and working-tree mode are DISJOINT surfaces in gitleaks
     # and neither subsumes the other. Kept as its own registry entry so the existing one-argv-per-
     # scanner runner is untouched; `--scanners gitleaks` selects both (see _expand_only).
     Scanner("gitleaks-dir", "Gitleaks (working tree)", "secrets", "gitleaks",
             install="brew install gitleaks", argv=_gitleaks_dir),
     Scanner("semgrep", "Semgrep/OpenGrep", "sast", "semgrep",
-            install="pipx install semgrep  # or opengrep for fully-OSS", argv=_semgrep),
+            install="pipx install semgrep  # or opengrep for fully-OSS", argv=_semgrep,
+            min_version=(1, 0, 0), version_note="`semgrep scan` + repeatable `--config` need 1.x"),
     Scanner("checkov", "Checkov", "iac", "checkov",
-            install="pipx install checkov", argv=_checkov),
+            install="pipx install checkov", argv=_checkov,
+            min_version=(2, 0, 0), version_note="the parsed JSON summary shape is 2.x+"),
     Scanner("bandit", "Bandit", "sast", "bandit", languages=("python",),
-            install="pipx install bandit", argv=_bandit),
+            install="pipx install bandit", argv=_bandit,
+            min_version=(1, 7, 0), version_note="`--ignore-nosec` + `metrics._totals` need 1.7+"),
     Scanner("gosec", "gosec", "sast", "gosec", languages=("go",),
-            install="brew install gosec  # Go SAST", argv=_gosec),
+            install="brew install gosec  # Go SAST", argv=_gosec,
+            min_version=(2, 0, 0), version_note="`-no-fail` and JSON `Issues[]` are 2.x"),
     Scanner("brakeman", "Brakeman", "sast", "brakeman", languages=("ruby",),
-            install="gem install brakeman  # Rails SAST", argv=_brakeman),
+            install="gem install brakeman  # Rails SAST", argv=_brakeman,
+            min_version=(4, 0, 0), version_note="`--no-exit-on-warn/--no-exit-on-error` need 4.x"),
     Scanner("osv-scanner", "OSV-Scanner", "sca", "osv-scanner",
-            install="brew install osv-scanner", argv=_osv),
+            install="brew install osv-scanner", argv=_osv,
+            min_version=(2, 0, 0),
+            version_note="the `scan` subcommand is 2.x; 1.x takes the directory as a bare "
+                         "argument and will reject this invocation"),
     # OPT-IN ONLY (--verify-secrets): verification calls third-party APIs with the found credential.
     # run_available() skips this unless explicitly enabled, even when the binary is installed.
     Scanner("trufflehog", "TruffleHog (live verification)", "secrets", "trufflehog",
@@ -287,7 +316,68 @@ REGISTRY: tuple = (
 )
 
 
-def detect(stack_languages: list | None = None) -> dict:
+_VERSION_RE = re.compile(r"(\d+)\.(\d+)(?:\.(\d+))?")
+_VERSION_CACHE: dict = {}
+
+
+def probe_version(binary: str, timeout: int = 15) -> str | None:
+    """`<binary> --version` → the first dotted version in its output, or None.
+
+    Every scanner in the registry prints a version in a slightly different shape ("osv-scanner
+    version: 2.4.0", "gitleaks version 8.30.1", "Version: 0.72.0", bare "1.177.0"), so we take the
+    first dotted number rather than teaching this nine formats. Cached per process. NEVER raises:
+    a version probe that fails must degrade to "unknown", never break `doctor` or a scan."""
+    if binary in _VERSION_CACHE:
+        return _VERSION_CACHE[binary]
+    version = None
+    try:
+        proc = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=timeout)
+        m = _VERSION_RE.search((proc.stdout or "") + "\n" + (proc.stderr or ""))
+        if m:
+            version = ".".join(part for part in m.groups() if part is not None)
+    except Exception:
+        version = None
+    _VERSION_CACHE[binary] = version
+    return version
+
+
+def _parse_version(text: str | None) -> tuple:
+    m = _VERSION_RE.search(text or "")
+    return tuple(int(part) for part in m.groups() if part is not None) if m else ()
+
+
+def check_version(scanner: Scanner) -> dict:
+    """Is the INSTALLED build one this adapter's argv actually works with?
+
+    `doctor` used to answer only "is the binary on PATH", which is a different and much weaker
+    question. An incompatible-but-present scanner is the worst state to be in: it is selected, it
+    runs, it fails in its own idiom, and its silence is indistinguishable from a clean result.
+    Returns {version, ok, status, note}; status is one of ok | too_old | unknown | not_installed."""
+    if not shutil.which(scanner.binary):
+        return {"version": None, "ok": False, "status": "not_installed", "note": ""}
+    version = probe_version(scanner.binary)
+    if not scanner.min_version:
+        return {"version": version, "ok": True,
+                "status": "ok" if version else "unknown", "note": ""}
+    parsed = _parse_version(version)
+    if not parsed:
+        return {"version": version, "ok": True, "status": "unknown",
+                "note": (f"could not read a version; websec's invocation expects "
+                         f">= {'.'.join(map(str, scanner.min_version))}"
+                         + (f" — {scanner.version_note}" if scanner.version_note else ""))}
+    # Compare on the components the minimum actually specifies, so a "2.4" reading satisfies
+    # a (2, 0, 0) minimum instead of being judged against a missing patch component.
+    want = scanner.min_version[:len(parsed)] or scanner.min_version
+    got = parsed[:len(want)]
+    if got < want:
+        return {"version": version, "ok": False, "status": "too_old",
+                "note": (f"websec builds an invocation that needs "
+                         f">= {'.'.join(map(str, scanner.min_version))}, but {version} is installed"
+                         + (f" — {scanner.version_note}" if scanner.version_note else ""))}
+    return {"version": version, "ok": True, "status": "ok", "note": ""}
+
+
+def detect(stack_languages: list | None = None, check_versions: bool = True) -> dict:
     """Return {'available': [...], 'missing': [...]} for the relevant scanners.
 
     A language-specific scanner (e.g. Bandit/python) is only considered relevant
@@ -305,10 +395,15 @@ def detect(stack_languages: list | None = None) -> dict:
         entry = {"key": s.key, "name": s.name, "category": s.category,
                  "runnable": s.argv is not None}
         if shutil.which(s.binary):
+            if check_versions:
+                entry.update(check_version(s))
             available.append(entry)
         else:
             missing.append({**entry, "install": s.install})
-    return {"available": available, "missing": missing}
+    # A present-but-incompatible scanner is NOT the same as a missing one and must not hide in the
+    # green ✓ list — it is the failure mode that reads as "scanned clean" (field report #2).
+    incompatible = [e for e in available if e.get("status") == "too_old"]
+    return {"available": available, "missing": missing, "incompatible": incompatible}
 
 
 def run_available(target: Path, outdir: Path, stack_languages: list | None = None,
