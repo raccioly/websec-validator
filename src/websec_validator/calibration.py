@@ -229,8 +229,12 @@ def _merge(shipped: dict | None, local: dict | None) -> dict | None:
         base["meta"]["local_samples"] = ls
         legacy = local.get("legacy_uncertain", {}).get("meta", {}).get("samples", 0)
         base["meta"]["legacy_uncertain_samples"] = legacy
+        # Only CLAIM personalization when something was actually folded in. Merely having a local
+        # overlay file — which queuing a pending feedback candidate creates — is not personalization,
+        # and "+0 samples folded in (personalized to your apps)" is a false statement about the number.
         base["meta"]["caveat"] = (base["meta"].get("caveat", CAVEAT)
-                                  + f" · +{ls} evidence-backed local sample(s) folded in (personalized to your apps)"
+                                  + (f" · +{ls} evidence-backed local sample(s) folded in "
+                                     "(personalized to your apps)" if ls else "")
                                   + (f" · {legacy} legacy sample(s) quarantined pending review" if legacy else ""))
     return base
 

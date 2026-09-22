@@ -34,7 +34,13 @@ def _record(verdict="false-positive", attack_class="sqli", confidence="MEDIUM",
 
 
 class _Overlay(unittest.TestCase):
-    """Each test gets its own overlay; the real one is user-global and must never be touched."""
+    """Each test gets its own overlay; the real one is user-global and must never be touched.
+
+    The SHIPPED table is also isolated. These tests assert how a candidate moves (or fails to move)
+    a probability, which must hold whatever the shipped corpus currently measures — pinning them to
+    it would make them fail every time the corpus is relabelled, which is a maintenance trap rather
+    than a property of the code.
+    """
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -46,6 +52,9 @@ class _Overlay(unittest.TestCase):
             patcher = patch.object(calibration, attr, value)
             patcher.start()
             self.addCleanup(patcher.stop)
+        shipped = patch.object(calibration, "load_shipped", lambda: None)
+        shipped.start()
+        self.addCleanup(shipped.stop)
 
     def overlay(self):
         return json.loads(self.local.read_text()) if self.local.exists() else {}
@@ -196,7 +205,7 @@ class SyntheticSeparationTests(_Overlay):
     def test_synthetic_table_is_a_separate_file_from_the_overlay(self):
         calibration.write_synthetic(calibration.fit_synthetic(self.PAIRS))
         self.assertNotEqual(calibration.SYNTHETIC_PATH, calibration.LOCAL_PATH)
-        self.assertEqual(calibration.load()["by_class_label"], {})
+        self.assertEqual((calibration.load() or {}).get("by_class_label", {}), {})
 
     def test_synthetic_table_carries_its_own_basis_and_caveat(self):
         table = calibration.fit_synthetic(self.PAIRS)
@@ -268,16 +277,21 @@ class ReviewedClassGateTests(unittest.TestCase):
             self._corpus(location_contains="app/safe.py", is_real=False,
                          review_status="reviewed")), {"sqli"})
 
-    def test_the_shipped_corpus_has_no_reviewed_class_today(self):
-        """Honest current state: every shipped entry still needs hand review."""
+    def test_every_shipped_truth_entry_is_reviewed_and_binds_a_location(self):
+        """The corpus was relabelled on 2026-09-22; unreviewed wildcards must not come back."""
         corpus = json.loads(
             (Path(__file__).resolve().parents[1] /
              "src/websec_validator/corpus.json").read_text())
-        self.assertEqual(calibration.reviewed_classes(corpus), set())
+        self.assertTrue(calibration.reviewed_classes(corpus))
         for app in corpus:
             for truth in app["truth"]:
-                self.assertIn("promotion_requires", truth,
-                              "every entry must state what promoting it requires")
+                with self.subTest(app=app["name"], cls=truth["class"]):
+                    self.assertEqual(truth["review_status"], "reviewed")
+                    self.assertIsInstance(truth["is_real"], bool)
+                    self.assertNotIn(truth["location_contains"], ("", "*"),
+                                     "a wildcard cannot separate a real vuln from an FP in the "
+                                     "same class — that is what got the old labels quarantined")
+                    self.assertTrue(truth.get("note"), "a label needs its reviewer's reasoning")
 
     def test_unreviewed_classes_are_excluded_from_published_cells(self):
         labels = [{"attack_class": "sqli", "confidence": "LOW", "is_real": True}] * 6

@@ -72,7 +72,7 @@
           {
             "requirementId": "FR-009",
             "file": "tests/test_calibration_review.py",
-            "line": 55
+            "line": 64
           },
           {
             "requirementId": "FR-009",
@@ -82,12 +82,12 @@
           {
             "requirementId": "FR-010",
             "file": "tests/test_calibration_review.py",
-            "line": 113
+            "line": 122
           },
           {
             "requirementId": "FR-010",
             "file": "tests/test_calibration_review.py",
-            "line": 246
+            "line": 255
           },
           {
             "requirementId": "FR-011",
@@ -117,7 +117,7 @@
           {
             "requirementId": "SC-007",
             "file": "tests/test_calibration_review.py",
-            "line": 188
+            "line": 197
           },
           {
             "requirementId": "SC-008",

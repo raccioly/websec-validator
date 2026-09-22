@@ -73,10 +73,18 @@ class IntelligenceTests(unittest.TestCase):
         (self.root/'epss.csv').write_text('cve,epss,percentile\nCVE-2025-12345,0.4,0.6\nCVE-2025-99999,nan,0.2\n')
         rows=[{'cve':'CVE-2025-12345'},{'cve':'CVE-2025-99999'}]; enrichment.enrich_exploitability(rows,self.root)
         self.assertEqual(rows[0]['intel']['provenance'],'legacy-unverified'); self.assertNotIn('epss',rows[1])
-    def test_historical_calibration_quarantined_not_erased(self):
-        table=calibration.load_shipped(); self.assertEqual(table['meta']['n_total'],0)
-        self.assertGreater(table['meta']['historical_uncertain_samples'],0)
-        self.assertTrue(table['legacy_uncertain']['by_class_label']); self.assertFalse(table['by_class_label'])
+    def test_shipped_calibration_is_reviewed_and_measured(self):
+        """Relabelled 2026-09-22: the shipped table carries reviewed labels, not quarantined ones.
+
+        The quarantine RULE — which withdrew the previous labels — is exercised against a synthetic
+        historical table in test_calibration_claimspec, so it stays covered without pinning this
+        test to whatever the corpus currently measures.
+        """
+        table = calibration.load_shipped()
+        self.assertEqual(table['meta']['evidence_status'], 'reviewed')
+        self.assertGreater(table['meta']['n_total'], 0)
+        self.assertTrue(table['by_class_label'])
+        self.assertNotIn('legacy_uncertain', table)
     def test_no_import_observation_never_claims_unreachable(self):
         (self.root/'app.py').write_text('import yaml\n')
         rows=[{'category':'sca','pkg':'requests','ecosystem':'pip','title':'CVE'}]; enrichment.enrich_reachability(rows,self.root)

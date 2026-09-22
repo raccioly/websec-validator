@@ -61,6 +61,24 @@ def shapes():
     }
 
 
+def _load_as_shipped(table):
+    """Run calibration.load_shipped() against `table` instead of the packaged file."""
+    import unittest.mock
+    from importlib import resources
+    payload = json.dumps(table)
+
+    class _Res:
+        def read_text(self, *a, **k):
+            return payload
+
+    class _Files:
+        def joinpath(self, *a):
+            return _Res()
+
+    with unittest.mock.patch.object(resources, "files", lambda *a, **k: _Files()):
+        return calibration.load_shipped()
+
+
 class ClaimspecWriterTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
@@ -75,7 +93,7 @@ class ClaimspecWriterTests(unittest.TestCase):
         self.assertEqual((doc['method'], doc['confidence'], doc['measures']), ('wilson', 0.95, 'finding-real'))
         self.assertEqual(doc['bucketBy'], 'attackClass|confidence'); self.assertEqual(doc['minN'], SHIPPED['meta']['min_n'])
         src = doc['source']
-        self.assertEqual(src['kind'], 'human-label'); self.assertEqual(src['evidenceStatus'], 'unverified')
+        self.assertEqual(src['kind'], 'human-label'); self.assertEqual(src['evidenceStatus'], 'verified')
         self.assertEqual(src['corpus'], SHIPPED['meta']['corpus'])
         self.assertEqual(src['caveat'], SHIPPED['meta']['caveat']); self.assertEqual(src['limitation'], SHIPPED['meta']['limitation'])
         for key in ('n_total', 'unmatched_rule', 'researched_classes'):
@@ -104,13 +122,29 @@ class ClaimspecWriterTests(unittest.TestCase):
                         if n:
                             self.assertTrue(cell['ci'][0] <= cell['p'] <= cell['ci'][1])
 
-    def test_runtime_table_is_quarantined_with_empty_buckets_and_a_caveat(self):
+    def test_runtime_table_exports_the_reviewed_corpus_measurements(self):
+        """The corpus was relabelled on 2026-09-22, so the runtime table carries real cells."""
         doc = calibration.to_claimspec(calibration.load(), computed_at=STAMP)
-        self.assertEqual(doc['source']['evidenceStatus'], 'quarantined'); self.assertEqual(doc['source']['kind'], 'human-label')
+        self.assertEqual(doc['source']['evidenceStatus'], 'verified')
+        self.assertEqual(doc['source']['kind'], 'human-label')
+        self.assertTrue(doc['buckets']); self.assertTrue(doc['backoff'][0]['buckets'])
+        self.assertEqual(doc['source']['corpus'], SHIPPED['meta']['corpus'])
+        self.assertEqual(doc['fallback']['values'], calibration.PRIOR)
+
+    def test_a_historical_table_is_still_quarantined_with_empty_buckets(self):
+        """The mechanism that withdrew the old labels must survive the relabel.
+
+        Exercised against a synthetic historical table, so this stays a test of the QUARANTINE RULE
+        rather than a snapshot of whatever the corpus currently says.
+        """
+        historical = copy.deepcopy(SHIPPED)
+        historical['meta']['evidence_status'] = 'historical-unverified'
+        quarantined = calibration._merge(_load_as_shipped(historical), None)
+        doc = calibration.to_claimspec(quarantined, computed_at=STAMP)
+        self.assertEqual(doc['source']['evidenceStatus'], 'quarantined')
         self.assertEqual(doc['buckets'], {}); self.assertEqual(doc['backoff'][0]['buckets'], {})
         self.assertIn('retained for audit', doc['source']['caveat'])
         self.assertGreater(doc['source']['detail']['historical_uncertain_samples'], 0)
-        self.assertNotIn('corpus', doc['source'])  # the quarantined numbers are not the corpus numbers
         self.assertEqual(doc['fallback']['values'], calibration.PRIOR)
 
     def test_local_only_overlay_is_a_tool_oracle_without_corpus_provenance(self):
@@ -123,10 +157,14 @@ class ClaimspecWriterTests(unittest.TestCase):
 
     def test_merged_table_is_mixed_and_carries_summed_counts(self):
         doc = calibration.to_claimspec(calibration._merge(copy.deepcopy(SHIPPED), copy.deepcopy(LOCAL)), computed_at=STAMP)
-        self.assertEqual(doc['source']['kind'], 'mixed'); self.assertEqual(doc['source']['evidenceStatus'], 'unverified')
+        self.assertEqual(doc['source']['kind'], 'mixed'); self.assertEqual(doc['source']['evidenceStatus'], 'verified')
+        base = SHIPPED['by_class_label']['missing-auth|MEDIUM']
         cell = doc['buckets']['missing-auth|MEDIUM']
-        self.assertEqual((cell['n'], cell['positives'], cell['p']), (42, 27, round(27 / 42, 3)))
-        self.assertEqual(doc['backoff'][0]['buckets']['MEDIUM']['n'], 51 + 7)
+        merged_n, merged_k = base['n'] + 1, base['k'] + 0     # LOCAL adds missing-auth 0/1
+        self.assertEqual((cell['n'], cell['positives'], cell['p']),
+                         (merged_n, merged_k, round(merged_k / merged_n, 3)))
+        self.assertEqual(doc['backoff'][0]['buckets']['MEDIUM']['n'],
+                         SHIPPED['by_label']['MEDIUM']['n'] + 7)
         self.assertIn('local sample(s) folded in', doc['source']['caveat']); self.assertEqual(doc['source']['corpus'], SHIPPED['meta']['corpus'])
 
     def test_zero_trial_cell_has_null_p_and_maximal_ignorance(self):
@@ -137,8 +175,11 @@ class ClaimspecWriterTests(unittest.TestCase):
         self.assertNotIn('detail', doc['source'])  # nothing to say ≠ an empty object
 
     def test_writer_refuses_a_cell_whose_numbers_do_not_reproduce(self):
-        stale = copy.deepcopy(SHIPPED); stale['by_class_label']['missing-auth|MEDIUM']['p'] = 0.7
-        with self.assertRaisesRegex(ValueError, r"'missing-auth\|MEDIUM'.*27/41"):
+        stale = copy.deepcopy(SHIPPED)
+        cell = stale['by_class_label']['missing-auth|MEDIUM']
+        counts = f"{cell['k']}/{cell['n']}"          # derived, so a relabel cannot stale this test
+        cell['p'] = round(cell['p'] + 0.1, 3)
+        with self.assertRaisesRegex(ValueError, r"'missing-auth\|MEDIUM'.*" + re.escape(counts)):
             calibration.to_claimspec(stale, computed_at=STAMP)
         bad = copy.deepcopy(SHIPPED); bad['by_label']['LOW'] = {'n': 2, 'k': 3, 'p': 1.5, 'ci': [0.0, 1.0]}
         with self.assertRaisesRegex(ValueError, "'LOW'"):
@@ -151,7 +192,7 @@ class ClaimspecWriterTests(unittest.TestCase):
         out = self.root / 'nested' / 'calibration.claimspec.json'
         with contextlib.redirect_stdout(io.StringIO()) as buf:
             self.assertEqual(cli.main(['calibrate', '--claimspec', str(out)]), 0)
-        self.assertIn('evidenceStatus=quarantined', buf.getvalue())
+        self.assertIn('evidenceStatus=verified', buf.getvalue())
         doc = json.loads(out.read_text())
         self.assertEqual(doc['schemaVersion'], 1); self.assertEqual(doc['measures'], 'finding-real')
         with contextlib.redirect_stdout(io.StringIO()) as buf:

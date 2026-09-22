@@ -73,6 +73,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   to the generic "write a regression test". These were real gaps in the fix prompts independently of
   the triage work, and they are what make the agent-fixable invariant true rather than aspirational.
 
+### Added — the calibration table carries measured numbers again
+
+The corpus was relabelled finding by finding against source at the pinned revisions, replacing the
+class-level wildcards (`location_contains: "*"`, `is_real: null`) that could not separate a real
+vulnerability from a false positive inside the same class and were therefore quarantined. 14
+reviewed entries across 9 attack classes, each carrying the reviewer's reasoning and the revision
+it was read at.
+
+Measured after the false-positive fixes below, so the rates describe the current detector:
+**LOW 6/11 = 0.545 [0.28, 0.787] · MEDIUM 7/10 = 0.70 [0.397, 0.892]**, Brier **0.2244** against a
+constant-0.5 reference of 0.25. Every finding now reports a measured `p` with its `n` and `basis`
+instead of the uncalibrated prior — on NodeGoat, 3 findings resolve from a class-specific cell and
+17 from the label tier, none from the prior.
+
+35 of the 56 corpus findings remain **unknown** and are excluded from every count rather than
+recorded as false. That is deliberate: an unverified label is what got the previous table
+quarantined, and `websec calibrate` now prints which classes it excluded.
+
+- **A class earns a published cell only from reviewed labels**, and the shipped corpus now has
+  nine. `--claimspec` exports them with `evidenceStatus: verified`; a table still marked
+  `historical-unverified` is quarantined exactly as before, proven against a synthetic historical
+  table so the rule survives the relabel.
+- **Tutorial and documentation code samples are no longer reported as findings.** A sink inside
+  `<pre>` or `<code>` in a markup file is displayed source, not executed source: NodeGoat's
+  tutorial pages documented `eval(req.body.preTax)` under the caption "Insecure use of eval() to
+  parse inputs", and websec reported the lesson. 7 of 27 NodeGoat findings. Masked only for markup
+  suffixes, never for `.js`/`.ts` where the same characters are code, and newlines are preserved so
+  reported line numbers stay true.
+- **Personalization is no longer claimed when nothing was folded in.** Queuing a pending feedback
+  candidate creates the local overlay, which made the caveat read "+0 evidence-backed local
+  sample(s) folded in (personalized to your apps)" — a false statement about the number.
+
 ### Fixed — `websec run` no longer version-probes scanners it will not run
 
 Scanner version-checking (0.17.0) spawns `<binary> --version` for every scanner on PATH. Measured on
