@@ -329,5 +329,56 @@ class RuleLevelGapTests(unittest.TestCase):
             self.assertIn("UNMEASURED", rule_gaps[0]["detail"])
 
 
+class InitScopeTests(unittest.TestCase):
+    """#8 — `init` produced no `.websec-ignore`, so setup-time scoping was undiscoverable."""
+
+    def setUp(self):
+        from websec_validator import init_scope
+        self.init_scope = init_scope
+
+    def _repo(self, tmp):
+        root = Path(tmp)
+        for d in ("backend/capacity-test", "backend/seed", "tests/fixtures", "frontend/src"):
+            (root / d).mkdir(parents=True)
+            (root / d / "f.ts").write_text("export const x = 1;\n")
+        return root
+
+    def test_proposes_nested_non_product_directories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = {e["path"] for e in self.init_scope.propose(self._repo(tmp))["entries"]}
+            self.assertIn("backend/capacity-test/", paths)
+            self.assertIn("backend/seed/", paths)
+            self.assertNotIn("frontend/src/", paths)
+
+    def test_nested_candidate_is_covered_by_its_parent_not_listed_twice(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = {e["path"] for e in self.init_scope.propose(self._repo(tmp))["entries"]}
+            self.assertIn("tests/", paths)
+            self.assertNotIn("tests/fixtures/", paths)
+
+    def test_every_entry_carries_its_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for e in self.init_scope.propose(self._repo(tmp))["entries"]:
+                self.assertGreater(e["files"], 0)
+                self.assertTrue(e["reason"])
+
+    def test_refuses_to_clobber_an_existing_policy_file(self):
+        """It may hold reviewed `fingerprint:` acknowledgements that regeneration would discard."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp)
+            (root / ".websec-ignore").write_text("fingerprint:abc expires:2030-01-01 # reviewed\n")
+            proposal = self.init_scope.propose(root)
+            self.assertFalse(self.init_scope.write(root, proposal)["written"])
+            self.assertIn("reviewed", (root / ".websec-ignore").read_text())
+            self.assertTrue(self.init_scope.write(root, proposal, force=True)["written"])
+
+    def test_written_file_parses_as_a_suppression_policy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._repo(tmp)
+            self.init_scope.write(root, self.init_scope.propose(root))
+            loaded = findings.load_suppressions(root)
+            self.assertIn("tests/", list(loaded))
+
+
 if __name__ == "__main__":
     unittest.main()

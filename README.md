@@ -301,6 +301,11 @@ websec builds; that silence is indistinguishable from a clean result. `doctor` n
 scanner's version, marks one that is too old for our invocation, and exits `2` when any selected
 scanner is incompatible — so a CI preflight can gate on the toolchain before it trusts a scan.
 
+**Scope the noise at setup, not after the first report.** `websec init` walks the repo, finds the
+directories that are not your product (`backend/capacity-test/`, `seed/`, `fixtures/`, `vendor/` …),
+and writes a `.websec-ignore` where every entry carries the file count that justifies it. It prints
+every proposal before writing, supports `--dry-run`, and refuses to overwrite an existing policy file
+without `--force` — that file may hold reviewed `fingerprint:` acknowledgements.
 
 **One issue, N sites.** Thirteen findings from one `jwtSecret` pattern and twenty-two blobs from one
 deleted-file incident are six issues, not thirty-five. The ledger carries a `clusters[]` view (and

@@ -3,6 +3,7 @@
 Commands:
   websec run <repo> [--scan] [--out DIR]   full pipeline → FACTS.json + AGENT-BRIEFING.md + probes/
   websec recon <repo> [--out DIR]          recon only → FACTS.json
+  websec init [<repo>]                     scaffold a .websec-ignore scoped to this repo
   websec doctor [<repo>]                    show which scanners are present / missing
 
 Code-in, artifacts-out. No LLM, no server, no running app. Point your AI coding
@@ -213,7 +214,48 @@ def cmd_doctor(args) -> int:
             print(f"      ✗ {s['name']} {s.get('version')}  —  {s.get('install','')}")
     print("\n  Docker:", "present" if _which("docker") else "not found "
           "(used for reproducible scanner runs in a future release)")
-    return 0
+    # A stale/incompatible analyzer is an operational defect, not just an FYI: exit non-zero so a
+    # CI preflight `websec doctor .` can gate on it. 2 = the usage/config class (see EXIT_* in this
+    # module) — the toolchain is misconfigured, no scan was attempted and no finding was missed.
+    return EXIT_USAGE if det.get("incompatible") else 0
+
+
+def cmd_init(args) -> int:
+    """Scaffold a `.websec-ignore` scoped to THIS repository (field report #8).
+
+    Setup-time scoping is the cheapest noise reduction there is: path-scoping a repo's fixture and
+    seed directories removes most of the noise before it ever reaches a report, and doing it after
+    the first run means reading a hundred findings to learn something the directory names already
+    said. Proposals are evidence-based and always printed before anything is written."""
+    from . import init_scope
+    target = _resolve_target(args.target)
+    proposal = init_scope.propose(target)
+    print(f"websec-validator v{__version__} — scope setup for {target}\n")
+    if proposal["entries"]:
+        print("  proposed scope exclusions (detected in this repo):")
+        for e in proposal["entries"]:
+            print(f"    {e['path']:<44} {e['files']:>5} file(s)  — {e['reason']}")
+        print(f"\n  covers {proposal['covered_files']} of {proposal['analyzed_files']} analyzed file(s).")
+    else:
+        print("  no test/fixture/seed/vendor directories detected — nothing to scope out.")
+    # Never suppress silently: the operator sees the list before the file exists.
+    print("\n  Suppression is SCOPE, not a verdict: a secret in a fixture is still committed.\n"
+          "  For a known, accepted finding prefer a `fingerprint:` acknowledgement — it stays\n"
+          "  visible in the report, carries a reason and expires.")
+    if getattr(args, "dry_run", False):
+        print("\n--- .websec-ignore (dry run, not written) ---")
+        print(init_scope.render(proposal))
+        return EXIT_OK
+    result = init_scope.write(target, proposal, force=getattr(args, "force", False))
+    if not result["written"]:
+        print(f"\n  ✗ not written: {result['reason']}\n    {result['path']}")
+        print("    An existing .websec-ignore is a policy document — it may hold reviewed "
+              "`fingerprint:`\n    acknowledgements that regenerating would discard. Review it, "
+              "or re-run with --force.")
+        return EXIT_USAGE
+    print(f"\n  ✓ wrote {result['path']} ({result['entries']} scope entr(ies))")
+    print("    Review it, delete what you disagree with, and commit it.")
+    return EXIT_OK
 
 
 def cmd_recon(args) -> int:
@@ -1366,7 +1408,7 @@ def build_parser() -> argparse.ArgumentParser:
     # metavar lists only the user-facing commands; recon/proof/calibrate still work but are
     # omitted (they get no `help=`, so argparse leaves them out of the listing entirely).
     sub = p.add_subparsers(dest="cmd", required=True,
-                          metavar="{run,doctor,dynamic,mcp,capabilities,demo,explain,feedback,intel,research,repair-verify,install,hooks}")
+                          metavar="{run,init,doctor,dynamic,mcp,capabilities,demo,explain,feedback,intel,research,repair-verify,install,hooks}")
 
     r = sub.add_parser("run", help="full pipeline → briefing + tailored probes")
     r.add_argument("target")
@@ -1441,6 +1483,14 @@ def build_parser() -> argparse.ArgumentParser:
     rc.add_argument("target")
     rc.add_argument("--out", help="output dir (default: ./websec-out)")
     rc.set_defaults(func=cmd_recon)
+
+    i = sub.add_parser("init", help="scaffold a .websec-ignore scoped to this repo")
+    i.add_argument("target", nargs="?", default=".")
+    i.add_argument("--dry-run", action="store_true", dest="dry_run",
+                   help="print the proposed .websec-ignore without writing it")
+    i.add_argument("--force", action="store_true",
+                   help="replace an existing .websec-ignore (it may hold reviewed acknowledgements)")
+    i.set_defaults(func=cmd_init)
 
     d = sub.add_parser("doctor", help="show which scanners are installed")
     d.add_argument("target", nargs="?", help="optional repo to scope scanner relevance")
@@ -1615,7 +1665,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-_COMMANDS = {"run", "recon", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks", "repair-verify", "capabilities", "intel", "research", "feedback", "gate", "attest", "explain", "demo"}
+_COMMANDS = {"run", "recon", "init", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks", "repair-verify", "capabilities", "intel", "research", "feedback", "gate", "attest", "explain", "demo"}
 
 
 def main(argv=None) -> int:
