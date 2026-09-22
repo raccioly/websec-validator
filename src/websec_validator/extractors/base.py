@@ -43,8 +43,58 @@ MAX_WALK_FILES = 120_000
 MAX_SKIP_SAMPLES = 200
 # Report known source types that the built-in code extractors do not inspect.
 # Config, documentation and binary assets are not presumed to be source code.
-SOURCE_EXT = CODE_EXT | {".vue", ".svelte", ".mts", ".cts", ".html", ".htm",
-                         ".cs", ".rs", ".kt", ".kts", ".swift", ".scala", ".c", ".h", ".cpp", ".hpp"}
+#
+# HISTORY: this was written as `CODE_EXT | {...}` with a member list that CODE_EXT later grew to
+# contain entirely except `.scala`. The set difference was therefore {".scala"}, so the
+# `elif suffix in SOURCE_EXT` arm below could fire for Scala and nothing else: a whole Elixir or
+# Clojure application walked past as `unsupported: []`, `gaps: []`, "REQUESTED CHECKS COMPLETED".
+# The list is now written OUT, independently of CODE_EXT, so a suffix added to CODE_EXT cannot
+# silently empty this one; `test_analysable_sets.py` pins the invariant.
+# CAUTION when adding to this set: "absent from CODE_EXT" does NOT mean "unanalysed". Several
+# extractors reach files by explicit glob instead — `.sql` is read by `schemas.py` and `stack.py`
+# for CREATE TABLE / RLS-policy analysis, and `.graphql`/`.gql`/`.vtl` live in CODE_EXT. Claiming
+# such a file was "never read" would be a false statement in the coverage manifest, which is worse
+# than the silence this set exists to fix. `test_unanalyzed_coverage` cross-checks every member
+# against the glob patterns in the extractor sources.
+UNANALYZED_SOURCE_EXT = {
+    # JVM / functional
+    ".scala", ".clj", ".cljs", ".cljc", ".groovy", ".gradle",
+    # BEAM
+    ".ex", ".exs", ".erl", ".hrl",
+    # scripting / systems languages with no ruleset here
+    ".pl", ".pm", ".lua", ".r", ".jl", ".dart", ".zig", ".nim", ".cr", ".hs", ".ml", ".fs", ".fsx",
+    ".sh", ".bash", ".zsh", ".ps1", ".psm1", ".tcl", ".vb", ".pas", ".d", ".f90",
+    # templating that can hold server-side logic
+    ".erb", ".haml", ".slim", ".twig", ".hbs", ".ejs", ".pug", ".mustache", ".liquid", ".blade",
+}
+# Every suffix the walker recognises as program source, whether or not it can analyse it.
+SOURCE_EXT = CODE_EXT | UNANALYZED_SOURCE_EXT
+
+# Human-readable language for an unanalysed suffix, so a coverage gap can say "elixir" rather than
+# ".ex". Only covers UNANALYZED_SOURCE_EXT; analysable languages are named by profiles._LANG.
+UNANALYZED_LANG = {
+    ".scala": "scala", ".clj": "clojure", ".cljs": "clojure", ".cljc": "clojure",
+    ".groovy": "groovy", ".gradle": "groovy", ".ex": "elixir", ".exs": "elixir",
+    ".erl": "erlang", ".hrl": "erlang", ".pl": "perl", ".pm": "perl", ".lua": "lua",
+    ".r": "r", ".jl": "julia", ".dart": "dart", ".zig": "zig", ".nim": "nim", ".cr": "crystal",
+    ".hs": "haskell", ".ml": "ocaml", ".fs": "f#", ".fsx": "f#", ".sh": "shell", ".bash": "shell",
+    ".zsh": "shell", ".ps1": "powershell", ".psm1": "powershell", ".sql": "sql", ".tcl": "tcl",
+    ".vb": "visual-basic", ".pas": "pascal", ".d": "d", ".f90": "fortran",
+    ".erb": "erb-template", ".haml": "haml-template", ".slim": "slim-template",
+    ".twig": "twig-template", ".hbs": "handlebars-template", ".ejs": "ejs-template",
+    ".pug": "pug-template", ".mustache": "mustache-template", ".liquid": "liquid-template",
+    ".blade": "blade-template",
+}
+
+
+def unanalyzed_languages(paths) -> dict:
+    """{language: file_count} for walked files whose suffix has no analyser. Sorted, bounded."""
+    counts: dict = {}
+    for path in paths or []:
+        lang = UNANALYZED_LANG.get(Path(str(path)).suffix.lower())
+        if lang:
+            counts[lang] = counts.get(lang, 0) + 1
+    return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
 
 
 def _glob_matches(relative: Path, pattern: str) -> bool:

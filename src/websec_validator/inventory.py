@@ -172,10 +172,20 @@ def build(facts: dict) -> dict:
     return {"endpoints": rows, "summary": summary}
 
 
-def render_md(inv: dict, limit: int = 25) -> str:
-    """Markdown table for the briefing/report — the 'test this first' ordering."""
+def render_md(inv: dict, limit: int = 25, coverage: dict | None = None) -> str:
+    """Markdown table for the briefing/report — the 'test this first' ordering.
+
+    `coverage` is optional so existing callers are unaffected; when supplied, an empty route table
+    names the *actual* cause where we know it. Blaming "route discovery failed" for a repository
+    written in a language we never read sends the reader to debug the wrong thing.
+    """
     rows = inv.get("endpoints", []) or []
     if not rows:
+        langs = ((coverage or {}).get("files", {}) or {}).get("unanalyzed_languages") or {}
+        if langs:
+            named = ", ".join(f"{lang} ({n} file(s))" for lang, n in langs.items())
+            return (f"_No endpoints mapped — **websec has no analyzer for {named}**, so no route in "
+                    "those files could be discovered. This is not an empty application._")
         return "_No endpoints mapped — nothing to inventory (a library/CLI, or route discovery failed)._"
     s = inv.get("summary", {})
     head = (f"**{s.get('endpoints', 0)} endpoint(s)** · **{s.get('unguarded', 0)} with no visible guard** "

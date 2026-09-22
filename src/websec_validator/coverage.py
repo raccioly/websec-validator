@@ -60,6 +60,17 @@ def from_context(ctx, outcomes: dict) -> dict:
         gaps.append({"kind": "file_limit", "detail": "file inventory or code selection capped", "execution": True})
     if ctx.unsupported_files:
         gaps.append({"kind": "unsupported_source", "detail": f"{len(ctx.unsupported_files)} source files", "execution": False})
+    # Name the languages, not just the count: "3 source files" does not tell an operator that their
+    # Elixir service was never looked at. Scope limitation, never an execution failure — nothing
+    # failed to run; there was nothing here to run.
+    from .extractors.base import unanalyzed_languages
+    unanalyzed = unanalyzed_languages(ctx.unsupported_files)
+    if unanalyzed:
+        named = ", ".join(f"{lang} ({n} file(s))" for lang, n in unanalyzed.items())
+        gaps.append({"kind": "language_without_analyzer",
+                     "detail": f"no analyzer for {named}; these files were never read or matched, "
+                               "so their absence from the findings is not a clean result",
+                     "execution": False})
     if ctx.excludes:
         gaps.append({"kind": "excluded_scope", "detail": "operator exclusions applied", "execution": False})
     if ctx.skip_counts:
@@ -79,6 +90,11 @@ def from_context(ctx, outcomes: dict) -> dict:
                   "truncated": bool(ctx.truncated), "inventory_truncated": ctx.walk_truncated,
                   "glob_truncated": list(ctx.glob_truncated), "excludes": list(ctx.excludes),
                   "include_fixtures": ctx.include_fixtures,
+                  "unanalyzed_languages": unanalyzed,
+                  # The headline distinction: source was present, none of it could be analysed.
+                  # Machine-readable so a consumer never has to parse the rendered banner.
+                  "no_analyzable_source": bool(ctx.files_seen and not len(ctx.code_files)
+                                               and (unanalyzed or ctx.unsupported_files)),
                   "skipped_counts": dict(ctx.skip_counts), "skipped_samples": list(ctx.skipped_files)},
     }
     result["scope_digest"] = _digest({"profile": result["profile"], "excludes": ctx.excludes,
@@ -112,6 +128,30 @@ def add_profiles(facts: dict) -> None:
     if unverified:
         add_gap(facts, "profile_scope", f"{unverified} named checks require manual review or lack applicable input",
                 execution=False)
+    thin = thin_languages(cov)
+    if thin:
+        named = ", ".join(sorted(thin))
+        add_gap(facts, "thin_language_coverage",
+                f"{named}: files were read, but websec has no injection, secret or authorization "
+                "rules for these languages — only the named configuration checks in `profiles`. "
+                "Absence of findings is not evidence of absence for them",
+                execution=False)
+
+
+# A language is "thin" when its files were read but no profile gives it a sink check — i.e. the
+# deep classes (injection, command execution, secrets, authz) have no rule. Derived from the
+# published capability catalog so adding a real ruleset removes the warning automatically, and a
+# future language cannot be quietly added to CODE_EXT without either rules or this disclosure.
+def thin_languages(cov: dict) -> set:
+    from .extractors.profiles import capabilities
+    catalog = capabilities()["profiles"]
+    with_sinks = {lang for spec in catalog for lang in spec["languages"]
+                  if any(check["kind"] == "sink" for check in spec["checks"])}
+    # Languages whose deep analysis lives in the main extractors rather than a named profile.
+    FIRST_CLASS = {"python", "node", "typescript"}
+    seen = {lang for service in cov.get("service_inventory", []) or []
+            for lang in (service.get("languages") or [])}
+    return seen - with_sinks - FIRST_CLASS
 
 
 def add_routes(facts: dict) -> None:
@@ -227,10 +267,26 @@ def render_md(facts: dict) -> str:
     cov = facts.get("coverage") or {}
     if not cov:
         return "\n> Coverage evidence unavailable for this legacy artifact.\n"
-    status = "REQUESTED CHECKS COMPLETED" if cov.get("execution_complete") else "PARTIAL SCAN — REQUESTED CHECKS INCOMPLETE"
     counts = cov.get("files", {})
+    # "REQUESTED CHECKS COMPLETED" over an unanalysable tree is the dangerous reading: nothing
+    # failed, so execution IS complete — but the operator hears "clean". Lead with the limit.
+    if counts.get("no_analyzable_source"):
+        status = "NO ANALYZABLE SOURCE"
+    elif cov.get("execution_complete"):
+        status = "REQUESTED CHECKS COMPLETED"
+    else:
+        status = "PARTIAL SCAN — REQUESTED CHECKS INCOMPLETE"
     lines = [f"\n> **{status}** — {counts.get('read', 0)} files read; {counts.get('scanned', 0)} code files selected.",
              "> Completion describes execution, not complete protection. See `coverage.json` for scope and limits."]
+    if counts.get("no_analyzable_source"):
+        langs = counts.get("unanalyzed_languages") or {}
+        named = ", ".join(f"{lang} ({n})" for lang, n in langs.items()) or "the detected file types"
+        lines.append(f"> **This scan analyzed nothing.** Source files are present but websec has no analyzer for "
+                     f"{named}. An empty findings list here means NOT CHECKED, not secure.")
+    elif counts.get("unanalyzed_languages"):
+        langs = counts["unanalyzed_languages"]
+        named = ", ".join(f"{lang} ({n})" for lang, n in langs.items())
+        lines.append(f"> Partially outside coverage: no analyzer for {named}. Those files were never read.")
     if cov.get("imports"):
         lines.append(f"> SARIF imports: {len(cov['imports'])}; producer analysis and import outcomes recorded separately from scanners. Source freshness unverified; repair completion unsupported.")
     if counts.get("byte_budget_exceeded"):

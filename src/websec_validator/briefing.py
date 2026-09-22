@@ -45,7 +45,7 @@ def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list
     from . import testplan as _testplan
     _inv = _inventory.build(facts)
     _pred = _dast.predict(facts, ledger)
-    inventory_md = _inventory.render_md(_inv)                      # §3a — ranked "test in this order"
+    inventory_md = _inventory.render_md(_inv, coverage=facts.get("coverage"))  # §3a — ranked "test in this order"
     dast_md = _dast.render_md(_pred)                              # §4b — predicted scanner alerts + blind spots
     testplan_md = _testplan.render_md(_testplan.build(facts, _inv, _pred))  # §5b — phased runbook
     # §3e — OpenAPI contract: shadow (undocumented) endpoints + spec hygiene.

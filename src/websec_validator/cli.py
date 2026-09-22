@@ -509,9 +509,20 @@ def cmd_run(args) -> int:
              "network_gate_note": ("registry-existence findings are reported but do not gate unless "
                                    "--fail-on-network is given: the UNKNOWN rate is outside operator "
                                    "control and a 404 is an observation, not a proof")}
+    # --require-analyzed is a SEPARATE opt-in from --require-complete, because the two describe
+    # different failures. Nothing failed to execute here: there was simply no analyser for any of
+    # the source present, so execution_complete stays true and --require-complete stays silent.
+    # A pipeline that wants "refuse to green-light a repo I cannot read" asks for it explicitly.
+    _unanalyzed = (getattr(args, "require_analyzed", False)
+                   and facts["coverage"].get("files", {}).get("no_analyzable_source"))
+    _gate["require_analyzed"] = bool(getattr(args, "require_analyzed", False))
     if _incomplete:
         _gate.update(verdict="incomplete", exit_code=2, count_at_or_above=None,
                      note="requested checks did not complete; the gate result is NOT a pass")
+    elif _unanalyzed:
+        _gate.update(verdict="no-analyzable-source", exit_code=2, count_at_or_above=None,
+                     note="source files were present but none could be analyzed; an empty findings "
+                          "list means NOT CHECKED and --require-analyzed refuses to report it as a pass")
     elif getattr(args, "fail_on", None):
         _n = baseline.gate_count(_gate_ledger, args.fail_on, new_only=bool(diff))
         _gate.update(count_at_or_above=_n, verdict="fail" if _n else "pass", exit_code=1 if _n else 0)
@@ -587,6 +598,10 @@ def cmd_run(args) -> int:
     # disagree.
     if _gate["verdict"] == "incomplete":
         log("\n✗ requested security checks did not complete; partial artifacts saved (exit 2).")
+        return 2
+    if _gate["verdict"] == "no-analyzable-source":
+        log("\n✗ --require-analyzed: source files are present but websec has no analyzer for any of "
+            "them; an empty findings list here means NOT CHECKED (exit 2).")
         return 2
     if _gate["verdict"] == "fail":
         log(f"\n✗ --fail-on {args.fail_on}: {_gate['count_at_or_above']} finding(s) at or above threshold"
@@ -797,10 +812,18 @@ def cmd_gate(args) -> int:
     result = _gate.verdict(ledger, facts, args.fail_on, scope_source=scope_source,
                            min_confidence=getattr(args, "min_confidence", "low"))
 
+    # --fail-on-missed is applied HERE, not inside verdict(): `verdict` answers "are there blocking
+    # findings in what was analysed", and a path that was never analysed produced no finding to
+    # judge. Folding it in would conflate "found nothing" with "looked at nothing" inside the very
+    # function whose job is to keep them apart. The JSON `passed` value stays the verdict's.
     if getattr(args, "format", "text") == "json":
         print(_gate.to_json(result))
     else:
         print(_gate.render_text(result))
+    if result["passed"] and result.get("missed") and getattr(args, "fail_on_missed", False):
+        print(f"websec gate: --fail-on-missed — {len(result['missed'])} requested path(s) were never "
+              "analyzed; refusing to report this as a pass.", file=sys.stderr)
+        return 1
     # 1 = blocking findings. Distinct from 2 (usage/target error) so a harness can tell a FAILED
     # check from a BROKEN one and must never treat a crash as a pass.
     return 0 if result["passed"] else 1
@@ -1330,6 +1353,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="exit 1 if any finding at/above this severity remains (CI gate). With --baseline, "
                         "new, changed and reopened findings count; incomplete execution exits 2.")
     r.add_argument("--require-complete", action="store_true", help="exit 2 when requested checks cannot complete")
+    r.add_argument("--require-analyzed", action="store_true", dest="require_analyzed",
+                   help="exit 2 when source files are present but NONE could be analyzed (no analyzer "
+                        "for the language). Separate from --require-complete: nothing failed to run, "
+                        "there was nothing runnable — but an empty findings list means NOT CHECKED.")
     r.add_argument("--network", action="store_true",
                    help="opt in to checking whether declared dependencies EXIST on the public "
                         "registry (the AI-hallucinated-dependency / slopsquat class). ⚠ this sends "
@@ -1441,6 +1468,11 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("target", nargs="?", default=".")
     g.add_argument("--only", action="append", metavar="PATH",
                    help="analyze these files instead of the working-tree changes (repeatable)")
+    g.add_argument("--fail-on-missed", action="store_true", dest="fail_on_missed",
+                   help="exit 1 when a requested path was never analyzed (unsupported language, "
+                        "excluded or absent). OFF by default: in the agent loop a pass over an "
+                        "unanalyzable file is a correct 'nothing to say', and the text output says "
+                        "so. Turn this on at merge time, where silence must not read as approval.")
     g.add_argument("--fail-on", dest="fail_on", default="medium",
                    choices=["critical", "high", "medium", "low"],
                    help="block at or above this severity (default: medium — command injection and "

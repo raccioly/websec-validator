@@ -162,6 +162,18 @@ def render_text(result: dict) -> str:
     """What the agent harness feeds back to the model on a block — specific enough to act on."""
     if result["passed"]:
         n = len(result["analyzed"])
+        missed = len(result.get("missed") or [])
+        # A pass over zero analysed files is the reading that must never look clean. The verdict
+        # itself is unchanged (see `verdict`'s contract and test_gate_command); only the sentence
+        # the model reads is, because a bare "pass (0 file(s) analyzed)" is indistinguishable from
+        # a genuine all-clear.
+        if missed and not n:
+            return (f"websec gate: pass — but 0 file(s) were analyzed and {missed} requested path(s) "
+                    f"were never looked at (threshold {result['threshold']}). "
+                    "This is NOT a clean result: " + result.get("missed_note", ""))
+        if missed:
+            return (f"websec gate: pass ({n} file(s) analyzed, threshold {result['threshold']}) — "
+                    f"{missed} requested path(s) never analyzed; not a clean result for those")
         return f"websec gate: pass ({n} file(s) analyzed, threshold {result['threshold']})"
     lines = [f"websec gate: FAILED — {result['blocking_count']} finding(s) at or above "
              f"{result['threshold']} in the files just changed.", ""]

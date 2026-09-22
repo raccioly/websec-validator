@@ -60,14 +60,49 @@
         "implementationEvidence": [],
         "testEvidence": [
           {
+            "requirementId": "FR-007",
+            "file": "tests/test_unanalyzed_coverage.py",
+            "line": 110
+          },
+          {
+            "requirementId": "FR-008",
+            "file": "tests/test_unanalyzed_coverage.py",
+            "line": 60
+          },
+          {
+            "requirementId": "FR-009",
+            "file": "tests/test_unanalyzed_cli.py",
+            "line": 149
+          },
+          {
             "requirementId": "FR-011",
             "file": "tests/test_calibration_scoring.py",
             "line": 43
           },
           {
+            "requirementId": "FR-012",
+            "file": "tests/test_unanalyzed_coverage.py",
+            "line": 134
+          },
+          {
+            "requirementId": "FR-013",
+            "file": "tests/test_unanalyzed_cli.py",
+            "line": 55
+          },
+          {
+            "requirementId": "SC-005",
+            "file": "tests/test_unanalyzed_coverage.py",
+            "line": 172
+          },
+          {
             "requirementId": "SC-008",
             "file": "tests/test_calibration_scoring.py",
             "line": 87
+          },
+          {
+            "requirementId": "SC-009",
+            "file": "tests/test_unanalyzed_coverage.py",
+            "line": 214
           }
         ]
       }

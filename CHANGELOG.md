@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **A scan that analyzed nothing can no longer read as clean.** `SOURCE_EXT` was defined as
+  `CODE_EXT | {…}` whose members `CODE_EXT` had since absorbed entirely except `.scala`, so the
+  walker's "unsupported source" arm was reachable for exactly one language. A deliberately
+  vulnerable Elixir application (raw SQL interpolation, `System.cmd` injection, a hardcoded
+  `sk_live_` key, no auth plug) therefore produced `unsupported: []`, `gaps: []` and the headline
+  *"REQUESTED CHECKS COMPLETED — 0 files read"*. The unanalyzed-source list is now written out
+  independently of `CODE_EXT` and covers 43 suffixes across 30 languages. New coverage evidence:
+  `files.unanalyzed_languages` (language → file count), `files.no_analyzable_source`, and the
+  `language_without_analyzer` gap. The banner now leads with **NO ANALYZABLE SOURCE**, and an empty
+  route table names the missing analyzer instead of blaming route discovery.
+- **`thin_language_coverage` gap** for languages whose files *are* read but have no injection,
+  secret or authorization rule (Swift, Kotlin, Rust, C/C++ — only the named configuration checks in
+  `profiles`). Derived from the published `capabilities()` catalog, so adding a real ruleset removes
+  the warning automatically.
+- **`websec run --require-analyzed`** (exit 2) and **`websec gate --fail-on-missed`** (exit 1) —
+  both opt-in. Default exit codes and the gate's recorded `passed` verdict are unchanged; only the
+  text a model reads gains the disclosure. `--require-complete` deliberately stays silent for this
+  case: nothing failed to execute, there was nothing executable.
+- **Fitting objective recorded as a design constraint.** Any quantity fitted from labels is chosen
+  by a strictly proper scoring rule (Brier or log score), never accuracy/precision/recall/F1, which
+  are maximized by confident wrongness. Stated in `METHODOLOGY.md` § Layer 3b, `BENCHMARKS.md` § 2
+  and `calibration.SCORING_RULE`; `websec calibrate` now prints the table's Brier score. Reported,
+  never optimized — no runtime behavior depends on it.
+
+All additive: no finding, severity, confidence, fingerprint or SARIF output changes on any existing
+fixture. New coverage gaps are scope limitations (`execution: false`), so `execution_complete` and
+`--require-complete` semantics are untouched. Specification:
+`specs/002-calibration-honesty-and-structural-coverage/spec.md`.
+
 ## [0.16.0] — 2026-09-18
 
 Migration: **none required — the release is a single additive export; no existing artifact, schema or
