@@ -3,6 +3,65 @@
   "schemaVersion": 2,
   "specs": [
     {
+      "specId": "websec.calibration-honesty-structural-coverage",
+      "path": "specs/002-calibration-honesty-and-structural-coverage/spec.md",
+      "reviewed": {
+        "lifecycle": {
+          "approval": "draft",
+          "delivery": "planned",
+          "context": "current",
+          "retirementReason": null,
+          "storage": "working_tree",
+          "persistenceModel": null
+        },
+        "relations": {
+          "extends": [],
+          "duplicates": [],
+          "conflictsWith": [],
+          "supersedes": [],
+          "supersededBy": []
+        },
+        "scope": {
+          "canonicalDocs": []
+        },
+        "reconciliation": {
+          "lastReviewedRevision": null,
+          "outcomes": []
+        }
+      },
+      "intent": {
+        "requirements": [
+          "websec.calibration-honesty-structural-coverage#FR-007",
+          "websec.calibration-honesty-structural-coverage#FR-008",
+          "websec.calibration-honesty-structural-coverage#FR-009",
+          "websec.calibration-honesty-structural-coverage#FR-010",
+          "websec.calibration-honesty-structural-coverage#FR-011",
+          "websec.calibration-honesty-structural-coverage#FR-012",
+          "websec.calibration-honesty-structural-coverage#FR-013",
+          "websec.calibration-honesty-structural-coverage#FR-014",
+          "websec.calibration-honesty-structural-coverage#SC-005",
+          "websec.calibration-honesty-structural-coverage#SC-006",
+          "websec.calibration-honesty-structural-coverage#SC-007",
+          "websec.calibration-honesty-structural-coverage#SC-008",
+          "websec.calibration-honesty-structural-coverage#SC-009"
+        ]
+      },
+      "observed": {
+        "artifacts": [
+          {
+            "path": "specs/002-calibration-honesty-and-structural-coverage/spec.md",
+            "digest": "sha256:3ec5419ac469369e7100c5183a20e1db32937d722b0b1591be167f655a4a285f"
+          }
+        ],
+        "taskCompletion": {
+          "checked": 0,
+          "total": 0
+        },
+        "implementationEvidence": [],
+        "testEvidence": []
+      }
+    },
+    {
       "specId": "websec.continuous-security-improvement",
       "path": "specs/001-continuous-security-improvement/spec.md",
       "reviewed": {
