@@ -74,6 +74,11 @@ The point is not the headline number — it's that **each finding ships with its
 and interval**, and a wide CI or a `basis: prior` bucket is surfaced as "thin data, verify manually"
 rather than dressed up as certainty.
 
+**Objective constraint.** Anything fitted from labels is chosen by a **strictly proper scoring rule**
+(Brier or log score), never by accuracy/precision/recall/F1 — those are maximized by confident
+wrongness. `websec calibrate` prints the table's Brier score alongside the intervals. See
+[METHODOLOGY.md § Layer 3b](docs/METHODOLOGY.md) for the full statement.
+
 **Honest caveat (shipped in `calibration.json.meta`):** these rates are calibrated on a *deliberately
 vulnerable* corpus and skew **optimistic on clean production code**. The current labeling policy keeps unmatched findings unknown unless explicit negative evidence
 exists. Legacy estimates must be revalidated against reviewed labels before claiming current

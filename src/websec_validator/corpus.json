@@ -15,17 +15,30 @@
     "truth": [
       {
         "class": "missing-auth",
-        "location_contains": "*",
-        "note": "VAmPI is a broken-object/function-level-authorization demo: its API endpoints are intentionally missing or mis-applying auth",
-        "review_status": "historical-class-level-unverified",
-        "is_real": null
+        "location_contains": "/users/v1",
+        "is_real": true,
+        "review_status": "reviewed",
+        "reviewed_on": "2026-09-22",
+        "note": "api_views/users.py get_all_users / get_by_username / debug run no token check and return user records; _debug returns passwords. Verified: no token_validator call in those function bodies.",
+        "evidence": "read at pinned revision f16052dce83f"
       },
       {
-        "class": "sqli",
-        "location_contains": "*",
-        "note": "raw SQL string interpolation in the vulnerable code path",
-        "review_status": "historical-class-level-unverified",
-        "is_real": null
+        "class": "missing-auth",
+        "location_contains": "/createdb",
+        "is_real": true,
+        "review_status": "reviewed",
+        "reviewed_on": "2026-09-22",
+        "note": "api_views/main.py populate_db recreates the database with no authentication.",
+        "evidence": "read at pinned revision f16052dce83f"
+      },
+      {
+        "class": "missing-auth",
+        "location_contains": "/books/v1",
+        "is_real": false,
+        "review_status": "reviewed",
+        "reviewed_on": "2026-09-22",
+        "note": "get_all_books returns a public catalogue listing. Not a documented VAmPI vulnerability; the BOLA demo is on GET /books/v1/{book_title}, which IS guarded and correctly not reported.",
+        "evidence": "read at pinned revision f16052dce83f"
       }
     ],
     "revision": "f16052dce83f05847133ec98f01c5193a41de7d8",
@@ -50,25 +63,76 @@
     },
     "truth": [
       {
-        "class": "missing-auth",
-        "location_contains": "*",
-        "note": "broken access control across allocation/admin routes",
-        "review_status": "historical-class-level-unverified",
-        "is_real": null
+        "class": "eval-injection",
+        "location_contains": "app/routes/contributions.js",
+        "is_real": true,
+        "review_status": "reviewed",
+        "reviewed_on": "2026-09-22",
+        "note": "`const preTax = eval(req.body.preTax)` \u2014 request body evaluated directly. The source comments it 'Insecure use of eval() to parse inputs'.",
+        "evidence": "read at pinned revision c5cb68a7084e"
+      },
+      {
+        "class": "nosql-injection",
+        "location_contains": "app/data/allocations-dao.js",
+        "is_real": true,
+        "review_status": "reviewed",
+        "reviewed_on": "2026-09-22",
+        "note": "`$where: `this.userId == ${parsedUserId} && this.stocks > '${threshold}'`` \u2014 user input interpolated into a MongoDB $where JavaScript expression.",
+        "evidence": "read at pinned revision c5cb68a7084e"
+      },
+      {
+        "class": "open-redirect",
+        "location_contains": "app/routes/index.js",
+        "is_real": true,
+        "review_status": "reviewed",
+        "reviewed_on": "2026-09-22",
+        "note": "`res.redirect(req.query.url)` on /learn, commented 'Insecure way to handle redirects'.",
+        "evidence": "read at pinned revision c5cb68a7084e"
+      },
+      {
+        "class": "nosql-injection",
+        "location_contains": "app/views/tutorial",
+        "is_real": false,
+        "review_status": "reviewed",
+        "reviewed_on": "2026-09-22",
+        "note": "Tutorial prose. a1.html:251 is `<h5>$where operator</h5>` \u2014 the operator NAME in a heading, explaining the attack. Displayed text, not an executed query.",
+        "evidence": "read at pinned revision c5cb68a7084e"
       },
       {
         "class": "command-injection",
-        "location_contains": "*",
-        "note": "SSJS injection via eval in the contributions handler",
-        "review_status": "historical-class-level-unverified",
-        "is_real": null
+        "location_contains": "Gruntfile.js",
+        "is_real": false,
+        "review_status": "reviewed",
+        "reviewed_on": "2026-09-22",
+        "note": "Build tooling, not the deployed app, and the interpolated value is process.env.NODE_ENV set by whoever runs the build \u2014 not request-derived.",
+        "evidence": "read at pinned revision c5cb68a7084e"
       },
       {
-        "class": "ssti",
-        "location_contains": "*",
-        "note": "server-side template injection demo",
-        "review_status": "historical-class-level-unverified",
-        "is_real": null
+        "class": "path-traversal",
+        "location_contains": "config/config.js",
+        "is_real": false,
+        "review_status": "reviewed",
+        "reviewed_on": "2026-09-22",
+        "note": "`path.resolve(__dirname + '/../config/env/' + NODE_ENV + '.js')` \u2014 config loading driven by an environment variable at startup, not by request data.",
+        "evidence": "read at pinned revision c5cb68a7084e"
+      },
+      {
+        "class": "xss",
+        "location_contains": "config/env/development.js",
+        "is_real": false,
+        "review_status": "reviewed",
+        "reviewed_on": "2026-09-22",
+        "note": "A development-only livereload snippet built from location.host. Not in the production config and not attacker-controlled.",
+        "evidence": "read at pinned revision c5cb68a7084e"
+      },
+      {
+        "class": "missing-auth",
+        "location_contains": "/tutorial",
+        "is_real": false,
+        "review_status": "reviewed",
+        "reviewed_on": "2026-09-22",
+        "note": "The tutorial pages are the teaching material and are public by design.",
+        "evidence": "read at pinned revision c5cb68a7084e"
       }
     ],
     "revision": "c5cb68a7084e4ae7dcc60e6a98768720a81841e8",
@@ -92,17 +156,30 @@
     "truth": [
       {
         "class": "graphql",
-        "location_contains": "*",
-        "note": "introspection + playground enabled, no depth/complexity limits",
-        "review_status": "historical-class-level-unverified",
-        "is_real": null
+        "location_contains": "/graphql",
+        "is_real": true,
+        "review_status": "reviewed",
+        "reviewed_on": "2026-09-22",
+        "note": "Introspection enabled and no query-depth limit \u2014 DVGA's two headline documented GraphQL vulnerabilities.",
+        "evidence": "read at pinned revision a961308c02d1"
       },
       {
-        "class": "command-injection",
-        "location_contains": "*",
-        "note": "OS command injection via the system-diagnostics resolver",
-        "review_status": "historical-class-level-unverified",
-        "is_real": null
+        "class": "path-traversal",
+        "location_contains": "core/helpers.py",
+        "is_real": true,
+        "review_status": "reviewed",
+        "reviewed_on": "2026-09-22",
+        "note": "`open(WEB_UPLOADDIR + filename, 'w')` \u2014 an unvalidated filename concatenated onto the upload directory, so `../` escapes it on WRITE.",
+        "evidence": "read at pinned revision a961308c02d1"
+      },
+      {
+        "class": "timing-unsafe-compare",
+        "location_contains": "core/security.py",
+        "is_real": true,
+        "review_status": "reviewed",
+        "reviewed_on": "2026-09-22",
+        "note": "`if password == real_password:` \u2014 a short-circuiting comparison on a secret.",
+        "evidence": "read at pinned revision a961308c02d1"
       }
     ],
     "revision": "a961308c02d1fb462b192681c336b0739e432da7",

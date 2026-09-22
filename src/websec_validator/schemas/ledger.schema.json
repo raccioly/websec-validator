@@ -360,6 +360,33 @@
             "type": "object"
           }
         },
+        "triage": {
+          "type": "object",
+          "description": "Advisory disposition \u2014 whether an agent can act alone. Never gates; derived from the published per-attack-class policy in `websec capabilities`.",
+          "properties": {
+            "disposition": {
+              "type": "string",
+              "enum": [
+                "agent-fixable",
+                "human-required"
+              ]
+            },
+            "reason": {
+              "type": "string"
+            },
+            "basis": {
+              "type": "string"
+            },
+            "advisory": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "disposition",
+            "reason",
+            "basis"
+          ]
+        },
         "in_tree": {
           "type": "boolean",
           "description": "Is the finding's file present in the working tree? false = the file is gone but the blob is still reachable in git history, so the credential is NOT remediated until it is rotated."

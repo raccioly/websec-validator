@@ -29,6 +29,48 @@ def _section(title, items):
     return f"**{title}** ({len(items or [])}):\n{_bullets(items)}\n"
 
 
+def _render_disposition(ledger: dict, limit: int = 12) -> str:
+    """§4d — the three axes side by side, ordered by (severity, P(real), disposition).
+
+    Disposition is the LAST sort key on purpose. Ordering by actionability first would put a
+    trivially-fixable header above a critical authorization hole, which is precisely the wrong
+    reading; it breaks ties between findings that are otherwise equally urgent and equally likely.
+    """
+    from .findings import SEV_RANK
+
+    rows = [f for f in (ledger or {}).get("findings") or [] if f.get("triage")]
+    if not rows:
+        return "_No findings to disposition._"
+    counts = (ledger or {}).get("by_disposition") or {}
+
+    def _key(f):
+        p = (f.get("calibrated") or {}).get("p")
+        return (-SEV_RANK.get(f.get("severity", ""), 0),
+                -(p if isinstance(p, (int, float)) else 0.0),
+                0 if f["triage"]["disposition"] == "agent-fixable" else 1)
+
+    lines = [
+        f"_{counts.get('agent-fixable', 0)} agent-fixable · "
+        f"{counts.get('human-required', 0)} human-required. **Advisory.** `agent-fixable` means an "
+        "agent may PROPOSE the patch — a human still reviews every diff, and nothing gates on this "
+        "column. Sorted by severity, then P(real), then disposition._\n",
+        "| Severity | P(real) | Disposition | Finding | Why |",
+        "|---|---|---|---|---|",
+    ]
+    for f in sorted(rows, key=_key)[:limit]:
+        cal = f.get("calibrated") or {}
+        p = cal.get("p")
+        basis = cal.get("basis", "")
+        p_text = "—" if p is None else (f"{p} _(prior)_" if "prior" in basis else f"{p} (n={cal.get('n', 0)})")
+        mark = "🤖 agent" if f["triage"]["disposition"] == "agent-fixable" else "🧑 human"
+        lines.append(f"| {_data(f.get('severity'))} | {p_text} | {mark} | "
+                     f"{_data(f.get('attack_class'))} — {_data(f.get('location'))} | "
+                     f"{_data(f['triage']['reason'])} |")
+    if len(rows) > limit:
+        lines.append(f"\n_… and {len(rows) - limit} more in `findings-ledger.json`._")
+    return "\n".join(lines)
+
+
 def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list,
            unified: dict | None = None, ledger: dict | None = None) -> str:
     stack = facts.get("stack", {})
@@ -45,7 +87,7 @@ def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list
     from . import testplan as _testplan
     _inv = _inventory.build(facts)
     _pred = _dast.predict(facts, ledger)
-    inventory_md = _inventory.render_md(_inv)                      # §3a — ranked "test in this order"
+    inventory_md = _inventory.render_md(_inv, coverage=facts.get("coverage"))  # §3a — ranked "test in this order"
     dast_md = _dast.render_md(_pred)                              # §4b — predicted scanner alerts + blind spots
     testplan_md = _testplan.render_md(_testplan.build(facts, _inv, _pred))  # §5b — phased runbook
     # §3e — OpenAPI contract: shadow (undocumented) endpoints + spec hygiene.
@@ -63,6 +105,9 @@ def render(facts: dict, scanners: dict, scan_results: list, probe_manifest: list
     fpfilter_md = _fpfilter.render_md(ledger or {}, _fp_counts)
     # §6b — one paste-ready fix instruction per finding, each ending in a VERIFY step.
     fixprompts_md = _fixprompt.render_md(_fixprompt.build(ledger or {}))
+    # §4d — the third axis. Ordered by (severity, P(real), disposition) so the agent starts where
+    # the evidence is strongest AND it can actually act, without ever implying it may act alone.
+    disposition_md = _render_disposition(ledger or {})
 
     authz = facts.get("authz", {})
     gs = authz.get("guard_summary", {})
@@ -345,6 +390,10 @@ Install for fuller coverage:
 ## 4c. Pre-triage — what a reviewer would filter (tagged, NOT dropped)
 
 {fpfilter_md}
+
+## 4d. Three axes — how bad, how likely, and who acts
+
+{disposition_md}
 
 ## 5. Tailored probes (staged — drafts you finalize against §2–§3)
 

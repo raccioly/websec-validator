@@ -5,28 +5,43 @@
       "NodeGoat",
       "DVGA"
     ],
-    "n_total": 59,
+    "n_total": 21,
+    "n_unknown": 35,
     "method": "binomial proportion + Wilson 95% CI",
     "min_n": 5,
-    "unmatched_rule": "unmatched finding = false positive",
+    "unmatched_rule": "unmatched finding = unknown (excluded from calibration)",
     "researched_classes": [
       "command-injection",
+      "eval-injection",
       "graphql",
       "missing-auth",
-      "sqli",
-      "ssti"
+      "nosql-injection",
+      "open-redirect",
+      "path-traversal",
+      "timing-unsafe-compare",
+      "xss"
     ],
     "caveat": "indicative \u2014 calibrated on a deliberately-vulnerable app corpus; skews optimistic on clean production code",
-    "evidence_status": "historical-unverified",
-    "limitation": "Historical unpinned corpus labels treated unmatched findings as false positives. Counts retained for audit only; runtime excludes these cells pending reviewed relabeling."
+    "evidence_status": "reviewed",
+    "reviewed_on": "2026-09-22",
+    "limitation": "21 of 56 corpus findings carry a reviewed label; the other 35 are UNKNOWN and are excluded from every count rather than treated as false. Per-class cells are all below min_n=5, so the runtime falls back to the per-label tier. Measured after the 2026-09-22 false-positive fixes (vendored assets, spec-as-handler, Express route middleware, displayed source), so these rates describe the current detector and not any earlier one."
   },
   "by_class_label": {
     "command-injection|LOW": {
       "n": 1,
-      "k": 1,
+      "k": 0,
+      "p": 0.0,
+      "ci": [
+        0.0,
+        0.793
+      ]
+    },
+    "eval-injection|LOW": {
+      "n": 3,
+      "k": 3,
       "p": 1.0,
       "ci": [
-        0.207,
+        0.439,
         1.0
       ]
     },
@@ -40,32 +55,77 @@
       ]
     },
     "missing-auth|MEDIUM": {
-      "n": 41,
-      "k": 27,
-      "p": 0.659,
+      "n": 7,
+      "k": 4,
+      "p": 0.571,
       "ci": [
-        0.505,
-        0.784
+        0.25,
+        0.842
+      ]
+    },
+    "nosql-injection|LOW": {
+      "n": 2,
+      "k": 1,
+      "p": 0.5,
+      "ci": [
+        0.095,
+        0.905
+      ]
+    },
+    "open-redirect|LOW": {
+      "n": 1,
+      "k": 1,
+      "p": 1.0,
+      "ci": [
+        0.207,
+        1.0
+      ]
+    },
+    "path-traversal|LOW": {
+      "n": 3,
+      "k": 1,
+      "p": 0.333,
+      "ci": [
+        0.061,
+        0.792
+      ]
+    },
+    "timing-unsafe-compare|MEDIUM": {
+      "n": 1,
+      "k": 1,
+      "p": 1.0,
+      "ci": [
+        0.207,
+        1.0
+      ]
+    },
+    "xss|LOW": {
+      "n": 1,
+      "k": 0,
+      "p": 0.0,
+      "ci": [
+        0.0,
+        0.793
       ]
     }
   },
   "by_label": {
     "LOW": {
-      "n": 8,
-      "k": 1,
-      "p": 0.125,
+      "n": 11,
+      "k": 6,
+      "p": 0.545,
       "ci": [
-        0.022,
-        0.471
+        0.28,
+        0.787
       ]
     },
     "MEDIUM": {
-      "n": 51,
-      "k": 29,
-      "p": 0.569,
+      "n": 10,
+      "k": 7,
+      "p": 0.7,
       "ci": [
-        0.433,
-        0.695
+        0.397,
+        0.892
       ]
     }
   },

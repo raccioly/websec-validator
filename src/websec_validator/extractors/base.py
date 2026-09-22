@@ -45,8 +45,117 @@ MAX_WALK_FILES = 120_000
 MAX_SKIP_SAMPLES = 200
 # Report known source types that the built-in code extractors do not inspect.
 # Config, documentation and binary assets are not presumed to be source code.
-SOURCE_EXT = CODE_EXT | {".vue", ".svelte", ".mts", ".cts", ".html", ".htm",
-                         ".cs", ".rs", ".kt", ".kts", ".swift", ".scala", ".c", ".h", ".cpp", ".hpp"}
+#
+# HISTORY: this was written as `CODE_EXT | {...}` with a member list that CODE_EXT later grew to
+# contain entirely except `.scala`. The set difference was therefore {".scala"}, so the
+# `elif suffix in SOURCE_EXT` arm below could fire for Scala and nothing else: a whole Elixir or
+# Clojure application walked past as `unsupported: []`, `gaps: []`, "REQUESTED CHECKS COMPLETED".
+# The list is now written OUT, independently of CODE_EXT, so a suffix added to CODE_EXT cannot
+# silently empty this one; `test_analysable_sets.py` pins the invariant.
+# CAUTION when adding to this set: "absent from CODE_EXT" does NOT mean "unanalysed". Several
+# extractors reach files by explicit glob instead — `.sql` is read by `schemas.py` and `stack.py`
+# for CREATE TABLE / RLS-policy analysis, and `.graphql`/`.gql`/`.vtl` live in CODE_EXT. Claiming
+# such a file was "never read" would be a false statement in the coverage manifest, which is worse
+# than the silence this set exists to fix. `test_unanalyzed_coverage` cross-checks every member
+# against the glob patterns in the extractor sources.
+UNANALYZED_SOURCE_EXT = {
+    # JVM / functional
+    ".scala", ".clj", ".cljs", ".cljc", ".groovy", ".gradle",
+    # BEAM
+    ".ex", ".exs", ".erl", ".hrl",
+    # scripting / systems languages with no ruleset here
+    ".pl", ".pm", ".lua", ".r", ".jl", ".dart", ".zig", ".nim", ".cr", ".hs", ".ml", ".fs", ".fsx",
+    ".sh", ".bash", ".zsh", ".ps1", ".psm1", ".tcl", ".vb", ".pas", ".d", ".f90",
+    # templating that can hold server-side logic
+    ".erb", ".haml", ".slim", ".twig", ".hbs", ".ejs", ".pug", ".mustache", ".liquid", ".blade",
+}
+# Every suffix the walker recognises as program source, whether or not it can analyse it.
+SOURCE_EXT = CODE_EXT | UNANALYZED_SOURCE_EXT
+
+# Human-readable language for an unanalysed suffix, so a coverage gap can say "elixir" rather than
+# ".ex". Only covers UNANALYZED_SOURCE_EXT; analysable languages are named by profiles._LANG.
+UNANALYZED_LANG = {
+    ".scala": "scala", ".clj": "clojure", ".cljs": "clojure", ".cljc": "clojure",
+    ".groovy": "groovy", ".gradle": "groovy", ".ex": "elixir", ".exs": "elixir",
+    ".erl": "erlang", ".hrl": "erlang", ".pl": "perl", ".pm": "perl", ".lua": "lua",
+    ".r": "r", ".jl": "julia", ".dart": "dart", ".zig": "zig", ".nim": "nim", ".cr": "crystal",
+    ".hs": "haskell", ".ml": "ocaml", ".fs": "f#", ".fsx": "f#", ".sh": "shell", ".bash": "shell",
+    ".zsh": "shell", ".ps1": "powershell", ".psm1": "powershell", ".sql": "sql", ".tcl": "tcl",
+    ".vb": "visual-basic", ".pas": "pascal", ".d": "d", ".f90": "fortran",
+    ".erb": "erb-template", ".haml": "haml-template", ".slim": "slim-template",
+    ".twig": "twig-template", ".hbs": "handlebars-template", ".ejs": "ejs-template",
+    ".pug": "pug-template", ".mustache": "mustache-template", ".liquid": "liquid-template",
+    ".blade": "blade-template",
+}
+
+
+def unanalyzed_languages(paths) -> dict:
+    """{language: file_count} for walked files whose suffix has no analyser. Sorted, bounded."""
+    counts: dict = {}
+    for path in paths or []:
+        lang = UNANALYZED_LANG.get(Path(str(path)).suffix.lower())
+        if lang:
+            counts[lang] = counts.get(lang, 0) + 1
+    return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+# --- Vendored third-party assets and generated bundles ---------------------------------------
+# `vendor/`, `dist/` and `node_modules/` are already skipped by name, but a library dropped into
+# `static/jquery/jquery.js` is none of those. On DVGA that single blind spot produced 100 of 128
+# findings (72 redos + 28 xss) — all inside jQuery and Bootstrap. jQuery's internal regex is not
+# your ReDoS and jQuery's `innerHTML` is not your XSS: you cannot fix it, it is not your code, and
+# it drowns the findings that are.
+#
+# Detected by CONTENT, not by a library-name allowlist, so a library this list never heard of is
+# still caught and an application file that happens to be called `jquery.js` is not:
+#   * a `/*!` preserved banner carrying a version or copyright — the near-universal convention for
+#     "this is third-party, keep this notice",
+#   * or any line beyond MINIFIED_LINE characters, which only minified output produces. Measured
+#     headroom: the longest line in this project's own source is 384, in its tests 253, and in the
+#     corpus apps' own code 155; the vendored bundles run to 32,000-89,000.
+# Skipped files are COUNTED and disclosed as a `walker_policy` scope gap, never silently dropped.
+VENDOR_PREFIX_BYTES = 4096
+MINIFIED_LINE = 1000
+MINIFIED_DENSITY = 0.9   # non-whitespace share of a long line; minified ~0.97, padded source ~0.01
+_VENDORABLE_EXT = {".js", ".mjs", ".cjs", ".jsx", ".css"}
+_MINIFIED_NAME = re.compile(r"[.\-]min\.(?:js|mjs|cjs|css)$", re.I)
+_VENDOR_BANNER = re.compile(r"^\s*/\*!.{0,400}?(?:\bv?\d+\.\d+\.\d+|copyright|\(c\)|licensed under)",
+                            re.I | re.S)
+
+
+def is_vendored_asset(path: Path) -> bool:
+    """True for a third-party library or a minified bundle — not the operator's own source.
+
+    Filename first (free), content only for the extensions where vendoring actually happens, and
+    only a bounded prefix. Any read error answers False: a file we cannot classify is analysed,
+    because skipping on uncertainty would hide real code.
+    """
+    suffix = path.suffix.lower()
+    if suffix not in _VENDORABLE_EXT:
+        return False
+    if _MINIFIED_NAME.search(path.name):
+        return True
+    try:
+        with path.open("rb") as handle:
+            prefix = handle.read(VENDOR_PREFIX_BYTES)
+    except OSError:
+        return False
+    text = prefix.decode("utf-8", errors="replace")
+    if _VENDOR_BANNER.match(text):
+        return True
+    # A long line alone is not minification: `tests/test_remaining_control_scope` builds a real
+    # source file padded with 25,000 SPACES, and an oversized scope like that must still be
+    # analysed. Minified output is DENSE — that is what minifying does. Measured non-whitespace
+    # density: minified bundles 0.97, ordinary source 0.84, the whitespace-padded case 0.007. So
+    # the long line must itself be dense before the file counts as generated.
+    # Every line counts, including one the prefix cut short: truncation can only stop us proving a
+    # line is SHORT. A 4 KB prefix with no newline at all is a single-line bundle, exactly this case.
+    for line in text.split("\n"):
+        if len(line) > MINIFIED_LINE:
+            dense = sum(1 for char in line if not char.isspace()) / len(line)
+            if dense > MINIFIED_DENSITY:
+                return True
+    return False
 
 
 def _glob_matches(relative: Path, pattern: str) -> bool:
@@ -309,6 +418,12 @@ class RepoContext:
                 suffix = path.suffix.lower()
                 self.file_types[suffix or "<none>"] = self.file_types.get(suffix or "<none>", 0) + 1
                 if suffix in CODE_EXT:
+                    # A vendored library or minified bundle is not the operator's source and cannot
+                    # be fixed by them; analysing it buries the findings that can. Counted as a
+                    # walker-policy skip so the exclusion is disclosed, never silent.
+                    if is_vendored_asset(path):
+                        self._skip(path, "vendored_asset")
+                        continue
                     if len(self.code_files) >= MAX_FILES:
                         self.truncated = True
                     else:

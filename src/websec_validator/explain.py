@@ -60,6 +60,28 @@ def _calibration_for(attack_class: str) -> str:
         return "calibration unavailable"
 
 
+def _synthetic_for(attack_class: str) -> str:
+    """Authored-pair precision, reported on its OWN line and never blended with the measured rate.
+
+    Two numbers on two lines with two provenances is the honest presentation; one number would
+    silently import the rule author's own coverage into a claim about real code.
+    """
+    try:
+        from . import calibration
+        table = calibration.load_synthetic()
+        if not table:
+            return ""
+        rows = {k.split("|", 1)[1]: v for k, v in (table.get("by_class_label") or {}).items()
+                if k.split("|", 1)[0] == attack_class and isinstance(v, dict)}
+        if not rows:
+            return ""
+        parts = [f"{label} → {v.get('k')}/{v.get('n')} correct (p={v.get('p')})"
+                 for label, v in sorted(rows.items())]
+        return "; ".join(parts)
+    except Exception:
+        return ""
+
+
 def describe(term: str) -> dict:
     """Resolve a class name or a CWE id. Never guesses between two matches."""
     key = (term or "").strip().lower()
@@ -89,7 +111,8 @@ def describe(term: str) -> dict:
             "owasp": list(api),
             "remediation": REMEDIATION.get(resolved, _DEFAULT_REM),
             "verify": VERIFY.get(resolved, _GENERIC_VERIFY),
-            "calibration": _calibration_for(resolved)}
+            "calibration": _calibration_for(resolved),
+            "authored_pairs": _synthetic_for(resolved)}
 
 
 def render(info: dict) -> str:
@@ -104,7 +127,11 @@ def render(info: dict) -> str:
         out.append(f"  OWASP API:  {'; '.join(info['owasp'])}")
     out += ["", "  How to confirm or refute it:", f"    {info['verify']}",
             "", "  Remediation pattern:", f"    {info['remediation']}",
-            "", f"  Calibration: {info['calibration']}",
-            "  Severity, analyzer confidence and calibrated probability are separate signals;",
+            "", f"  Calibration: {info['calibration']}"]
+    if info.get("authored_pairs"):
+        out += [f"  Authored pairs: {info['authored_pairs']}",
+                "  (regression precision on cases the detector was written to handle — NOT the rate",
+                "   in real code, and never merged into the calibrated probability above.)"]
+    out += ["  Severity, analyzer confidence and calibrated probability are separate signals;",
             "  an unknown truth label is not a false positive."]
     return "\n".join(out)

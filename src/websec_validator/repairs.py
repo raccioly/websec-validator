@@ -63,6 +63,10 @@ def build(ledger: dict, *, application_id: str = "", build_id: str = "", source_
                                   "Use an authorized isolated fixture for tests that can change data.",
                                   "Capture positive and negative test artifacts for the fixed build."],
                 "suggested_remediation": finding.get("remediation", ""),
+                # Advisory disposition carried through so a plan consumer sees the same third axis
+                # as the ledger. The prerequisites below are UNCHANGED by it: every plan still
+                # requires confirming the finding on the original build, whatever the disposition.
+                "triage": finding.get("triage") or fixprompt.disposition(finding.get("attack_class", "")),
                 "verification": {"positive": "Authorized legitimate behavior still succeeds.",
                                  "negative": fixprompt._verify_for(finding.get("attack_class", "")),
                                  "rerun": "Same fixed source digest; required checks complete; finding no longer observed."},

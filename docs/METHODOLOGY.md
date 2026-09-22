@@ -198,14 +198,85 @@ something you can act on.
   The deliberately vulnerable corpus skews optimistic for production code; every rate must identify
   its detector revision, reviewed labels, sample size and interval. Historical unmatched-as-false
   measurements are legacy data, not a fresh precision estimate for the current detector.
+- **Operator feedback is a candidate, not a label.** `websec feedback --verdict false-positive`
+  queues a *calibration candidate* — visible in `websec calibrate --review`, counted nowhere. An
+  operator's verdict is evidence, not proof, and a wrong label would lower P(real) for that bucket
+  on every future run of every project on the machine, permanently. Promotion requires an explicit
+  `websec calibrate --accept <id> --reason "..."` by a human, and is refused when the candidate was
+  reported against a different `detector_revision` — the rule that produced it may no longer exist.
+  Acceptance goes through the same `record_samples` evidence bar as a dynamic-confirmed sample, so
+  there is no second, weaker door into a measured cell. `severity-wrong` and `false-negative`
+  reports queue nothing: one disputes severity rather than existence, the other describes a finding
+  that was never produced, and neither can be scored against a bucket.
+- **Authored pairs are measured separately and never merged.** `websec calibrate --synthetic`
+  scores the repository's paired fixtures (a vulnerable variant that must fire, a sanitized twin
+  that must not) into `calibration-synthetic.json`. Those are reviewed, reproducible labels, but
+  they measure whether a rule still handles what it was *built* to handle — regression precision on
+  anticipated cases, not the rate at which a finding in real code is a real vulnerability. Merging
+  them would launder the author's own coverage into P(real), so `apply()` never reads that table
+  and `websec explain` prints it on its own line with its own caveat. A detector that fails to fire
+  on a vulnerable variant is reported as a recall gap, never silently dropped — a harness that
+  scored nothing would otherwise publish a perfect table.
+- **A class earns a cell only from reviewed labels.** Appearing in `corpus.json` is not research:
+  the historical entries are class-level wildcards (`location_contains: "*"`, `is_real: null`) that
+  cannot separate a real vulnerability from a false positive inside the same class. A class is
+  published as a class-specific cell only when it has a truth entry with `review_status: "reviewed"`
+  and an explicit boolean `is_real`; otherwise it falls back to the wider, honest label tier. Every
+  shipped entry carries a `promotion_requires` block stating exactly what a reviewer must supply.
 - **Learning is gated by evidence.** Only scoped evidence-backed labels enter the local calibration
   overlay (`~/.cache/websec-validator/`). Legacy unproven records are quarantined. Unknown-only input
   reports no successful measurement and leaves fitted calibration unchanged. Evidence may support a
   specific request/property without proving the entire endpoint or attack class safe.
+- **Objective — strictly proper scoring rules only.** Any quantity fitted from labels (a bucket
+  probability, a cut-off, a threshold default) is chosen by a **strictly proper scoring rule** —
+  Brier or log score — never by accuracy, precision, recall or F1. A strictly proper rule is
+  maximized only by reporting honest probabilities; accuracy-shaped objectives are maximized by
+  confident wrongness, which is the exact failure this layer exists to prevent. Those other metrics
+  may be *reported*; they must not be *optimized*. `websec calibrate` prints the table's Brier score
+  whenever it writes a measurable cell, so the honest metric exists before anyone is tempted to tune
+  on a dishonest one. No behavior currently depends on that number.
 
 This is the deterministic realization of the **CJE (Calibrated Judge Evaluation)** idea from the
 AITPG/TRACE research: the tool emits the evidence + citation + a calibrated confidence; the agent
 runs the judging.
+
+---
+
+## Layer 3d — Disposition: the third axis
+
+A finding has always answered two questions — **how bad if real** (`severity`) and **is it real**
+(`calibrated.p`). It never answered the third: **can an agent act on this alone?** That question was
+carried implicitly, and answered "no" for everything: every repair plan requires a human to confirm
+the finding first. Safe, but uninformative — it gives an agent no way to distinguish a missing
+`nosniff` header from a missing authorization decision.
+
+Each finding now carries an additive `triage` block:
+
+```json
+{"disposition": "agent-fixable", "reason": "...", "basis": "attack-class policy", "advisory": "..."}
+```
+
+- **The rule has two necessary conditions.** A class is `agent-fixable` only when the remediation is
+  a local code/config change **and** the fix prompt names a **mechanical** verification — something
+  that passes or fails without judgement (`curl -I` shows the header, a `none`-algorithm token is
+  rejected, a unit test pins the constant-time comparison). The second condition is load-bearing: if
+  a fix cannot be demonstrated, an agent cannot know it worked, so a human must look however local
+  the edit was. Today that is 9 classes out of 73.
+- **Everything else, including unknown classes, is `human-required`,** with a reason stated per
+  class rather than one generic sentence — an agent reading "human-required" with no reason learns
+  nothing about what to ask the human for. The asymmetry is deliberate: wrongly calling something
+  human-required costs a review that was going to happen anyway, while wrongly calling something
+  agent-fixable invites an unattended change to a security control. A new detector therefore cannot
+  silently widen what an agent may touch.
+- **It is derived, not asserted.** The value comes from a static per-attack-class policy published
+  by `websec capabilities`, together with the verification that justifies each `agent-fixable`
+  entry — so a reader who disagrees can argue with the rule instead of inferring it from behaviour.
+- **Nothing gates on it.** `gate.verdict`, `--fail-on`, `fpfilter` and the baseline all ignore it,
+  and it is absent from SARIF. A HIGH-severity `agent-fixable` finding blocks a gate exactly as it
+  did before. `agent-fixable` means an agent may **propose** the patch; a human still reviews every
+  diff. The briefing sorts by severity, then P(real), then disposition — disposition is the *last*
+  key on purpose, because ordering by actionability first would put a trivially-fixable header above
+  a critical authorization hole.
 
 ---
 

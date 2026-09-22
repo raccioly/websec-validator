@@ -391,8 +391,13 @@ def cmd_run(args) -> int:
     langs = facts.get("stack", {}).get("languages", [])
     _print_facts_summary(facts, log)
 
-    # 2. scanners: detect, optionally run
-    det = scanners.detect(langs)
+    # 2. scanners: detect, optionally run.
+    # Version-probing spawns `<binary> --version` for every scanner on PATH, which measured 3.4s of
+    # a 3.5s run on a machine with the full toolchain installed. The version answers "is this build
+    # compatible with the adapter's argv" — a question that only arises when the scanner is about to
+    # RUN. Without --scan none of them execute, so the probe buys nothing and is skipped; `doctor`,
+    # whose entire job is answering whether the toolchain is usable, still probes every time.
+    det = scanners.detect(langs, check_versions=bool(args.scan))
     scan_results = []
     unified = None
     if args.scan:
@@ -592,9 +597,17 @@ def cmd_run(args) -> int:
              "network_gate_note": ("registry-existence findings are reported but do not gate unless "
                                    "--fail-on-network is given: the UNKNOWN rate is outside operator "
                                    "control and a 404 is an observation, not a proof")}
+    # --require-analyzed is a SEPARATE opt-in from --require-complete, because the two describe
+    # different failures. Nothing failed to execute here: there was simply no analyser for any of
+    # the source present, so execution_complete stays true and --require-complete stays silent.
+    # A pipeline that wants "refuse to green-light a repo I cannot read" asks for it explicitly.
+    _unanalyzed = (getattr(args, "require_analyzed", False)
+                   and facts["coverage"].get("files", {}).get("no_analyzable_source"))
+    _gate["require_analyzed"] = bool(getattr(args, "require_analyzed", False))
     # Count the findings FIRST, unconditionally. Previously `_incomplete` short-circuited this, so a
     # run that was both incomplete and gate-failing reported exit 2 and dropped the security signal
-    # entirely — the caller could not tell it had a CRITICAL (field report #1).
+    # entirely — the caller could not tell it had a CRITICAL (field report #1). The same ordering
+    # applies to --require-analyzed: a real finding outranks "I could not read the rest".
     _n = (baseline.gate_count(_gate_ledger, args.fail_on, new_only=bool(diff))
           if getattr(args, "fail_on", None) else None)
     _gate["incomplete"] = bool(_incomplete)
@@ -608,6 +621,13 @@ def cmd_run(args) -> int:
         _gate.update(verdict="incomplete", exit_code=EXIT_INCOMPLETE, count_at_or_above=_n,
                      failure_kind="incomplete",
                      note="requested checks did not complete; the gate result is NOT a pass")
+    elif _unanalyzed:
+        # EXIT_INCOMPLETE, not EXIT_USAGE: nothing was misconfigured and nothing crashed — the scan
+        # simply covered no code, which is a coverage outcome in exactly the sense code 3 names.
+        _gate.update(verdict="no-analyzable-source", exit_code=EXIT_INCOMPLETE,
+                     count_at_or_above=_n, failure_kind="no-analyzable-source",
+                     note="source files were present but none could be analyzed; an empty findings "
+                          "list means NOT CHECKED and --require-analyzed refuses to report it as a pass")
     elif getattr(args, "fail_on", None):
         _gate.update(count_at_or_above=_n, verdict="pass", exit_code=EXIT_OK, failure_kind=None)
     else:
@@ -616,7 +636,7 @@ def cmd_run(args) -> int:
                      note="no --fail-on was requested; this run gated nothing")
     _gate["exit_code_contract"] = {"0": "clean", "1": "findings at or above --fail-on",
                                    "2": "usage/configuration error (nothing scanned)",
-                                   "3": "requested checks did not complete"}
+                                   "3": "requested checks did not complete, or --require-analyzed and nothing was analyzable"}
     # Enforcement is a server-side concern. Say so IN THE ARTIFACT, not only in the docs: a local
     # gate can be skipped with --no-verify, an uninstalled hook, or a deleted one.
     _gate["enforcement"] = ("advisory unless run as a required status check. A client-side gate is a "
@@ -694,6 +714,12 @@ def cmd_run(args) -> int:
             f"(exit {EXIT_INCOMPLETE} — toolchain/coverage, NOT a finding).")
         log("  Your build is not failing because of a vulnerability. See coverage.gaps in "
             "coverage.json for which check did not run.")
+        return EXIT_INCOMPLETE
+    if _gate["verdict"] == "no-analyzable-source":
+        log(f"\n✗ --require-analyzed: source files are present but websec has no analyzer for any "
+            f"of them (exit {EXIT_INCOMPLETE} — coverage, NOT a finding).")
+        log("  An empty findings list here means NOT CHECKED, not secure. See "
+            "coverage.files.unanalyzed_languages for which languages were skipped.")
         return EXIT_INCOMPLETE
     if _gate["verdict"] == "fail":
         log(f"\n✗ --fail-on {args.fail_on}: {_gate['count_at_or_above']} finding(s) at or above threshold"
@@ -912,10 +938,18 @@ def cmd_gate(args) -> int:
     result = _gate.verdict(ledger, facts, args.fail_on, scope_source=scope_source,
                            min_confidence=getattr(args, "min_confidence", "low"))
 
+    # --fail-on-missed is applied HERE, not inside verdict(): `verdict` answers "are there blocking
+    # findings in what was analysed", and a path that was never analysed produced no finding to
+    # judge. Folding it in would conflate "found nothing" with "looked at nothing" inside the very
+    # function whose job is to keep them apart. The JSON `passed` value stays the verdict's.
     if getattr(args, "format", "text") == "json":
         print(_gate.to_json(result))
     else:
         print(_gate.render_text(result))
+    if result["passed"] and result.get("missed") and getattr(args, "fail_on_missed", False):
+        print(f"websec gate: --fail-on-missed — {len(result['missed'])} requested path(s) were never "
+              "analyzed; refusing to report this as a pass.", file=sys.stderr)
+        return EXIT_FINDINGS
     # 1 = blocking findings; 2 = usage/target error; 3 = the gate could not determine its scope.
     # A harness can tell a FAILED check from a BROKEN one and must never treat a crash as a pass.
     return EXIT_OK if result["passed"] else EXIT_FINDINGS
@@ -957,7 +991,11 @@ def cmd_attest(args) -> int:
 
 def cmd_capabilities(args) -> int:
     from .extractors.profiles import capabilities
-    _emit_json_result(capabilities())
+    from . import fixprompt as _fixprompt
+    # The disposition policy ships here rather than only in code so it can be read, quoted and
+    # ARGUED WITH: a consumer who disagrees that a class is agent-fixable can see the exact rule
+    # and the verification that justified it, instead of inferring it from behaviour.
+    _emit_json_result({**capabilities(), "disposition_policy": _fixprompt.disposition_catalog()})
     return 0
 
 
@@ -1060,6 +1098,23 @@ def cmd_feedback(args) -> int:
             print("aborted; nothing written", file=sys.stderr)
             return 2
 
+    # A false-positive report is the ONE verdict that is also a calibration label (is_real=False).
+    # It is stored as a PENDING CANDIDATE, never as a measured sample: an operator's verdict is
+    # evidence, not proof, and a wrong label would lower P(real) for that bucket on every future
+    # run of every project, permanently (bug-212). Promotion requires `calibrate --accept`.
+    candidate = None
+    if record.get("verdict") == "false-positive":
+        _cov = {}
+        _cov_path = ledger_path.parent / "coverage.json"
+        if _cov_path.is_file():
+            try:
+                _cov = json.loads(_cov_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                _cov = {}
+        candidate = calibration.record_candidate(
+            record, detector_revision=_cov.get("detector_revision", ""),
+            analyzed_input_digest=_cov.get("analyzed_input_digest", ""))
+
     destination = Path(args.out or "websec-out").resolve() / fb.FEEDBACK_FILENAME
     try:
         fb.append(destination, record)
@@ -1069,10 +1124,16 @@ def cmd_feedback(args) -> int:
 
     url = fb.issue_url(record)
     if getattr(args, "format", None) == "json":
-        _emit_json_result({"recorded": str(destination), "record": record, "issue_url": url})
+        _emit_json_result({"recorded": str(destination), "record": record, "issue_url": url,
+                           **({"calibration_candidate": candidate} if candidate else {})})
     else:
         print(f"recorded {record['verdict']} for {record['finding'].get('fingerprint')} "
               f"({record['redaction']}) → {destination}")
+        if candidate:
+            print(f"\ncalibration candidate {candidate['candidate_id']} queued for review "
+                  f"({candidate['attack_class']}|{candidate['confidence']}). No probability changed: "
+                  "review it with `websec calibrate --review`, then\n"
+                  f"  websec calibrate --accept {candidate['candidate_id']} --reason \"<why it is wrong>\"")
         print("\nnothing was sent. To report it upstream, open:")
         print(f"  {url}")
         print("\nTo silence this finding locally instead, add a `fingerprint:` line "
@@ -1236,6 +1297,81 @@ def cmd_calibrate(args) -> int:
     write calibration.json (shipped + applied at runtime by findings.build_ledger)."""
     from importlib import resources
 
+    # --review / --accept / --reject: the human gate between an operator's false-positive report and
+    # a measured probability. Nothing else may promote a candidate; `record_samples`' evidence bar is
+    # enforced on the far side of --accept, so there is no weaker second door into a cell.
+    if getattr(args, "review", False) or getattr(args, "accept", None) or getattr(args, "reject", None):
+        from . import coverage as _coverage
+        revision = _coverage.detector_revision()
+        if getattr(args, "review", False):
+            rows = calibration.candidates(revision)
+            if getattr(args, "format", None) == "json":
+                _emit_json_result({"detector_revision": revision, "candidates": rows})
+                return 0
+            if not rows:
+                print("no pending calibration candidates. `websec feedback --verdict false-positive` "
+                      "queues one; nothing else changes a measured probability.")
+                return 0
+            table = calibration.load()
+            print(f"{len(rows)} pending candidate(s) — none is counted until accepted:\n")
+            for row in rows:
+                est = calibration.apply(row["attack_class"], row["confidence"], table)
+                flag = "  [STALE — detector changed since it was reported]" if row["stale"] else ""
+                print(f"  {row['candidate_id']}  {row['attack_class']}|{row['confidence']}"
+                      f"   bucket now p={est['p']} (n={est['n']}, {est['basis']}){flag}")
+                print(f"      reported {row.get('recorded') or 'unknown date'}: {row.get('reason', '')[:100]}")
+            print("\nAccepting records is_real=False for that bucket and is permanent across every "
+                  "project on this machine:\n  websec calibrate --accept <id> --reason \"<why it is "
+                  "wrong>\"\n  websec calibrate --reject <id>")
+            return 0
+        target = getattr(args, "accept", None) or getattr(args, "reject", None)
+        result = calibration.review_candidate(
+            target, accept=bool(getattr(args, "accept", None)),
+            reason=getattr(args, "reason", "") or "", current_revision=revision)
+        if not result["ok"]:
+            print(f"error: {result['error']}", file=sys.stderr)
+            return 2
+        row = result["candidate"]
+        if getattr(args, "format", None) == "json":
+            _emit_json_result({"candidate": row})
+            return 0
+        if row["state"] == "accepted":
+            print(f"accepted {row['candidate_id']}: recorded one is_real=False sample for "
+                  f"{row['attack_class']}|{row['confidence']} in {calibration.LOCAL_PATH}.")
+            est = calibration.apply(row["attack_class"], row["confidence"], calibration.load())
+            print(f"  bucket now p={est['p']} ci={est['ci']} n={est['n']} basis={est['basis']}")
+        else:
+            print(f"rejected {row['candidate_id']}: discarded, no probability changed.")
+        return 0
+
+    # --synthetic: score the authored paired fixtures. Written to its OWN file and never merged:
+    # a pair measures whether a rule still handles what it was built to handle, which is regression
+    # evidence, not the rate at which a finding in real code is a real vulnerability.
+    if getattr(args, "synthetic", False):
+        from . import synthetic as _syn
+        pairs = _syn.load_pairs(getattr(args, "pairs", None))
+        if not pairs:
+            print("websec calibrate --synthetic: no pair manifest found.", file=sys.stderr)
+            return 2
+        res = _syn.evaluate(pairs)
+        table = calibration.fit_synthetic(res["labels"])
+        dest = calibration.write_synthetic(table)
+        if getattr(args, "format", None) == "json":
+            _emit_json_result({"written": str(dest), "table": table, "errors": res["errors"]})
+            return 0
+        agg = table["by_label"]
+        print(f"websec calibrate --synthetic: scored {res['pairs']} pair(s) → {len(res['labels'])} "
+              f"label(s), {len(res['errors'])} error(s) → {dest}")
+        for key, cell in sorted(table["by_class_label"].items()):
+            print(f"    {key:28} {cell['k']}/{cell['n']} correct · p={cell['p']} · 95% CI {cell['ci']}")
+        for key, cell in sorted(agg.items()):
+            print(f"    {key + ' (aggregate)':28} {cell['k']}/{cell['n']} · p={cell['p']} · 95% CI {cell['ci']}")
+        for err in res["errors"]:
+            print(f"    ! {err.get('pair')}: {err.get('error')}")
+        print(f"\n  {calibration.SYNTHETIC_CAVEAT}")
+        print("  This table is NOT merged into P(real); `websec explain <class>` reports it separately.")
+        return 0
+
     # --claimspec: export the calibration the runtime actually uses (shipped table + your local
     # overlay, merged) as a claimspec v1 `calibration` document — the Guard-family shared format,
     # so another tool can read websec's P(real) table with its caveat, floor, backoff and
@@ -1355,7 +1491,18 @@ def cmd_calibrate(args) -> int:
         print("\n  no labeled findings produced — is the corpus cloned? (needs network on first run)")
         return 1
 
-    researched = {t.get("class") for entry in corpus for t in (entry.get("truth") or [])}
+    # A class is RESEARCHED only when it has at least one REVIEWED truth entry. Merely appearing in
+    # corpus.json is not research: the historical entries are class-level wildcards
+    # (location_contains "*") with is_real null, which cannot separate a real vulnerability from a
+    # false positive within the same class. Publishing a class-specific cell on that basis would
+    # assert a precision the labels do not support; an unreviewed class falls back to the label
+    # tier, which is wider and honest. See calibration.reviewed_classes.
+    researched = calibration.reviewed_classes(corpus)
+    unreviewed = ({t.get("class") for entry in corpus for t in (entry.get("truth") or [])}
+                  - researched)
+    if unreviewed:
+        print(f"  unreviewed classes (fall back to the label tier, no class-specific cell): "
+              f"{', '.join(sorted(c for c in unreviewed if c))}")
     table = calibration.fit(labeled, used, researched)
     print(f"  calibration labels: {table['meta']['n_total']} scored · {table['meta'].get('n_unknown', 0)} unknown")
     if not table["meta"]["n_total"]:
@@ -1365,6 +1512,12 @@ def cmd_calibrate(args) -> int:
     print(f"\n  fitted {table['meta']['n_total']} findings across {len(used)} app(s) → {out_path}")
     for k, v in table["by_label"].items():
         print(f"    {k:7} {v['k']}/{v['n']} real · p={v['p']} · 95% CI {v['ci']}")
+    # Strictly proper scoring rule, reported not optimized (calibration.SCORING_RULE).
+    score = calibration.brier(labeled, table)
+    if score:
+        print(f"\n  Brier {score['brier']} on {score['n']} label(s) "
+              f"(lower better; a constant 0.5 scores {score['reference']['always_0.5']}).")
+        print(f"  Fitting objective: {score['rule']}.")
     print(f"\n  NOTE: {table['meta']['caveat']}.")
     print("  Per-finding estimates carry n + basis; wide CI / basis=prior ⇒ trust the debate, not the number.")
     return 0
@@ -1441,6 +1594,11 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--require-complete", action="store_true",
                    help="exit 3 when requested checks cannot complete (3 = toolchain/coverage, "
                         "distinct from 1 = findings and 2 = usage/configuration error)")
+    r.add_argument("--require-analyzed", action="store_true", dest="require_analyzed",
+                   help="exit 3 when source files are present but NONE could be analyzed (no analyzer "
+                        "for the language). Shares code 3 with --require-complete because both are "
+                        "coverage outcomes, but the cause differs: nothing FAILED to run here, there "
+                        "was nothing runnable — and an empty findings list means NOT CHECKED.")
     r.add_argument("--network", action="store_true",
                    help="opt in to checking whether declared dependencies EXIST on the public "
                         "registry (the AI-hallucinated-dependency / slopsquat class). ⚠ this sends "
@@ -1525,6 +1683,23 @@ def build_parser() -> argparse.ArgumentParser:
     cal.add_argument("--claimspec", metavar="PATH",
                      help="export the calibration the runtime uses (shipped + local overlay) as a "
                           "claimspec v1 `calibration` document; `-` writes to stdout")
+    cal.add_argument("--synthetic", action="store_true",
+                     help="score the authored paired fixtures into a SEPARATE table "
+                          "(calibration-synthetic.json). Never merged into P(real): pairs measure "
+                          "regression precision on anticipated cases, not the rate in real code.")
+    cal.add_argument("--pairs", metavar="PAIRS.json",
+                     help="pair manifest to score with --synthetic (default: bundled pairs.json)")
+    cal.add_argument("--review", action="store_true",
+                     help="list pending calibration candidates from `websec feedback "
+                          "--verdict false-positive`. They change no probability until accepted.")
+    cal.add_argument("--accept", metavar="CANDIDATE_ID",
+                     help="promote one candidate into a measured is_real=False sample. Requires "
+                          "--reason; refuses a candidate reported against a different detector build.")
+    cal.add_argument("--reject", metavar="CANDIDATE_ID", help="discard one pending candidate")
+    cal.add_argument("--reason", help="why the finding is wrong (required with --accept): a label "
+                                      "with no reviewer rationale is an assertion, not evidence")
+    cal.add_argument("--format", choices=["text", "json"], default="text",
+                     help="output format for --review/--accept/--reject")
     cal.set_defaults(func=cmd_calibrate)
 
     dyn = sub.add_parser("dynamic", help="dynamic probes vs a LIVE target (read-only): cross-tenant BOLA (--config) or unauth reachability (--unauth)")
@@ -1560,6 +1735,11 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("target", nargs="?", default=".")
     g.add_argument("--only", action="append", metavar="PATH",
                    help="analyze these files instead of the working-tree changes (repeatable)")
+    g.add_argument("--fail-on-missed", action="store_true", dest="fail_on_missed",
+                   help="exit 1 when a requested path was never analyzed (unsupported language, "
+                        "excluded or absent). OFF by default: in the agent loop a pass over an "
+                        "unanalyzable file is a correct 'nothing to say', and the text output says "
+                        "so. Turn this on at merge time, where silence must not read as approval.")
     g.add_argument("--fail-on", dest="fail_on", default="medium",
                    choices=["critical", "high", "medium", "low"],
                    help="block at or above this severity (default: medium — command injection and "

@@ -3,6 +3,141 @@
   "schemaVersion": 2,
   "specs": [
     {
+      "specId": "websec.calibration-honesty-structural-coverage",
+      "path": "specs/002-calibration-honesty-and-structural-coverage/spec.md",
+      "reviewed": {
+        "lifecycle": {
+          "approval": "draft",
+          "delivery": "planned",
+          "context": "current",
+          "retirementReason": null,
+          "storage": "working_tree",
+          "persistenceModel": null
+        },
+        "relations": {
+          "extends": [],
+          "duplicates": [],
+          "conflictsWith": [],
+          "supersedes": [],
+          "supersededBy": []
+        },
+        "scope": {
+          "canonicalDocs": []
+        },
+        "reconciliation": {
+          "lastReviewedRevision": null,
+          "outcomes": []
+        }
+      },
+      "intent": {
+        "requirements": [
+          "websec.calibration-honesty-structural-coverage#FR-007",
+          "websec.calibration-honesty-structural-coverage#FR-008",
+          "websec.calibration-honesty-structural-coverage#FR-009",
+          "websec.calibration-honesty-structural-coverage#FR-010",
+          "websec.calibration-honesty-structural-coverage#FR-011",
+          "websec.calibration-honesty-structural-coverage#FR-012",
+          "websec.calibration-honesty-structural-coverage#FR-013",
+          "websec.calibration-honesty-structural-coverage#FR-014",
+          "websec.calibration-honesty-structural-coverage#SC-005",
+          "websec.calibration-honesty-structural-coverage#SC-006",
+          "websec.calibration-honesty-structural-coverage#SC-007",
+          "websec.calibration-honesty-structural-coverage#SC-008",
+          "websec.calibration-honesty-structural-coverage#SC-009"
+        ]
+      },
+      "observed": {
+        "artifacts": [
+          {
+            "path": "specs/002-calibration-honesty-and-structural-coverage/spec.md",
+            "digest": "sha256:fa1d9824d0cdbae4c2f4d518bff74cb96b3da2a649fdbbe506447de5f3c10a11"
+          }
+        ],
+        "taskCompletion": {
+          "checked": 0,
+          "total": 0
+        },
+        "implementationEvidence": [],
+        "testEvidence": [
+          {
+            "requirementId": "FR-007",
+            "file": "tests/test_unanalyzed_coverage.py",
+            "line": 110
+          },
+          {
+            "requirementId": "FR-008",
+            "file": "tests/test_unanalyzed_coverage.py",
+            "line": 60
+          },
+          {
+            "requirementId": "FR-009",
+            "file": "tests/test_calibration_review.py",
+            "line": 64
+          },
+          {
+            "requirementId": "FR-009",
+            "file": "tests/test_unanalyzed_cli.py",
+            "line": 152
+          },
+          {
+            "requirementId": "FR-010",
+            "file": "tests/test_calibration_review.py",
+            "line": 122
+          },
+          {
+            "requirementId": "FR-010",
+            "file": "tests/test_calibration_review.py",
+            "line": 255
+          },
+          {
+            "requirementId": "FR-011",
+            "file": "tests/test_calibration_scoring.py",
+            "line": 43
+          },
+          {
+            "requirementId": "FR-012",
+            "file": "tests/test_triage.py",
+            "line": 32
+          },
+          {
+            "requirementId": "FR-012",
+            "file": "tests/test_unanalyzed_coverage.py",
+            "line": 134
+          },
+          {
+            "requirementId": "FR-013",
+            "file": "tests/test_unanalyzed_cli.py",
+            "line": 56
+          },
+          {
+            "requirementId": "SC-005",
+            "file": "tests/test_unanalyzed_coverage.py",
+            "line": 172
+          },
+          {
+            "requirementId": "SC-007",
+            "file": "tests/test_calibration_review.py",
+            "line": 197
+          },
+          {
+            "requirementId": "SC-008",
+            "file": "tests/test_calibration_scoring.py",
+            "line": 87
+          },
+          {
+            "requirementId": "SC-009",
+            "file": "tests/test_triage.py",
+            "line": 153
+          },
+          {
+            "requirementId": "SC-009",
+            "file": "tests/test_unanalyzed_coverage.py",
+            "line": 214
+          }
+        ]
+      }
+    },
+    {
       "specId": "websec.continuous-security-improvement",
       "path": "specs/001-continuous-security-improvement/spec.md",
       "reviewed": {

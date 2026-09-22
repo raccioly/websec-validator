@@ -19,6 +19,7 @@ structure upgrades cleanly to isotonic regression if a large labeled set ever ex
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -29,6 +30,15 @@ Z95 = 1.959963984540054   # z for a 95% two-sided interval
 MIN_N = 5                 # a cell needs ≥ this many samples to be used (else fall back a tier)
 # uncalibrated fallback prior — used ONLY when we have no data; always labeled as such
 PRIOR = {"HIGH": 0.85, "MEDIUM": 0.5, "LOW": 0.25}
+
+# DESIGN CONSTRAINT — read this before fitting anything from labels.
+# Any quantity derived from labeled outcomes (a bucket probability, a cut-off, a threshold default)
+# must be chosen by a STRICTLY PROPER SCORING RULE — Brier or log score — never by accuracy,
+# precision, recall or F1. A strictly proper rule is maximized only by honest probabilities;
+# accuracy-shaped objectives are maximized by a confidently-wrong estimator, which is precisely the
+# failure this module exists to prevent. Report those other metrics if useful; never optimize them.
+# `brier()` below exists so the honest metric is available at the moment the temptation arises.
+SCORING_RULE = "strictly proper (Brier / log score) — never accuracy, precision, recall or F1"
 CAVEAT = ("indicative — calibrated on a deliberately-vulnerable app corpus; "
           "skews optimistic on clean production code")
 # Used when NO shipped corpus table is present and the numbers come only from the operator's own
@@ -67,6 +77,32 @@ def _cell(k: int, n: int) -> dict:
             "ci": [round(lo, 3), round(hi, 3)]}
 
 
+def brier(labeled: list, table: dict) -> dict | None:
+    """Mean Brier score of `table`'s predictions against the labels that produced them.
+
+    Brier = mean((p - outcome)^2), lower is better; 0.25 is what a constant 0.5 scores. It is a
+    STRICTLY PROPER rule (see SCORING_RULE): it is minimized only by honest probabilities, so
+    unlike accuracy it cannot be improved by becoming more confident than the evidence warrants.
+
+    Reported, never optimized against — nothing in the runtime reads this. It exists so the honest
+    number is already on screen if anyone later reaches for a threshold to tune. Rows whose bucket
+    has no measured cell fall back through `apply()` exactly as a real finding would, so the score
+    describes the estimates the tool would actually have emitted, priors included.
+    """
+    rows = [r for r in (labeled or []) if isinstance(r.get("is_real"), bool)]
+    if not rows:
+        return None
+    total = 0.0
+    for row in rows:
+        est = apply(row.get("attack_class", ""), row.get("confidence", ""), table)
+        p = est["p"] if isinstance(est.get("p"), (int, float)) else 0.5
+        total += (p - float(row["is_real"])) ** 2
+    return {"brier": round(total / len(rows), 4), "n": len(rows),
+            "reference": {"always_0.5": 0.25},
+            "rule": SCORING_RULE,
+            "note": "reported for honesty; no runtime behavior depends on it"}
+
+
 def is_real(attack_class: str, location: str, truth: list) -> bool | None:
     """Match explicit corpus ground truth; absence of a label means unknown.
 
@@ -84,6 +120,30 @@ def is_real(attack_class: str, location: str, truth: list) -> bool | None:
             if isinstance(label, bool):
                 outcomes.add(label)
     return next(iter(outcomes)) if len(outcomes) == 1 else None
+
+
+REVIEWED_STATUS = "reviewed"
+
+
+def reviewed_classes(corpus: list) -> set:
+    """Attack classes with at least one REVIEWED truth entry — the only ones eligible for a
+    class-specific published cell.
+
+    A truth entry qualifies when `review_status` is "reviewed" AND `is_real` is an explicit
+    boolean. The historical entries are neither: they are class-level wildcards
+    (`location_contains: "*"`, `is_real: null`) that cannot separate a real vulnerability from a
+    false positive inside the same class, so a cell fitted from them would assert a precision the
+    labels never established. Those classes fall back to the per-label tier, which is wider and
+    honest. Relabelling requires cloning the pinned revision and reviewing each finding by hand;
+    there is deliberately no code path that promotes an unreviewed entry.
+    """
+    out = set()
+    for entry in corpus or []:
+        for truth in entry.get("truth") or []:
+            if truth.get("review_status") == REVIEWED_STATUS and isinstance(truth.get("is_real"), bool):
+                if truth.get("class"):
+                    out.add(truth["class"])
+    return out
 
 
 def fit(labeled: list, corpus_names: list, researched_classes: set | None = None) -> dict:
@@ -169,8 +229,12 @@ def _merge(shipped: dict | None, local: dict | None) -> dict | None:
         base["meta"]["local_samples"] = ls
         legacy = local.get("legacy_uncertain", {}).get("meta", {}).get("samples", 0)
         base["meta"]["legacy_uncertain_samples"] = legacy
+        # Only CLAIM personalization when something was actually folded in. Merely having a local
+        # overlay file — which queuing a pending feedback candidate creates — is not personalization,
+        # and "+0 samples folded in (personalized to your apps)" is a false statement about the number.
         base["meta"]["caveat"] = (base["meta"].get("caveat", CAVEAT)
-                                  + f" · +{ls} evidence-backed local sample(s) folded in (personalized to your apps)"
+                                  + (f" · +{ls} evidence-backed local sample(s) folded in "
+                                     "(personalized to your apps)" if ls else "")
                                   + (f" · {legacy} legacy sample(s) quarantined pending review" if legacy else ""))
     return base
 
@@ -224,20 +288,198 @@ def record_samples(labeled: list, runs: int = 1) -> dict | None:
             added += 1
         local["meta"]["samples"] = local["meta"].get("samples", 0) + added
         local["meta"]["runs"] = local["meta"].get("runs", 0) + (runs if added else 0)
-        LOCAL_PATH.parent.mkdir(parents=True, exist_ok=True)
-        # Atomic replacement avoids a truncated JSON overlay if the process is interrupted.
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode="w", dir=LOCAL_PATH.parent, delete=False) as handle:
-            temp = Path(handle.name)
-            json.dump(local, handle, indent=2)
-            handle.write("\n")
-        try:
-            temp.replace(LOCAL_PATH)
-        finally:
-            temp.unlink(missing_ok=True)
+        _write_local(local)
         return local
     except Exception:
         return None
+
+
+# ---- operator feedback → CANDIDATE labels (never a measured probability without human review) ----
+# An operator reporting a false positive is evidence, not proof. `record_samples` already refuses
+# anything without evidence_verified/sample_id/provenance, and that bar must not be lowered: a wrong
+# label lowers P(real) for that bucket on every future run of every project, permanently
+# (bug-212 poisoned the overlay exactly this way). So a report becomes a CANDIDATE — visible,
+# counted, reviewable — and only an explicit human acceptance promotes it into a cell.
+CANDIDATE_KEY = "feedback_candidates"
+
+
+def _candidate_id(record: dict) -> str:
+    """Stable identity for a report: the finding + the detector that produced it.
+
+    Includes detector_revision deliberately. The same finding reported against a different detector
+    build is a different claim, because the rule that produced it may no longer exist.
+    """
+    finding = record.get("finding") or {}
+    basis = "|".join([str(finding.get("fingerprint", "")), str(record.get("verdict", "")),
+                      str(record.get("detector_revision", ""))])
+    return hashlib.sha256(basis.encode()).hexdigest()[:16]
+
+
+def record_candidate(record: dict, *, detector_revision: str = "",
+                     analyzed_input_digest: str = "") -> dict | None:
+    """Store an operator feedback record as a pending candidate. Changes no probability.
+
+    Returns the stored candidate (with its `candidate_id`), or None when the record is not a
+    labelling claim about an existing finding. Re-reporting the same finding does not duplicate.
+    """
+    if not isinstance(record, dict):
+        return None
+    verdict = record.get("verdict")
+    # Only false-positive is a LABEL (is_real=False). `severity-wrong` disputes the severity, not
+    # the existence, and `false-negative` describes a finding that was never produced, so neither
+    # can be scored against a bucket — storing them as labels would fabricate an outcome.
+    if verdict != "false-positive":
+        return None
+    finding = record.get("finding") or {}
+    attack_class, confidence = finding.get("attack_class"), finding.get("confidence")
+    if not attack_class or confidence not in PRIOR:
+        return None
+    try:
+        local = _upgrade_local(load_local() or {})
+        enriched = dict(record)
+        if detector_revision:
+            enriched["detector_revision"] = detector_revision
+        if analyzed_input_digest:
+            enriched["analyzed_input_digest"] = analyzed_input_digest
+        candidate_id = _candidate_id(enriched)
+        pending = local.setdefault(CANDIDATE_KEY, {})
+        if candidate_id in pending:
+            return pending[candidate_id]
+        pending[candidate_id] = {
+            "candidate_id": candidate_id, "state": "pending",
+            "attack_class": attack_class, "confidence": confidence,
+            "is_real": False,                      # the claim under review, not yet counted
+            "reason": record.get("reason", ""), "recorded": record.get("recorded", ""),
+            "fingerprint": finding.get("fingerprint", ""),
+            "detector_revision": enriched.get("detector_revision", ""),
+            "analyzed_input_digest": enriched.get("analyzed_input_digest", ""),
+            "tool_version": record.get("tool_version", ""),
+        }
+        _write_local(local)
+        return pending[candidate_id]
+    except Exception:
+        return None
+
+
+def candidates(current_revision: str = "") -> list:
+    """Pending candidates, newest first, each marked `stale` when its detector no longer exists."""
+    local = _upgrade_local(load_local() or {})
+    rows = []
+    for row in (local.get(CANDIDATE_KEY, {}) or {}).values():
+        row = dict(row)
+        row["stale"] = bool(current_revision and row.get("detector_revision")
+                            and row["detector_revision"] != current_revision)
+        rows.append(row)
+    return sorted(rows, key=lambda r: r.get("recorded", ""), reverse=True)
+
+
+def review_candidate(candidate_id: str, *, accept: bool, reason: str = "",
+                     current_revision: str = "") -> dict:
+    """Promote or discard one candidate. Acceptance requires a human reason and a live detector.
+
+    Returns {"ok": bool, "error": str, "candidate": dict}. Acceptance is the ONLY path from an
+    operator's opinion into a measured cell, and it goes through `record_samples`, so the evidence
+    bar (`evidence_verified` + `sample_id` + `provenance`) is enforced by the same code that
+    enforces it for dynamic-confirmed samples — there is no second, weaker door.
+    """
+    local = _upgrade_local(load_local() or {})
+    pending = local.get(CANDIDATE_KEY, {}) or {}
+    row = pending.get(candidate_id)
+    if not row:
+        return {"ok": False, "error": f"no pending candidate {candidate_id!r}", "candidate": None}
+    if not accept:
+        del pending[candidate_id]
+        _write_local(local)
+        return {"ok": True, "error": "", "candidate": dict(row, state="rejected")}
+    if not (reason or "").strip():
+        return {"ok": False, "error": "accepting a candidate requires --reason: a label with no "
+                                      "reviewer rationale is an assertion, not evidence",
+                "candidate": row}
+    if current_revision and row.get("detector_revision") and row["detector_revision"] != current_revision:
+        return {"ok": False, "error": "candidate is STALE: it was reported against detector "
+                                      f"{row['detector_revision'][:19]}… but this build is "
+                                      f"{current_revision[:19]}…. The rule that produced it may no "
+                                      "longer exist; re-run the scan and re-report.",
+                "candidate": row}
+    del pending[candidate_id]
+    _write_local(local)
+    sample = {"attack_class": row["attack_class"], "confidence": row["confidence"],
+              "is_real": False, "sample_id": f"feedback:{candidate_id}",
+              "evidence_verified": True,
+              "provenance": {"kind": "operator-review", "reviewer_reason": reason.strip(),
+                             "reported_reason": row.get("reason", ""),
+                             "detector_revision": row.get("detector_revision", ""),
+                             "analyzed_input_digest": row.get("analyzed_input_digest", ""),
+                             "fingerprint": row.get("fingerprint", "")}}
+    record_samples([sample])
+    return {"ok": True, "error": "", "candidate": dict(row, state="accepted")}
+
+
+def _write_local(local: dict) -> None:
+    """Atomic overwrite of the overlay; a truncated JSON file would lose every measured cell."""
+    import tempfile
+    LOCAL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", dir=LOCAL_PATH.parent, delete=False) as handle:
+        temp = Path(handle.name)
+        json.dump(local, handle, indent=2)
+        handle.write("\n")
+    try:
+        temp.replace(LOCAL_PATH)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+# ---- authored-pair precision: measured, published, and NEVER merged into the real table ----
+# The repository's paired fixtures (a vulnerable variant that must fire, a sanitized twin that must
+# not) are reviewed, reproducible labels — the strongest ones on disk. But they measure precision on
+# cases the rule author ALREADY ANTICIPATED, which is not the field base rate: it skews optimistic
+# in the same direction, and for a related reason, as the deliberately-vulnerable corpus. So they get
+# their own file, their own basis and their own caveat. `apply()` never reads this table; summing it
+# into `by_class_label` would launder authored coverage into a claim about real code.
+SYNTHETIC_PATH = LOCAL_PATH.parent / "calibration-synthetic.json"
+SYNTHETIC_CAVEAT = ("authored paired fixtures — measures REGRESSION precision on cases the detector "
+                    "was written to handle, not the rate in real code. Never merged into P(real).")
+
+
+def fit_synthetic(pairs: list) -> dict:
+    """Fit a separate table from authored pairs.
+
+    `pairs`: [{attack_class, confidence, is_real, sample_id}] where is_real is True for a variant
+    that SHOULD fire and False for its sanitized control. Same cell shape as the real table, so the
+    numbers are comparable by eye — but carried in a different file under a different basis.
+    """
+    by_cl: dict = {}
+    by_l: dict = {}
+    for row in pairs or []:
+        if not isinstance(row.get("is_real"), bool):
+            continue
+        for group, key in ((by_cl, f"{row['attack_class']}|{row['confidence']}"),
+                           (by_l, row["confidence"])):
+            cell = group.setdefault(key, [0, 0])
+            cell[1] += 1
+            cell[0] += int(row["is_real"])
+    return {"meta": {"basis": "synthetic-paired", "n_total": len(pairs or []),
+                     "method": "binomial proportion + Wilson 95% CI", "min_n": MIN_N,
+                     "caveat": SYNTHETIC_CAVEAT,
+                     "never_merged": "apply() does not read this table; it is reported beside the "
+                                     "measured one, never summed into it"},
+            "by_class_label": {k: _cell(v[0], v[1]) for k, v in sorted(by_cl.items())},
+            "by_label": {k: _cell(v[0], v[1]) for k, v in sorted(by_l.items())}}
+
+
+def write_synthetic(table: dict) -> Path:
+    SYNTHETIC_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SYNTHETIC_PATH.write_text(json.dumps(table, indent=2) + "\n")
+    return SYNTHETIC_PATH
+
+
+def load_synthetic() -> dict | None:
+    try:
+        if SYNTHETIC_PATH.is_file():
+            return json.loads(SYNTHETIC_PATH.read_text())
+    except Exception:
+        pass
+    return None
 
 
 def samples_from_dynamic(dynamic: dict) -> list:

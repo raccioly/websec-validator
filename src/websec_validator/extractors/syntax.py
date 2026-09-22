@@ -14,8 +14,28 @@ from pathlib import Path
 
 MAX_EXPRESSION = 8192
 
+# `<pre>` and `<code>` hold source that is DISPLAYED, not executed. A tutorial page that documents
+# `eval(req.body.preTax)` under the caption "Insecure use of eval() to parse inputs" is teaching
+# material, and reporting it is reporting the lesson rather than the bug: on NodeGoat these blocks
+# produced 11 of 27 findings. Masked only for markup files, where the tags have this meaning —
+# never for `.js`/`.ts`, where the same characters would be code.
+_HTML_SUFFIXES = {".html", ".htm", ".jinja", ".jinja2", ".j2", ".vue", ".svelte"}
+_DISPLAYED_SOURCE = re.compile(r"<(pre|code)\b[^>]*>.*?</\1\s*>", re.I | re.S)
+
+
+def _mask_displayed_source(text: str) -> str:
+    """Blank `<pre>`/`<code>` bodies, preserving newlines so reported line numbers stay true."""
+    chars = list(text)
+    for block in _DISPLAYED_SOURCE.finditer(text):
+        for index in range(block.start(), block.end()):
+            if chars[index] != "\n":
+                chars[index] = " "
+    return "".join(chars)
+
 
 def without_comments(text: str, suffix: str = "") -> str:
+    if suffix in _HTML_SUFFIXES:
+        text = _mask_displayed_source(text)
     chars = list(text)
     if suffix == ".py":
         offsets = [0]

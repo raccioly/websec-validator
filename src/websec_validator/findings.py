@@ -1155,14 +1155,20 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
 
     # ---- calibrate: attach a measured real-rate + CI to each finding (best-effort) ----
     cal_table = calibration.load()
-    by_sev, by_conf, by_basis = {}, {}, {}
+    from . import fixprompt as _fixprompt
+    by_sev, by_conf, by_basis, by_disp = {}, {}, {}, {}
     for f in kept:
         f["calibrated"] = ({"p": None, "ci": None, "n": 0, "basis": "unvalidated import",
                             "note": "Imported SARIF is not a reviewed truth label or calibration sample."}
                            if f.get("sarif") else calibration.apply(f.get("attack_class", ""), f["confidence"], cal_table))
+        # The third axis, derived (never asserted per finding) from a published per-class policy:
+        # severity says how bad if real, calibrated.p says whether it IS real, and this says whether
+        # an agent can act alone. Advisory — no gate, no suppression, no baseline effect.
+        f["triage"] = _fixprompt.disposition(f.get("attack_class", ""))
         by_sev[f["severity"]] = by_sev.get(f["severity"], 0) + 1
         by_conf[f["confidence"]] = by_conf.get(f["confidence"], 0) + 1
         by_basis[f["calibrated"]["basis"]] = by_basis.get(f["calibrated"]["basis"], 0) + 1
+        by_disp[f["triage"]["disposition"]] = by_disp.get(f["triage"]["disposition"], 0) + 1
     policy_rows = getattr(suppressions, "sources", []) + getattr(acknowledgements, "sources", [])
     policy = []
     for row in policy_rows:
@@ -1183,7 +1189,7 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
             "verification_context": {"application_id": facts.get("application_id") or facts.get("target", ""),
                                      "build_id": facts.get("build_id") or (facts.get("coverage") or {}).get("analyzed_input_digest", ""),
                                      "source_digest": (facts.get("coverage") or {}).get("analyzed_input_digest", "")},
-            "by_severity": by_sev, "by_confidence": by_conf,
+            "by_severity": by_sev, "by_confidence": by_conf, "by_disposition": by_disp,
             "calibration": {"loaded": bool(cal_table), "by_basis": by_basis,
                             "personalized": bool((cal_table or {}).get("meta", {}).get("personalized")),
                             "local_samples": (cal_table or {}).get("meta", {}).get("local_samples", 0),

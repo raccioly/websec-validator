@@ -7,6 +7,196 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **A scan that analyzed nothing can no longer read as clean.** `SOURCE_EXT` was defined as
+  `CODE_EXT | {…}` whose members `CODE_EXT` had since absorbed entirely except `.scala`, so the
+  walker's "unsupported source" arm was reachable for exactly one language. A deliberately
+  vulnerable Elixir application (raw SQL interpolation, `System.cmd` injection, a hardcoded
+  credential, no auth plug) therefore produced `unsupported: []`, `gaps: []` and the headline
+  *"REQUESTED CHECKS COMPLETED — 0 files read"*. The unanalyzed-source list is now written out
+  independently of `CODE_EXT` and covers 43 suffixes across 30 languages. New coverage evidence:
+  `files.unanalyzed_languages` (language → file count), `files.no_analyzable_source`, and the
+  `language_without_analyzer` gap. The banner now leads with **NO ANALYZABLE SOURCE**, and an empty
+  route table names the missing analyzer instead of blaming route discovery.
+- **`thin_language_coverage` gap** for languages whose files *are* read but have no injection,
+  secret or authorization rule (Swift, Kotlin, Rust, C/C++ — only the named configuration checks in
+  `profiles`). Derived from the published `capabilities()` catalog, so adding a real ruleset removes
+  the warning automatically.
+- **`websec run --require-analyzed`** (exit 3) and **`websec gate --fail-on-missed`** (exit 1) —
+  both opt-in. Default exit codes and the gate's recorded `passed` verdict are unchanged; only the
+  text a model reads gains the disclosure. `--require-complete` deliberately stays silent for this
+  case: nothing failed to execute, there was nothing executable. `--require-analyzed` shares exit
+  code 3 with it, because covering no code is a coverage outcome rather than a usage error or a
+  finding — it is never reported as a vulnerability.
+- **Fitting objective recorded as a design constraint.** Any quantity fitted from labels is chosen
+  by a strictly proper scoring rule (Brier or log score), never accuracy/precision/recall/F1, which
+  are maximized by confident wrongness. Stated in `METHODOLOGY.md` § Layer 3b, `BENCHMARKS.md` § 2
+  and `calibration.SCORING_RULE`; `websec calibrate` now prints the table's Brier score. Reported,
+  never optimized — no runtime behavior depends on it.
+
+- **The feedback loop is closed, without lowering the evidence bar.** `feedback.jsonl` was
+  write-only: a false-positive report had no effect on any future confidence. Now a
+  `--verdict false-positive` report also queues a **calibration candidate** — visible in
+  `websec calibrate --review`, counted nowhere. Promotion requires an explicit
+  `websec calibrate --accept <id> --reason "..."`, and is refused when the candidate was reported
+  against a different `detector_revision`, because the rule that produced it may no longer exist.
+  Acceptance flows through the same `record_samples` evidence bar as a dynamic-confirmed sample.
+  `severity-wrong` and `false-negative` queue nothing: neither is a label about whether a reported
+  finding was real. `feedback.jsonl` keeps schema 1.0, and feedback still never suppresses.
+- **`websec calibrate --synthetic`** scores the repository's authored paired fixtures into a
+  SEPARATE `calibration-synthetic.json`. `apply()` never reads it and it is never summed into
+  `by_class_label`: pairs measure regression precision on cases the detector was written to handle,
+  not the rate in real code. `websec explain <class>` prints it on its own line with its own
+  caveat. A detector that fails to fire on a vulnerable variant is reported as a recall gap rather
+  than silently dropped — a harness that scored nothing would otherwise publish a perfect table.
+- **A class earns a published cell only from reviewed labels.** `websec calibrate` previously
+  treated any class appearing in `corpus.json` as researched, including the historical class-level
+  wildcards (`location_contains: "*"`, `is_real: null`) that cannot separate a real vulnerability
+  from a false positive within the same class. `calibration.reviewed_classes` now requires
+  `review_status: "reviewed"` plus an explicit boolean `is_real`; everything else falls back to the
+  wider label tier, and `calibrate` names the classes it excluded. Every shipped truth entry
+  carries a `promotion_requires` block stating what a reviewer must supply.
+
+- **Disposition — a third axis, advisory and separate from severity and confidence.** Each finding
+  gains a `triage` block saying whether an agent can act alone. `agent-fixable` requires BOTH a
+  local code/config remediation AND a mechanical verification in the fix prompt; everything else,
+  including unknown classes, is `human-required` with a per-class reason. 9 classes of 73 qualify.
+  Derived from a static policy published by `websec capabilities` alongside the verification that
+  justifies each entry, so the rule can be argued with rather than inferred. Nothing gates on it:
+  `gate.verdict`, `--fail-on`, `fpfilter` and the baseline ignore it and it is absent from SARIF, so
+  a HIGH-severity agent-fixable finding blocks a gate exactly as before. `agent-fixable` means an
+  agent may PROPOSE the patch; repair-plan prerequisites are unchanged and a human reviews every
+  diff. New briefing section §4d shows the three axes, sorted by severity → P(real) → disposition.
+- **Four missing mechanical verifications added to the fix prompts** (`incomplete-hsts`,
+  `content-sniffing`, `subresource-integrity`, `timing-unsafe-compare`), which previously fell back
+  to the generic "write a regression test". These were real gaps in the fix prompts independently of
+  the triage work, and they are what make the agent-fixable invariant true rather than aspirational.
+
+### Fixed — the dynamic probe imposed its own login shape
+
+`mint()` sent `{"email": ..., "password": ...}` unconditionally, so any API that authenticates with
+`username` — VAmPI, and a large share of real ones — could never mint a token. The BOLA matrix was
+then skipped with "could not mint both agent tokens", which reads like a credential or network
+problem rather than a shape websec imposed on the target. The role object is now sent as written,
+so it carries whatever the app expects; `email` + `password` is simply one such shape and keeps
+working unchanged, `_`-prefixed keys stay comments, and the login-redirect refusal (bug-208) is
+unaffected. When the login response carries no user object, the identity falls back to the
+credential that was sent, so two agents remain distinguishable in the report.
+
+### Fixed — SARIF results without `locations` no longer reject the whole upload (#147)
+
+GitHub Code Scanning rejects the **entire** SARIF file when any result carries no `locations`, so
+one unanchorable finding discarded every valid result with it — turning a green security posture
+into a red CI job for a reason unrelated to the repository. Two causes, both fixed:
+
+- `Dockerfile` (and `Makefile`, `Jenkinsfile`, `Gemfile`, …) failed the path test, which required
+  an extension or a `/`, so an IaC finding naming one exactly lost its location. Extensionless
+  build files are now recognised as the real artifacts they are.
+- A genuinely project-level finding — deployed response headers, a policy spanning several routes —
+  has no file at all. It is now anchored at the repository root and marked `projectLevel`, with the
+  conceptual location preserved verbatim in `locationHint` and in the location's own properties. A
+  route path is still never emitted as a file URI, which was the original reason these results were
+  left unanchored.
+
+### Added — the report says how to dispute a finding (#141)
+
+The offline-verdict path was undiscoverable from the report itself: findings were listed and
+nothing beside them said how to say one was wrong, so the calibration loop had no way to receive
+the data it most needs. The findings ledger section now names the exact command, states that the
+record is local and metadata-only, that nothing is sent anywhere, that it does **not** suppress
+(`.websec-ignore` is for that), and that a false-positive verdict queues a calibration candidate
+which changes no number until a human accepts it.
+
+### Added — the calibration table carries measured numbers again
+
+The corpus was relabelled finding by finding against source at the pinned revisions, replacing the
+class-level wildcards (`location_contains: "*"`, `is_real: null`) that could not separate a real
+vulnerability from a false positive inside the same class and were therefore quarantined. 14
+reviewed entries across 9 attack classes, each carrying the reviewer's reasoning and the revision
+it was read at.
+
+Measured after the false-positive fixes below, so the rates describe the current detector:
+**LOW 6/11 = 0.545 [0.28, 0.787] · MEDIUM 7/10 = 0.70 [0.397, 0.892]**, Brier **0.2244** against a
+constant-0.5 reference of 0.25. Every finding now reports a measured `p` with its `n` and `basis`
+instead of the uncalibrated prior — on NodeGoat, 3 findings resolve from a class-specific cell and
+17 from the label tier, none from the prior.
+
+35 of the 56 corpus findings remain **unknown** and are excluded from every count rather than
+recorded as false. That is deliberate: an unverified label is what got the previous table
+quarantined, and `websec calibrate` now prints which classes it excluded.
+
+- **A class earns a published cell only from reviewed labels**, and the shipped corpus now has
+  nine. `--claimspec` exports them with `evidenceStatus: verified`; a table still marked
+  `historical-unverified` is quarantined exactly as before, proven against a synthetic historical
+  table so the rule survives the relabel.
+- **Tutorial and documentation code samples are no longer reported as findings.** A sink inside
+  `<pre>` or `<code>` in a markup file is displayed source, not executed source: NodeGoat's
+  tutorial pages documented `eval(req.body.preTax)` under the caption "Insecure use of eval() to
+  parse inputs", and websec reported the lesson. 7 of 27 NodeGoat findings. Masked only for markup
+  suffixes, never for `.js`/`.ts` where the same characters are code, and newlines are preserved so
+  reported line numbers stay true.
+- **Personalization is no longer claimed when nothing was folded in.** Queuing a pending feedback
+  candidate creates the local overlay, which made the caveat read "+0 evidence-backed local
+  sample(s) folded in (personalized to your apps)" — a false statement about the number.
+
+### Fixed — `websec run` no longer version-probes scanners it will not run
+
+Scanner version-checking (0.17.0) spawns `<binary> --version` for every scanner on PATH. Measured on
+a machine with the full toolchain, that was **3.4s of a 3.5s run** — on the default path, where
+`--scan` was not given and none of those scanners execute. The version answers "is this build
+compatible with the adapter's argv", which only matters when the scanner is about to run, so it is
+now probed only with `--scan`. `doctor`, whose entire job is reporting whether the toolchain is
+usable, still probes every time, and `--scan` records `reported_version`/`version_verified` exactly
+as before. `websec run` on a small repo: **3.53s -> 0.14s**.
+
+### Fixed — three systematic false-positive sources (corpus 184 -> 63 findings, -66%)
+
+Found by labelling the pinned corpus (VAmPI, NodeGoat, DVGA) finding by finding against source.
+Each fix ships with the control that must keep firing: the dangerous direction for a security tool
+is the false negative, so a guard credited too generously is worse than one missed.
+
+- **Vendored third-party assets are no longer scanned as your source.** `vendor/`, `dist/` and
+  `node_modules/` were skipped by name, but a library dropped in `static/jquery/jquery.js` is none
+  of those: on DVGA that produced **100 of 128 findings** (72 ReDoS + 28 XSS), all inside jQuery and
+  Bootstrap. jQuery's internal regex is not your ReDoS and you cannot fix it. Detected by CONTENT —
+  a `/*!` banner with a version or copyright, or a long line that is also DENSE — so an unknown
+  library is caught and an app file named `jquery.js` is not. Density matters: a real source file
+  padded with 25,000 spaces is an oversized scope that must still be analysed, not a bundle.
+  Skips are counted and disclosed as a `walker_policy` gap. DVGA: 128 -> 25 findings, 5.4x faster.
+- **A spec is no longer read as a handler.** A spec-first app has its OpenAPI document promoted to
+  the route list (without that, the whole API reads as zero routes) — but authz then searched that
+  YAML for `requireAuth`/`@login_required`, which a spec never contains, so every route came back
+  unguarded. VAmPI reported 12 missing-auth findings, 6 of them on handlers that DO validate a
+  token. `operationId` now resolves the operation to the file that implements it, falling back to
+  the contract's own `security:` declaration, and leaving the route UNANALYSED when neither is
+  available — a file never read cannot be said to lack a guard. The guard decision is scoped to the
+  named function, because nine operations can share a file and disagree: crediting the file would
+  have cleared `/users/v1/_debug`, an unauthenticated user dump. VAmPI: 17 -> 11, missing-auth 12 -> 6.
+- **Express per-route middleware is credited.** `app.get("/dashboard", isLoggedIn, handler)` is the
+  dominant Express guard form and was invisible: `alias_call` requires a CALL, and here the
+  middleware is an argument REFERENCE. All 20 NodeGoat routes reported unguarded when 12 are
+  protected. Now resolved per registration, through local bindings
+  (`const isLoggedIn = sessionHandler.isLoggedInMiddleware`), and only for names that read as
+  AUTHENTICATION — a role-only name or a `rateLimit` is not proof identity was established, and
+  every registration of a path must be guarded so one protected copy cannot vouch for an
+  unprotected twin. NodeGoat: 39 -> 27, missing-auth 15 -> 3.
+
+Also: target source is parsed with warnings suppressed, so a deprecation or invalid-escape warning
+in the code under analysis (VAmPI raises one) no longer surfaces as output from this tool.
+
+### Changed — README
+
+Corrected five inaccuracies and shortened the trailing review notes: the stale "first PyPI release"
+install caveat (0.16.0 is published), "four ways" over a five-row table, the opening and flow
+diagram implying the static scanners run without `--scan`, and the Docker section claiming the image
+bundles every scanner when it carries Noir + Trivy + Gitleaks + Semgrep + Checkov. Added
+reader-visible links to DocGuard and TestGuard near the introduction.
+
+All additive: no finding, severity, confidence, fingerprint or SARIF output changes on any existing
+fixture, and no probability moves without an explicit human acceptance. New coverage gaps are scope limitations (`execution: false`), so `execution_complete` and
+`--require-complete` semantics are untouched. Specification:
+`specs/002-calibration-honesty-and-structural-coverage/spec.md`.
 ## [0.17.1] — 2026-09-22
 
 ### Fixed

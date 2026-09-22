@@ -12,10 +12,11 @@ A senior pentester's "here's what to test and how" handoff — auto-generated fr
 <!-- docguard:quality negation-load off — "no LLM / no server / no running app / not a SaaS / never touches prod" is this tool's core positioning; defining it by contrast with the scanners-and-SaaS it deliberately is NOT is intentional, not a phrasing defect. -->
 
 > Local-first security recon that **briefs your AI coding agent**. It does the deterministic
-> half — read the repo, map the full attack surface, run + de-duplicate the static scanners, and
-> stage a probe library tailored to what it found — then hands your agent (Claude Code, Codex,
-> Gemini, Cursor) a marching-orders briefing. **Code in, artifacts out. No LLM in the tool, no
-> server, no running app required.**
+> half — read the repo, map the full attack surface, and stage a probe library tailored to what it
+> found — then hands your agent (Claude Code, Codex, Gemini, Cursor) a marching-orders briefing.
+> `websec run` needs nothing but the code; add `--scan` to also run and de-duplicate whichever
+> static scanners you have installed. **Code in, artifacts out. No LLM in the tool, no server, no
+> running app required.**
 
 [![websec-validator demo](assets/demo.gif)](assets/demo.gif)
 
@@ -23,6 +24,12 @@ It is *not* an autonomous scanner and *not* a SaaS. It's the missing front-half:
 turns a repo into a precise, fact-grounded security brief an AI agent (with a human in the loop)
 can act on — an auto-filled, repo-aware version of a senior pentester's "here's what to test and
 how" handoff. How it works + the reasoning behind every check: [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md).
+
+**Part of the Guard family**, three tools that each keep one kind of claim honest:
+[**DocGuard**](https://github.com/raccioly/docguard) validates documentation against the code it
+describes, [**TestGuard**](https://github.com/raccioly/testguard) checks that tests actually
+establish what they assert, and websec-validator does the same for security findings — every
+finding carries its evidence, its standard, and a calibrated probability that it is real.
 
 ## Getting Started — just point it at your repo
 
@@ -36,7 +43,7 @@ It installs, runs, and walks the findings with you. There's nothing to host and 
 local. (Phrasing it as a *defensive review of your own code* matters: it's the difference between an
 agent that just gets to work and one that stops to confirm you're authorized — the tool is local and
 read-only by default, but a generic "pentest this" can read as a request to attack something.) The
-four ways to get there, all ending in the same `AGENT-BRIEFING.md` your agent acts on:
+five ways to get there, all ending in the same `AGENT-BRIEFING.md` your agent acts on:
 
 | Path | One-time setup | Then |
 |---|---|---|
@@ -74,7 +81,7 @@ brew install noir               # OWASP Noir — the route engine (50+ framework
 websec --version
 ```
 
-_Until the first PyPI release publishes (or for bleeding-edge), install straight from source instead:_
+_For bleeding-edge (unreleased changes), install straight from source instead:_
 `pipx install git+https://github.com/raccioly/websec-validator` (or from a clone: `pipx install .`).
 
 Requires **Python 3.11+** (on stock macOS, `python3` is often 3.9 — use `pipx`, which picks a newer
@@ -84,17 +91,20 @@ plus **per-language SAST auto-selected by stack** — Bandit (Python), gosec (Go
 each fired only when its language is detected. It reports what's missing and never hard-fails if a tool
 is absent.
 
-### Or run via Docker (everything bundled, zero install)
+### Or run via Docker (scanners bundled, zero install)
 
-No need to install Noir or any scanner — the image bundles them all (arch-aware, amd64 + arm64):
+No need to install Noir or the scanners separately — the image carries a working set
+(arch-aware, amd64 + arm64):
 
 ```bash
 docker build -t websec-validator .
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/scan" websec-validator run /scan --out /scan/websec-out
 ```
 
-The image carries Noir + Trivy + Gitleaks + Semgrep + Checkov; mount your repo at `/scan` and the
-artifacts land in `/scan/websec-out`.
+The image carries Noir + Trivy + Gitleaks + Semgrep + Checkov — not the full list above, so
+OSV-Scanner, Prowler and the per-language SAST tools (Bandit, gosec, Brakeman) are absent and are
+reported as missing rather than silently skipped. Mount your repo at `/scan`; artifacts land in
+`/scan/websec-out`.
 
 ## Usage
 
@@ -247,12 +257,12 @@ candidates — so probes get pointed at the *exact* endpoints, not fired blindly
 🔧 websec (deterministic)              🤖 your agent + 🧑 you
 ─────────────────────────────────      ─────────────────────────────────
 1. recon → full attack surface     →   confirm the tenant boundary + auth model
-2. run + de-dup static scanners    →   triage real-vs-noise
+2. de-dup scanners (--scan, opt-in)→   triage real-vs-noise
 3. stage tailored probes           →   fill placeholders, run vs a TEST instance
 4. emit AGENT-BRIEFING.md           →   propose fixes, re-run to confirm, report back
 ```
 
-Static recon + briefing need **only the code**. *Running* the probes needs a live test instance +
+Static recon + briefing need **only the code**, and run without `--scan`. *Running* the probes needs a live test instance +
 test credentials (the human supplies them) — the tool itself never touches a running app.
 
 ## CI / enterprise integration
@@ -737,35 +747,18 @@ This tool productizes that hand-written methodology into something an AI agent c
 
 ## Latest source review and adoption
 
-The [upstream overlap review](docs/security-review/upstream-overlap-review.md) compares selected
-open PRs at exact heads with the working implementation. Recompare both target and PR heads before
-future integration, then rerun combined checks; overlapping old-base PRs are not automatically safe
-to apply. No PR was merged as part of that review.
+Snapshot-bound review records live with the artefacts they describe rather than in this README, so
+the numbers cannot drift out of date here:
 
-Django URL discovery parses supported declarations and local include bindings without importing
-settings or executing target code. Unknown mounts remain route candidates with explicit uncertainty.
-A scoped read of pinned Linkding produced 53 candidates and one dynamic mount gap, not 53 confirmed
-HTTP paths. Framework metadata, native React views and browser renderers are distinguished; actual
-browser/HTTP hints remain review scope rather than proof of deployment. See the dated
-[validation record](docs/security-review/validation.md) for snapshot-bound results.
+- [**Validation record**](docs/security-review/validation.md) — dated results bound to exact
+  detector revisions and test counts.
+- [**Upstream overlap review**](docs/security-review/upstream-overlap-review.md) — selected open PRs
+  compared at exact heads. No PR was merged as part of it; recompare both heads before integrating.
+- [**Integration examples**](docs/integrations/README.md) — opt-in pre-commit, PR/weekly workflow and
+  composite Action. They reuse the existing CLI and install nothing on their own.
 
-
-Opt-in [pre-commit and PR/weekly workflow examples](docs/integrations/README.md) reuse the existing
-CLI, native post-commit/pre-push hooks and composite Action. The local example requires an explicit
-trusted Python environment; the hosted example requires a reviewed engine commit and keeps target
-code separate. The examples do not install hooks or activate a hosted schedule. Validation covers
-actual isolated CLI arguments and limited configuration structure, not a full pre-commit/YAML or
-hosted workflow lifecycle.
-
-`research catalog` discovers the shipped `control-scope` suite; `research evaluate --suite
-control-scope` evaluates all three proposals and 24 authored cases. Aggregate and per-proposal
-results retain exact detector revision, partition metrics and uncertainty. An empty, regressed or
-revision-inconsistent suite exits 2. Eligibility means human review, not installation, independent
-real-project validation or measured vulnerability recall.
-
-
-Assigned Python SQL query review now follows supported local assignments and branch joins to the
-query sink, preserving source traces and separate bound-value controls. Loops and cross-function
-behavior remain limited and disclosed. The [final fourth-phase validation](docs/security-review/validation.md)
-records 1082 tests across two Python versions and 15 isolated-wheel checks; historical corpus
-scores remain separate and do not establish full protection.
+Two standing limits worth knowing before you read any of them. Route discovery reports what it can
+parse *without importing settings or executing your code*, so unknown mounts stay route **candidates**
+carrying their uncertainty rather than becoming confirmed paths. And eligibility recorded in these
+documents means human review — not installation, independent real-project validation, or measured
+vulnerability recall.
