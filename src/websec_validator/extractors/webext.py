@@ -42,11 +42,83 @@ ON_MESSAGE_EXTERNAL = re.compile(r"\.onMessageExternal\.addListener")
 BROAD_HOST = re.compile(r"<all_urls>|\*://\*/\*|https?://\*/\*")
 
 
+# `const { origin } = sender;` before the guard is the common modern shape, and it was uncredited:
+# `guarded_body` requires the body to START with `if (`, so any binding in front of the check made
+# the whole handler read as unvalidated. That first-statement rule is deliberate and right — a guard
+# that runs after something has already acted on untrusted input is too late — but a BINDING acts on
+# nothing. So a prologue is allowed only when every statement in it is an inert alias of the sender,
+# and the alias is then rewritten back to `sender.<prop>` so the existing predicate judges the real
+# read rather than a name.
+#
+# Three things keep this from becoming a false negative:
+#   * only `const`/`let`/`var <name> = sender.<id|origin|url>` and `{ id, origin, url }` destructuring
+#     count — anything else in the prologue (a call, an await, an assignment to something else)
+#     abandons the rewrite and leaves the original, stricter behaviour,
+#   * an alias that is REBOUND anywhere in the body disqualifies the whole handler, because the value
+#     checked would not be the value used,
+#   * the prologue must be inert: no call, no await, no increment.
+_ALIAS_PROP = r"(?:id|origin|url)"
+_ALIAS_DESTRUCTURE = re.compile(
+    r"^(?:const|let|var)\s*\{\s*([^{}=;]+?)\s*\}\s*=\s*(\w[\w$]*)\s*;?$")
+_ALIAS_ASSIGN = re.compile(
+    r"^(?:const|let|var)\s+([\w$]+)\s*=\s*(\w[\w$]*)\s*\??\.\s*(" + _ALIAS_PROP + r")\s*;?$")
+_INERT = re.compile(r"""^[\w$\s{}:,.?\[\]'"=-]*$""")
+
+
+def _resolve_sender_aliases(body: str, sender: str) -> str:
+    """Rewrite an inert alias prologue back to direct `sender.<prop>` reads, or return body unchanged.
+
+    Returns "" when an alias is rebound later — the caller must then refuse to credit, because the
+    value that was checked is not the value that gets used.
+    """
+    statements, rest = [], body.strip()
+    aliases: dict = {}
+    while True:
+        head, sep, tail = rest.partition(";")
+        if not sep:
+            break
+        statement = head.strip()
+        if statement.startswith("if") or not statement:
+            break
+        if not _INERT.match(statement):
+            return body                      # a call/await ran before the guard: original rules
+        match = _ALIAS_ASSIGN.match(statement)
+        if match and match.group(2) == sender:
+            aliases[match.group(1)] = match.group(3)
+        else:
+            match = _ALIAS_DESTRUCTURE.match(statement)
+            if not match or match.group(2) != sender:
+                return body                  # an inert binding we cannot attribute to the sender
+            for part in match.group(1).split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                renamed = re.fullmatch(r"(" + _ALIAS_PROP + r")\s*:\s*([\w$]+)", part)
+                if renamed:
+                    aliases[renamed.group(2)] = renamed.group(1)
+                elif re.fullmatch(_ALIAS_PROP, part):
+                    aliases[part] = part
+                else:
+                    return body              # destructuring something other than the sender props
+        statements.append(statement)
+        rest = tail.lstrip()
+    if not aliases or not rest.startswith("if"):
+        return body
+    for alias in aliases:
+        rebind = re.compile(r"\b" + re.escape(alias) + r"\s*(?:=(?!=)|\+\+|--)")
+        if any(not in_literal(rest, m.start()) for m in rebind.finditer(rest)):
+            return ""                        # checked value != used value
+        rest = re.sub(r"\b" + re.escape(alias) + r"\b", f"{sender}.{aliases[alias]}", rest)
+    return rest
+
+
 def _sender_control(scope: dict) -> bool:
     if len(scope["params"]) < 2:
         return False
     sender = scope["params"][1]
-    body = scope["body"]
+    body = _resolve_sender_aliases(scope["body"], sender)
+    if not body:
+        return False                          # an alias was rebound after the check
     # A check on an earlier value does not authorize a replaced sender object.
     mutations = re.finditer(r"\b" + re.escape(sender) + r"(?:\.[\w$]+)?\s*(?:=(?!=)|\+\+|--)", body)
     if any(not in_literal(body, match.start()) for match in mutations):

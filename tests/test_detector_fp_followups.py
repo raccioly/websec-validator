@@ -137,17 +137,48 @@ class SenderControlTests(unittest.TestCase):
         self.assertFalse(_sender_control(
             self.scope('if (sender.origin !== "https://ok.example") return;\nsender = other;\ndo();')))
 
-    def test_a_local_alias_is_deliberately_NOT_credited(self):
-        """#143 shipped alias resolution that never fired end-to-end; it is intentionally absent.
+    def test_an_inert_alias_prologue_is_resolved_back_to_the_sender(self):
+        """`const { origin } = sender;` before the guard is the common modern shape.
 
-        An alias can be reassigned between the binding and the check, so crediting one would turn a
-        missing sender check into silence. If alias support is added later it needs a control
-        proving `let { origin } = sender; origin = "..."` is still reported.
+        `guarded_body` requires the body to START with `if (`, so any binding in front of the check
+        made the handler read as unvalidated. The prologue is now rewritten back to a direct
+        `sender.<prop>` read — but only while every statement in it is an inert sender alias.
         """
-        for body in ('const { origin } = sender;\nif (origin !== "https://ok.example") return;\ndo();',
-                     'const o = sender.origin;\nif (o !== "https://ok.example") return;\ndo();'):
-            with self.subTest(body=body.splitlines()[0]):
-                self.assertFalse(_sender_control(self.scope(body)))
+        for label, body in (
+            ("destructured", 'const { origin } = sender;\nif (origin !== "https://ok.example") return;\ndo();'),
+            ("renamed", 'const { origin: o } = sender;\nif (o !== "https://ok.example") return;\ndo();'),
+            ("assigned", 'const o = sender.origin;\nif (o !== "https://ok.example") return;\ndo();'),
+            ("optional-chained", 'const o = sender?.origin;\nif (o !== "https://ok.example") return;\ndo();'),
+            ("two props", 'const { id, origin } = sender;\nif (origin !== "https://ok.example") return;\ndo();'),
+        ):
+            with self.subTest(label=label):
+                self.assertTrue(_sender_control(self.scope(body)))
+
+    def test_a_REBOUND_alias_is_not_credited(self):
+        """The control that makes alias support safe: checked value != used value."""
+        body = ('let { origin } = sender;\norigin = "https://ok.example";\n'
+                'if (origin === "https://ok.example") { do(); }')
+        self.assertFalse(_sender_control(self.scope(body)))
+
+    def test_a_call_before_the_guard_abandons_the_rewrite(self):
+        """A guard that runs after something acted on untrusted input is too late."""
+        body = ('const o = sender.origin;\nsideEffect(msg);\n'
+                'if (o !== "https://ok.example") return;\ndo();')
+        self.assertFalse(_sender_control(self.scope(body)))
+
+    def test_an_alias_of_something_other_than_the_sender_is_not_credited(self):
+        body = 'const o = msg.claimedOrigin;\nif (o !== "https://ok.example") return;\ndo();'
+        self.assertFalse(_sender_control(self.scope(body)))
+
+    def test_a_wildcard_reached_through_an_alias_is_still_not_a_control(self):
+        body = 'const o = sender.origin;\nif (o !== "*") return;\ndo();'
+        self.assertFalse(_sender_control(self.scope(body)))
+
+    def test_alias_support_does_not_weaken_the_direct_forms(self):
+        """Direct reads must behave exactly as before the prologue rewrite existed."""
+        self.assertTrue(_sender_control(
+            self.scope('if (sender.origin === "https://ok.example") { do(); }')))
+        self.assertFalse(_sender_control(self.scope("do(msg);")))
 
     def test_a_literal_allowlist_still_resolves(self):
         body = 'if (!["https://a.example","https://b.example"].includes(sender.origin)) return;\ndo();'
