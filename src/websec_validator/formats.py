@@ -16,6 +16,7 @@ Stdlib only (json) — no new runtime dependency, consistent with the zero-dep c
 
 from __future__ import annotations
 
+import pathlib
 import re
 from urllib.parse import quote
 from .baseline import fingerprint, legacy_fingerprint
@@ -34,6 +35,14 @@ _SECURITY_SEVERITY = {"CRITICAL": "9.5", "HIGH": "8.0", "MEDIUM": "5.5", "LOW": 
 # A location string is a real file path (→ SARIF physicalLocation) vs. a prose placeholder like
 # "(response headers)" / "set-password paths" / "client" that can't anchor to a file.
 _PATHLIKE = re.compile(r"[\w./\\-]+\.[A-Za-z0-9]{1,6}$")
+# Real repository files that carry no extension, so the extension test alone rejects them.
+# Where a finding with no file is anchored. A path that exists in every repository websec can scan,
+# so Code Scanning can always resolve it; `projectLevel` and `locationHint` say what it really means.
+_PROJECT_ANCHOR = "."
+_EXTENSIONLESS_FILES = {
+    "Dockerfile", "Containerfile", "Makefile", "Jenkinsfile", "Procfile", "Vagrantfile",
+    "Gemfile", "Rakefile", "Brewfile", "Caddyfile", "Justfile", "CODEOWNERS",
+}
 
 
 def _is_pathlike(loc: str) -> bool:
@@ -50,6 +59,10 @@ def _is_pathlike(loc: str) -> bool:
         return False                      # "GET /api/x" — a route, not a file
     if loc.startswith("/") and not _PATHLIKE.search(loc):
         return False                      # "/api/admin/users" — absolute route path, no extension
+    # Extensionless build files are real artifacts. `Dockerfile` failed the extension test and the
+    # "/" test, so an IaC finding that names one exactly lost its location (issue #147).
+    if pathlib.PurePosixPath(loc.replace("\\", "/")).name in _EXTENSIONLESS_FILES:
+        return True
     return bool(_PATHLIKE.search(loc)) or "/" in loc
 
 
@@ -175,7 +188,22 @@ def to_sarif(ledger: dict, facts: dict | None = None, tool_version: str = "0") -
             if loc != path:
                 result["properties"]["locationHint"] = loc
         else:
+            # A project-level finding — deployed response headers, a policy across several routes —
+            # genuinely has no file. SARIF permits that; GitHub Code Scanning does not, and rejects
+            # the ENTIRE upload when any result carries no `locations`, discarding every valid
+            # result with it (issue #147). So anchor it at the repository root: the claim stays
+            # true (the finding is about the project, not about that path), the conceptual location
+            # is preserved verbatim in `locationHint`, and one unanchorable finding can no longer
+            # destroy the whole report.
+            result["locations"] = [{
+                "physicalLocation": {
+                    "artifactLocation": {"uri": _PROJECT_ANCHOR},
+                    "region": {"startLine": 1},
+                },
+                "properties": {"anchoredAtRepositoryRoot": True, "conceptualLocation": loc or ""},
+            }]
             result["properties"]["locationHint"] = loc or "(project-level)"
+            result["properties"]["projectLevel"] = True
         if f.get("baseline_state"):
             state = f["baseline_state"]
             result["properties"]["lifecycleState"] = state

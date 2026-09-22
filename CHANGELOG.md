@@ -73,6 +73,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   to the generic "write a regression test". These were real gaps in the fix prompts independently of
   the triage work, and they are what make the agent-fixable invariant true rather than aspirational.
 
+### Fixed — SARIF results without `locations` no longer reject the whole upload (#147)
+
+GitHub Code Scanning rejects the **entire** SARIF file when any result carries no `locations`, so
+one unanchorable finding discarded every valid result with it — turning a green security posture
+into a red CI job for a reason unrelated to the repository. Two causes, both fixed:
+
+- `Dockerfile` (and `Makefile`, `Jenkinsfile`, `Gemfile`, …) failed the path test, which required
+  an extension or a `/`, so an IaC finding naming one exactly lost its location. Extensionless
+  build files are now recognised as the real artifacts they are.
+- A genuinely project-level finding — deployed response headers, a policy spanning several routes —
+  has no file at all. It is now anchored at the repository root and marked `projectLevel`, with the
+  conceptual location preserved verbatim in `locationHint` and in the location's own properties. A
+  route path is still never emitted as a file URI, which was the original reason these results were
+  left unanchored.
+
+### Added — the report says how to dispute a finding (#141)
+
+The offline-verdict path was undiscoverable from the report itself: findings were listed and
+nothing beside them said how to say one was wrong, so the calibration loop had no way to receive
+the data it most needs. The findings ledger section now names the exact command, states that the
+record is local and metadata-only, that nothing is sent anywhere, that it does **not** suppress
+(`.websec-ignore` is for that), and that a false-positive verdict queues a calibration candidate
+which changes no number until a human accepts it.
+
 ### Added — the calibration table carries measured numbers again
 
 The corpus was relabelled finding by finding against source at the pinned revisions, replacing the

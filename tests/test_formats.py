@@ -50,7 +50,13 @@ class SarifTests(unittest.TestCase):
                 self.assertEqual(physical['region'].get('startColumn'), column)
         route = {**LEDGER['findings'][0], 'location':'/api/records:7'}
         result = formats.to_sarif({'findings':[route]})['runs'][0]['results'][0]
-        self.assertNotIn('locations', result)
+        # The route must never become a file URI — Code Scanning cannot map it. But the result must
+        # still CARRY a location, because Code Scanning rejects the whole upload otherwise (#147),
+        # so it is anchored at the repository root with the route preserved as the hint.
+        uri = result['locations'][0]['physicalLocation']['artifactLocation']['uri']
+        self.assertNotEqual(uri, '/api/records:7')
+        self.assertNotIn('/api/records', uri)
+        self.assertTrue(result['properties']['projectLevel'])
         self.assertEqual(result['properties']['locationHint'], '/api/records:7')
         route.update(file='src/routes.py', line=23)
         result = formats.to_sarif({'findings':[route]})['runs'][0]['results'][0]
@@ -76,7 +82,11 @@ class SarifTests(unittest.TestCase):
     def test_pathlike_vs_prose_location(self):
         r0, r1 = self.run["results"]
         self.assertEqual(r0["locations"][0]["physicalLocation"]["artifactLocation"]["uri"], "src/api.js")
-        self.assertNotIn("locations", r1)                       # prose location can't anchor to a file
+        # Prose cannot anchor to a file, but the result still needs A location or Code Scanning
+        # discards every valid result in the file alongside it (#147).
+        anchor = r1["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        self.assertNotIn("response headers", anchor)
+        self.assertTrue(r1["properties"]["projectLevel"])
         self.assertEqual(r1["properties"]["locationHint"], "(response headers)")
 
     def test_fingerprint_present(self):
