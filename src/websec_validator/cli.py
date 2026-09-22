@@ -229,6 +229,33 @@ def cmd_init(args) -> int:
     said. Proposals are evidence-based and always printed before anything is written."""
     from . import init_scope
     target = _resolve_target(args.target)
+    # --claimspec: export the REVIEWED acknowledgements ALREADY in .websec-ignore as a claimspec v1
+    # `ignore` document (the Guard-family shared format). This reads policy instead of scaffolding
+    # it, so it short-circuits before any proposal is computed and never writes .websec-ignore.
+    if getattr(args, "claimspec", None):
+        doc, report = findings.to_claimspec_ignore(target)
+        payload = json.dumps(doc, indent=2, sort_keys=False) + "\n"
+        if args.claimspec == "-":
+            sys.stdout.write(payload)
+        else:
+            dest = Path(args.claimspec).expanduser().resolve()
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(payload)
+            print(f"websec init --claimspec: wrote {dest} — {report['entries']} entr(y/ies)")
+        # The omissions are the whole point of reporting at all: a claimspec `ignore` document that
+        # silently dropped half the policy would read to an auditor as the complete one. They go to
+        # stderr so `--claimspec -` stays a clean pipe.
+        if not report["complete"]:
+            print("  NOT the complete suppression policy:", file=sys.stderr)
+            if report["omitted_patterns"]:
+                print(f"    {report['omitted_patterns']} path/category pattern(s) omitted — a bare "
+                      ".websec-ignore pattern carries\n      no reason, and claimspec requires one; "
+                      "inventing one would make an unreviewed\n      suppression read as reviewed.",
+                      file=sys.stderr)
+            for row in report["omitted_acknowledgements"]:
+                print(f"    acknowledgement {row['fingerprint']} omitted "
+                      f"({row['state']}): {row['why']}", file=sys.stderr)
+        return EXIT_OK
     proposal = init_scope.propose(target)
     print(f"websec-validator v{__version__} — scope setup for {target}\n")
     if proposal["entries"]:
@@ -1650,6 +1677,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="print the proposed .websec-ignore without writing it")
     i.add_argument("--force", action="store_true",
                    help="replace an existing .websec-ignore (it may hold reviewed acknowledgements)")
+    i.add_argument("--claimspec", metavar="PATH",
+                   help="export the reviewed `fingerprint:` acknowledgements already in "
+                        ".websec-ignore as a claimspec v1 `ignore` document; `-` writes to stdout")
     i.set_defaults(func=cmd_init)
 
     d = sub.add_parser("doctor", help="show which scanners are installed")
