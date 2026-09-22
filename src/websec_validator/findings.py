@@ -643,7 +643,13 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
     _auth = facts.get("auth", {}) or {}
     _jwt_used = bool((_auth.get("signal_counts") or {}).get("jwt")) or bool(_auth.get("jwt_sign_verify_present"))
     for sd in (_auth.get("insecure_secret_defaults", []) or []):
-        if sd.get("dev_ish") and _jwt_used:
+        if sd.get("guarded_by_startup_assertion"):
+            # field report #9: the app asserts this env var at startup and will not boot without it,
+            # so the literal cannot be reached in any environment that runs. Still reported — the
+            # literal should be deleted so the guarantee is local rather than one import away, and an
+            # assertion on a path that never executes would leave the fallback live.
+            sev, conf = "LOW", "MEDIUM"
+        elif sd.get("dev_ish") and _jwt_used:
             sev, conf = "CRITICAL", "MEDIUM"        # dev placeholder + the repo signs JWTs → forgeable
         elif sd.get("dev_ish"):
             sev, conf = "HIGH", "MEDIUM"
@@ -655,6 +661,10 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                         f"{sd.get('literal')!r} — if that fallback is reached at runtime, anyone who reads the "
                         f"source can forge tokens."
                         + (" The repo signs/verifies JWTs." if _jwt_used else "")
+                        + (f" A startup assertion enforces {sd.get('env_var')}, so this fallback is "
+                           "UNREACHABLE in any environment that boots — demoted, not dropped: verify "
+                           "the assertion runs on the path that reads this value, and delete the literal."
+                           if sd.get("guarded_by_startup_assertion") else "")
                         + " Confirm reachability with the forged-token / hs256 probe (it seeds this literal)."}]))
 
     # ---- 1b2. Explicitly-public serverless endpoints (Function URL AuthType: NONE) ----

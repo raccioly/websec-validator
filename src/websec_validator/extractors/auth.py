@@ -50,6 +50,46 @@ SECRET_DEFAULT_JS = re.compile(
 SECRET_DEFAULT_PY = re.compile(
     r"(?:os\.environ\.get|os\.getenv|getenv)\(\s*['\"][^'\"]*" + _SECRET_VAR
     + r"[^'\"]*['\"]\s*,\s*['\"]([^'\"]{3,80})['\"]", re.I)
+# --- startup assertions that make a hard-coded fallback UNREACHABLE (field report #9) -----------
+# `process.env.JWT_SECRET || 'dev-default'` is a real pattern and worth matching — but if the app
+# asserts the variable at startup and refuses to boot without it, the literal is dead code kept for
+# types and local dev. The assertion usually lives in a DIFFERENT file (config/env.ts, a zod schema,
+# an assertEnv() bootstrap), so this is a whole-repo question, collected across the walk and applied
+# once at the end. Demote, never drop: an assertion that is itself never invoked leaves the fallback
+# live, and static analysis cannot prove invocation.
+ENV_ASSERT_TEMPLATES = (
+    r'''if\s*\(\s*!\s*(?:process\.env\.{v}|process\.env\[['"]{v}['"]\])[^)]*\)\s*\{{?[^}}]{{0,200}}?(?:throw|process\.exit|assert|fatal)''',
+    r'''(?:invariant|assert|ok|required|requireEnv|assertEnv|mustGetEnv|getRequiredEnv)\s*\([^)]{{0,120}}{v}''',
+    r'''['"]?{v}['"]?\s*:\s*(?:z|Joi|joi|yup|v|type|envalid|str|num)\b[^,\n]{{0,160}}''',
+    r'''throw\s+new\s+\w*Error\s*\([^)]{{0,200}}{v}''',
+    # Python: a raise/assert naming the variable, or an os.environ[...] (which raises KeyError)
+    r'''(?:raise|assert)[^\n]{{0,160}}{v}''',
+    r'''os\.environ\[\s*['"]{v}['"]\s*\]''',
+)
+# Which env var a fallback expression is about, recovered from the matched text.
+ENV_VAR_IN_FALLBACK = re.compile(
+    r"""(?:process\.env(?:\.([A-Za-z0-9_]+)|\[['"]([A-Za-z0-9_]+)['"]\])"""
+    r"""|(?:os\.environ\.get|os\.getenv|getenv)\(\s*['"]([A-Za-z0-9_]+)['"])""", re.I)
+
+
+def _asserted_env_vars(texts: list, wanted: set) -> set:
+    """Subset of `wanted` that some file in the repo asserts at startup."""
+    found: set = set()
+    if not wanted:
+        return found
+    patterns = {v: [re.compile(t.format(v=re.escape(v)), re.I) for t in ENV_ASSERT_TEMPLATES]
+                for v in wanted}
+    for text in texts:
+        if len(found) == len(wanted):
+            break
+        for var, rxs in patterns.items():
+            if var in found or var not in text:
+                continue
+            if any(rx.search(text) for rx in rxs):
+                found.add(var)
+    return found
+
+
 # placeholder markers that make a fallback unambiguously a non-production dev secret
 SECRET_DEVISH = re.compile(r"dev|do[_-]?not[_-]?use|change[_-]?(?:me|it|this)|placeholder|secret|test"
                            r"|local|example|sample|default|your[_-]|xxx|todo|fixme|123456|password", re.I)
@@ -183,7 +223,8 @@ class AuthExtractor(Extractor):
         jwt = passport = session = apikey = hmac = 0
         guard_files = []
         cookie_names: list[str] = []
-        secret_defaults: list = []          # (file, literal) hard-coded fallback signing secrets
+        secret_defaults: list = []          # (file, literal, matched-expression) fallback signing secrets
+        all_texts: list = []                # every walked file's text, for the startup-assertion sweep
         jwt_sign_verify = False             # does the repo actually sign/verify JWTs?
         cookie_present = False              # any cookie usage (qualifies HMAC as cookie-session)
         broken_auth: list = []              # total auth-bypass backdoors (CRITICAL) — see the regexes above
@@ -251,24 +292,42 @@ class AuthExtractor(Extractor):
             if not cookie_present and COOKIE_PRESENT.search(text):
                 cookie_present = True
             if not _looks_like_example(rel):
-                for mm in SECRET_DEFAULT_JS.finditer(text):
-                    secret_defaults.append((rel, mm.group(1)))
-                for mm in SECRET_DEFAULT_PY.finditer(text):
-                    secret_defaults.append((rel, mm.group(1)))
+                # Keep a window of the SOURCE around each match, not just the match: SECRET_DEFAULT_JS
+                # starts at the variable NAME, so `process.env.` sits to its left and the env var
+                # cannot be recovered from the match alone (which silently disabled the
+                # startup-assertion check — the recon finding stayed HIGH while the semgrep one
+                # correctly demoted).
+                for rx in (SECRET_DEFAULT_JS, SECRET_DEFAULT_PY):
+                    for mm in rx.finditer(text):
+                        secret_defaults.append((rel, mm.group(1),
+                                                text[max(0, mm.start() - 48):mm.end()]))
+            all_texts.append(text)
 
         # Hard-coded fallback signing secret → forgeable-JWT lead (REF-PENTEST #8). De-dup by
         # (file, literal); mark dev-ish placeholders. findings.py escalates dev-ish + jwt-in-use to
         # CRITICAL; probes.stage seeds the literal into the hs256 brute-force candidate list.
         seen_sd: set = set()
         insecure_secret_defaults: list = []
-        for rel_, lit in secret_defaults:
+        # Which env var does each fallback guard? Needed to ask "is THIS one asserted at startup?"
+        pending: list = []
+        for rel_, lit, expr in secret_defaults:
             if (rel_, lit) in seen_sd:
                 continue
             seen_sd.add((rel_, lit))
-            insecure_secret_defaults.append({"file": rel_, "literal": lit,
-                                             "dev_ish": bool(SECRET_DEVISH.search(lit))})
-            if len(insecure_secret_defaults) >= 20:
+            vm = ENV_VAR_IN_FALLBACK.search(expr or "")
+            var = next((g for g in (vm.groups() if vm else ()) if g), "")
+            pending.append({"file": rel_, "literal": lit, "env_var": var,
+                            "dev_ish": bool(SECRET_DEVISH.search(lit))})
+            if len(pending) >= 20:
                 break
+        asserted = _asserted_env_vars(all_texts, {e["env_var"] for e in pending if e["env_var"]})
+        for entry in pending:
+            if entry["env_var"] in asserted:
+                # Reported, but NOT as a live forgeable-JWT lead: findings.py tiers a guarded
+                # fallback down instead of escalating it to CRITICAL.
+                entry["guarded_by_startup_assertion"] = True
+                entry["dev_ish"] = False
+            insecure_secret_defaults.append(entry)
 
         nextauth = "nextauth" in frameworks or any("nextauth" in e.lower() for e in auth_eps)
 
