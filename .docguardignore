@@ -49,3 +49,4 @@ base-research/**
 # comments are not project TODOs, so exclude them from TODO/surface validation.
 src/websec_validator/templates/probes/**
 .claude/**
+.specify/
