@@ -51,8 +51,8 @@ SINKS = {
         r"\s*\(\s*[^)\n;]{0,160}?" + _REQ_SRC)),
     "command-injection": ("ssrf-probes", None, re.compile(
         r"(?:child_process\.exec|\bexecSync|\bexec|\bspawn|os\.system|os\.popen"
-        r"|subprocess\.(?:run|call|check_output|Popen|getoutput|getstatusoutput))\s*\([^)]*"
-        + _U + r"|shell\s*=\s*True")),
+        r"|subprocess\.(?:run|call|check_output|Popen|getoutput|getstatusoutput))\s*\([^)]*(?:"
+        + _U + r"|shell\s*=\s*True)|(?:os\.(?:system|popen)|subprocess\.(?:getoutput|getstatusoutput)|child_process\.exec|\bexecSync|\bexec|\bspawn)\s*\(\s*[a-zA-Z_]\w*\s*\)")),
     "sql-injection": ("bola-write-verbs", "sql", re.compile(
         r"(?:\.query|\.execute|\.raw|cursor\.execute|sequelize\.query|knex\.raw)\s*\([^)]*(?:\$\{|\+|%\s*[\(%]|\.format\s*\(|f['\"])")),
     "nosql-injection": ("bola-write-verbs", "nosql", re.compile(

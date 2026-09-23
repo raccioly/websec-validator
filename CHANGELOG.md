@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Fixed command-injection false negative when calling `os.system` / `os.popen` / `subprocess.getoutput` / `subprocess.getstatusoutput` / `child_process.exec` / `execSync` / `exec` / `spawn` with a simple variable argument.
+
 ## [0.19.0] — 2026-09-22
 
 Migration: **none required.** The one new surface is an opt-in flag, and nothing existing changes
