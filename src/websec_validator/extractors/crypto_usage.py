@@ -23,7 +23,7 @@ import re
 from .base import Extractor, RepoContext, is_test_file
 from .syntax import expression_end, in_literal, js_functions, without_comments
 
-_PW = r"(?:password|passwd|passphrase|\bpwd\b|userPassword|plainPassword)"
+_PW = r"(?:password|passwd|passphrase|\bpwd\b|userPassword|plainPassword)(?![a-zA-Z0-9_]*?(?:[Tt]oken|[Hh]ash|[Ss]alt|[Aa]ttempt|[Rr]eset|[Cc]ount|[Uu]ri|[Uu]rl|[Ii]d\b|[Ff]ile))"
 # a fast digest fed a password-shaped value (either arg order, within a small window)
 WEAK_PW_HASH = re.compile(
     r"createHash\s*\(\s*['\"](?:md5|sha1|sha256|sha224)['\"]\s*\)[\s\S]{0,160}?\.update\s*\([^)]*" + _PW

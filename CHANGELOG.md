@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+- Improved `weak-password-hash` regex in `crypto_usage.py` to prevent false positives when benign variables matching `password` (e.g. `passwordResetToken`, `password_hash`) are used in fast hashes.
+
 ## [0.19.0] — 2026-09-22
 
 Migration: **none required.** The one new surface is an opt-in flag, and nothing existing changes
