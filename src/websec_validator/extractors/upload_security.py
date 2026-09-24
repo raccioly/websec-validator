@@ -26,9 +26,9 @@ DENY_LIST = re.compile(r"isExecutableMimeType|blockedMimeTypes|blacklist|deny[_-
 ALLOW_LIST = re.compile(r"isAllowedMediaType|allowedMimeTypes|allow[_-]?list|whitelist|ALLOWED_(?:MIME|TYPES|EXT)"
                         r"|ACCEPTED_(?:MIME|TYPES?|EXT)|accepted(?:Mime|File|Content)?(?:Types?|Extensions?)"
                         r"|\bfile-type\b|fileTypeFrom|magic[_-]?byte|detectContentType|\.fromBuffer\b|sniff", re.I)
-KEY_FROM_NAME = re.compile(r"(?:Key|key|path|filename|filepath|destination|filename\s*\()\s*[:=(][^;\n]{0,90}"
-                           r"\b(?:originalname|originalName|file\.name)\b"
-                           r"|`[^`]*\$\{[^}]*\boriginalname\b[^}]*\}[^`]*`", re.I)
+KEY_FROM_NAME = re.compile(r"(?:Key|key|path|filepath|destination|filename\s*\()\s*[:=(][^;\n]{0,90}"
+                           r"(?:\b(?:originalname|originalName|file\.name)\b|`[^`]*\$\{[^}]*\b(?:originalname|originalName)\b[^}]*\}[^`]*`)", re.I)
+
 TRUST_CLIENT_MIME = re.compile(r"(?:\b(?:req|request)\.files?(?:\.[\w$]+)*|\bfile)\.mimetype\b|headers\[['\"]content-type['\"]\]", re.I)
 ACCEPT_SVG = re.compile(r"image/svg\+xml|['\"]svg['\"]", re.I)
 # file-serving: streaming a STORED/PROXIED object back to the client. Tightened to genuine
@@ -56,6 +56,25 @@ def _response_file_sites(source: str) -> list[dict]:
             body = args[0] if args else ""
             if not any(not in_literal(body, item.start()) for item in byte_source.finditer(body)):
                 continue
+        elif match[2] == "sendFile":
+            args = split_arguments(expression[expression.find("(") + 1:-1])
+            if args:
+                arg0 = args[0].strip()
+                # Filter out pure string literal arguments for sendFile (e.g., hardcoded static paths)
+                if re.fullmatch(r'''"[^"\\]*"|'[^'\\]*'|`[^`$\\]*`''', arg0):
+                    continue
+
+                # Further heuristics for static sendFile
+                # if options variable is used, check if it contains a root definition before this call
+                if len(args) > 1:
+                    opt_var = args[1].strip()
+                    if opt_var.isalnum():
+                        # Look backward in the source for the assignment of this variable
+                        # e.g., const options = { root: ... }
+                        prefix = source[:match.start()]
+                        if re.search(r'\b' + re.escape(opt_var) + r'\s*=\s*\{[^}]*\broot\s*:', prefix):
+                            continue
+
         sites.append({"start": match.start(), "expression": expression,
                       "kind": match[2] or ("pipe" if match[3] else "response"),
                       "receiver": match[1] or match[3] or ""})
@@ -162,6 +181,28 @@ def _byte_allowlist(scope: dict | None, file_object: str, source: str) -> bool:
     return True
 
 
+
+def _is_safe_mime(source: str, match) -> bool:
+    line_start = source.rfind('\n', 0, match.start()) + 1
+    line_end = source.find('\n', match.start())
+    if line_end == -1:
+        line_end = len(source)
+    line = source[line_start:line_end]
+
+    # We only consider it safe if the specific expression containing the match is a logging call.
+    # To approximate this on a single line safely without parsing AST:
+    # If there is a log call on the line, we check if the log call appears *before* the match
+    # and there are no statement boundaries (; or { or }) between the log call and the match.
+    log_match = re.search(r'\b(?:console\.(?:log|info|debug|warn|error)|logger\.(?:info|debug|warn|error|log))\b', line)
+    if log_match:
+        # Check from log_match to our actual match inside the line
+        match_offset_in_line = match.start() - line_start
+        if log_match.start() < match_offset_in_line:
+            between = line[log_match.end():match_offset_in_line]
+            if not re.search(r'[;{}]', between):
+                return True
+    return False
+
 def _mime_unsafe(source: str, match, scopes: list[dict]) -> bool:
     containing = [scope for scope in scopes if scope["body_start"] <= match.start() < scope["end"]]
     scope = min(containing, key=lambda item: item["end"]-item["start"]) if containing else None
@@ -188,7 +229,7 @@ class UploadSecurityExtractor(Extractor):
                 source = without_comments(text, _p.suffix)
                 scopes = js_functions(source)
                 mime_sites = [match for match in TRUST_CLIENT_MIME.finditer(source)
-                              if not in_literal(source, match.start())]
+                              if not in_literal(source, match.start()) and not _is_safe_mime(source, match)]
                 unsafe_mime = [match for match in mime_sites if _mime_unsafe(source, match, scopes)]
                 deny_sites = [match for match in DENY_LIST.finditer(source) if not in_literal(source, match.start())]
                 if deny_sites and (unsafe_mime or not mime_sites):
