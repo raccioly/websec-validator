@@ -43,8 +43,8 @@ python3 -m unittest discover -s tests
 | a fixed bug / disproven pen-test finding | a dedicated case in `tests/test_pentest_regressions.py` | Regression |
 | entitlement / licensing + WebExtension client-trust classes (`integrations`, `webext`) | a case in `tests/test_entitlement_webext.py` (incl. cross-provider genericity) | Unit / Regression |
 | `src/websec_validator/{cli,dynamic}.py` + safety invariants | a case in `tests/test_hardening.py` | Hardening |
-| analysis scoping (`--only`) in `extractors/base.py` | a parity case in `tests/test_analysis_scope.py` proving scoped findings are a SUBSET of full-tree findings with unchanged severities | Regression |
-| the agent-loop gate (`gate.py`, `agenthook.py`) | a case in `tests/test_gate_command.py` / `tests/test_agent_hook.py`, including fail-open behaviour | Hardening |
+| analysis scoping (`--only`) in `extractors/base.py` | a parity case in `tests/test_analysis_scope.py` proving scoped findings are a SUBSET of full-tree findings with unchanged severities; a path-normalization case in `tests/test_gate_policy_and_scope.py` (dot-directories, dotfiles, `../`) | Regression |
+| the agent-loop gate (`gate.py`, `agenthook.py`) | a case in `tests/test_gate_command.py` / `tests/test_agent_hook.py`, including fail-open behaviour; ignore-policy or scope-attribution changes need a case in `tests/test_gate_policy_and_scope.py` for BOTH entry points | Hardening |
 | any network egress (`registry.py`, `intel.py`) | an offline-contract case proving the DEFAULT pass makes zero socket connections | Hardening |
 | audit-evidence output (`attest.py`) | a guardrail case in `tests/test_attest.py` asserting no verdict is rendered and no citation is misattributed | Hardening |
 
@@ -64,8 +64,8 @@ python3 -m unittest discover -s tests
 | `src/websec_validator/proof.py` | `tests/test_proof_revisions.py`: pinned revisions, mismatch and unavailable diagnostics | ✅ |
 | `src/websec_validator/cli.py` | `tests/test_workbench_cli.py`: bounded command inputs, new-only outputs and validated documentation examples | ✅ |
 | `src/websec_validator/formats.py` | `tests/test_formats.py`, `tests/test_openapi.py`, `tests/test_graph_enrich.py`: schema 2.0, SARIF enums, scoped reads and distinct input origins | ✅ |
-| `src/websec_validator/gate.py` | `tests/test_gate_command.py`: working-tree target selection, thresholds, writes-nothing, and verdict text that states it is not a review | ✅ |
-| `src/websec_validator/agenthook.py` | `tests/test_agent_hook.py`: blocking on a real finding, failing OPEN and loudly on an internal error, no env escape hatch, malformed events, out-of-repo paths | ✅ |
+| `src/websec_validator/gate.py` | `tests/test_gate_command.py`: working-tree target selection, thresholds, writes-nothing, and verdict text that states it is not a review. `tests/test_gate_policy_and_scope.py`: `.websec-ignore` parity with `run` (active/expired/reasonless acknowledgements, `category:` suppression, scoped fingerprint equals the run's), and attribution scoping (outside-scope needs an existing unrequested file; route-only, missing and root-escaping paths keep gating) | ✅ |
+| `src/websec_validator/agenthook.py` | `tests/test_agent_hook.py`: blocking on a real finding, failing OPEN and loudly on an internal error, no env escape hatch, malformed events, out-of-repo paths. `tests/test_gate_policy_and_scope.py`: honours the same acknowledgement as `websec gate`; an unrelated edit is not blocked by a manifest finding, an edit to the manifest is | ✅ |
 | `src/websec_validator/registry.py` | `tests/test_registry_existence.py`: offline suppression before any request, host allowlist, UNKNOWN never reported as missing, and the removed-vs-hallucinated split | ✅ |
 | `src/websec_validator/attribution.py` | `tests/test_attribution.py`: computed assurance tiers, self-asserted values never promoted, and isolation from `verification_context` | ✅ |
 | `src/websec_validator/attest.py` | `tests/test_attest.py`: no verdict/score/badge, gaps ordered before evidence, exact regulatory citations, unsigned in-toto shape | ✅ |

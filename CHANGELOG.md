@@ -22,8 +22,9 @@ blocks on noise trains the agent to ignore the hook, which costs the one finding
   computes the same fingerprint as the unscoped run, so an acknowledgement written from `run`
   output matches in the loop — pinned by test.
 - **Findings outside `--only` no longer gate the scope.** Some extractors read config manifests
-  directly whatever `--only` names (the `wrangler.jsonc` route table here), so a scoped check about
-  one file blocked on a finding attributed to another. A finding now gates only when it names a
+  directly whatever `--only` names — the CI-workflow checks always, and with the optional OWASP Noir
+  engine a `wrangler.jsonc` route table (the field report) — so a scoped check about one file
+  blocked on a finding attributed to another. A finding now gates only when it names a
   requested path. It is reported under `outside_scope` — never dropped silently — when it names a
   *different file that exists in the repository*; anything less (a route-only location, a path
   that does not exist or escapes the root) cannot be shown to be outside the scope and keeps

@@ -29,8 +29,8 @@ HONEST LIMITS, surfaced in the verdict rather than buried in docs:
   * Cross-file evidence outside the scope is not consulted. Measured on this project, scoping never
     INVENTED a finding (0 new across 17 files), which is the property that matters for a gate.
   * `missed` paths were never analyzed. Their absence from the findings is not a clean result.
-  * Some extractors read config manifests directly (a `wrangler.jsonc` route table, for one) no
-    matter what `--only` names, so a scoped pass can still produce a finding ATTRIBUTED to a file
+  * Some extractors read manifests directly (CI workflows; with OWASP Noir, a `wrangler.jsonc`
+    route table) no matter what `--only` names, so a scoped pass can still produce a finding ATTRIBUTED to a file
     outside the scope. That finding was not caused by this edit; it is reported under
     `outside_scope` and does not gate. A finding that names no repository file cannot be shown to
     be outside the scope, so it still gates — the safe direction for an unattributable result.

@@ -17,6 +17,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -36,8 +37,20 @@ def ping():
     return subprocess.check_output("ping -c1 " + host, shell=True)
 '''
 
-# A Worker whose route table lives in a config manifest. The routes extractor reads it directly,
-# regardless of `--only`, and attributes a missing-authorization lead to `wrangler.jsonc`.
+# A CI workflow is read by the iac_ci extractor directly, whatever `--only` names — the stdlib
+# path to the same defect, so the tests do not depend on an optional route engine.
+WORKFLOW = """name: ci
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make test
+"""
+
+# The field report's shape: a Worker whose route table lives in a config manifest. Only the
+# optional OWASP Noir route engine turns it into an endpoint, so that test skips without Noir.
 WRANGLER = '''{
   "name": "demo",
   "main": "src/index.ts",
@@ -155,46 +168,63 @@ class GateHonoursIgnorePolicyTests(unittest.TestCase):
 class GateScopeAttributionTests(unittest.TestCase):
     """Defect 2: a finding attributed to a file outside `--only` must not gate that scope."""
 
+    WORKFLOW_PATH = ".github/workflows/ci.yml"
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.repo = Path(self.temp.name).resolve() / "w"
         (self.repo / "src").mkdir(parents=True)
-        (self.repo / "wrangler.jsonc").write_text(WRANGLER)
-        (self.repo / "package.json").write_text('{"name":"demo","devDependencies":{"wrangler":"4.0.0"}}\n')
-        (self.repo / "src" / "index.ts").write_text(
-            'export default { async fetch(r: Request) { return new Response("ok"); } };\n')
-        (self.repo / "src" / "util.ts").write_text(
-            "export const add = (a: number, b: number) => a + b;\n")
+        (self.repo / ".github" / "workflows").mkdir(parents=True)
+        (self.repo / self.WORKFLOW_PATH).write_text(WORKFLOW)
+        (self.repo / "src" / "util.py").write_text("def add(a, b):\n    return a + b\n")
         _git_repo(self.repo)
+        # Precondition, so a detector change cannot turn every assertion below vacuous: the
+        # manifest finding exists and a scoped pass over an unrelated file still produces it.
+        scoped = findings.build_ledger(recon.build_facts(self.repo, "t", only=["src/util.py"]), None)
+        self.assertIn(self.WORKFLOW_PATH, [f.get("location") for f in scoped["findings"]
+                                           if f.get("severity") in ("MEDIUM", "HIGH", "CRITICAL")])
 
     def test_manifest_finding_outside_the_scope_does_not_block(self):
-        code, result = _gate_json(self.repo, "--only", "src/util.ts")
+        code, result = _gate_json(self.repo, "--only", "src/util.py")
         self.assertEqual(code, 0, result)
         self.assertEqual(result["findings"], [])
-        self.assertEqual(result["outside_scope_count"], 1)
-        self.assertEqual(result["outside_scope"][0]["file"], "wrangler.jsonc")
+        self.assertGreaterEqual(result["outside_scope_count"], 1)
+        self.assertIn(self.WORKFLOW_PATH, [f["file"] for f in result["outside_scope"]])
         self.assertIn("did not cause them", result["outside_scope_note"])
 
     def test_the_same_finding_still_blocks_when_its_file_is_requested(self):
         """Attribution narrows the gate to the edit; it never hides a finding about the edit."""
-        code, result = _gate_json(self.repo, "--only", "wrangler.jsonc")
+        code, result = _gate_json(self.repo, "--only", self.WORKFLOW_PATH)
         self.assertEqual(code, 1)
-        self.assertEqual(result["findings"][0]["file"], "wrangler.jsonc")
-        self.assertEqual(result["findings"][0]["scope"], "in-scope")
+        self.assertTrue(all(f["scope"] == "in-scope" for f in result["findings"]))
 
     def test_agent_hook_does_not_block_an_unrelated_edit(self):
-        self.assertEqual(_hook(_event(self.repo, self.repo / "src" / "util.ts")), 0)
+        self.assertEqual(_hook(_event(self.repo, self.repo / "src" / "util.py")), 0)
+
+    def test_agent_hook_still_blocks_an_edit_to_the_manifest(self):
+        self.assertEqual(_hook(_event(self.repo, self.repo / self.WORKFLOW_PATH)), 2)
 
     def test_pass_text_discloses_what_was_set_aside(self):
-        result = gate.evaluate(self.repo, ["src/util.ts"], "medium", version="t",
+        result = gate.evaluate(self.repo, ["src/util.py"], "medium", version="t",
                                scope_source="explicit")
-        self.assertIn("1 outside the changed files", gate.render_text(result))
+        self.assertIn("outside the changed files", gate.render_text(result))
 
     def test_run_still_reports_the_manifest_finding(self):
         """Out of the gate's scope is not out of the review: the unscoped ledger keeps it."""
         ledger = findings.build_ledger(recon.build_facts(self.repo, "t"), None)
-        self.assertIn("wrangler.jsonc", [f.get("file") for f in ledger["findings"]])
+        self.assertIn(self.WORKFLOW_PATH, [f.get("location") for f in ledger["findings"]])
+
+    @unittest.skipUnless(shutil.which("noir"), "the wrangler route table needs the optional OWASP Noir engine")
+    def test_field_report_wrangler_route_does_not_block_an_unrelated_edit(self):
+        (self.repo / "wrangler.jsonc").write_text(WRANGLER)
+        (self.repo / "src" / "index.ts").write_text(
+            'export default { async fetch(r: Request) { return new Response("ok"); } };\n')
+        code, result = _gate_json(self.repo, "--only", "src/util.py")
+        self.assertEqual(code, 0, result)
+        self.assertIn("wrangler.jsonc", [f["file"] for f in result["outside_scope"]])
+        code, _ = _gate_json(self.repo, "--only", "wrangler.jsonc")
+        self.assertEqual(code, 1)
 
 
 class ScopeStateUnitTests(unittest.TestCase):

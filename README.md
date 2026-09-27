@@ -465,8 +465,8 @@ advances an accepted baseline.
 `gate` applies `.websec-ignore` exactly as `run` does: an active `fingerprint:` acknowledgement is
 reported under `acknowledged` and does not block; an expired or reasonless one excuses nothing. A
 finding blocks only when it names a file you asked about. One attributed to a *different*
-repository file — some extractors read config manifests such as `wrangler.jsonc` whatever
-`--only` names — is reported under `outside_scope` instead; one that names no file at all still
+repository file — some extractors read CI workflows or config manifests such as `wrangler.jsonc`
+whatever `--only` names — is reported under `outside_scope` instead; one that names no file at all still
 blocks, because it cannot be shown to be outside the scope.
 
 The default threshold is **medium, not high**: command injection and SSRF on agent-written code are
