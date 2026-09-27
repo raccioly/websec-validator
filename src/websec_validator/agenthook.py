@@ -115,13 +115,11 @@ def run(event: dict | None = None, *, env: dict | None = None) -> int:
     #   * it avoids a second interpreter start (~0.2s) on every edit.
     # The harness's own hook timeout is the outer guard.
     try:
-        from . import findings as _findings, gate as _gate, recon as _recon
+        from . import gate as _gate
         from . import __version__ as _version
-        facts = _recon.build_facts(Path(root), _version, only=relative)
-        ledger = _findings.build_ledger(facts, None)
-        result = _gate.verdict(ledger, facts, env.get("WEBSEC_GATE_FAIL_ON", "medium"),
-                               scope_source="agent-hook",
-                               min_confidence=env.get("WEBSEC_GATE_MIN_CONFIDENCE", "low"))
+        result = _gate.evaluate(Path(root), relative, env.get("WEBSEC_GATE_FAIL_ON", "medium"),
+                                version=_version, scope_source="agent-hook",
+                                min_confidence=env.get("WEBSEC_GATE_MIN_CONFIDENCE", "low"))
     except Exception as error:
         # FAIL OPEN, LOUDLY. A security check that blocks every edit when it is broken gets
         # uninstalled within the hour, and then there is no check at all.

@@ -960,10 +960,10 @@ def cmd_gate(args) -> int:
                                  "reason": "no changed files to analyze"}))
             return 0
 
-    facts = recon.build_facts(target, __version__, getattr(args, "exclude", None), only=paths)
-    ledger = findings.build_ledger(facts, None)
-    result = _gate.verdict(ledger, facts, args.fail_on, scope_source=scope_source,
-                           min_confidence=getattr(args, "min_confidence", "low"))
+    result = _gate.evaluate(target, paths, args.fail_on, version=__version__,
+                            scope_source=scope_source,
+                            min_confidence=getattr(args, "min_confidence", "low"),
+                            excludes=getattr(args, "exclude", None))
 
     # --fail-on-missed is applied HERE, not inside verdict(): `verdict` answers "are there blocking
     # findings in what was analysed", and a path that was never analysed produced no finding to

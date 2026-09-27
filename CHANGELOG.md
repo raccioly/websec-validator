@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+### Fixed — `websec gate` answers the same policy question `run` does, about the files it was given
+
+Field report: in a Cloudflare Worker repository every agent edit drew a blocking `PostToolUse`
+error about `wrangler.jsonc` — a file the agent never touched, carrying a finding already reviewed
+and acknowledged in `.websec-ignore`. `run` acknowledged it; `gate` blocked on it. A hook that
+blocks on noise trains the agent to ignore the hook, which costs the one finding that is real.
+
+- **`.websec-ignore` now applies in the gate and the agent hook.** Both built the ledger with no
+  ignore policy, so `fingerprint:` acknowledgements and path/`category:` suppressions that `run`
+  honours were silently dropped — independently, in two places. Both now call one shared
+  `gate.evaluate()`, which loads the policy exactly as `run` does, so the two entry points cannot
+  drift apart again. Expiry semantics are `run`'s own: an active acknowledgement moves the finding
+  to `acknowledged` (reported, not gating); an expired, malformed or reasonless one excuses nothing
+  and the finding gates with its `reopened_reason`, which the retry text now shows. A scoped pass
+  computes the same fingerprint as the unscoped run, so an acknowledgement written from `run`
+  output matches in the loop — pinned by test.
+- **Findings outside `--only` no longer gate the scope.** Some extractors read config manifests
+  directly whatever `--only` names (the `wrangler.jsonc` route table here), so a scoped check about
+  one file blocked on a finding attributed to another. A finding now gates only when it names a
+  requested path. It is reported under `outside_scope` — never dropped silently — when it names a
+  *different file that exists in the repository*; anything less (a route-only location, a path
+  that does not exist or escapes the root) cannot be shown to be outside the scope and keeps
+  gating, the safe direction. `run` still reports and gates every one of them.
+- **`--only` matches paths under dot-directories and dotfiles.** The scope was normalized with
+  `.lstrip("./")`, which strips characters rather than a prefix: `.github/scripts/triage.py` became
+  `github/scripts/triage.py`, matched nothing, and was reported *missed* — so the gate never
+  analysed `.github/**`, `.husky/**`, `.storybook/**` or `.eslintrc.js`. It also rewrote
+  `../app.py` into `app.py`, analysing a root file nobody requested. `Path()` already removes a
+  leading `./`; the strip is gone.
+- The gate verdict gains `acknowledged`/`acknowledged_count`, `outside_scope`/
+  `outside_scope_count`, and a per-finding `fingerprint`, `scope` and (when an acknowledgement
+  lapsed) `reopened_reason`. All additive. A pass that set findings aside now says so
+  (`not gating: 1 acknowledged in .websec-ignore`), so it never reads as "nothing was there".
+
 ## [0.19.0] — 2026-09-22
 
 Migration: **none required.** The one new surface is an opt-in flag, and nothing existing changes

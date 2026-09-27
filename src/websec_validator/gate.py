@@ -29,16 +29,26 @@ HONEST LIMITS, surfaced in the verdict rather than buried in docs:
   * Cross-file evidence outside the scope is not consulted. Measured on this project, scoping never
     INVENTED a finding (0 new across 17 files), which is the property that matters for a gate.
   * `missed` paths were never analyzed. Their absence from the findings is not a clean result.
+  * Some extractors read config manifests directly (a `wrangler.jsonc` route table, for one) no
+    matter what `--only` names, so a scoped pass can still produce a finding ATTRIBUTED to a file
+    outside the scope. That finding was not caused by this edit; it is reported under
+    `outside_scope` and does not gate. A finding that names no repository file cannot be shown to
+    be outside the scope, so it still gates — the safe direction for an unattributable result.
+  * `.websec-ignore` applies exactly as it does in `run`: path/category suppressions drop, active
+    `fingerprint:` acknowledgements move a finding to `acknowledged`, and an expired, malformed or
+    reasonless acknowledgement excuses nothing (the finding gates with its `reopened_reason`).
 """
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
 SEV_ORDER = ["low", "medium", "high", "critical"]
 _TIMEOUT = 20
 _MAX_FILES = 200
+_LIST_CAP = 20
 
 # Analyzing a file is pointless if no detector reads that suffix; this only trims the scope, it
 # never suppresses a finding (an unlisted suffix would produce none anyway).
@@ -101,6 +111,79 @@ def working_tree_paths(repo: Path) -> dict:
 CONF_ORDER = ["low", "medium", "high"]
 
 
+def evaluate(root: Path, paths: list, threshold: str, *, version: str, scope_source: str,
+             min_confidence: str = "low", excludes: list | None = None) -> dict:
+    """The one gate path, shared by `websec gate` and the PostToolUse hook.
+
+    Both used to build the ledger themselves with no ignore policy, and drifted from `run`
+    identically: a finding reviewed and acknowledged in `.websec-ignore` blocked every agent edit.
+    One function means the policy cannot be dropped from one entry point and kept in the other.
+    """
+    from . import findings, recon
+    from .extractors.base import RepoContext
+    root = Path(root)
+    facts = recon.build_facts(root, version, excludes, only=paths)
+    # One non-walking context serves both reads: `load_*` would otherwise walk the whole tree
+    # twice more, tripling the cost of a check that runs on every edit.
+    policy = RepoContext(root, walk=False)
+    ledger = findings.build_ledger(facts, None, None,
+                                   findings.load_suppressions(root, context=policy),
+                                   findings.load_acknowledgements(root, context=policy))
+    return verdict(ledger, facts, threshold, scope_source=scope_source,
+                   min_confidence=min_confidence)
+
+
+def _scope_key(path: str) -> str:
+    # The exact normalization RepoContext applies to `only`, so both sides compare alike.
+    return Path(path).as_posix()
+
+
+def _named_paths(finding: dict, root: Path | None) -> list[str]:
+    """Repository-relative paths a finding names: its `file` and its `location` minus :line."""
+    out = []
+    for value in (finding.get("file"), finding.get("location")):
+        value = re.sub(r":L?\d+(?::\d+)?$", "", str(value or "").replace("\\", "/"))
+        if not value:
+            continue
+        if Path(value).is_absolute():
+            # A route location (/api/users) is absolute-looking too; only a path under the root
+            # can name a repository file.
+            try:
+                value = Path(value).relative_to(root).as_posix() if root else ""
+            except ValueError:
+                value = ""
+        if value and value not in out:
+            out.append(value)
+    return out
+
+
+def _is_repo_file(root: Path, rel: str) -> bool:
+    try:
+        resolved = (root / rel).resolve()
+        resolved.relative_to(root.resolve())
+        return resolved.is_file()
+    except (OSError, ValueError, RuntimeError):
+        return False
+
+
+def scope_state(finding: dict, requested: list, root: Path | None) -> str:
+    """'in-scope' | 'outside-scope' | 'unattributed' for one finding against the requested paths.
+
+    Outside-scope needs POSITIVE evidence: the finding names a file that exists in the repository
+    and is not one of the requested paths. A route-only location or a missing file proves nothing
+    about where the finding came from, so it stays gating ('unattributed').
+    """
+    if not requested:
+        return "in-scope"
+    wanted = {_scope_key(p) for p in requested}
+    named = _named_paths(finding, root)
+    if any(_scope_key(p) in wanted for p in named):
+        return "in-scope"
+    if root is not None and any(_is_repo_file(root, p) for p in named):
+        return "outside-scope"
+    return "unattributed"
+
+
 def verdict(ledger: dict, facts: dict, threshold: str, *, scope_source: str = "explicit",
             min_confidence: str = "low") -> dict:
     """Pass/fail plus everything a harness needs to explain the decision to a model.
@@ -129,8 +212,14 @@ def verdict(ledger: dict, facts: dict, threshold: str, *, scope_source: str = "e
         # dropping a finding because its confidence could not be graded is the wrong direction.
         return conf not in CONF_ORDER or CONF_ORDER.index(conf) >= conf_floor
 
-    blocking = [f for f in ledger.get("findings", []) or [] if _blocks(f)]
     scope = facts.get("analysis_scope") or {}
+    root = Path(facts["target"]) if facts.get("target") else None
+    in_scope, outside = [], []
+    for f in ledger.get("findings", []) or []:
+        state = scope_state(f, scope.get("requested") or [], root)
+        (outside if state == "outside-scope" else in_scope).append((f, state))
+    blocking = [(f, state) for f, state in in_scope if _blocks(f)]
+    acknowledged = ledger.get("acknowledged", []) or []
     out = {
         "tool": "websec-validator",
         "command": "gate",
@@ -145,12 +234,35 @@ def verdict(ledger: dict, facts: dict, threshold: str, *, scope_source: str = "e
         "findings": [{"severity": f.get("severity"), "confidence": f.get("confidence"),
                       "title": f.get("title"), "file": f.get("file"), "line": f.get("line"),
                       "attack_class": f.get("attack_class"), "rule_id": f.get("rule_id"),
-                      "remediation": f.get("remediation")}
-                     for f in blocking],
+                      "remediation": f.get("remediation"), "fingerprint": f.get("fingerprint"),
+                      "scope": state,
+                      **({"reopened_reason": f["reopened_reason"]}
+                         if f.get("reopened_reason") else {})}
+                     for f, state in blocking],
+        "outside_scope_count": len(outside),
+        "outside_scope": [{"severity": f.get("severity"), "title": f.get("title"),
+                           "file": f.get("file") or f.get("location"),
+                           "fingerprint": f.get("fingerprint")}
+                          for f, _ in outside[:_LIST_CAP]],
+        "acknowledged_count": len(acknowledged),
+        "acknowledged": [{"severity": f.get("severity"), "title": f.get("title"),
+                          "file": f.get("file") or f.get("location"),
+                          "fingerprint": f.get("fingerprint"),
+                          "expires": (f.get("acknowledgement") or {}).get("expires"),
+                          "reason": f.get("ack_reason")}
+                         for f in acknowledged[:_LIST_CAP]],
         "scope_note": ("a scoped pass over the files just changed. This is a fast retry signal, not "
                        "a review: cross-file evidence outside the scope was not consulted, and a "
                        "clean result here does not mean the repository is clean."),
     }
+    if outside:
+        out["outside_scope_note"] = ("findings attributed to repository files OUTSIDE the requested "
+                                     "scope (typically read directly from a config manifest). This "
+                                     "edit did not cause them and they do not gate here; `websec "
+                                     "run` still reports and gates them")
+    if acknowledged:
+        out["acknowledged_note"] = ("findings matched by an active `fingerprint:` acknowledgement in "
+                                    ".websec-ignore; shown, not gating, exactly as in `websec run`")
     if out["missed"]:
         out["missed_note"] = ("these requested paths were never analyzed (excluded, generated, "
                               "unsupported suffix or absent); their absence from the findings is "
@@ -163,6 +275,12 @@ def render_text(result: dict) -> str:
     if result["passed"]:
         n = len(result["analyzed"])
         missed = len(result.get("missed") or [])
+        # Say what was set aside, so a pass never reads as "nothing was there at all".
+        aside = [f"{c} {label}" for c, label in
+                 ((result.get("acknowledged_count", 0), "acknowledged in .websec-ignore"),
+                  (result.get("outside_scope_count", 0), "outside the changed files"))
+                 if c]
+        tail = f"; not gating: {', '.join(aside)}" if aside else ""
         # A pass over zero analysed files is the reading that must never look clean. The verdict
         # itself is unchanged (see `verdict`'s contract and test_gate_command); only the sentence
         # the model reads is, because a bare "pass (0 file(s) analyzed)" is indistinguishable from
@@ -170,11 +288,11 @@ def render_text(result: dict) -> str:
         if missed and not n:
             return (f"websec gate: pass — but 0 file(s) were analyzed and {missed} requested path(s) "
                     f"were never looked at (threshold {result['threshold']}). "
-                    "This is NOT a clean result: " + result.get("missed_note", ""))
+                    "This is NOT a clean result: " + result.get("missed_note", "") + tail)
         if missed:
             return (f"websec gate: pass ({n} file(s) analyzed, threshold {result['threshold']}) — "
-                    f"{missed} requested path(s) never analyzed; not a clean result for those")
-        return f"websec gate: pass ({n} file(s) analyzed, threshold {result['threshold']})"
+                    f"{missed} requested path(s) never analyzed; not a clean result for those{tail}")
+        return f"websec gate: pass ({n} file(s) analyzed, threshold {result['threshold']}){tail}"
     lines = [f"websec gate: FAILED — {result['blocking_count']} finding(s) at or above "
              f"{result['threshold']} in the files just changed.", ""]
     for f in result["findings"][:10]:
@@ -184,6 +302,8 @@ def render_text(result: dict) -> str:
         lines.append(f"  [{f.get('severity')}] {where} — {f.get('title')}")
         if f.get("remediation"):
             lines.append(f"      fix: {f['remediation']}")
+        if f.get("reopened_reason"):
+            lines.append(f"      note: {f['reopened_reason']} (fingerprint {f.get('fingerprint')})")
     if result["blocking_count"] > 10:
         lines.append(f"  … and {result['blocking_count'] - 10} more")
     lines += ["", "Fix these, then the check will re-run on the next edit.",
