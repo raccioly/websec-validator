@@ -216,7 +216,7 @@ websec knows it statically, so it aims them:
   scan back — confirming or refuting each prediction — so `P(real)` personalizes to your app over time.
   Blind-spot classes are never scored: a scanner's silence there means nothing.
 
-## What it extracts (22 deterministic extractors, no LLM)
+## What it extracts (25 deterministic extractors, no LLM)
 
 | | Dimension | Notable output |
 |---|---|---|
@@ -694,7 +694,7 @@ omit an independent version field. Check both sources when diagnosing stale inst
 
 ## Status / roadmap
 
-Version 0.18.0 provides 22 recon extractors, eleven optional scanner entries, nine named profiles,
+Version 0.18.0 provides 25 recon extractors, eleven optional scanner entries, nine named profiles,
 SARIF import/export, bounded source/query analysis, explicit coverage and lifecycle evidence,
 intelligence/research commands, and opt-in agent/hook/CI adoption. It adds an in-loop security gate
 (`websec gate` and a `PostToolUse` hook), analysis scoping with `--only`, an opt-in dependency

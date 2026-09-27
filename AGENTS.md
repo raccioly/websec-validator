@@ -75,7 +75,7 @@ content instead of overwriting the name-guard.
 ### AI Agent Workflow
 
 1. **Before any work**: read `docs-canonical/` and run `docguard guard` to see the compliance state.
-2. **After changing code or docs**: re-run `docguard guard`; keep the numbers (22 extractors, 17 sink
+2. **After changing code or docs**: re-run `docguard guard`; keep the numbers (25 extractors, 17 sink
    classes, 11 scanner entries, 1579 tests, dated 10/10 proof (not vulnerability recall)) consistent across every doc — DocGuard's metrics-consistency
    validator cross-checks them.
 3. **Update `CHANGELOG.md`** for any user-visible change.
