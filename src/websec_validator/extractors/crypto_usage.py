@@ -100,7 +100,12 @@ def _unparenthesized(value: str) -> str:
 
 
 # Identifier-shaped arguments: not credentials, so hashing them weakly is not a password-hash bug.
-_NON_CREDENTIAL_ARGUMENT = re.compile(r"(?:^|\.)(?:id|email|userId|user_id|tenantId|tenant_id)$", re.I)
+_NON_CREDENTIAL_ARGUMENT = re.compile(
+    r"(?:^|\.)(?:id|email|userId|user_id|tenantId|tenant_id)$|"
+    r"(?:^|\.)(?:username|org_id|organizationId|session_id|sessionId|token|nonce|ts|timestamp)$|"
+    r"crypto\.randomBytes|randomBytes|uuid|uuidv4|crypto\.randomUUID|Date\.now",
+    re.I
+)
 
 
 def _credential_operand(value: str) -> bool:
