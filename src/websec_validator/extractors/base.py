@@ -301,7 +301,12 @@ class RepoContext:
         self.all_code_files: list[Path] = []
         self.scope: set[str] | None = None
         if only:
-            self.scope = {Path(str(p)).as_posix().lstrip("./") for p in only if str(p).strip()}
+            # Path() already drops a leading "./". `.lstrip("./")` used to follow it, and lstrip
+            # removes CHARACTERS, not a prefix: `.github/scripts/triage.py` became
+            # `github/scripts/triage.py`, matched nothing, and every code file under a
+            # dot-directory or named as a dotfile (.husky/*.js, .eslintrc.js) was reported missed
+            # — never analyzed by the gate. It also turned `../app.py` into `app.py`.
+            self.scope = {Path(str(p)).as_posix() for p in only if str(p).strip()}
         self.scope_requested: list[str] = sorted(self.scope) if self.scope else []
         self.scope_matched: list[str] = []
         self.scope_missed: list[str] = []
