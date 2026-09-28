@@ -31,14 +31,14 @@ that makes the agent + human dramatically more effective.
 ## Component Map
 
 The tool is a single pure-Python package, `src/websec_validator/`. Recon walks the repo **once** into a
-shared `RepoContext`, then runs 22 extractors over it; the downstream modules turn those facts into
+shared `RepoContext`, then runs 25 extractors over it; the downstream modules turn those facts into
 scanner runs, a calibrated findings ledger, staged probes, and the briefing/report artifacts.
 
 | Component | Responsibility | Location | Tests |
 |-----------|---------------|----------|-------|
 | CLI entry point | Arg parsing + the `run` (with `--format`/`--fail-on`/`--baseline`) / `doctor` / `dynamic` / `mcp` commands (and hidden `recon` / `proof` / `calibrate`) | `src/websec_validator/cli.py` | `tests/test_recon.py`, `tests/test_hardening.py` |
 | Recon driver | Thin wrapper that runs the extractor registry over one repo walk | `src/websec_validator/recon.py` | `tests/test_recon.py` |
-| Extractors (22) | One focused question each → the merged `FACTS.json` (stack, routes, auth, authz, **authz_dataflow**, tenant, password_policy, surface, schemas, iac_ci, client_exposure, client_integrity, transport_security, graphql, upload_security, pii_exposure, integrations, **llm_security**, **crypto_usage**, **webext**, **agent_config**, **offline_deps**) | `src/websec_validator/extractors/` | `tests/test_recon.py`, `tests/test_pentest_regressions.py`, `tests/test_entitlement_webext.py` |
+| Extractors (25) | One focused question each → the merged `FACTS.json` (stack, routes, auth, authz, **authz_dataflow**, tenant, password_policy, surface, schemas, iac_ci, client_exposure, client_integrity, transport_security, graphql, upload_security, pii_exposure, integrations, **llm_security**, **crypto_usage**, **webext**, **agent_config**, **offline_deps**) | `src/websec_validator/extractors/` | `tests/test_recon.py`, `tests/test_pentest_regressions.py`, `tests/test_entitlement_webext.py` |
 | Static scanners | Detect + (with `--scan`) shell out to Trivy/Gitleaks/Semgrep/Checkov/Prowler and de-duplicate across tools | `src/websec_validator/scanners.py` | `tests/test_recon.py` |
 | Findings ledger | Correlate recon + static + dynamic into one ranked, standards-cited, calibrated record set | `src/websec_validator/findings.py` | `tests/test_pentest_regressions.py` |
 | Analysis scope | Narrow what is READ AND MATCHED to named files while still walking the whole tree, so classification is unchanged | `src/websec_validator/extractors/base.py` | `tests/test_analysis_scope.py`, `tests/test_gate_policy_and_scope.py` |
@@ -66,7 +66,7 @@ scanner runs, a calibrated findings ledger, staged probes, and the briefing/repo
 | Constitution | Derive Given/When/Then security invariants → `CONSTITUTION.md` | `src/websec_validator/constitution.py` | `tests/test_recon.py` |
 | Dynamic phase | Optional, gated live probing against a TEST instance (read-only BOLA, unauth reachability, localhost write-verb) | `src/websec_validator/dynamic.py` | `tests/test_hardening.py` |
 | Proof harness | Score recon coverage against the labeled vuln-app corpus (VAmPI/NodeGoat/DVGA) | `src/websec_validator/proof.py` | `tests/test_recon.py` |
-| Probe templates (22) | Scaffolds staged into the target's `probes/` for the agent + human to fill and run | `src/websec_validator/templates/probes/` | — (end-user scaffolding) |
+| Probe templates (23) | Scaffolds staged into the target's `probes/` for the agent + human to fill and run | `src/websec_validator/templates/probes/` | — (end-user scaffolding) |
 
 ### Feedback record redaction
 
@@ -166,7 +166,7 @@ all artifacts of a completed execution are written does an atomic symlink replac
 
 ```mermaid
 graph LR
-    R[your repo] --> A[1. Recon<br/>22 extractors]
+    R[your repo] --> A[1. Recon<br/>25 extractors]
     A --> B[2. Static scanners<br/>de-duplicated]
     B --> C[3. Findings ledger<br/>evidence + standards + calibrated P-real]
     A --> D[3. Stage tailored probes]

@@ -48,7 +48,7 @@ it safe to run anywhere.
 ```
                  ┌─────────────────────────── deterministic, no LLM, no running app ──────────────────────────┐
   your repo ──▶  1. RECON          2. STATIC SCANNERS      3. FINDINGS LEDGER        4. BRIEFING + REPORT
-                 (22 extractors)   (Trivy/Gitleaks/…,      (evidence chain +         (marching orders for
+                 (25 extractors)   (Trivy/Gitleaks/…,      (evidence chain +         (marching orders for
                  walk once         de-duplicated)          standards + calibrated     your agent) + immutable
                                                            confidence)                run record
                                                                   │
@@ -62,7 +62,7 @@ unique directory and coverage manifest; completed checks do not establish comple
 
 ---
 
-## Layer 1 — Recon: the 22 extractors
+## Layer 1 — Recon: the 25 extractors
 
 Recon walks the repository **once** into a shared `RepoContext`, then runs twenty-two focused
 extractors over it. Each answers one question a pentester asks first. The output is `FACTS.json`.
@@ -90,7 +90,7 @@ extractors over it. Each answers one question a pentester asks first. The output
 | 19 | **crypto_usage** | Are crypto primitives used correctly? | Beyond "is there a leaked secret" — *how* crypto is used. Flags a **weak password hash** (a fast/unsalted SHA-256/MD5 verifying a credential instead of argon2/scrypt/bcrypt), a **`jwtVerify` with no `algorithms` allowlist** (latent alg-confusion the day the key turns asymmetric), a **predictable principal** (a tenant/user id derived as a public hash of an identity field — anyone who knows the email recomputes the id), and a **non-constant-time secret compare** (`===`/`!==` on a request-supplied token instead of `timingSafeEqual`). |
 | 20 | **webext** | Is the browser-extension client-trust boundary sound? | For MV2/MV3 extensions: **excessive host permissions** (`<all_urls>` / `*://*/*` → read/modify every site), **untrusted message channels** (a `runtime.onMessage` / window `message` handler with no `sender.id`/`event.origin` check, or `postMessage` to `'*'`), and **client-side entitlement** gates (a tier/plan read from `chrome.storage.local`/`localStorage` treated as an enforcement boundary). |
 | 21 | **agent_config** | Is the repo's OWN agent/MCP wiring poisoned? (OWASP **Agentic Top 10**) | Reads the agent-steering config (`.claude/settings.json`, `.mcp.json`, cursor/copilot rules, `CLAUDE.md`/`AGENTS.md`) as **untrusted data, never executed**. Flags **invisible/bidi Unicode** in a rules file (Rules-File-Backdoor), a pre-consent hook with a **fetch-and-execute command shape** (CVE-2025-59536 class), **blanket MCP auto-approval**, a **non-vendor `*_BASE_URL` override** (key-exfil), and **unpinned/remote MCP servers**. Reads a fixed bounded allow-list off the root; tool-description *poisoning* (prose-grammar) is deferred to keep the FP bar. |
-| 22 | **dependencies** | Offline supply-chain hygiene (the AI slopsquat / malicious-dep class) | What Trivy's known-CVE scan can't see. Ledger classes: a **malicious install/lifecycle script** (`postinstall` whose body fetches-and-executes/evals — the Shai-Hulud shape) and **lockfile drift** (a manifest dep absent from an existing JSON lockfile's installed set). **Unpinned versions** and **dependency-confusion-shaped names** are advisory-only (never routed to the ledger). Registry resolution / hallucinated-name / typosquat-distance are deferred behind an opt-in `--network` step — the default pass makes **zero network calls**. |
+| 25 | **dependencies** | Offline supply-chain hygiene (the AI slopsquat / malicious-dep class) | What Trivy's known-CVE scan can't see. Ledger classes: a **malicious install/lifecycle script** (`postinstall` whose body fetches-and-executes/evals — the Shai-Hulud shape) and **lockfile drift** (a manifest dep absent from an existing JSON lockfile's installed set). **Unpinned versions** and **dependency-confusion-shaped names** are advisory-only (never routed to the ledger). Registry resolution / hallucinated-name / typosquat-distance are deferred behind an opt-in `--network` step — the default pass makes **zero network calls**. |
 
 > **Why rows 17–19 exist (the self-improvement pass).** Dogfooding the tool on a large real-world
 > **LLM-agent monorepo** (a 15-agent verification pass that adversarially confirmed every finding)

@@ -14,7 +14,7 @@ third-party runner, public network, external scanner, or running target app. Rel
 and smoke-tests the installed wheel. The 2026-09-16 source phase passed **1241 application tests** on
 Python 3.14.7 (33.393s) and Python 3.12.13 (33.955s), plus **41 repository automation tests**.
 CI enforces an application-test floor derived at run time from the base commit's own suite, so no floor constant is stored; a drop requires a `Test-Removal:` commit trailer. The package
-has **22 registered extractors**, **17 sink classes**, **11 scanner entries** and **9 named profiles**.
+has **25 registered extractors**, **17 sink classes**, **11 scanner entries** and **9 named profiles**.
 The eleventh scanner entry is `gitleaks-dir`: gitleaks runs as two disjoint passes, git history and
 working tree, because neither surface subsumes the other.
 
