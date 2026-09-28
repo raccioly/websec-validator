@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+- Added support for detecting SSRF vulnerabilities via `needle.get()` and other needle methods in the `ssrf` and `ssrf-outbound-http` extractors.
+
 ### Fixed — `websec gate` answers the same policy question `run` does, about the files it was given
 
 Field report: in a Cloudflare Worker repository every agent edit drew a blocking `PostToolUse`
