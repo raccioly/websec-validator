@@ -7,6 +7,22 @@
 
 ## Active Drift
 
+### Resolved publication gap — technical brief, 2026-09-30 (bug-363)
+
+The published PDF retained the v0.18.0 snapshot while the HTML acquired the v0.20.0 MCP tool.
+The landing page and masthead also stayed old. Previous regression tests parsed only the HTML;
+their snapshot test-count floor did not require a refresh. The README's no-silent-drift claim
+therefore exceeded the implemented checks. DocGuard's enabled `generatedStaleness` validator
+reported no matches: its scope is marked Markdown sections, not rendered PDF/HTML pairs.
+Configured evidence bindings covered dated proof claims, not this publication artifact.
+
+The reviewed brief and landing page now describe v0.20.0, preserving dated proof/review results.
+`scripts/build-brief.py` renders with an already installed browser and writes a generated
+HTML/PDF/renderer hash manifest; `test_brief_artifacts.py` verifies it in the normal required suite,
+including stale, malformed, truncated, aliased and bad-render controls. All eight pages require
+visual inspection and qualitative review. This closes accidental forgotten rebuilds, not semantic
+drift in arbitrary prose; no DocGuard validator is claimed to cover that broader problem.
+
 Canonical security, execution-accounting and evidence contracts were updated alongside the
 approved hardening batch on 2026-09-12. Remaining feature and validation documentation is finalized
 with its corresponding implementation; historical benchmark numbers are not treated as current proof.

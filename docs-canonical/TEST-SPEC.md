@@ -45,7 +45,7 @@ python3 -m unittest discover -s tests
 | `src/websec_validator/{cli,dynamic}.py` + safety invariants | a case in `tests/test_hardening.py` | Hardening |
 | analysis scoping (`--only`) in `extractors/base.py` | a parity case in `tests/test_analysis_scope.py` proving scoped findings are a SUBSET of full-tree findings with unchanged severities; a path-normalization case in `tests/test_gate_policy_and_scope.py` (dot-directories, dotfiles, `../`) | Regression |
 | the agent-loop gate (`gate.py`, `agenthook.py`) | a case in `tests/test_gate_command.py` / `tests/test_agent_hook.py`, including fail-open behaviour; ignore-policy or scope-attribution changes need a case in `tests/test_gate_policy_and_scope.py` for BOTH entry points | Hardening |
-| any network egress (`registry.py`, `intel.py`) | an offline-contract case proving the DEFAULT pass makes zero socket connections | Hardening |
+| any network egress (`registry.py`, `intel.py`, `updates.py`) | an offline-contract case proving the DEFAULT pass makes zero socket connections; online release advice requires separate consent and cannot install packages | Hardening |
 | audit-evidence output (`attest.py`) | a guardrail case in `tests/test_attest.py` asserting no verdict is rendered and no citation is misattributed | Hardening |
 
 ## Source-to-Test Map
@@ -93,7 +93,8 @@ Additional protocol and assurance contracts:
 | Evidence consumers | `test_assurance_regressions.py`: contradictory completion metadata, per-feed rollback, publication locking and honest proof exits |
 | Value-scoped controls | `test_remaining_control_scope.py`, `test_extension_controls.py`, `test_transport_pii_scope.py`: webhook/upload/hash/message controls, individual cookie setters and actual PII response projections |
 | Public-source precision | `test_public_precision.py`: executable authentication decisions, browser-response file delivery, and exact numeric GitHub expressions paired with unsafe text controls |
-| Technical brief drift | `test_explained_brief.py`: every number quoted in `docs/websec-explained.html` re-derived from its source (extractor/sink registries, corpus pins, proof JSON, field-review table, required checks, CI ceiling, Docker pins, standards map), suite size checked as a floor |
+| Technical brief facts | `test_explained_brief.py`: selected HTML claims re-derived from extractor/sink registries, corpus pins, dated proof JSON, field-review table, required checks, CI ceiling, Docker pins and standards map; snapshot suite size checked as a floor, not a current-count guarantee |
+| Published brief freshness | `test_brief_artifacts.py`: committed HTML/PDF/renderer hash binding, plus stale source/PDF/renderer, missing/malformed manifest, truncated PDF and alias regressions. `scripts/build-brief.py --check` is offline and needs no browser. All eight rendered pages and qualitative claims require review; DocGuard's marked-Markdown generated-staleness validator does not inspect PDFs |
 
 Imported report tests must preserve usable sibling findings while reporting failures, keep report
 hashes separate from source evidence, and prove no referenced source, network resource or command is

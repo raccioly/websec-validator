@@ -21,7 +21,7 @@
 ## System Overview
 
 `websec-validator` is a **local-first security-recon CLI that briefs an AI coding agent**. It does the
-deterministic half a machine is good at — read the whole repo, map the full attack surface, run and
+deterministic half a machine is good at — read supported source, map the visible attack surface, run and
 de-duplicate the static scanners it finds, and stage a probe library tailored to what it discovered —
 then emits an `AGENT-BRIEFING.md` an agent (Claude Code, Codex, Gemini, Cursor) executes with a human
 in the loop. **Code in, artifacts out: the core pass contains no LLM/server and needs no running app**
@@ -41,7 +41,7 @@ scanner runs, a calibrated findings ledger, staged probes, and the briefing/repo
 | Extractors (22) | One focused question each → the merged `FACTS.json` (stack, routes, auth, authz, **authz_dataflow**, tenant, password_policy, surface, schemas, iac_ci, client_exposure, client_integrity, transport_security, graphql, upload_security, pii_exposure, integrations, **llm_security**, **crypto_usage**, **webext**, **agent_config**, **offline_deps**) | `src/websec_validator/extractors/` | `tests/test_recon.py`, `tests/test_pentest_regressions.py`, `tests/test_entitlement_webext.py` |
 | Static scanners | Detect + (with `--scan`) shell out to Trivy/Gitleaks/Semgrep/Checkov/Prowler and de-duplicate across tools | `src/websec_validator/scanners.py` | `tests/test_recon.py` |
 | Findings ledger | Correlate recon + static + dynamic into one ranked, standards-cited, calibrated record set | `src/websec_validator/findings.py` | `tests/test_pentest_regressions.py` |
-| Analysis scope | Narrow what is READ AND MATCHED to named files while still walking the whole tree, so classification is unchanged | `src/websec_validator/extractors/base.py` | `tests/test_analysis_scope.py`, `tests/test_gate_policy_and_scope.py` |
+| Analysis scope | Narrow what is READ AND MATCHED to named files while inventorying the eligible tree and reporting exclusions | `src/websec_validator/extractors/base.py` | `tests/test_analysis_scope.py`, `tests/test_gate_policy_and_scope.py` |
 | Agent-loop gate | Fast scoped pass/fail on the files just changed; applies `.websec-ignore` exactly as `run` does; gates requested-file and unattributed findings (confirmed outside-scope findings remain reported); requires completed source reads and execution; writes nothing, publishes nothing, never advances a baseline | `src/websec_validator/gate.py` | `tests/test_gate_command.py`, `tests/test_gate_policy_and_scope.py`, `tests/test_security_fix_boundaries.py` |
 | PostToolUse hook | Run the gate on each file an agent writes and block the loop on a finding or completed-but-incomplete analysis; unexpected internal crashes fail open, loudly | `src/websec_validator/agenthook.py` | `tests/test_agent_hook.py`, `tests/test_gate_policy_and_scope.py`, `tests/test_security_fix_boundaries.py` |
 | Dependency existence | Opt-in registry check for hallucinated/removed packages, with offline suppression applied before any request | `src/websec_validator/registry.py` | `tests/test_registry_existence.py` |
@@ -67,7 +67,7 @@ scanner runs, a calibrated findings ledger, staged probes, and the briefing/repo
 | Constitution | Derive Given/When/Then security invariants → `CONSTITUTION.md` | `src/websec_validator/constitution.py` | `tests/test_recon.py` |
 | Dynamic phase | Optional, gated live probing against a TEST instance (read-only BOLA, unauth reachability, localhost write-verb) | `src/websec_validator/dynamic.py` | `tests/test_hardening.py` |
 | Proof harness | Score recon coverage against the labeled vuln-app corpus (VAmPI/NodeGoat/DVGA) | `src/websec_validator/proof.py` | `tests/test_recon.py` |
-| Probe templates (22) | Scaffolds staged into the target's `probes/` for the agent + human to fill and run | `src/websec_validator/templates/probes/` | — (end-user scaffolding) |
+| Probe scripts (24, plus transport helpers) | Scaffolds staged into the target's `probes/` for the agent + human to review and run; mutating transports enforce localhost | `src/websec_validator/templates/probes/` | `tests/test_security_fix_boundaries.py` |
 
 ### Feedback record redaction
 
@@ -126,9 +126,9 @@ Adding a dimension = drop a module in `extractors/` and append it to `REGISTRY` 
 
 ## External Dependencies
 
-The tool **shells out** to these when present and degrades gracefully when absent (reports what is
-missing with an install hint, never hard-fails). None are Python imports — there are zero runtime
-package dependencies.
+The tool **shells out** to these when present. Missing unselected tools are reported as limitations
+with install hints; a missing explicitly requested scanner is an execution gap and cannot pass
+completeness gating. None are Python imports — there are zero runtime package dependencies.
 
 | Tool | Purpose | Fallback |
 |------|---------|----------|

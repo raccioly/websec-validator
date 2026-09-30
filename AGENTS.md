@@ -32,7 +32,8 @@ pass. Pure-Python, **stdlib only, zero runtime dependencies**; it shells out to 
 | Command | Purpose |
 |---------|---------|
 | `pipx install --editable .` | Install the CLI from source (or `pip install -e .` in a 3.11+ venv) |
-| `python3 -m unittest discover -s tests` | Run the suite (1700 tests, stdlib only, no public network) |
+| `python3 -m unittest discover -s tests` | Run the suite (1713 tests, stdlib only, no public network) |
+| `python3 scripts/build-brief.py --check` | Verify the committed HTML/PDF/renderer binding offline; rebuild and review all eight pages after source edits |
 | `websec run ./target` | Full pipeline → `FACTS.json` + `AGENT-BRIEFING.md` + `probes/` |
 | `websec doctor ./target` | Show which optional scanners are installed |
 | `websec gate` | Fast scoped pass/fail on the files you just changed (agent-loop check) |
@@ -76,11 +77,16 @@ content instead of overwriting the name-guard.
 
 1. **Before any work**: read `docs-canonical/` and run `docguard guard` to see the compliance state.
 2. **After changing code or docs**: re-run `docguard guard`; keep the numbers (22 extractors, 17 sink
-   classes, 11 scanner entries, 1700 tests, dated 10/10 proof (not vulnerability recall)) consistent across every doc — DocGuard's metrics-consistency
+   classes, 11 scanner entries, 1713 tests, dated 10/10 proof (not vulnerability recall)) consistent across every doc — DocGuard's metrics-consistency
    validator cross-checks them.
 3. **Update `CHANGELOG.md`** for any user-visible change.
 4. **Document drift**: if code must deviate from a canonical doc, add a `// DRIFT: reason` (or
    `# DRIFT: reason`) comment and a matching `DRIFT-LOG.md` entry.
+
+The technical brief has separate publication checks. DocGuard's `generatedStaleness` covers marked
+Markdown sections, not rendered PDFs. Update HTML and landing-page snapshot versions together,
+rebuild with `scripts/build-brief.py`, review all eight rendered pages, and commit the generated PDF
+and hash manifest with the source. Selected fact tests and matching hashes do not prove every sentence.
 
 ## Code Conventions
 

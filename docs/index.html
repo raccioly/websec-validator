@@ -63,13 +63,13 @@
 <div class="wrap">
   <div class="masthead">
     <div class="wordmark">web<span class="mark">sec</span>-validator</div>
-    <div class="meta">v0.18.0 · MIT · Python 3.11+</div>
+    <div class="meta">v0.20.0 · MIT · Python 3.11+</div>
   </div>
 
   <h1>The deterministic half of a pentest.</h1>
   <p class="standfirst">It reads a repository the way a senior pentester reads it on day one, then hands
-  your AI coding agent the plan: what the attack surface is, which findings are real, and exactly what to
-  test. No model inside, no server, no running app.</p>
+  your AI coding agent a plan: the supported attack surface, which leads need review, and how to
+  test them. No model inside; no server or running app needed for the core pass.</p>
 
   <h2>Read the brief</h2>
   <div class="cards">
@@ -88,15 +88,20 @@
 websec run ./your-repo</pre>
   <p>Artifacts land in <code>websec-out/</code>: a briefing written for your agent, the structured
   recon, a de-duplicated findings ledger, SARIF 2.1.0, and probe scripts pre-filled with the
-  endpoints it found. It never edits your repository.</p>
+  endpoints it found. Core analysis never edits scanned source; guidance and hook installation are separate opt-in actions.</p>
 
   <h2>What makes it different</h2>
   <ul>
-    <li><strong>It says when it could not look.</strong> Exit 3 means the picture is incomplete, and it outranks a clean result.</li>
-    <li><strong>No model in the tool.</strong> Same repository, same output, every run.</li>
+    <li><strong>It says when it could not look.</strong> With completeness gating, incomplete-only exits 3; findings plus incomplete exits 1 and records both. Ungated exit 0 is not a completeness verdict.</li>
+    <li><strong>No model in the tool.</strong> Reproducible analysis with the same inputs and tooling; run metadata and dated advice can vary.</li>
     <li><strong>Zero runtime dependencies.</strong> It shells out to the scanners you have installed and never imports them.</li>
-    <li><strong>Nothing leaves your machine.</strong> The default pass makes no network calls at all.</li>
+    <li><strong>Offline by default.</strong> External scanners and online feeds are separate opt-ins. Review guidance offers a consent-driven release check, never an automatic upgrade.</li>
   </ul>
+
+  <h2>Check, do not update</h2>
+  <p>The AI asks whether you want a release check and respects a decline.
+  <code>websec update-check</code> reads cached metadata offline; <code>--online</code> checks release metadata only with consent.
+  Checking does not download or install a package. Any upgrade needs separate approval.</p>
 
   <h2>Elsewhere</h2>
   <div class="cards">

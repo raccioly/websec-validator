@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Documentation
+
+- Refresh the eight-page technical brief, PDF and landing page for the reviewed v0.20.0 snapshot,
+  including consent-driven release checks, hardened probe transports and incomplete-gate behavior.
+  Preserve dated proof results rather than presenting them as a new benchmark run.
+- Correct status-only BOLA oracles, unqualified determinism/coverage claims, scanner requirements
+  and the canonical probe-script inventory. Add a stdlib maintenance renderer and offline
+  HTML/PDF/renderer hash check to CI's test suite: DocGuard's marked-Markdown staleness validator
+  and the previous HTML-only tests did not detect an unreconstructed PDF. Prose/layout review
+  remains required; matching hashes are not an accuracy guarantee.
+
 ## [0.20.0] — 2026-09-30
 
 ### Fixed — precise timing-comparison metadata handling
