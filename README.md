@@ -512,7 +512,8 @@ not immutable snapshots of every pushed Git object. A missing runtime or concurr
 blocks pre-push; post-commit remains advisory.
 
 **MCP server (any agent, not just Claude Code).** `websec mcp` speaks the Model Context Protocol over
-stdio, exposing typed tools — `websec_recon`, `websec_findings`, `websec_sarif`, `websec_briefing` — so
+stdio, exposing typed tools — `websec_recon`, `websec_findings`, `websec_sarif`, `websec_briefing`,
+and advisory `websec_check_updates` — so
 Cursor / Cline / Windsurf / Zed can call recon directly instead of shelling out and parsing stdout.
 Register it in your MCP client:
 
@@ -532,6 +533,14 @@ JSON-RPC requests require the bearer token. Host/Origin validation, framing and 
 workers, and an absolute receive deadline constrain the HTTP boundary. `GET /health` remains a
 minimal liveness endpoint. Non-loopback binding is refused. Stdio uses the launching process's trust
 and filesystem permissions.
+
+**Update checks are optional, upgrades are separate.** At the start of a security review, the AI
+asks whether you want to check for a newer WebSec release. `websec update-check` reads only dated
+cached metadata; after approval, `websec update-check --online` checks PyPI without downloading or
+installing packages. MCP uses `websec_check_updates` with `online: true` only after that approval.
+A newer-release notice offers an upgrade for separate approval. Declining or an unavailable check
+does not block the review or change its findings/gate result. The tiny per-user cache contains only
+version/check-time metadata; `WEBSEC_UPDATE_HOME` optionally selects its absolute directory.
 
 **Blast-radius from a knowledge graph (opt-in, zero-dep).** If your repo has a
 [`graphify`](https://github.com/Graphify-Labs/graphify) graph at `graphify-out/graph.json` (or you

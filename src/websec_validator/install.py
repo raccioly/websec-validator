@@ -45,6 +45,14 @@ installation/revision; do not silently install, upgrade, or fall back to a float
 `websec doctor .` shows optional analyzers. Core recon is read-only and offline; optional scanner
 subprocesses have their own filesystem/network behavior and are not a sandbox.
 
+At the start of each security review, ask whether the user wants to check PyPI for a newer
+WebSec release. Respect their answer for that review. `websec update-check` is offline;
+only after approval use `websec update-check --online` (or MCP `websec_check_updates`
+with `online: true`). Checking never installs software. Offer any upgrade for separate
+approval, using the user's selected installation; never auto-upgrade or refresh the plugin.
+If the installed revision lacks this command, report that limitation instead of silently
+using a different network check. A declined or unavailable check does not block review.
+
 Run from the repository root, capturing this invocation's JSON envelope and exit status:
 
 ```bash

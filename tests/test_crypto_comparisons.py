@@ -138,6 +138,39 @@ class CryptoComparisonTests(unittest.TestCase):
         self.assertIn('weak-password-hash', kinds)
         self.assertIn('jwt-verify-no-algorithms', kinds)
 
+    def test_explicit_metadata_names_are_not_secret_bytes(self):
+        for expression in ("token_name === 'auth_token'", "signature_algorithm === 'HS256'",
+                           "req.body.token_id === 12345", "secret_type === 'symmetric'",
+                           "password_reset_required === true", "db.Model.token_name === 'auth_token'",
+                           "apiKeyId === 'default'", "req.query.signature_method === 'HMAC-SHA1'",
+                           "tokenName === 'label'", "(token_name) === 'label'",
+                           "token.length === supplied"):
+            with self.subTest(expression=expression):
+                self.assertEqual(self.timing('if (' + expression + ') metadata();'), [])
+
+    def test_suffix_substrings_do_not_hide_credentials(self):
+        for name in ('secretValid', 'tokenValid', 'signatureValid', 'secrettime', 'hmacformat', 'apiKeyHash'):
+            with self.subTest(name=name):
+                self.assertEqual(len(self.timing('if (' + name + ' === supplied) grant();')), 1)
+
+    def test_metadata_tail_does_not_hide_compound_credential_operand(self):
+        for expression in ('providedToken + config.name', 'secret + token_name',
+                           'secret + config.type', 'providedToken + config.length',
+                           'combine(secret, config.name)', 'token_name + providedToken'):
+            with self.subTest(expression=expression):
+                self.assertEqual(len(self.timing('if (' + expression + ' === supplied) grant();')), 1)
+
+    def test_metadata_comparison_cannot_hide_unsafe_sibling(self):
+        rows = self.timing("if(token_name === 'label') metadata();\nif(secretValid === supplied) grant();")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['line'], 2)
+
+    def test_metadata_vs_secret_operand_still_requires_review(self):
+        for expression in ('token_name === providedToken', 'providedToken === token_name',
+                           'tokenName === req.headers.authorization', "req.headers['x-api-key'] === tokenName"):
+            with self.subTest(expression=expression):
+                self.assertEqual(len(self.timing('if (' + expression + ') grant();')), 1)
+
 
 if __name__ == '__main__':
     unittest.main()

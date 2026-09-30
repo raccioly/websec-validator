@@ -2,8 +2,10 @@
 
 Exposes websec-validator's deterministic recon as typed MCP tools, so ANY MCP client (Claude Code,
 Cursor, Cline, Windsurf, Zed) can call it directly instead of shelling out to the CLI and parsing
-stdout. Every tool is read-only, takes a repo path, and returns structured facts / findings / SARIF /
-briefing — code-in, artifacts-out. No LLM, no network to the target, zero runtime dependencies: the
+stdout. Repo tools are read-only and return facts / findings / SARIF / briefing. The separate
+release-check tool reads metadata offline by default; explicit online checks contact PyPI and
+save only version/check-time metadata, never install software. No LLM, no network to the target,
+zero runtime dependencies: the
 transport is raw JSON-RPC 2.0 framed as newline-delimited JSON per the MCP stdio spec.
 
 Wire it into a client's MCP config as:  command="websec", args=["mcp"]   (or command="websec-mcp").
@@ -23,7 +25,7 @@ from contextvars import ContextVar
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import __version__, briefing, findings, formats, probes, recon, scanners
+from . import __version__, briefing, findings, formats, probes, recon, scanners, updates
 
 PROTOCOL_VERSION = "2025-11-25"
 SUPPORTED_PROTOCOL_VERSIONS = (PROTOCOL_VERSION, "2025-06-18", "2025-03-26", "2024-11-05")
@@ -35,6 +37,13 @@ HTTP_RECEIVE_TIMEOUT = 10
 _HTTP_ROOT: ContextVar[tuple[Path, int, int] | None] = ContextVar("mcp_http_root", default=None)
 
 TOOLS = [
+    {"name": "websec_check_updates",
+     "description": "Advisory WebSec release check; offline cached metadata by default. "
+                    + updates.CONSENT,
+     "inputSchema": {"type": "object", "properties": {
+         "online": {"type": "boolean", "default": False,
+                    "description": "True only after human approval to check PyPI metadata."}},
+         "additionalProperties": False}},
     {"name": "websec_recon",
      "description": "Map a repo's attack surface (read-only): stack, routes, auth/tenant model, "
                     "dangerous sinks, and derived IDOR/SSRF/upload/write targeting. Returns FACTS.json.",
@@ -123,7 +132,15 @@ def tool_websec_briefing(a: dict) -> str:
     return briefing.render(facts, det, [], manifest, None, ledger)
 
 
+def tool_websec_check_updates(a: dict) -> str:
+    if set(a) - {"online"}:
+        raise ValueError("only the online boolean is supported")
+    result = updates.check(online=a.get("online", False))
+    return json.dumps({**result, "advice": updates.advisory(result)}, indent=2)
+
+
 DISPATCH = {
+    "websec_check_updates": tool_websec_check_updates,
     "websec_recon": tool_websec_recon,
     "websec_findings": tool_websec_findings,
     "websec_sarif": tool_websec_sarif,
@@ -179,7 +196,9 @@ def process(req: dict, *, allowed_roots: tuple[Path, ...] | None = None,
             arguments = params.get("arguments", {})
             if not isinstance(arguments, dict):
                 raise ValueError("arguments must be an object")
-            if allowed_roots is not None:
+            # The exact metadata-only tool never accepts a repository path. All
+            # repository tools retain root authorization and identity pinning.
+            if allowed_roots is not None and name != "websec_check_updates":
                 path = arguments.get("path")
                 if not isinstance(path, str) or not path.strip() or not Path(path).is_absolute():
                     raise ValueError("an absolute repository path is required")

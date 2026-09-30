@@ -60,6 +60,8 @@ python3 -m unittest discover -s tests
 | `src/websec_validator/repairs.py` | `tests/test_lifecycle.py`: identity migration, expiry/reopening, no-longer-observed semantics and bound before/after artifacts | ✅ |
 | `src/websec_validator/extractors/profiles.py` | `tests/test_profiles.py`: named safe/unsafe checks, service boundaries and explicit config errors | ✅ |
 | `src/websec_validator/intel.py` | `tests/test_intel.py`: validated dated snapshots, atomic failures and offline reassessment | ✅ |
+| `src/websec_validator/updates.py` and CLI/MCP/briefing consumers | `tests/test_updates.py`: default zero connections, consent flag validation, metadata-only transport, numeric stable/non-yanked comparisons, bounded/private/alias-safe caches, failure preservation and unchanged repository-tool authorization | ✅ |
+| Timing metadata operands | `tests/test_crypto_comparisons.py`: exact snake/camel metadata names with real credential, suffix-lookalike, compound-expression, reversed and unsafe-sibling controls | ✅ |
 | `src/websec_validator/research.py` | `tests/test_research.py`: data-only metadata validation and development/holdout metrics | ✅ |
 | `src/websec_validator/proof.py` | `tests/test_proof_revisions.py`: pinned revisions, mismatch and unavailable diagnostics | ✅ |
 | `src/websec_validator/cli.py` | `tests/test_workbench_cli.py`: bounded command inputs, new-only outputs and validated documentation examples | ✅ |

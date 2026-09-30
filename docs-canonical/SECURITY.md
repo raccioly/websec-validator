@@ -23,8 +23,8 @@ explicitly invoke the gated dynamic phase against a TEST target you control.
 |----------|-----------------|-----------------|
 | Target repo → tool | source files and configuration (read-only) | Shared root containment, exclusions, bounded regular-file reads, and private-tree pruning; target code is never executed. |
 | Tool → scanner subprocesses | the target path | Scanners are detected and only **executed with `--scan`**; they are read-only and shelled out, never imported. |
-| Tool → network | nothing, in the core pass | Recon + briefing are fully offline. Outbound traffic requires optional scanner/Noir subprocesses, the **explicit TEST URL** for dynamic checks, an explicit public-feed refresh, an opt-in `--network` dependency-existence check, or a corpus preparation command. |
-| Tool → disk | artifacts under `websec-out/` + a gitignored calibration overlay | Each attempt has a unique directory; `latest` is atomically published only after completed execution. Target source is not mutated. |
+| Tool → network | nothing, in the core pass | Recon + briefing are fully offline. Outbound traffic requires optional scanner/Noir subprocesses, the **explicit TEST URL** for dynamic checks, an explicit public-feed refresh, an opt-in `--network` dependency-existence check, an explicitly approved release check, or a corpus preparation command. |
+| Tool → disk | artifacts under `websec-out/`, a gitignored calibration overlay, and version/check-time release metadata | Each attempt has a unique directory; `latest` is atomically published only after completed execution. Target source is not mutated. |
 
 ## Authentication & Authorization
 
@@ -63,6 +63,31 @@ bounded regular-file readers and distinct input identities.
 Auto-detected graph enrichment does not become required execution merely because its file exists.
 Its read/parse failures remain disclosed as non-execution gaps; explicit `--graph` failures and
 source-read losses still make execution incomplete. Reader limits are unchanged.
+
+## Advisory Release Checks
+
+Online access is explicit: `websec update-check --online` or MCP `websec_check_updates` with
+`online: true`. AI guidance first asks the human; MCP relies on the client's assertion of consent.
+Defaults, doctor and generated briefings read only cached metadata and make no online check.
+The request is GET to the fixed `https://pypi.org/simple/websec-validator/` JSON index, with no
+repository identity, package list, credentials, cookies or installed-version header. Ordinary
+network metadata (source IP and request timing) is still visible to the registry. Ambient proxy
+configuration is bypassed, redirects and encoded responses are refused, and response size is capped
+at 1 MiB. Socket operations have a five-second timeout and reads a ten-second deadline with bounded
+blocking-read overshoot; DNS resolution is not an absolute cancellation guarantee.
+
+Only numeric stable `major.minor.patch` releases with a non-yanked artifact are compared. This is
+advisory registry metadata, not package verification, proof of publication propagation, compatibility
+resolution or verification of a local source tree. Cache data is unauthenticated and always labelled
+as a previous observation, stale after 24 hours. Invalid metadata or failed checks never gate a scan.
+No request or metadata value can trigger an install, downgrade, plugin refresh or revision switch.
+The AI must obtain separate approval for an upgrade using the operator's selected installation.
+
+The cache stores only `latest_version` and integer Unix `checked_at`, at most 1 KiB, atomically.
+Implicit cache parents and leaf aliases are refused; deliberate `WEBSEC_UPDATE_HOME` base aliases
+remain supported. Private `.local` paths and special-file children are rejected. Local writes assume
+a stable operator-controlled directory tree, as other output helpers do. Failed online checks preserve
+the previous cache; a cache-write failure does not invalidate a successful metadata observation.
 
 ## The Dynamic-Phase Safety Model (explicit and non-negotiable)
 

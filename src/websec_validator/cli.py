@@ -182,6 +182,13 @@ def _publish_run(run: Path) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def cmd_update_check(args) -> int:
+    from . import updates
+    result = updates.check(online=args.online)
+    print(json.dumps(result, indent=2) if args.format == "json" else updates.advisory(result))
+    return 0  # Release advice never acts as a security or execution gate.
+
+
 def cmd_doctor(args) -> int:
     target = _resolve_target(args.target) if args.target else None
     langs = recon.detect_stack(target)["languages"] if target else None
@@ -194,6 +201,8 @@ def cmd_doctor(args) -> int:
     print()
     for line in _prov.lines():
         print(line)
+    from . import updates
+    print("\n" + updates.advisory())
     print("\n  available:")
     for s in det["available"]:
         # Presence is not compatibility. `doctor` printed a green ✓ for an osv-scanner whose CLI
@@ -1608,7 +1617,13 @@ def build_parser() -> argparse.ArgumentParser:
     # metavar lists only the user-facing commands; recon/proof/calibrate still work but are
     # omitted (they get no `help=`, so argparse leaves them out of the listing entirely).
     sub = p.add_subparsers(dest="cmd", required=True,
-                          metavar="{run,init,doctor,dynamic,mcp,capabilities,demo,explain,feedback,intel,research,repair-verify,install,hooks}")
+                          metavar="{run,init,doctor,update-check,dynamic,mcp,capabilities,demo,explain,feedback,intel,research,repair-verify,install,hooks}")
+
+    uc = sub.add_parser("update-check", help="advisory release metadata; offline unless --online")
+    uc.add_argument("--online", action="store_true",
+                    help="explicitly check PyPI metadata (no installation); ask the human first")
+    uc.add_argument("--format", choices=["text", "json"], default="text")
+    uc.set_defaults(func=cmd_update_check)
 
     r = sub.add_parser("run", help="full pipeline → briefing + tailored probes")
     r.add_argument("target")
@@ -1897,7 +1912,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-_COMMANDS = {"run", "recon", "init", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks", "repair-verify", "capabilities", "intel", "research", "feedback", "gate", "attest", "explain", "demo"}
+_COMMANDS = {"run", "recon", "init", "doctor", "emit-context", "proof", "dynamic", "calibrate", "mcp", "install", "hooks", "repair-verify", "capabilities", "intel", "research", "feedback", "gate", "attest", "explain", "demo", "update-check"}
 
 
 def main(argv=None) -> int:

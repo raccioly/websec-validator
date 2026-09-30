@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-09-30
+
+### Fixed — precise timing-comparison metadata handling
+
+- Resolve the metadata false positives raised in #174 with exact snake/camel identifier boundaries
+  and simple-operand checks. Compound expressions, credential suffix lookalikes and unsafe sibling
+  comparisons remain review leads. Existing length/type exemptions now stay local to simple values.
+
+### Added — consent-driven release advice
+
+- `websec update-check` reads cached release metadata offline; `--online` explicitly checks
+  PyPI for stable, non-yanked WebSec releases without downloading or installing packages.
+- Doctor, generated briefings and the new `websec_check_updates` MCP tool tell the AI to ask
+  permission to check, respect a decline, and obtain separate approval for any upgrade.
+  Advice never changes findings, completeness or gate exits. Source/preview versions are not
+  compared as stable releases, and cached observations are dated rather than claimed current.
+- Installed agent guidance and the shipped security-pass skill offer a check before review;
+  refresh existing managed guidance explicitly with `websec install <host>` after upgrading.
+- A bounded per-user `release.json` stores only the release version and check timestamp.
+  Failed checks preserve previous metadata; invalid caches and alias destinations degrade to
+  advisory notices. `WEBSEC_UPDATE_HOME` selects an explicit cache base.
+
 ## [0.19.2] — 2026-09-30
 
 ### Fixed — security boundaries in local tooling and staged probes
@@ -1563,7 +1585,8 @@ The initial public line. Highlights across 0.2.1–0.2.9:
 ### Fixed
 - Scanner-contamination and rate-limit fixes (agent-wallet dogfood).
 
-[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.19.2...HEAD
+[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/raccioly/websec-validator/compare/v0.19.2...v0.20.0
 [0.19.2]: https://github.com/raccioly/websec-validator/compare/v0.19.1...v0.19.2
 [0.16.0]: https://github.com/raccioly/websec-validator/compare/v0.15.3...v0.16.0
 [0.14.0]: https://github.com/raccioly/websec-validator/compare/v0.13.0...v0.14.0
