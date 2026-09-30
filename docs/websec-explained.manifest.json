@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "brief_version": "0.20.0",
+  "pages": 8,
+  "sha256": {
+    "docs/websec-explained.html": "6d891f4916841dab5f6f2e78690968be001da65db0610e1be069a04a6af19fb9",
+    "docs/websec-explained.pdf": "8b6b56dac40601fb9fe5c0a76907310e345110460694cf620c3979c4a6f80417",
+    "scripts/build-brief.py": "b740fd36a9926bd6a5e9ff40526f70f6abd3942aebe599c15dc7c0330d04ed7f"
+  }
+}

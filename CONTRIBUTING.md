@@ -9,11 +9,12 @@ These are the invariants the whole tool is built on. PRs that break them will be
 regardless of how useful the feature is:
 
 1. **Zero runtime dependencies.** The package is stdlib-only. New third-party tools are
-   integrated by *shelling out* to them when present (see `tools.py` detection), never by
+   integrated by *shelling out* to them when present (see `src/websec_validator/scanners.py`), never by
    importing them. `dependencies = []` in `pyproject.toml` stays empty.
-2. **The core pass stays offline and read-only.** `websec run` must never touch the network
-   or write into the target repo. Anything that contacts a live system belongs in the gated
-   `dynamic` phase, read-only by default, write probes localhost-only.
+2. **The core pass stays offline and read-only.** Default analysis must not contact the
+   network or edit scanned source. Live target probes belong in the explicitly authorized
+   `dynamic` phase; mutating probes stay localhost-only at every transport. External scanners,
+   feed/registry queries and consent-driven release metadata checks are separate opt-ins.
 3. **No LLM in the tool.** Extractors are deterministic. The AI half of the workflow lives
    in the *agent* consuming `AGENT-BRIEFING.md`, not in this codebase.
 4. **Every detector earns its keep with tests.** New extractors and detector classes need
@@ -54,6 +55,31 @@ Optional, to exercise the scanner integrations locally: `brew install noir trivy
 ## Reporting security issues
 
 Not here — see [SECURITY.md](SECURITY.md) for private reporting.
+
+## Publishing the technical brief
+
+Keep `docs/websec-explained.html` and the landing page's snapshot version consistent. Separate
+current behavior from dated proof/review results; changing a masthead does not rerun a benchmark.
+After editing the HTML, use an already installed Chrome/Chromium (no package dependency):
+
+```bash
+python3 scripts/build-brief.py             # optionally: --chrome /path/to/chrome
+python3 scripts/build-brief.py --check     # offline, no browser required
+python3 -m unittest discover -s tests -p 'test*brief*.py'
+docguard guard
+```
+
+Render and inspect **all eight PDF pages**, including SVG labels and page breaks, before committing
+the HTML, PDF and generated `docs/websec-explained.manifest.json` together. Do not hand-edit the
+manifest. CI's normal suite verifies source/PDF/renderer digests and tests stale, missing,
+truncated and aliased artifacts. A matching digest proves a recorded publication pair, not prose
+accuracy or visual quality; those require review. The builder is maintenance tooling, not shipped
+runtime behavior or an automatic browser installer.
+
+DocGuard's `generatedStaleness` checks marked Markdown sections against generated section bodies;
+it does **not** verify rendered PDFs. Its metrics/evidence validators cover configured claims,
+not every sentence or HTML/PDF byte. An enabled validator with no matching sections is not PDF
+coverage. The separate artifact test closes the forgotten-rebuild gap.
 
 ## Releases
 

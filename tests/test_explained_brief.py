@@ -3,8 +3,8 @@
 The brief is a public, self-contained HTML document that quotes concrete numbers: extractor
 and sink counts, corpus pins, proof results, field-review totals, CI facts. Prose rots
 silently; a number that was true at 0.17.1 reads as a lie two releases later. So every
-number the brief states is re-derived here from its source of truth and compared. If the
-code changes and the page does not, this file fails, and the fix is to update the page.
+selected fact below is re-derived from its source of truth and compared. Qualitative
+accuracy still needs review; PDF freshness is checked by test_brief_artifacts.py.
 
 Two numbers are deliberately checked as floors rather than equalities: the test count and
 the file count. The suite only grows between releases (the derived test floor in CI enforces
@@ -33,7 +33,7 @@ PKG = REPO / "src" / "websec_validator"
 # The version the brief was written at. It is NOT required to equal pyproject's current
 # version — the weekly release-propose workflow bumps pyproject without touching docs, and a
 # hard equality would fail every release PR. It IS required to be a version that shipped.
-STATED_VERSION = "0.18.0"
+STATED_VERSION = "0.20.0"
 
 
 class _Text(HTMLParser):
@@ -98,8 +98,8 @@ class BriefIsSelfContained(unittest.TestCase):
         shipped = re.findall(r"^## \[(\d+\.\d+[^\]]*)\]", changelog, flags=re.M)
         self.assertIn(STATED_VERSION, shipped)
         releases = len(shipped[shipped.index(STATED_VERSION):])
-        self.assertTrue(_has("twenty-eight releases"), "release count wording drifted")
-        self.assertEqual(releases, 28)
+        self.assertTrue(_has("thirty-two releases"), "release count wording drifted")
+        self.assertEqual(releases, 32)
         breaking = changelog.count("### Changed — BREAKING")
         self.assertEqual(breaking, 1, "the brief says 'one breaking change'")
 
@@ -239,6 +239,20 @@ class BriefMatchesEvidence(unittest.TestCase):
 
 
 class BriefMatchesSelfGuarding(unittest.TestCase):
+    def test_publication_guards_have_bounded_claims(self):
+        for fragment in ("hash manifest binds the HTML, PDF and renderer script",
+                         "not PDF rendering", "human review", "Selected fact tests"):
+            self.assertTrue(_has(fragment), fragment)
+        self.assertFalse(_has("cannot drift silently"))
+
+    def test_current_boundaries_and_advisory_consent(self):
+        for fragment in ("findings + incomplete exits 1", "completed-but-incomplete analysis",
+                         "localhost-only at every transport", "status alone is inconclusive",
+                         "Checking never installs anything", "upgrade needs separate approval",
+                         "respects a decline", "not a v0.20.0 rerun or vulnerability recall"):
+            self.assertTrue(_has(fragment), fragment)
+        self.assertFalse(_has("A 200 with a body is BOLA"))
+
     def test_required_checks(self):
         req = json.loads((REPO / ".github/required-checks.json").read_text(encoding="utf-8"))["required"]
         self.assertEqual(len(req), 5)

@@ -12,19 +12,21 @@ A senior pentester's "here's what to test and how" handoff — auto-generated fr
 <!-- docguard:quality negation-load off — "no LLM / no server / no running app / not a SaaS / never touches prod" is this tool's core positioning; defining it by contrast with the scanners-and-SaaS it deliberately is NOT is intentional, not a phrasing defect. -->
 
 > Local-first security recon that **briefs your AI coding agent**. It does the deterministic
-> half — read the repo, map the full attack surface, and stage a probe library tailored to what it
+> half — read supported source, map the visible attack surface, and stage a probe library tailored to what it
 > found — then hands your agent (Claude Code, Codex, Gemini, Cursor) a marching-orders briefing.
 > `websec run` needs nothing but the code; add `--scan` to also run and de-duplicate whichever
-> static scanners you have installed. **Code in, artifacts out. No LLM in the tool, no server, no
-> running app required.**
+> static scanners you have installed. **Code in, artifacts out. No LLM in the tool; no server or
+> running app required for the core pass.**
 
 [![websec-validator demo](assets/demo.gif)](assets/demo.gif)
 
 **New here?** Read the eight-page technical brief — what it reads, how a finding earns its severity,
 what it refuses to say, and the field evidence:
 **[raccioly.github.io/websec-validator](https://raccioly.github.io/websec-validator/websec-explained.html)**
-· [PDF](https://raccioly.github.io/websec-validator/websec-explained.pdf). Every number in it is
-asserted against this tree by `tests/test_explained_brief.py`, so it cannot drift silently.
+· [PDF](https://raccioly.github.io/websec-validator/websec-explained.pdf). The reviewed v0.20.0 snapshot
+has selected fact assertions in `tests/test_explained_brief.py` and an HTML/PDF/renderer hash binding
+in `tests/test_brief_artifacts.py`. Prose accuracy and rendered layout still require review;
+see [rebuilding the brief](CONTRIBUTING.md#publishing-the-technical-brief).
 
 It is *not* an autonomous scanner and *not* a SaaS. It's the missing front-half: the thing that
 turns a repo into a precise, fact-grounded security brief an AI agent (with a human in the loop)
@@ -94,8 +96,8 @@ Requires **Python 3.11+** (on stock macOS, `python3` is often 3.9 — use `pipx`
 interpreter, or install via Homebrew/pyenv). Zero Python runtime dependencies: it shells out to
 scanners (Trivy, OSV-Scanner, Gitleaks, Semgrep/OpenGrep, Checkov, Prowler) and Noir **when present**,
 plus **per-language SAST auto-selected by stack** — Bandit (Python), gosec (Go), Brakeman (Rails) —
-each fired only when its language is detected. It reports what's missing and never hard-fails if a tool
-is absent.
+each fired only when its language is detected. Unselected missing tools are reported as limitations;
+a missing explicitly requested scanner is an execution gap and cannot pass completeness gating.
 
 ### Or run via Docker (scanners bundled, zero install)
 

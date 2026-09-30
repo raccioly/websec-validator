@@ -19,9 +19,9 @@ alerts. The problem is well known — they cry wolf. Engineers drown in false po
 ignore the tool, and the one real bug hides in the noise.
 
 websec-validator takes the opposite stance. **It does the deterministic half a machine is actually
-good at — reading the whole repo, mapping the attack surface, citing the standards — and then hands
+good at — reading supported source, mapping visible attack surface, citing the standards — and then hands
 an AI coding agent a precise, fact-grounded briefing to do the reasoning half.** The tool itself
-contains **no LLM, runs no server, and needs no running app** for its core pass. It is code-in,
+contains **no LLM and needs no server or running app** for its core pass. It is code-in,
 artifacts-out.
 
 Think of it as the auto-filled, repo-aware version of the handoff a senior penetration tester
@@ -311,6 +311,11 @@ localhost-only; isolated test targets; and **production is out of scope without 
 authorization.** The tool refuses write probes against non-localhost targets, and the human owns
 every credential and authorizes every live run.
 
+Configured TEST authentication may POST even when the data probes use GET. Mutating probe
+transports enforce localhost independently, including manually executed shell/httpx drafts;
+staging itself sends no requests. Reflected credentials must not enter persisted response previews
+or login-error text. An HTTP status alone does not prove or disprove an authorization defect.
+
 ---
 
 ## Where in the workflow this runs
@@ -324,6 +329,9 @@ and SARIF. This is the review.
 returns pass/fail; a `PostToolUse` hook runs it after each write and blocks the loop on a finding,
 so the model fixes it on the next turn. A finding surfaced after forty merges is a backlog item; the
 same finding surfaced on the edit that caused it is a retry.
+
+Completed-but-incomplete scoped analysis also blocks the loop: an inventoried path is not a
+successfully read source file. Only unexpected internal crashes fail open, with a loud diagnostic.
 
 The gate is deliberately *not* a smaller review. It scopes the analysis rather than the report, does
 not consult cross-file evidence outside that scope, writes nothing, and never advances an accepted
@@ -536,6 +544,13 @@ They do not substitute older `latest` evidence on failure. Foreign dedicated ski
 shared markers must be preserved; ownership is based on known generated provenance or a complete
 managed region. Runtime/source identity, scan scope, uncertainty and before/after repair evidence
 matter more than a version label or HTTP status alone.
+
+At the start of review, current managed guidance offers a release metadata check and respects a
+decline. `websec update-check` is offline; `--online` requires consent. The per-user cache contains
+only version/check-time metadata, with dated/stale advice. Checking never installs a package;
+upgrading is a separate authorized action. This advice is not analysis evidence and cannot change
+findings, completeness or gate exits. Existing installed guidance must be explicitly refreshed
+after an upgrade to acquire the new instructions.
 
 
 Assigned Python SQL query detection follows supported local request-derived expressions through
