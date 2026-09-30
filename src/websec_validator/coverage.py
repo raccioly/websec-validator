@@ -21,8 +21,8 @@ def detector_revision() -> str:
     return "sha256:" + digest.hexdigest()
 
 
-def include_reads(cov: dict, ctx, *, input_prefix: str = "") -> None:
-    """Merge a bounded auxiliary reader into the same analyzed input snapshot."""
+def include_reads(cov: dict, ctx, *, input_prefix: str = "", execution: bool = True) -> None:
+    """Merge auxiliary reads; optional enrichment losses are scope gaps, not source losses."""
     cov.setdefault("inputs", {}).update({input_prefix + key: value for key, value in ctx.input_hashes.items()})
     cov["analyzed_input_digest"] = _digest(cov["inputs"])
     files = cov.setdefault("files", {})
@@ -30,9 +30,15 @@ def include_reads(cov: dict, ctx, *, input_prefix: str = "") -> None:
     files.setdefault("auxiliary_read_policies", {})[input_prefix] = source_read_policy(ctx)
     files.setdefault("auxiliary_source_bytes", {})[input_prefix] = ctx.cached_source_bytes
     for key in ("unreadable", "oversized", "byte_budget_exceeded"):
-        files[key] = sorted(set(files.get(key, [])) | {input_prefix + path for path in getattr(ctx, key)})
+        paths = {input_prefix + path for path in getattr(ctx, key)}
+        # The source-loss lists are independently checked by repair/proof consumers.
+        # Optional enrichment must not contaminate that required-execution evidence.
+        if execution:
+            files[key] = sorted(set(files.get(key, [])) | paths)
         if getattr(ctx, key):
-            add_gap({"coverage": cov}, key, "auxiliary input could not be read completely")
+            add_gap({"coverage": cov}, key,
+                    "auxiliary input could not be read completely: " + ", ".join(sorted(paths)),
+                    execution=execution)
 
 
 def source_read_policy(ctx) -> dict:

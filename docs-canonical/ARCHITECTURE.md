@@ -192,6 +192,8 @@ graph LR
 `RepoContext` owns contained, excluded, bounded regular-file reads and a pruned inventory. It records
 inputs only after successful reads; OpenAPI uses that same context and implicit graph reads honor
 target exclusions. Explicit external graph input gets a distinct origin namespace in the digest.
+Auto-detected graph enrichment is optional: failed bounded reads are non-execution gaps, not
+required source-read losses. Explicit `--graph` input remains required execution.
 Extractor errors remain isolated, but they make requested execution incomplete. Scanner report
 read/parse failures and explicitly requested unavailable adapters have the same effect. Optional
 unselected tools are scope limitations. `execution_complete` never means full vulnerability coverage.

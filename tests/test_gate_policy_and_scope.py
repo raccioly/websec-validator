@@ -254,6 +254,16 @@ class ScopeStateUnitTests(unittest.TestCase):
                              "location": "src/ghost.py"}]}
         self.assertFalse(gate.verdict(led, self._facts(["src/a.py"]), "medium")["passed"])
 
+    def test_unattributed_headers_are_not_described_as_caused_by_changed_files(self):
+        led = {"findings": [{"severity": "MEDIUM", "confidence": "HIGH",
+                             "title": "no-csp", "location": ""}]}
+        result = gate.verdict(led, self._facts(["src/a.py"]), "low")
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["findings"][0]["scope"], "unattributed")
+        rendered = gate.render_text(result)
+        self.assertIn("not proven to originate in the changed files", rendered)
+        self.assertNotIn("low in the files just changed", rendered)
+
     def test_existing_unrequested_file_is_outside_scope(self):
         led = {"findings": [{"severity": "HIGH", "confidence": "HIGH", "title": "t",
                              "location": "src/b.py:3"}]}

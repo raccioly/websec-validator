@@ -162,6 +162,11 @@ named suite without executing fixture source or installing rules.
 
 ## Agent guidance installation
 
+Native `websec hooks` installation respects `core.hooksPath`. Husky's generated `.husky/_`
+dispatchers are not modified: the managed block lives in the durable `.husky/<hook>` user script.
+Shebangless Husky shell fragments are supported, existing foreign commands are preserved, and
+explicit non-shell hooks require manual chaining rather than text insertion.
+
 `websec install <host>` writes a generated skill or managed instruction block. Use a trusted selected
 engine revision and inspect its source provenance, especially for editable checkouts. Existing
 foreign skills or malformed markers produce an actionable refusal; there is no forced overwrite.

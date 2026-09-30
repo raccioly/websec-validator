@@ -60,6 +60,9 @@ manifest. Execution completeness is separate from scope exclusions and unsupport
 requested execution while preserving partial artifacts; a run that is both incomplete and
 gate-failing exits 1 and records `gate.failure_kind: findings+incomplete`. Explicit external graph/report inputs use
 bounded regular-file readers and distinct input identities.
+Auto-detected graph enrichment does not become required execution merely because its file exists.
+Its read/parse failures remain disclosed as non-execution gaps; explicit `--graph` failures and
+source-read losses still make execution incomplete. Reader limits are unchanged.
 
 ## The Dynamic-Phase Safety Model (explicit and non-negotiable)
 
