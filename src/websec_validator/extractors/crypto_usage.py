@@ -23,7 +23,10 @@ import re
 from .base import Extractor, RepoContext, is_test_file
 from .syntax import expression_end, in_literal, js_functions, without_comments
 
-_PW = r"(?:password|passwd|passphrase|\bpwd\b|userPassword|plainPassword)"
+# Exact metadata suffixes are not password bytes. Hashes/tokens in general remain
+# credential-shaped; a broad suffix exemption would hide double-hashed passwords.
+_PW_METADATA = r"_?(?:reset_?(?:token|url)|attempt_?count|file_?path|salt)"
+_PW = r"(?:password|passwd|passphrase|\bpwd\b|userPassword|plainPassword)(?!" + _PW_METADATA + r"\b)"
 # a fast digest fed a password-shaped value (either arg order, within a small window)
 WEAK_PW_HASH = re.compile(
     r"createHash\s*\(\s*['\"](?:md5|sha1|sha256|sha224)['\"]\s*\)[\s\S]{0,160}?\.update\s*\([^)]*" + _PW
@@ -100,7 +103,8 @@ def _unparenthesized(value: str) -> str:
 
 
 # Identifier-shaped arguments: not credentials, so hashing them weakly is not a password-hash bug.
-_NON_CREDENTIAL_ARGUMENT = re.compile(r"(?:^|\.)(?:id|email|userId|user_id|tenantId|tenant_id)$", re.I)
+_NON_CREDENTIAL_ARGUMENT = re.compile(
+    r"(?:^|\.)(?:id|email|userId|user_id|tenantId|tenant_id|password" + _PW_METADATA + r")$", re.I)
 
 
 def _credential_operand(value: str) -> bool:

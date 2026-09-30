@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.19.1] — 2026-09-29
+
+Migration: no configuration change is required. Re-run `websec hooks install --pre-push`
+or `websec hooks install` to put an existing Husky guardrail in its durable user script.
+No reader limits, runtime dependencies or source-execution boundaries have changed.
+
+### Fixed — optional graphs, durable Husky hooks, and bounded detector precision
+
+- An auto-detected `graphify-out/graph.json` that is unreadable or exceeds the bounded
+  reader is disclosed as a non-execution coverage gap, rather than turning a successful
+  core pass into exit 3 (#172). Explicit `--graph` inputs remain required execution:
+  read/parse failures still fail completeness and prevent publication of `latest`.
+  Source read losses remain execution failures in both cases.
+- With Husky's `core.hooksPath=.husky/_`, install, status and uninstall use the durable
+  `.husky/<hook>` user script, not the generated dispatcher (#170). Shebangless Husky
+  shell scripts and foreign commands are preserved; explicit non-shell hooks are refused.
+- Weak-password-hash detection distinguishes exact password reset-token/URL, attempt-count,
+  file-path and salt names from password bytes (#161). Credential hashes and generic tokens
+  remain review leads; metadata elsewhere never clears a real weak password hash.
+- Upload filename template logging no longer counts as a storage key, and direct inert
+  MIME logging no longer counts as a validation/storage decision (#163). Filename-derived
+  assignments, nested MIME decisions and sibling unsafe operations still report.
+  Literal file paths and `root` options do not prove safe response headers and are not exempted.
+- The gate text distinguishes unattributed findings from findings caused by changed files
+  (#171). Unattributed findings still gate; uncertainty is not evidence of an unrelated file.
+- Seventeen additive regression tests exercise the failures and their unsafe neighbours.
+
 ### Fixed — `websec gate` answers the same policy question `run` does, about the files it was given
 
 Field report: in a Cloudflare Worker repository every agent edit drew a blocking `PostToolUse`

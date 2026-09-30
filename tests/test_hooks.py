@@ -78,6 +78,65 @@ class HooksTests(unittest.TestCase):
         self.assertIn("run_guardrail(pre_push=True)", body)
         self.assertIn('"$_PYTHON" -I -c', body)
 
+    def _husky(self):
+        generated = self.root / '.husky' / '_'
+        generated.mkdir(parents=True)
+        subprocess.run(['git', 'config', 'core.hooksPath', '.husky/_'], cwd=self.root, check=True)
+        dispatcher = generated / 'pre-push'
+        dispatcher.write_text('#!/usr/bin/env sh\n. "$(dirname "$0")/h"\n')
+        return generated, dispatcher
+
+    def test_husky_install_targets_durable_user_hook(self):
+        generated, dispatcher = self._husky()
+        before = dispatcher.read_bytes()
+        hooks.install(self.root, pre_push=True)
+        user_hook = generated.parent / 'pre-push'
+        self.assertIn(hooks.MARKER_START, user_hook.read_text())
+        self.assertEqual(dispatcher.read_bytes(), before)
+        dispatcher.write_text('#!/usr/bin/env sh\n. "$(dirname "$0")/h"\n')
+        self.assertIn(hooks.MARKER_START, user_hook.read_text())
+        self.assertIn('✓ pre-push', hooks.status(self.root))
+
+    def test_husky_preserves_shebangless_foreign_script_and_is_idempotent(self):
+        generated, _ = self._husky()
+        user_hook = generated.parent / 'pre-push'
+        user_hook.write_text('npm test\nexit 7\n')
+        hooks.install(self.root, pre_push=True)
+        hooks.install(self.root, pre_push=True)
+        self.assertEqual(user_hook.read_text().count(hooks.MARKER_START), 1)
+        self.assertIn('npm test\nexit 7\n', user_hook.read_text())
+        hooks.uninstall(self.root)
+        self.assertNotIn(hooks.MARKER_START, user_hook.read_text())
+        self.assertIn('npm test\nexit 7\n', user_hook.read_text())
+
+    def test_husky_uninstall_preserves_dispatcher_and_removes_managed_user_hook(self):
+        generated, dispatcher = self._husky()
+        before = dispatcher.read_bytes()
+        hooks.install(self.root, pre_push=True)
+        hooks.install(self.root)
+        hooks.uninstall(self.root)
+        self.assertFalse((generated.parent / 'pre-push').exists())
+        self.assertFalse((generated.parent / 'post-commit').exists())
+        self.assertEqual(dispatcher.read_bytes(), before)
+
+    def test_husky_explicit_non_shell_hook_is_refused(self):
+        generated, dispatcher = self._husky()
+        hook = generated.parent / 'pre-push'
+        hook.write_text('#!/usr/bin/env python3\nprint("foreign")\n')
+        before = hook.read_bytes()
+        with self.assertRaisesRegex(RuntimeError, 'non-shell'):
+            hooks.install(self.root, pre_push=True)
+        self.assertEqual(hook.read_bytes(), before)
+        self.assertNotIn(hooks.MARKER_START, dispatcher.read_text())
+
+    def test_arbitrary_generated_directory_is_not_assumed_to_be_husky(self):
+        target = self.root / 'custom' / '_'
+        target.mkdir(parents=True)
+        subprocess.run(['git', 'config', 'core.hooksPath', 'custom/_'], cwd=self.root, check=True)
+        hooks.install(self.root, pre_push=True)
+        self.assertIn(hooks.MARKER_START, (target / 'pre-push').read_text())
+        self.assertFalse((target.parent / 'pre-push').exists())
+
     def test_reinstall_idempotent(self):
         hooks.install(self.root)
         hooks.install(self.root)

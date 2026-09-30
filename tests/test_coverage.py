@@ -142,6 +142,72 @@ class CoverageTests(unittest.TestCase):
         self.assertEqual(len(external), 1)
         self.assertNotEqual(inputs[external[0]], expected)
 
+    def test_oversized_implicit_graph_is_disclosed_without_failing_execution(self):
+        graph = self.repo / 'graphify-out' / 'graph.json'
+        graph.parent.mkdir()
+        graph.write_text(json.dumps({'nodes': [], 'padding': 'x' * 2_000_001}))
+        self.assertEqual(self.run_cli('--require-complete', '--fail-on', 'low'), 0)
+        cov = self.latest('coverage.json')
+        self.assertTrue(cov['execution_complete'])
+        self.assertEqual(coverage.execution_errors(cov), [])
+        self.assertEqual(cov['files']['oversized'], [])
+        self.assertTrue(any(g['kind'] == 'oversized' and not g['execution']
+                            and 'graphify-out/graph.json' in g['detail'] for g in cov['gaps']))
+        self.assertFalse(self.latest('findings-ledger.json')['graph_enrichment']['available'])
+        self.assertTrue((self.out / 'latest').exists())
+
+    def test_oversized_explicit_graph_still_fails_requested_execution(self):
+        graph = self.base / 'graph.json'
+        graph.write_text(json.dumps({'nodes': [], 'padding': 'x' * 2_000_001}))
+        self.assertEqual(self.run_cli('--graph', str(graph), '--require-complete'), 3)
+        cov = self.latest('coverage.json')
+        self.assertFalse(cov['execution_complete'])
+        self.assertTrue(coverage.execution_errors(cov))
+        self.assertTrue(cov['files']['oversized'])
+        self.assertFalse((self.out / 'latest').exists())
+
+    def test_invalid_graph_is_optional_only_when_implicitly_selected(self):
+        graph = self.repo / 'graphify-out' / 'graph.json'
+        graph.parent.mkdir()
+        graph.write_text('{invalid')
+        self.assertEqual(self.run_cli('--require-complete'), 0)
+        self.assertEqual(coverage.execution_errors(self.latest('coverage.json')), [])
+        self.assertEqual(self.run_cli('--graph', str(graph), '--require-complete'), 3)
+
+    def test_unreadable_implicit_graph_does_not_mask_source_read_loss(self):
+        graph = self.repo / 'graphify-out' / 'graph.json'
+        graph.parent.mkdir()
+        graph.write_text('{"nodes": []}')
+        original = RepoContext.text
+
+        def unreadable(ctx, path, *args, **kwargs):
+            if Path(path).name == 'graph.json':
+                ctx.unreadable.append('graphify-out/graph.json')
+                return ''
+            return original(ctx, path, *args, **kwargs)
+
+        with patch.object(RepoContext, 'text', unreadable):
+            self.assertEqual(self.run_cli('--require-complete'), 0)
+            self.assertEqual(coverage.execution_errors(self.latest('coverage.json')), [])
+            (self.repo / 'app.py').write_text('x' * 2_000_001)
+            self.assertEqual(self.run_cli('--require-complete'), 3)
+            self.assertIn('app.py', self.latest('coverage.json')['files']['oversized'])
+
+    def test_oversized_implicit_graph_with_empty_git_diff_passes(self):
+        import os
+        import subprocess
+        with patch.dict(os.environ, {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_SYSTEM': os.devnull}):
+            for args in (['init', '-q'], ['config', 'user.name', 'synthetic'],
+                         ['config', 'user.email', 'test@example.invalid'],
+                         ['config', 'core.hooksPath', '.git/hooks'],
+                         ['add', 'app.py'], ['commit', '-qm', 'fixture']):
+                subprocess.run(['git', '-C', str(self.repo), *args], check=True, capture_output=True)
+            graph = self.repo / 'graphify-out' / 'graph.json'
+            graph.parent.mkdir()
+            graph.write_text(json.dumps({'nodes': [], 'padding': 'x' * 2_000_001}))
+            self.assertEqual(self.run_cli('--diff', 'HEAD', '--fail-on', 'low'), 0)
+            self.assertEqual(coverage.execution_errors(self.latest('coverage.json')), [])
+
     def test_scanner_semantic_identity_fields_survive_summary(self):
         path = self.base / 'semgrep.json'
         path.write_text(json.dumps({'results':[{'check_id':'rules.ssrf','path':'app.py',

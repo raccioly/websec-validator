@@ -54,6 +54,10 @@ def _hooks_dir(root: Path) -> Path:
         raw = res.stdout.strip()
         if res.returncode == 0 and raw and not any(c in raw for c in ("\n", "\r", "\x00")):
             d = (root / raw).resolve()
+            # Husky v9 points Git at generated dispatchers in .husky/_. The
+            # durable user scripts live one level up and survive `husky install`.
+            if d.name == "_" and d.parent.name == ".husky":
+                d = d.parent
             d.mkdir(parents=True, exist_ok=True)
             return d
     except (OSError, FileNotFoundError):
@@ -372,17 +376,24 @@ def run_guardrail(*, pre_push: bool = False) -> int:
         return failure
 
 
-def _write_hook(hooks_dir: Path, name: str, script: str) -> str:
+def _write_hook(hooks_dir: Path, name: str, script: str, *, shell_fragment: bool = False) -> str:
     hook_path = hooks_dir / name
     if hook_path.exists():
         content = hook_path.read_text(encoding="utf-8")
         first = content.splitlines()[0] if content else ""
-        if content.strip() and not re.fullmatch(r"#!\s*(?:/bin/(?:ba)?sh|/usr/bin/(?:ba)?sh|/usr/bin/env (?:ba)?sh)", first):
+        shell = re.fullmatch(r"#!\s*(?:/bin/(?:ba)?sh|/usr/bin/(?:ba)?sh|/usr/bin/env (?:ba)?sh)", first)
+        # Husky invokes its user script with sh; these files commonly omit a
+        # shebang. An explicit non-shell interpreter must still be refused.
+        fragment = shell_fragment and not first.startswith("#!")
+        if content.strip() and not shell and not fragment:
             raise RuntimeError(f"refusing to modify non-shell hook {hook_path}; chain websec explicitly")
         if MARKER_START in content:  # replace our section in place (idempotent)
             content = _strip_section(content)
         lines = content.splitlines(keepends=True)
-        merged = lines[0].rstrip("\r\n") + "\n" + script + "".join(lines[1:]) if lines else "#!/bin/sh\n" + script
+        if fragment:
+            merged = "#!/bin/sh\n" + script + content
+        else:
+            merged = lines[0].rstrip("\r\n") + "\n" + script + "".join(lines[1:]) if lines else "#!/bin/sh\n" + script
         hook_path.write_text(merged, encoding="utf-8", newline="\n")
         hook_path.chmod(0o755)
         return f"updated {name} hook at {hook_path}"
@@ -417,7 +428,7 @@ def install(path: Path | None = None, *, pre_push: bool = False) -> str:
         raise RuntimeError(f"no git repository at or above {(path or Path('.')).resolve()}")
     hooks_dir = _hooks_dir(root)
     name = "pre-push" if pre_push else "post-commit"
-    return _write_hook(hooks_dir, name, _script(pre_push))
+    return _write_hook(hooks_dir, name, _script(pre_push), shell_fragment=hooks_dir.name == ".husky")
 
 
 def uninstall(path: Path | None = None) -> str:

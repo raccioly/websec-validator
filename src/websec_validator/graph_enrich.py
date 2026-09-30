@@ -150,7 +150,8 @@ def enrich_ledger(ledger: dict, target: Path, graph_path: Path | None = None, *,
     if ledger.get("coverage") is not None:
         from . import coverage
         prefix = f"external-graph:{gp.parent}:" if graph_path is not None else ""
-        coverage.include_reads(ledger["coverage"], ctx, input_prefix=prefix)
+        coverage.include_reads(ledger["coverage"], ctx, input_prefix=prefix,
+                               execution=graph_path is not None)
     if graph is None:
         ledger["graph_enrichment"] = {"available": False, "input": str(gp),
                                       "explicit_input": graph_path is not None,

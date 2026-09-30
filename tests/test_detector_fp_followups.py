@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from websec_validator.extractors.base import RepoContext
 from websec_validator.extractors.crypto_usage import CryptoUsageExtractor
+from websec_validator.extractors.upload_security import UploadSecurityExtractor
 from websec_validator.extractors.webext import _sender_control
 
 
@@ -66,6 +67,27 @@ class TimingCompareTests(unittest.TestCase):
 class WeakPasswordHashTests(unittest.TestCase):
     """#128: hashing an identifier is not hashing a password."""
 
+    def test_password_metadata_is_not_password_material(self):
+        for name in ('passwordResetToken', 'password_reset_url', 'passwordAttemptCount',
+                     'password_file_path', 'password_salt'):
+            with self.subTest(name=name):
+                self.assertEqual(_classes({'app.js': "createHash('sha256').update(" + name + ").digest();"},
+                                          'weak-password-hash'), [])
+                self.assertEqual(_classes({'app.py': 'hashlib.md5(' + name + ').hexdigest()'},
+                                          'weak-password-hash'), [])
+        self.assertEqual(_classes({'app.js': "function verifyPassword() { return createHash('sha256').update(user.passwordSalt).digest(); }"},
+                                  'weak-password-hash'), [])
+
+    def test_metadata_exceptions_do_not_hide_credentials_or_sibling_hashes(self):
+        for value in ('password', 'password_hash', 'passwordToken', 'passwordSalted',
+                      'password_salt + password', 'passwordResetToken + req.body.password'):
+            with self.subTest(value=value):
+                self.assertTrue(_classes({'app.js': "createHash('sha256').update(" + value + ").digest();"},
+                                         'weak-password-hash'))
+        for body in ("createHash('md5').update(password).digest();createHash('sha256').update(passwordSalt).digest();",
+                     "createHash('sha256').update(passwordSalt).digest();createHash('md5').update(password).digest();"):
+            self.assertTrue(_classes({'app.js': 'function verifyPassword() {' + body + '}'}, 'weak-password-hash'))
+
     def test_hashing_an_identifier_is_not_a_password_hash(self):
         source = ("function verifyPassword(req, res) {\n"
                   "const cacheKey = crypto.createHash('md5').update(req.body.id).digest('hex');\n}\n")
@@ -101,6 +123,43 @@ class WeakPasswordHashTests(unittest.TestCase):
         source = ("function setPassword(u) {\n"
                   "const h = crypto.createHash('sha256').update(codeVerifier).digest('hex');\n}\n")
         self.assertEqual(_classes({"h.js": source}, "weak-password-hash"), [])
+
+
+class UploadLoggingTests(unittest.TestCase):
+    def kinds(self, source):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / 'app.js').write_text(source)
+            return {row['kind'] for row in UploadSecurityExtractor().extract(RepoContext(root), {})['findings']}
+
+    def test_filename_log_is_not_a_storage_key_but_assignments_remain(self):
+        log = 'console.log(`Received file: ${req.file.originalname}`);'
+        self.assertNotIn('upload-key-from-filename', self.kinds(log))
+        for storage in ('const key = `${req.file.originalname}`;',
+                        'const destination = req.file.originalname;',
+                        'store({Key: `uploads/${req.file.originalname}`});',
+                        'const filename = req.file.originalname;'):
+            with self.subTest(storage=storage):
+                self.assertIn('upload-key-from-filename', self.kinds(log + storage))
+
+    def test_direct_mime_logging_is_not_a_decision(self):
+        for log in ('console.log(req.file.mimetype);',
+                    'logger.info("MIME type: " + req.file.mimetype);',
+                    'logger.debug(\n"MIME type:",\nreq.file.mimetype\n);'):
+            self.assertNotIn('upload-trusts-client-mime', self.kinds(log))
+            self.assertIn('upload-trusts-client-mime', self.kinds(log + 'if(req.file.mimetype === "image/png") save();'))
+
+    def test_nested_logging_and_unknown_expressions_do_not_suppress_mime_use(self):
+        for source in ('console.log(validate(req.file.mimetype));',
+                       'logger.info(req.file.mimetype === "image/png");',
+                       'logger.info(save(req.file.mimetype), "saved");',
+                       'logger.info("MIME:", req.file.mimetype, store(file));'):
+            self.assertIn('upload-trusts-client-mime', self.kinds(source))
+
+    def test_literal_file_paths_and_roots_do_not_prove_response_headers(self):
+        for source in ('res.sendFile("logo.png");',
+                       'res.sendFile(req.query.name, {root: "public"});'):
+            self.assertIn('serve-no-nosniff', self.kinds(source))
 
 
 class SenderControlTests(unittest.TestCase):

@@ -294,12 +294,15 @@ def render_text(result: dict) -> str:
                     f"{missed} requested path(s) never analyzed; not a clean result for those{tail}")
         return f"websec gate: pass ({n} file(s) analyzed, threshold {result['threshold']}){tail}"
     lines = [f"websec gate: FAILED — {result['blocking_count']} finding(s) at or above "
-             f"{result['threshold']} in the files just changed.", ""]
+             f"{result['threshold']} in this scoped analysis.", ""]
     for f in result["findings"][:10]:
         where = f.get("file") or "(no file)"
         if f.get("line"):
             where += f":{f['line']}"
         lines.append(f"  [{f.get('severity')}] {where} — {f.get('title')}")
+        if f.get("scope") == "unattributed":
+            lines.append("      scope: unattributed — not proven to originate in the changed files; "
+                         "kept gating because outside-scope attribution is unverified.")
         if f.get("remediation"):
             lines.append(f"      fix: {f['remediation']}")
         if f.get("reopened_reason"):

@@ -27,8 +27,7 @@ ALLOW_LIST = re.compile(r"isAllowedMediaType|allowedMimeTypes|allow[_-]?list|whi
                         r"|ACCEPTED_(?:MIME|TYPES?|EXT)|accepted(?:Mime|File|Content)?(?:Types?|Extensions?)"
                         r"|\bfile-type\b|fileTypeFrom|magic[_-]?byte|detectContentType|\.fromBuffer\b|sniff", re.I)
 KEY_FROM_NAME = re.compile(r"(?:Key|key|path|filename|filepath|destination|filename\s*\()\s*[:=(][^;\n]{0,90}"
-                           r"\b(?:originalname|originalName|file\.name)\b"
-                           r"|`[^`]*\$\{[^}]*\boriginalname\b[^}]*\}[^`]*`", re.I)
+                           r"\b(?:originalname|originalName|file\.name)\b", re.I)
 TRUST_CLIENT_MIME = re.compile(r"(?:\b(?:req|request)\.files?(?:\.[\w$]+)*|\bfile)\.mimetype\b|headers\[['\"]content-type['\"]\]", re.I)
 ACCEPT_SVG = re.compile(r"image/svg\+xml|['\"]svg['\"]", re.I)
 # file-serving: streaming a STORED/PROXIED object back to the client. Tightened to genuine
@@ -162,7 +161,30 @@ def _byte_allowlist(scope: dict | None, file_object: str, source: str) -> bool:
     return True
 
 
+def _logged_mime_only(source: str, match) -> bool:
+    """Exclude simple logging arguments, never nested calls or decisions."""
+    literal = r'''"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*' '''
+    value = re.escape(match[0])
+    simple = re.compile(r"(?:" + literal + "|" + value + r")(?:\s*\+\s*(?:" + literal + "|" + value + r"))*", re.X)
+    for log in re.finditer(r"\b(?:console|logger|logging)\.(?:log|info|debug|warn|warning|error)\s*\(", source):
+        if log.start() >= match.start():
+            break
+        if in_literal(source, log.start()):
+            continue
+        expression = call_expression(source, log.start())
+        if log.start() + len(expression) <= match.end() or not expression.endswith(")"):
+            continue
+        # Every argument must be inert literals or this MIME property. Unknown
+        # expressions (including nested validation calls) contribute no exemption.
+        args = split_arguments(expression[expression.find("(") + 1:-1])
+        if args and all(simple.fullmatch(arg) for arg in args):
+            return True
+    return False
+
+
 def _mime_unsafe(source: str, match, scopes: list[dict]) -> bool:
+    if _logged_mime_only(source, match):
+        return False
     containing = [scope for scope in scopes if scope["body_start"] <= match.start() < scope["end"]]
     scope = min(containing, key=lambda item: item["end"]-item["start"]) if containing else None
     file_match = re.search(r"([\w$]+(?:\.[\w$]+)*)\.mimetype", match[0])
