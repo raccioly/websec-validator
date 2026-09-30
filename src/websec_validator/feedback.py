@@ -178,6 +178,10 @@ def build_record(finding: dict, *, verdict: str, reason: str, envelope: dict | N
 
 def append(path: Path, record: dict) -> Path:
     """Append one JSON line. Bounded so a scripted loop cannot grow the file forever."""
+    from .output import checked_path
+    path = checked_path(path.parent, path.name)
+    if path.exists() and path.stat().st_nlink != 1:
+        raise FeedbackError("feedback destination must not have hard-link aliases")
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         with path.open("r", encoding="utf-8") as handle:

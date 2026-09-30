@@ -110,6 +110,8 @@ def _maybe_nudge_websecignore(target: Path, ledger: dict, unified: dict | None, 
 
 def _default_out(target: Path, out: str | None) -> Path:
     d = Path(out).expanduser().resolve() if out else Path.cwd() / "websec-out"
+    if not out and d.is_symlink():
+        raise OSError("implicit output directory must not be a symlink; select --out deliberately")
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -273,7 +275,11 @@ def cmd_init(args) -> int:
         print("\n--- .websec-ignore (dry run, not written) ---")
         print(init_scope.render(proposal))
         return EXIT_OK
-    result = init_scope.write(target, proposal, force=getattr(args, "force", False))
+    try:
+        result = init_scope.write(target, proposal, force=getattr(args, "force", False))
+    except OSError as exc:
+        print(f"cannot write scope policy: {exc}", file=sys.stderr)
+        return EXIT_USAGE
     if not result["written"]:
         print(f"\n  ✗ not written: {result['reason']}\n    {result['path']}")
         print("    An existing .websec-ignore is a policy document — it may hold reviewed "
@@ -287,9 +293,19 @@ def cmd_init(args) -> int:
 
 def cmd_recon(args) -> int:
     target = _resolve_target(args.target)
-    out = _default_out(target, args.out)
+    try:
+        out = _default_out(target, args.out)
+        from .output import checked_path
+        checked_path(out, "FACTS.json")
+    except OSError as exc:
+        print(f"cannot select recon output: {exc}", file=sys.stderr)
+        return EXIT_USAGE
     facts = recon.build_facts(target, __version__)
-    recon.write_facts(facts, out / "FACTS.json")
+    try:
+        recon.write_facts(facts, out / "FACTS.json")
+    except OSError as exc:
+        print(f"cannot write recon output: {exc}", file=sys.stderr)
+        return EXIT_USAGE
     print(f"✓ FACTS.json → {out / 'FACTS.json'}")
     _print_facts_summary(facts)
     return 0
@@ -939,10 +955,12 @@ def cmd_gate(args) -> int:
         return EXIT_USAGE
 
     scope_source = "explicit"
+    scope_truncated = False
     paths = list(getattr(args, "only", None) or [])
     if not paths:
         discovered = _gate.working_tree_paths(target)
         paths, scope_source = discovered["paths"], discovered["source"]
+        scope_truncated = discovered.get("truncated", False)
         if scope_source == "working-tree-unavailable":
             # Not a pass: the gate could not determine what to analyse, so it never answered the
             # question. This is the INCOMPLETE class (the check did not run), not the usage class
@@ -963,7 +981,7 @@ def cmd_gate(args) -> int:
     result = _gate.evaluate(target, paths, args.fail_on, version=__version__,
                             scope_source=scope_source,
                             min_confidence=getattr(args, "min_confidence", "low"),
-                            excludes=getattr(args, "exclude", None))
+                            excludes=getattr(args, "exclude", None), scope_truncated=scope_truncated)
 
     # --fail-on-missed is applied HERE, not inside verdict(): `verdict` answers "are there blocking
     # findings in what was analysed", and a path that was never analysed produced no finding to
@@ -973,6 +991,8 @@ def cmd_gate(args) -> int:
         print(_gate.to_json(result))
     else:
         print(_gate.render_text(result))
+    if result.get("execution_complete") is False and not result.get("blocking_count"):
+        return EXIT_INCOMPLETE
     if result["passed"] and result.get("missed") and getattr(args, "fail_on_missed", False):
         print(f"websec gate: --fail-on-missed — {len(result['missed'])} requested path(s) were never "
               "analyzed; refusing to report this as a pass.", file=sys.stderr)
@@ -1068,7 +1088,7 @@ def cmd_feedback(args) -> int:
             record = fb.build_missed_record(
                 attack_class=getattr(args, "attack_class", "") or "", reason=args.reason,
                 file_extension=getattr(args, "file_extension", "") or "")
-            destination = Path(args.out or "websec-out").resolve() / fb.FEEDBACK_FILENAME
+            destination = _default_out(Path.cwd(), args.out) / fb.FEEDBACK_FILENAME
             fb.append(destination, record)
         except (fb.FeedbackError, OSError) as exc:
             print(str(exc), file=sys.stderr)
@@ -1142,8 +1162,8 @@ def cmd_feedback(args) -> int:
             record, detector_revision=_cov.get("detector_revision", ""),
             analyzed_input_digest=_cov.get("analyzed_input_digest", ""))
 
-    destination = Path(args.out or "websec-out").resolve() / fb.FEEDBACK_FILENAME
     try:
+        destination = _default_out(Path.cwd(), args.out) / fb.FEEDBACK_FILENAME
         fb.append(destination, record)
     except (fb.FeedbackError, OSError) as exc:
         print(f"cannot record feedback: {exc}", file=sys.stderr)

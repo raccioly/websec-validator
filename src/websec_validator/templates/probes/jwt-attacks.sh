@@ -11,6 +11,7 @@
 # Optional: TEST_PATH=/api/some/protected/route (else picked from probe-context.json),
 #           REFRESH_TOKEN, LOGOUT_PATH, REFRESH_PATH. Run only against a TEST instance.
 set -uo pipefail
+source "$(dirname "$0")/_lib.bash" || exit 2
 cd "$(dirname "$0")"
 ctx=probe-context.json
 

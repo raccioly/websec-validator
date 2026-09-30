@@ -120,6 +120,12 @@ def install_agent_hook(project_dir, *, uninstall: bool = False, settings_path=No
     evidence that it ran for every change."""
     root = Path(project_dir).expanduser().resolve()
     path = Path(settings_path) if settings_path else root / ".claude" / "settings.json"
+    if settings_path is None:
+        from .output import checked_path
+        try:
+            path = checked_path(root, ".claude/settings.json")
+        except OSError as error:
+            return {"ok": False, "path": str(path), "error": str(error)}
     data: dict = {}
     if path.is_file():
         try:
@@ -151,8 +157,16 @@ def install_agent_hook(project_dir, *, uninstall: bool = False, settings_path=No
         data["hooks"] = hooks_block
     else:
         data.pop("hooks", None)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    content = json.dumps(data, indent=2) + "\n"
+    if settings_path is None:
+        from .output import write_text
+        try:
+            write_text(root, ".claude/settings.json", content)
+        except OSError as error:
+            return {"ok": False, "path": str(path), "error": str(error)}
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
     return {"ok": True, "path": str(path), "action": action, "event": AGENT_HOOK_EVENT,
             "matcher": AGENT_HOOK_MATCHER}
 
@@ -160,6 +174,12 @@ def install_agent_hook(project_dir, *, uninstall: bool = False, settings_path=No
 def agent_hook_status(project_dir, settings_path=None) -> dict:
     root = Path(project_dir).expanduser().resolve()
     path = Path(settings_path) if settings_path else root / ".claude" / "settings.json"
+    if settings_path is None:
+        from .output import checked_path
+        try:
+            path = checked_path(root, ".claude/settings.json")
+        except OSError as error:
+            return {"installed": False, "path": str(path), "error": str(error)}
     if not path.is_file():
         return {"installed": False, "path": str(path)}
     try:

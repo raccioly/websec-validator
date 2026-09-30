@@ -75,7 +75,8 @@ findings = []
 print(f"=== Webhook forgery probes against {URL} ===\n")
 
 for name, headers, body, expected, reason in probes:
-    cmd = ['curl', '-s', '-X', 'POST', URL, '-w', '\nHTTP_CODE:%{http_code}']
+    _lib.guard_request('POST', URL)
+    cmd = ['curl', '-q', '--noproxy', '*', '--proto', '=http,https', '-s', '-X', 'POST', '--url', URL, '-w', '\nHTTP_CODE:%{http_code}', '--max-time', '20']
     for h, v in headers.items():
         cmd += ['-H', f'{h}: {v}']
     if 'Content-Type' not in headers:
@@ -91,7 +92,6 @@ for name, headers, body, expected, reason in probes:
     print(f"  [{mark}] [{sev}] {name:30s} expected={expected} actual={code} ({reason})")
     findings.append({
         'name': name, 'expected': expected, 'actual': code, 'pass': expected_ok,
-        'body_preview': body_text[:120],
     })
 
 out_p = _lib.save("webhook-forgery", findings)

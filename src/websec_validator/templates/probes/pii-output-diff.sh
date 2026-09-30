@@ -8,6 +8,7 @@
 #
 # Env (see _lib.py): TARGET, TOKEN_A=<low-priv jwt> (required), TOKEN_B=<priv jwt> (optional, for diff).
 set -uo pipefail
+source "$(dirname "$0")/_lib.bash" || exit 2
 cd "$(dirname "$0")"
 ctx=probe-context.json
 TARGET="${TARGET:-$(python3 -c "import json;print(json.load(open('$ctx'))['target_base_url'])" 2>/dev/null)}"

@@ -119,6 +119,16 @@ is exit 1, and exit 2 is reserved for a usage/configuration error in which nothi
 optional tools remain reported coverage limitations. Each attempt has a unique run directory;
 `latest` continues to identify the most recent fully executed scan.
 
+`websec gate` also requires complete scoped execution: unread, oversized or truncated selected
+source returns exit 3 unless blocking findings already require exit 1. The agent hook blocks both
+outcomes; unexpected internal crashes retain its loud fail-open behavior. Inventory matches are
+reported separately from files actually read.
+
+Regenerate staged probe drafts after upgrading: the shell drafts require their adjacent `_lib.bash`
+and `_lib.py` transport helpers. Probe writes require localhost; explicitly configured remote login
+POSTs remain credential setup, not write probes. Dynamic and draft transports bypass ambient HTTP
+proxies and curl configuration so local-only destinations cannot be rerouted by those settings.
+
 For MCP HTTP, supply `WEBSEC_MCP_TOKEN`, then run
 `websec mcp --http --allow-root /absolute/project`. Repeat `--allow-root` to add approved roots.
 The default root is the startup directory. Binding to non-loopback addresses is refused.

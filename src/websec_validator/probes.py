@@ -219,6 +219,7 @@ def stage(chosen: list, outdir: Path, facts: dict | None = None) -> list:
     # always ship the shared helper the Python probes import (load context + env auth)
     try:
         (dest / "_lib.py").write_text(src_root.joinpath("_lib.py").read_text())
+        (dest / "_lib.bash").write_text(src_root.joinpath("_lib.bash").read_text())
     except Exception:
         pass
     for key in chosen:

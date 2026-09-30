@@ -15,7 +15,7 @@ def detector_revision() -> str:
         dirs[:] = sorted(d for d in dirs if d.casefold() != ".local" and d != "__pycache__")
         for name in sorted(files):
             path = Path(directory) / name
-            if path.suffix in {".py", ".json", ".yaml", ".yml", ".md", ".sh", ".txt"} and not path.is_symlink():
+            if path.suffix in {".py", ".json", ".yaml", ".yml", ".md", ".sh", ".bash", ".txt"} and not path.is_symlink():
                 digest.update(path.relative_to(root).as_posix().encode() + b"\0")
                 digest.update(path.read_bytes())
     return "sha256:" + digest.hexdigest()

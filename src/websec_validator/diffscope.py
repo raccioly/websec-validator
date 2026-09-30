@@ -29,8 +29,8 @@ _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
 def _git(target: Path, *args: str, timeout: int = 60):
     try:
-        p = subprocess.run(["git", "-C", str(target), *args],
-                           capture_output=True, text=True, timeout=timeout)
+        from .git_read import run
+        p = run(target, *args, timeout=timeout)
         return (p.stdout, None) if p.returncode == 0 else (None, (p.stderr or "").strip()[:200])
     except FileNotFoundError:
         return None, "git not found on PATH"
@@ -60,7 +60,7 @@ def compute(target: Path, ref: str) -> dict:
     # files → "nothing changed" → the scoped --fail-on gate silently passes. Never let a developer's
     # git config turn the CI gate off.
     diff, err = _git(target, "-c", "diff.noprefix=false", "-c", "diff.mnemonicPrefix=false",
-                     "-c", "core.quotePath=false", "diff", "--no-ext-diff", "-U0", "--no-color",
+                     "-c", "core.quotePath=false", "diff", "--no-ext-diff", "--no-textconv", "-U0", "--no-color",
                      f"{base}...HEAD")
     if err is not None:
         return {"base": base, "files": {}, "error": err}

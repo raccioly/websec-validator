@@ -23,8 +23,8 @@ def build_facts(root: Path, version: str, excludes: list | None = None,
 
 
 def write_facts(facts: dict, out: Path) -> Path:
-    out.write_text(json.dumps(facts, indent=2))
-    return out
+    from .output import write_text
+    return write_text(out.parent, out.name, json.dumps(facts, indent=2))
 
 
 def detect_stack(root: Path) -> dict:

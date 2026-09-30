@@ -233,7 +233,8 @@ class ScopeStateUnitTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name).resolve()
+        self.root = Path(self.temp.name).resolve() / "repo"
+        self.root.mkdir()
         (self.root / "src").mkdir()
         (self.root / "src" / "a.py").write_text("x = 1\n")
         (self.root / "src" / "b.py").write_text("y = 2\n")
@@ -281,7 +282,6 @@ class ScopeStateUnitTests(unittest.TestCase):
     def test_a_path_escaping_the_root_is_never_outside_scope(self):
         """A `..` path cannot be proven to be a repository file, so it keeps gating."""
         (self.root.parent / "outside.py").write_text("z = 3\n")
-        self.addCleanup((self.root.parent / "outside.py").unlink)
         led = {"findings": [{"severity": "HIGH", "confidence": "HIGH", "title": "t",
                              "location": "../outside.py"}]}
         self.assertFalse(gate.verdict(led, self._facts(["src/a.py"]), "medium")["passed"])

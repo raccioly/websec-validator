@@ -14,13 +14,15 @@ dependency-confusion-shaped names (the public-org allowlist is inherently incomp
 signals that would actually confirm a hallucinated/typosquatted package (registry resolution, a shipped
 known-hallucinated-name list, Levenshtein-to-top-N) are DEFERRED behind an opt-in `--network` step: this
 extractor makes ZERO network calls in the default pass (`facts['dependencies']['network']['ran']` is
-always False here). No new pip dependency; stdlib json/re only.
+always False here). No new pip dependency; stdlib only.
 """
 
 from __future__ import annotations
 
+import configparser
 import json
 import re
+from urllib.parse import urlsplit
 
 from .base import Extractor, RepoContext
 
@@ -115,14 +117,43 @@ def _npmrc_private_scopes(ctx: RepoContext) -> set:
 
 
 def _pip_private_index(ctx: RepoContext) -> str:
-    """A non-PyPI default index means pip names should not be resolved against pypi.org."""
+    """Any private or unknown pip index suppresses public package-name queries."""
     for rel in ("pip.conf", ".pip/pip.conf", "pip.ini"):
         text = ctx.text(ctx.root / rel)
         if not text:
+            if any(rel in losses for losses in (ctx.unreadable, ctx.oversized, ctx.byte_budget_exceeded)):
+                return "private-or-unknown-index:unreadable"
             continue
-        m = re.search(r"(?m)^\s*index-url\s*=\s*(\S+)", text)
-        if m and "pypi.org" not in m.group(1):
-            return m.group(1)[:200]
+        config = configparser.ConfigParser(interpolation=None)
+        try:
+            config.read_string(text)
+        except configparser.Error:
+            return "private-or-unknown-index:unknown"
+        entries = list(config.defaults().items())
+        for section in config.sections():
+            entries.extend(config.items(section, raw=True))
+        for name, configured in entries:
+            name = name.lower().replace("_", "-")
+            if name.startswith("--"):
+                name = name[2:]
+            if name not in {"index-url", "extra-index-url"}:
+                continue
+            values = configured.split()
+            if not values or (name == "index-url" and len(values) != 1):
+                return "private-or-unknown-index:unknown"
+            for value in values:
+                try:
+                    parsed = urlsplit(value)
+                    host = (parsed.hostname or "").lower()
+                    if (parsed.scheme == "https" and host == "pypi.org" and parsed.port in (None, 443)
+                            and parsed.username is None and parsed.password is None
+                            and not parsed.query and not parsed.fragment and parsed.path.rstrip("/") in ("", "/simple")):
+                        continue
+                    # Never retain userinfo, query, fragment, path, or a raw parsing-error fallback.
+                    safe_host = host if re.fullmatch(r"[a-z0-9.-]{1,253}", host) else "unknown"
+                except ValueError:
+                    safe_host = "unknown"
+                return "private-or-unknown-index:" + safe_host
     return ""
 
 

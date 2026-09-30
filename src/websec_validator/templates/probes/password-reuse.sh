@@ -8,6 +8,7 @@
 # Env (see _lib.py): TARGET, TOKEN_A=<jwt for a test user>, CURRENT_PW, plus the set-password path(s).
 # Run only against a TEST instance with a throwaway account.
 set -uo pipefail
+source "$(dirname "$0")/_lib.bash" || exit 2
 cd "$(dirname "$0")"
 ctx=probe-context.json
 TARGET="${TARGET:-$(python3 -c "import json;print(json.load(open('$ctx'))['target_base_url'])" 2>/dev/null)}"

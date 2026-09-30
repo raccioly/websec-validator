@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed — security boundaries in local tooling and staged probes
+
+- Refuse parent/leaf aliases for implicit agent settings and standalone output destinations;
+  preserve deliberate custom settings and explicit output-base aliases. Atomic replacement avoids
+  truncating hard-link peers; feedback refuses shared hard-link destinations.
+- Enforce localhost write verbs at Python, shell curl, async race and dynamic HTTP transports.
+  Disable ambient curl configuration and proxy routing; missing shell guards fail closed.
+  Explicit remote authentication remains available, but mutating drafts (including GraphQL POST)
+  require a local TEST target. Previously staged drafts must be regenerated to receive the guards.
+- Persist structured login failures instead of reflected redirects/exception text, and omit response
+  body previews from staged findings while retaining status and decision metadata.
+- Reserve and clean an owned private temporary directory for manual S3 assessment.
+- Bind bot checks, immutable diff classification and the merge request to the checked head SHA.
+  Hold rename/removal origins and privileged dependency edits without complete reference-only
+  action-pin evidence; balanced line counts alone no longer authorize a merge.
+- Keep pip index credentials and URL components out of facts/output; exact public-host parsing
+  and conservative unknown/private-index suppression prevent package-name disclosure.
+- Isolate Git metadata from inherited selectors and checkout fsmonitor, signature and filter
+  programs; diffs disable textconv/external helpers. Signatures remain explicitly unchecked rather
+  than invoking target-configured verifiers.
+- Validate entire synthetic manifests, contained filenames and registered extractors before any
+  fixture is materialized. Preserve nested relative data-only calibration pairs.
+- Carry read, extractor and scope-selection losses through gate CLI and agent-hook outcomes.
+  Inventory matches are separate from files actually read; incomplete execution is not a pass.
+  Combined findings/incomplete outcomes retain the findings exit priority. Hook crashes still fail
+  open loudly, separately from completed-but-incomplete checks.
+- Own both the repository and outside sentinel in the escaping-path regression's temporary root.
+
 ## [0.19.1] — 2026-09-29
 
 Migration: no configuration change is required. Re-run `websec hooks install --pre-push`

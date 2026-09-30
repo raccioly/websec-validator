@@ -72,6 +72,9 @@ python3 -m unittest discover -s tests
 | `src/websec_validator/hooks.py` (agent hook + bypass record) | `tests/test_gate_and_bypass_record.py`, `tests/test_agent_hook.py`: durable bypass records, structural settings.json merge, idempotent install/uninstall | ✅ |
 | `src/websec_validator/scanners.py` (secret surfaces) | `tests/test_gitleaks_worktree.py`: history and working-tree passes, cross-mode dedup, history-only annotation correctness | ✅ |
 | `src/websec_validator/extractors/agent_config.py` | `tests/test_agent_hosts.py`: paired safe/unsafe cases per agent host, and proof the allow-list never walks an agent directory | ✅ |
+| Local writes, Git metadata, private indexes, synthetic imports and gate completeness | `tests/test_security_fix_boundaries.py`: hostile inputs paired with legitimate controls; owned sentinels, helper-execution markers, unread-input verdicts and credential-free facts | ✅ |
+| Staged probe transports and dynamic credential privacy | `tests/test_probe_transport_boundaries.py`: every transport rejects remote writes before I/O, local writes and remote reads remain usable, response artifacts omit reflected credentials, and S3 temporaries are privately owned | ✅ |
+| Repository triage and auto-merge | `.github/scripts/test_security_merge_boundaries.py`: protected rename origins, complete reference-only workflow patch evidence, immutable comparison inputs and checked-head merge preconditions | ✅ |
 
 Boundary tests must include legitimate positive cases as well as rejected inputs. Fault tests must
 show preserved partial evidence and failed execution gates; returning an empty result is insufficient.

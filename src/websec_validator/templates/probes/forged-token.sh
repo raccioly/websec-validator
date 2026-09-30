@@ -12,6 +12,7 @@
 # (written by websec). Tries Authorization: Bearer, plus a cookie if you pass COOKIE_NAME.
 # Usage:  TARGET=https://127.0.0.1:8443 [PROBE_WRITES=1] [COOKIE_NAME=session] bash forged-token.sh
 set -uo pipefail
+source "$(dirname "$0")/_lib.bash" || exit 2
 ctx="$(dirname "$0")/probe-context.json"
 BASE="${TARGET:-$(python3 -c "import json;print(json.load(open('$ctx'))['target_base_url'])" 2>/dev/null)}"
 if [ -z "${BASE:-}" ] || [ "${BASE#FILL}" != "$BASE" ]; then

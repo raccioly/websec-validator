@@ -77,9 +77,8 @@ def edited_paths(event: dict) -> list[str]:
 
 def _repo_root(start: Path) -> Path | None:
     try:
-        proc = subprocess.run(["git", "-C", str(start), "rev-parse", "--show-toplevel"],
-                              capture_output=True, text=True,
-                              timeout=GIT_TIMEOUT_SECONDS)
+        from .git_read import run
+        proc = run(start, "rev-parse", "--show-toplevel", timeout=GIT_TIMEOUT_SECONDS)
     except Exception:
         return None
     if proc.returncode != 0:

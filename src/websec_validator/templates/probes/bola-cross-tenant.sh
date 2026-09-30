@@ -9,6 +9,7 @@
 # (each account's tenant/group id). Bearer auth; cookie users: swap the -H below.
 # Run only against a TEST instance you're authorized to probe.
 set -uo pipefail
+source "$(dirname "$0")/_lib.bash" || exit 2
 cd "$(dirname "$0")"
 ctx=probe-context.json
 

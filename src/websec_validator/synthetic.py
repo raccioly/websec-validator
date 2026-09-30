@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import tempfile
 from importlib import resources
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 PAIRS_FILENAME = "pairs.json"
 
@@ -39,15 +39,15 @@ def _findings_for(source: str, filename: str, extractor_name: str) -> set:
     from .extractors.base import RepoContext
     from . import extractors as _ex
 
+    cls = _fixture_type(filename, extractor_name)
+    _fixture_source(source)
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         target = root / filename
+        target.resolve().relative_to(root.resolve())
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(source)
         ctx = RepoContext(root)
-        cls = getattr(_ex, extractor_name, None)
-        if cls is None:
-            return set()
         result = cls().extract(ctx, {"stack": {"datastores": ["postgres"]}}) or {}
     classes = set()
     for row in result.get("findings", []) or []:
@@ -61,6 +61,24 @@ def _findings_for(source: str, filename: str, extractor_name: str) -> set:
     return classes
 
 
+def _fixture_type(filename, extractor_name):
+    from .extractors import REGISTRY
+    if (not isinstance(filename, str) or not filename or len(filename) > 1024
+            or "\\" in filename or ":" in filename or "\x00" in filename
+            or PurePosixPath(filename).is_absolute()
+            or any(p == ".." or p.casefold() == ".local" for p in PurePosixPath(filename).parts)):
+        raise ValueError("fixture file must be a safe relative path")
+    allowed = {type(item).__name__: type(item) for item in REGISTRY}
+    if not isinstance(extractor_name, str) or extractor_name not in allowed:
+        raise ValueError("unknown fixture extractor")
+    return allowed[extractor_name]
+
+
+def _fixture_source(source):
+    if not isinstance(source, str) or not source or len(source.encode()) > 2_000_000:
+        raise ValueError("fixture source must be bounded nonempty text")
+
+
 def evaluate(pairs: list) -> dict:
     """Score every pair. Returns {"labels": [...], "errors": [...], "skipped": int}.
 
@@ -68,6 +86,22 @@ def evaluate(pairs: list) -> dict:
     ERROR, not a silent pass — a harness that scores nothing must not report a perfect table.
     """
     labels, errors = [], []
+    if not isinstance(pairs, list) or len(pairs) > 1000:
+        return {"labels": [], "errors": [{"pair": "?", "error": "invalid pair manifest"}], "pairs": 0}
+    # Validate the entire imported manifest before materializing even its first fixture.
+    for pair in pairs:
+        try:
+            if not isinstance(pair, dict) or not all(pair.get(k) for k in ("attack_class", "confidence", "extractor")):
+                raise ValueError("incomplete pair declaration")
+            _fixture_type(pair.get("file", "app.ts"), pair["extractor"])
+            for variant in ("vulnerable", "control"):
+                if not pair.get(variant):
+                    raise ValueError(f"missing {variant} variant")
+                _fixture_source(pair[variant])
+        except (ValueError, TypeError) as exc:
+            errors.append({"pair": pair.get("id", "?") if isinstance(pair, dict) else "?", "error": str(exc)})
+    if errors:
+        return {"labels": [], "errors": errors, "pairs": len(pairs)}
     for pair in pairs or []:
         cls = pair.get("attack_class")
         conf = pair.get("confidence")

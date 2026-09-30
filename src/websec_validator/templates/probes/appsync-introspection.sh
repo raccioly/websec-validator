@@ -11,6 +11,7 @@
 # Env: APPSYNC_URL=https://xxxx.appsync-api.<region>.amazonaws.com/graphql
 #      APPSYNC_API_KEY=da2-... (or AUTH_HEADER='Authorization: <jwt>'). TEST instance only.
 set -uo pipefail
+source "$(dirname "$0")/_lib.bash" || exit 2
 cd "$(dirname "$0")"
 URL="${APPSYNC_URL:-FILL_ME}"
 [ "${URL#FILL}" != "$URL" ] && { echo "Set APPSYNC_URL=https://<id>.appsync-api.<region>.amazonaws.com/graphql"; exit 2; }

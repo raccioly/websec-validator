@@ -70,10 +70,15 @@ The optional `websec dynamic` phase is the only part of the tool that contacts a
 guarantees are enforced in code (`dynamic.py`, `cli.py`):
 
 - **Read-only by default.** `--config` (authenticated cross-tenant BOLA) and `--unauth` (reachability)
-  issue **GET-only** requests.
+  issue **GET-only probes**. Explicit `--config` authentication may first POST operator-supplied
+  TEST credentials to the configured login endpoint, including a remote authorized TEST endpoint.
+  This credential setup is separate from write probes and never follows redirects.
 - **Write probes are localhost-only.** `--probe-writes` is refused unless `--target` is localhost; it
   sends empty bodies / dummy ids. Even these requests can change application state, so use an
-  authorized isolated test instance.
+  authorized isolated test instance. Actual Python/curl/httpx transports enforce the boundary
+  independently of staging and CLI flags. Shell drafts require the staged source-only transport
+  library; copying a draft without its guard fails closed. GraphQL POST drafts also require localhost.
+  Transport configuration does not inherit proxy routing or curl startup configuration.
 - **Production is out of scope without written authorization.** The human owns every credential and
   authorizes every live run. Never point it at production.
 - **Trigger-style paths are excluded** from unauth GET probing because a GET can still be side-effecting
@@ -101,7 +106,8 @@ for HTTP MCP. The core pass requires no secrets; see ENVIRONMENT.md for optional
 
 - The core pass (`recon` / `run`) MUST remain offline and read-only on the target.
 - The tool MUST NOT execute or modify the target repository's code.
-- Live probing MUST be opt-in, default read-only, and localhost-only for any write verb.
+- Live probes MUST be opt-in, default read-only, and localhost-only for any write verb;
+  explicit operator-configured authentication POSTs are credential setup, not write probes.
 - Secrets (dynamic creds, calibration overlay) MUST stay gitignored and out of shipped artifacts.
 - Runtime dependencies MUST stay at zero; new third-party tools are integrated by shelling out, not importing.
 
@@ -216,6 +222,25 @@ text, infer authorization from HTTP status, or treat finding disappearance as a 
 Nested output `runs` paths must be real directories, not symlinks or other file types, before run
 reservation. An explicitly selected output-base alias may resolve to its operator-chosen location.
 The checks prevent static redirection; subsequent path writes still assume a stable output tree.
+
+Implicit agent-hook settings reject parent and leaf symlinks before reading or writing JSON.
+Standalone facts, feedback and scope writers reject destination aliases/special files; implicit
+standalone output-base aliases are refused while explicit operator-selected bases may resolve.
+Atomic fixed-file replacement avoids truncating hard-link peers; bounded feedback append refuses
+hard-link aliases. These checks retain the stable operator-controlled tree assumption.
+
+Git metadata readers strip inherited Git selectors, disable fsmonitor and checkout clean/process
+filters, and disable external/textconv diff programs. Attribution observes signature presence but
+does not invoke checkout-configured signature verifiers: signed commits remain `unchecked`.
+Configured filters are not executed to establish a clean tree; raw/filter-transformed worktrees
+may consequently be reported dirty rather than claiming a trusted clean commit.
+
+Gate execution losses block a clean pass, including changed-file scope truncation. The CLI exits 3
+for incomplete-only outcomes and 1 when blocking findings also exist. Agent hooks return a retry
+on completed-but-incomplete checks; unexpected internal exceptions still fail open with a warning.
+Persisted dynamic login diagnostics exclude raw redirects/exception messages, and staged finding
+artifacts omit response-body previews, retaining status and decision metadata.
+
 Pre-commit examples use isolated installed Python and never install the target package. Hosted
 examples check out a required reviewed engine revision separately from PR content and keep token
 permissions read-only; no target installer, hooks or local Action are invoked.

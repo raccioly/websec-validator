@@ -50,7 +50,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 # One shared opener so redirects are NOT followed anywhere in the dynamic phase.
-_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirect)
+_NO_REDIRECT_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
 
 
 def _read_body(resp, limit: int):
@@ -74,6 +74,8 @@ def _read_body(resp, limit: int):
 
 def _request(method: str, url: str, token: str | None, timeout: int = 20,
              data: bytes | None = None, cookie: str | None = None):
+    if method.upper() not in {"GET", "HEAD", "OPTIONS"} and not is_localhost(url):
+        raise ValueError("mutating probes require localhost; no request sent")
     headers = {"Accept": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -93,12 +95,19 @@ def _request(method: str, url: str, token: str | None, timeout: int = 20,
         # would NOT be caught by the sibling `except Exception` below and would kill the whole run.
         return e.code, _read_body(e, 1000)
     except Exception as e:
-        return None, f"{type(e).__name__}: {e}"
+        return None, type(e).__name__
 
 
 def is_localhost(target: str) -> bool:
     import urllib.parse
-    return (urllib.parse.urlparse(target).hostname or "") in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
+    try:
+        parsed = urllib.parse.urlsplit(target)
+        parsed.port
+        return (parsed.scheme in {"http", "https"} and parsed.username is None and parsed.password is None
+                and "\\" not in target and not any(ord(c) < 33 for c in target)
+                and (parsed.hostname or "").lower() in {"localhost", "127.0.0.1", "::1", "0.0.0.0"})
+    except ValueError:
+        return False
 
 
 def mint(cfg: dict, role: str) -> dict:
@@ -123,12 +132,12 @@ def mint(cfg: dict, role: str) -> dict:
         d = json.load(resp)
     except urllib.error.HTTPError as e:
         if e.code in (301, 302, 303, 307, 308):
-            return {"error": f"login returned {e.code} → {e.headers.get('Location')} instead of a JSON "
+            return {"error": f"login returned {e.code} instead of a JSON "
                              "token (cookie-session login?). Point --config login_path at the JSON "
-                             "auth endpoint, or supply tokens directly."}
-        return {"error": f"HTTP {e.code} from the login endpoint"}
+                             "auth endpoint, or supply tokens directly.", "error_kind": "login_redirect", "status": e.code}
+        return {"error": f"HTTP {e.code} from the login endpoint", "error_kind": "login_http", "status": e.code}
     except Exception as e:
-        return {"error": f"{type(e).__name__}: {e}"}
+        return {"error": "login failed", "error_kind": type(e).__name__}
     token = _dig(d, cfg.get("token_json_path", "tokens.accessToken"))
     user = _dig(d, cfg.get("user_json_path", "user")) or {}
     # A login response need not echo the user object; fall back to the credential we sent so the
