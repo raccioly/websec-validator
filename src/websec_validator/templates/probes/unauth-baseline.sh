@@ -9,6 +9,7 @@
 # Reads the target's real write routes from ./probe-context.json (written by websec).
 # Usage:  TARGET=http://localhost:3000 bash unauth-baseline.sh
 set -uo pipefail
+source "$(dirname "$0")/_lib.bash" || exit 2
 
 ctx="$(dirname "$0")/probe-context.json"
 BASE="${TARGET:-$(python3 -c "import json;print(json.load(open('$ctx'))['target_base_url'])" 2>/dev/null)}"

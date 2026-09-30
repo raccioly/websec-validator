@@ -10,8 +10,8 @@ This module adds that, and grades it honestly. The grading is the point:
 
   tier 1  ci-minted      CI runner env / OIDC claims. Not settable from inside the job and
                          corroborable against the forge's own audit log.          REAL evidence.
-  tier 2  vcs-observed   `git rev-parse HEAD`, signature status. The SHA is fixed by content;
-                         the signature is the forgery-resistant part.             MEDIUM.
+  tier 2  vcs-observed   `git rev-parse HEAD`, signature presence. The SHA binds content;
+                         signature verification is a separate trusted step.       MEDIUM.
   tier 3  self-asserted  --actor, $WEBSEC_ACTOR, git config user.email, $USER, git trailers.
                          `git config user.email "cfo@corp.com"` takes one second. ZERO.
 
@@ -81,8 +81,8 @@ def _clean(value, limit: int = 256) -> str:
 def _git(target, *args: str):
     """Bounded, argument-array git. Returns stdout or None; never raises."""
     try:
-        proc = subprocess.run(["git", "-C", str(target), *args],
-                              capture_output=True, text=True, timeout=_TIMEOUT)
+        from .git_read import run
+        proc = run(target, *args, timeout=_TIMEOUT)
     except Exception:
         return None
     if proc.returncode != 0:
@@ -115,18 +115,12 @@ def _vcs(target) -> dict:
         if value:
             out[key] = value
 
-    # Signature status is the one locally checkable forgery-resistant signal. It proves a KEY signed
-    # the commit — not that a human rather than an agent produced it.
-    raw = _git(target, "verify-commit", "--raw", "HEAD")
-    if raw is None:
-        out["signature"] = "none"
-    else:
-        blob = raw + (_git(target, "log", "-1", "--format=%G?") or "")
-        out["signature"] = "good" if "GOODSIG" in blob else ("bad" if "BADSIG" in blob else "unchecked")
-        fpr = re.search(r"VALIDSIG\s+([0-9A-Fa-f]{16,64})", raw)
-        if fpr:
-            # The key fingerprint, deliberately NOT a claimed human name.
-            out["signer"] = fpr.group(1)
+    # Observe presence, not validity or signer identity. Signature programs/key stores selected
+    # by the checkout are untrusted, so recon only inspects commit headers.
+    raw = _git(target, "cat-file", "commit", "HEAD")
+    headers = (raw or "").split("\n\n", 1)[0]
+    out["signature"] = "none" if raw is not None and not re.search(r"(?m)^gpgsig(?:-sha256)? ", headers) else "unchecked"
+    out["signature_note"] = "signature verification requires a separately trusted verifier; not executed by recon"
     return out
 
 

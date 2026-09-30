@@ -106,7 +106,14 @@ def main():
             continue
         print(f"  checks: {why}")
 
-        files = gh.paged(f"/repos/{REPO}/pulls/{n}/files")
+        # PR files are mutable: a branch can move while they are paginated, even move back.
+        # Classify the immutable checked head against this PR's base instead.
+        base_sha = pr.get("base", {}).get("sha")
+        if not isinstance(base_sha, str) or len(base_sha) != 40 or any(c not in "0123456789abcdef" for c in base_sha):
+            print("  hold: immutable PR base unavailable")
+            continue
+        comparison = gh.get(f"/repos/{REPO}/compare/{base_sha}...{HEAD_SHA}")
+        files = comparison.get("files", []) if isinstance(comparison, dict) else []
         verdict, reason = triage.verdict(author, pr["title"], files)
         print(f"  verdict: {verdict} — {reason}")
 
@@ -123,13 +130,17 @@ def main():
 
         # mergeable is computed asynchronously; re-read the PR for a settled value.
         fresh = gh.get(f"/repos/{REPO}/pulls/{n}")
+        if (fresh.get("head", {}).get("sha") != HEAD_SHA or fresh.get("state") != "open"
+                or fresh.get("draft") or fresh.get("user", {}).get("login") != author):
+            print("  hold: PR identity or head changed since checks")
+            continue
         if fresh.get("mergeable") is False:
             print("  hold: PR has conflicts")
             continue
 
         status, body = gh.request(
             "PUT", f"/repos/{REPO}/pulls/{n}/merge",
-            {"merge_method": "squash",
+            {"merge_method": "squash", "sha": HEAD_SHA,
              "commit_title": f"{pr['title']} (#{n})",
              "commit_message": f"Auto-merged by the bot-PR gate: {reason}\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>"},
             accept_status=(405, 409, 403),

@@ -48,6 +48,7 @@ if not TARGETS:
 
 async def fire(client, t):
     """Single request, return (status_code, response_body_preview)"""
+    _lib.guard_request(t['method'], t['url'])
     try:
         r = await client.request(
             t['method'], t['url'],
@@ -55,13 +56,13 @@ async def fire(client, t):
             headers=HEADERS,
             timeout=30.0,
         )
-        return (r.status_code, r.text[:120])
+        return (r.status_code, None)
     except Exception as e:
-        return (None, str(e)[:120])
+        return (None, type(e).__name__)
 
 async def run_target(t):
     print(f"  Firing {PARALLEL} parallel {t['method']} to {t['url'][len(TARGET):]}")
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(trust_env=False, follow_redirects=False) as client:
         results = await asyncio.gather(*[fire(client, t) for _ in range(PARALLEL)])
     codes = Counter(r[0] for r in results)
     success = sum(1 for r in results if r[0] and 200 <= r[0] < 300)

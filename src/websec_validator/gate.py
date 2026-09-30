@@ -59,8 +59,8 @@ _CODE_SUFFIXES = {".py", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", "
 
 def _git(repo: Path, *args: str):
     try:
-        proc = subprocess.run(["git", "-C", str(repo), *args],
-                              capture_output=True, text=True, timeout=_TIMEOUT)
+        from .git_read import run
+        proc = run(repo, *args, timeout=_TIMEOUT)
     except Exception:
         return None
     return proc.stdout if proc.returncode == 0 else None
@@ -112,7 +112,8 @@ CONF_ORDER = ["low", "medium", "high"]
 
 
 def evaluate(root: Path, paths: list, threshold: str, *, version: str, scope_source: str,
-             min_confidence: str = "low", excludes: list | None = None) -> dict:
+             min_confidence: str = "low", excludes: list | None = None,
+             scope_truncated: bool = False) -> dict:
     """The one gate path, shared by `websec gate` and the PostToolUse hook.
 
     Both used to build the ledger themselves with no ignore policy, and drifted from `run`
@@ -123,6 +124,9 @@ def evaluate(root: Path, paths: list, threshold: str, *, version: str, scope_sou
     from .extractors.base import RepoContext
     root = Path(root)
     facts = recon.build_facts(root, version, excludes, only=paths)
+    if scope_truncated:
+        from .coverage import add_gap
+        add_gap(facts, "gate_scope_limit", "changed-file selection exceeded the gate limit")
     # One non-walking context serves both reads: `load_*` would otherwise walk the whole tree
     # twice more, tripling the cost of a check that runs on every edit.
     policy = RepoContext(root, walk=False)
@@ -220,15 +224,24 @@ def verdict(ledger: dict, facts: dict, threshold: str, *, scope_source: str = "e
         (outside if state == "outside-scope" else in_scope).append((f, state))
     blocking = [(f, state) for f, state in in_scope if _blocks(f)]
     acknowledged = ledger.get("acknowledged", []) or []
+    from .coverage import execution_errors
+    coverage = facts.get("coverage")
+    # Sparse verdict-only callers predate coverage; production evaluate always supplies it.
+    errors = execution_errors(coverage) if coverage is not None else []
+    matched = scope.get("matched", [])
+    analyzed = [p for p in matched if p in coverage.get("inputs", {})] if isinstance(coverage, dict) else matched
     out = {
         "tool": "websec-validator",
         "command": "gate",
         "threshold": threshold.lower(),
         "min_confidence": min_confidence.lower(),
-        "passed": not blocking,
+        "passed": not blocking and not errors,
+        "execution_complete": not errors,
+        "execution_errors": errors,
         "blocking_count": len(blocking),
         "total_findings": ledger.get("total", len(ledger.get("findings", []) or [])),
-        "analyzed": scope.get("matched", []),
+        "analyzed": analyzed,
+        "matched": matched,
         "missed": scope.get("missed", []),
         "scope_source": scope_source,
         "findings": [{"severity": f.get("severity"), "confidence": f.get("confidence"),
@@ -272,6 +285,13 @@ def verdict(ledger: dict, facts: dict, threshold: str, *, scope_source: str = "e
 
 def render_text(result: dict) -> str:
     """What the agent harness feeds back to the model on a block — specific enough to act on."""
+    incomplete = ""
+    if result.get("execution_complete") is False:
+        incomplete = ("websec gate: INCOMPLETE — this edit was not fully security-checked.\n"
+                + "\n".join("  " + e for e in result.get("execution_errors", []))
+                + f"\n{result['blocking_count']} blocking finding(s) retained; resolve the execution gaps and re-run.")
+        if not result["blocking_count"]:
+            return incomplete
     if result["passed"]:
         n = len(result["analyzed"])
         missed = len(result.get("missed") or [])
@@ -311,7 +331,7 @@ def render_text(result: dict) -> str:
         lines.append(f"  … and {result['blocking_count'] - 10} more")
     lines += ["", "Fix these, then the check will re-run on the next edit.",
               "This is a scoped check of the changed files, not a full review."]
-    return "\n".join(lines)
+    return (incomplete + "\n\n" if incomplete else "") + "\n".join(lines)
 
 
 def to_json(result: dict) -> str:

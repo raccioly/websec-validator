@@ -5,6 +5,7 @@
 # the Layer B (out-of-band anchor) checklist for the human. Honest limit: on-screen display can't be
 # made tamper-proof on the web — the goal is DETECTABLE tampering, not impossible.
 set -uo pipefail
+source "$(dirname "$0")/_lib.bash" || exit 2
 cd "$(dirname "$0")"
 ctx=probe-context.json
 TARGET="${TARGET:-$(python3 -c "import json;print(json.load(open('$ctx'))['target_base_url'])" 2>/dev/null)}"

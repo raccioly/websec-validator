@@ -147,6 +147,12 @@ def verdict(author: str, title: str, files) -> tuple[str, str]:
         return "hold", "no files reported"
     if len(names) > MAX_FILES:
         return "hold", f"{len(names)} files changed (limit {MAX_FILES})"
+    for file in files:
+        previous = file.get("previous_filename")
+        if previous and _held_reason(previous):
+            return "hold", f"protected rename origin: {previous}"
+        if file.get("status") not in {"added", "modified"} or previous:
+            return "hold", "removal, rename or unknown file status requires human review"
 
     # Precedence: a known-noise PR is closed by the triage workflow, never merged. Without this the
     # 27 test_hooks-only PRs all read as "purely additive" and would merge each other into conflict.
@@ -175,6 +181,8 @@ def verdict(author: str, title: str, files) -> tuple[str, str]:
             return "hold", f"+{adds}/-{dels} is not a pure pin swap — dependabot PRs replace lines 1:1"
         if adds > DEPENDABOT_MAX_LINES:
             return "hold", f"{adds} changed lines exceeds the {DEPENDABOT_MAX_LINES}-line pin-swap budget"
+        if not all(_reference_only(file) for file in files):
+            return "hold", "privileged dependency edit lacks complete reference-only patch evidence"
         return "merge", f"{level} bump {a} → {b} ({adds} line(s) swapped across {len(names)} file(s))"
 
     # Every other bot: docs, or purely-additive tests. Protected paths are absolute.
@@ -204,3 +212,38 @@ def verdict(author: str, title: str, files) -> tuple[str, str]:
         return "merge", f"tests-only and purely additive (+{sum(f.get('additions', 0) for f in touched)})"
 
     return "hold", "mixes tests/docs with other paths — needs a human"
+
+
+_USES = re.compile(r"^(\s*(?:-\s*)?uses:\s*[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@)"
+                   r"([0-9a-f]{40}|v?\d+(?:\.\d+){0,2})(\s*(?:#.*)?)$")
+
+
+def _reference_only(file: dict) -> bool:
+    """Prove all changed lines only replace action references, not workflow semantics.
+
+    Incomplete/missing patches and other privileged formats require a human, not a YAML guess.
+    """
+    name = file["filename"]
+    if not (name.startswith(".github/workflows/") or name in {"action.yml", "action.yaml"}):
+        return False
+    patch = file.get("patch")
+    if not isinstance(patch, str) or not patch.startswith("@@ "):
+        return False
+    removed, added = [], []
+    for line in patch.splitlines():
+        if line.startswith("@@ ") or line.startswith(" "):
+            continue
+        if line.startswith("-"):
+            removed.append(line[1:])
+        elif line.startswith("+"):
+            added.append(line[1:])
+        else:
+            return False
+    if (not added or len(added) != file.get("additions") or len(removed) != file.get("deletions")
+            or len(added) != len(removed)):
+        return False
+    for before, after in zip(removed, added):
+        a, b = _USES.fullmatch(before), _USES.fullmatch(after)
+        if not a or not b or a.group(1) != b.group(1):
+            return False
+    return True

@@ -11,6 +11,12 @@
 # Uses your configured AWS credentials. Read-only — never writes, deletes, or changes
 # anything. Anonymous probes use --no-sign-request / unauthenticated curl.
 set -uo pipefail
+source "$(dirname "$0")/_lib.bash" || exit 2
+umask 077
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/websec-s3.XXXXXXXX") || exit 1
+trap 'rm -f "$tmp/error" "$tmp/policy"; rmdir "$tmp"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 BUCKET="${1:-${BUCKET:-<UPLOADS_BUCKET>}}"
 REGION="${2:-${REGION:-us-east-1}}"
@@ -26,10 +32,10 @@ command -v aws >/dev/null || { echo "aws CLI not found. Install it or run from a
 echo "Assessing s3://$BUCKET (region $REGION) as: $(aws sts get-caller-identity --query Arn --output text 2>/dev/null || echo 'UNKNOWN')"
 
 hdr "Bucket exists / reachable"
-if aws s3api head-bucket --bucket "$BUCKET" --region "$REGION" 2>/tmp/_s3err; then
+if aws s3api head-bucket --bucket "$BUCKET" --region "$REGION" 2>"$tmp/error"; then
   ok "head-bucket succeeded"
 else
-  bad "head-bucket failed: $(tr -d '\n' </tmp/_s3err). Check bucket name/region/credentials."
+  bad "head-bucket failed: $(tr -d '\n' <"$tmp/error"). Check bucket name/region/credentials."
   echo; echo "Cannot continue without bucket access."; exit 1
 fi
 
@@ -57,9 +63,9 @@ case "$PS" in
 esac
 
 hdr "Bucket policy document"
-if aws s3api get-bucket-policy --bucket "$BUCKET" --region "$REGION" --query Policy --output text 2>/dev/null > /tmp/_s3pol && [[ -s /tmp/_s3pol ]]; then
-  python3 -m json.tool < /tmp/_s3pol 2>/dev/null | sed 's/^/    /' || sed 's/^/    /' /tmp/_s3pol
-  if grep -qE '"Principal"[[:space:]]*:[[:space:]]*"\*"|"AWS"[[:space:]]*:[[:space:]]*"\*"' /tmp/_s3pol; then
+if aws s3api get-bucket-policy --bucket "$BUCKET" --region "$REGION" --query Policy --output text 2>/dev/null > "$tmp/policy" && [[ -s "$tmp/policy" ]]; then
+  python3 -m json.tool < "$tmp/policy" 2>/dev/null | sed 's/^/    /' || sed 's/^/    /' "$tmp/policy"
+  if grep -qE '"Principal"[[:space:]]*:[[:space:]]*"\*"|"AWS"[[:space:]]*:[[:space:]]*"\*"' "$tmp/policy"; then
     wn 'Policy contains a wildcard Principal ("*") — confirm it is paired with a tight Condition, not an open Allow.'
   else
     ok "No wildcard Principal in policy."
@@ -117,5 +123,4 @@ echo "Reminder — also test the UPLOAD PATH (these are app-layer, not bucket-la
 echo "  - content-type bypass on the upload endpoint (mime sniffing vs claimed type)"
 echo "  - path traversal in uploaded filenames (../ in the key)"
 echo "  - whether media signed-URL / media-token can be forged or replayed"
-rm -f /tmp/_s3err /tmp/_s3pol
 [[ $fail -gt 0 ]] && exit 1 || exit 0

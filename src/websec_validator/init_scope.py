@@ -166,7 +166,9 @@ def render(proposal: dict) -> str:
 def write(target: Path, proposal: dict, *, force: bool = False) -> dict:
     """Write `.websec-ignore`. Refuses to clobber an existing one unless `force`."""
     path = Path(target) / IGNORE_NAME
+    from .output import checked_path, write_text
+    path = checked_path(Path(target), IGNORE_NAME)
     if path.is_file() and not force:
         return {"written": False, "path": str(path), "reason": "already exists (use --force to replace)"}
-    path.write_text(render(proposal))
+    write_text(Path(target), IGNORE_NAME, render(proposal))
     return {"written": True, "path": str(path), "entries": len(proposal["entries"])}

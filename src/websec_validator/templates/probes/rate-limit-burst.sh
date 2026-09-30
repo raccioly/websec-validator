@@ -15,6 +15,7 @@
 #      AUTH_LIMIT (default 10), LOGIN_PATH, HEALTH_PATH.
 # Usage:  TARGET=http://localhost:3000 bash rate-limit-burst.sh
 set -uo pipefail
+source "$(dirname "$0")/_lib.bash" || exit 2
 ctx="$(dirname "$0")/probe-context.json"
 BASE="${TARGET:-$(python3 -c "import json;print(json.load(open('$ctx'))['target_base_url'])" 2>/dev/null)}"
 if [ -z "${BASE:-}" ] || [ "${BASE#FILL}" != "$BASE" ]; then
@@ -54,7 +55,7 @@ fi
 echo
 
 echo "=== Test 2: general limiter — 200 GET $HEALTH_PATH in ~10s ==="
-codes=$(seq 1 200 | xargs -n1 -P20 -I{} curl -s -o /dev/null -w '%{http_code}\n' "$BASE$HEALTH_PATH" --max-time 15)
+codes=$(seq 1 200 | xargs -n1 -P20 -I{} python3 "$WEBSEC_PROBE_DIR/_lib.py" --curl -s -o /dev/null -w '%{http_code}\n' "$BASE$HEALTH_PATH" --max-time 15)
 n429=$(printf '%s\n' "$codes" | grep -c '^429$' || true)
 n200=$(printf '%s\n' "$codes" | grep -c '^200$' || true)
 echo "  200: $n200 · 429: $n429"

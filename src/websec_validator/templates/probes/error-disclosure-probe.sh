@@ -7,6 +7,7 @@
 #
 # Env (see _lib.py): TARGET, optionally TOKEN_A=<jwt> / COOKIE_A. Run only against a TEST instance.
 set -uo pipefail
+source "$(dirname "$0")/_lib.bash" || exit 2
 cd "$(dirname "$0")"
 ctx=probe-context.json
 

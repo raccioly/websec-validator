@@ -14,7 +14,10 @@ import triage
 
 
 def f(name, status="modified", additions=1, deletions=0):
-    return {"filename": name, "status": status, "additions": additions, "deletions": deletions}
+    result = {"filename": name, "status": status, "additions": additions, "deletions": deletions}
+    if name.startswith(".github/workflows/") and additions == deletions == 1:
+        result["patch"] = "@@ -1 +1 @@\n-    uses: actions/checkout@" + "a" * 40 + "\n+    uses: actions/checkout@" + "b" * 40
+    return result
 
 
 class ParseBumpTests(unittest.TestCase):
