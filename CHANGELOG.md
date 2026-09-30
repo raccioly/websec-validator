@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Crypto**: Fix false positive timing-unsafe-compare alerts on credential-like variables combined with metadata suffixes (e.g. `token_name`, `secret_type`).
+
 ## [0.19.1] — 2026-09-29
 
 Migration: no configuration change is required. Re-run `websec hooks install --pre-push`

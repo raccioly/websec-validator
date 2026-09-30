@@ -111,6 +111,8 @@ def _credential_operand(value: str) -> bool:
     # Literal words in arbitrary message strings aren't credential variables.
     if re.search(r'\.(?:length|size|byteLength|type)$', value):
         return False
+    if re.search(r'(?i)_?(?:name|type|id|method|algorithm|class|url|uri|path|count|salt|format|state|required|status|date|time)$', value):
+        return False
     bare = re.sub(_TIMING_LITERAL, "''", value)
     if _CREDENTIAL_NAME.search(bare):
         return True
