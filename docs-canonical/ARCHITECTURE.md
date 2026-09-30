@@ -59,6 +59,7 @@ scanner runs, a calibrated findings ledger, staged probes, and the briefing/repo
 | Demo | Runs the real recon + ledger path against a bundled sample in a temp directory and summarises the findings, so the output can be seen before adopting. The sample ships as `.txt` and carries no credential-shaped strings | `src/websec_validator/demo.py`, `templates/demo/` | `tests/test_demo.py` |
 | Explain | Offline lookup for an attack class or CWE id: citations, what would confirm or refute it, the remediation pattern and whether a calibrated cell exists. Reads the shipped STANDARDS/REMEDIATION/calibration data, so there is no second source of truth | `src/websec_validator/explain.py` | `tests/test_explain.py` |
 | Provenance | Classifies how the running engine was installed — index, local file, editable, VCS or source tree — from PEP 610 `direct_url.json` and the metadata directory, with no network. `doctor` prints it because a version string alone does not identify the engine | `src/websec_validator/provenance.py` | `tests/test_provenance.py` |
+| Release advice | Offline metadata and consent-driven PyPI checks; no installer, target data, finding or gate mutation | `src/websec_validator/updates.py` | `tests/test_updates.py` |
 | Feedback | Operator verdict that a detector is wrong; metadata-only record appended to `websec-out/feedback.jsonl` plus a printed issue link. Offline: builds a URL, sends nothing. Distinct from `.websec-ignore`, which suppresses locally and is never written here | `src/websec_validator/feedback.py` | `tests/test_feedback.py` |
 | Coverage | Execution outcomes, read losses, scope limitations and actual analyzed-input/detector digests | `src/websec_validator/coverage.py` | `tests/test_coverage.py` |
 | Repair evidence | Build-bound remediation plans and offline validation of contained, hashed before/after test artifacts | `src/websec_validator/repairs.py` | `tests/test_lifecycle.py`, `tests/test_coverage.py` |
@@ -81,6 +82,17 @@ the exact record first, and refuses without `--yes` when stdin is not a terminal
 is versioned by its `schema_version` field; no JSON Schema is shipped because nothing in the
 package validates it at runtime.
 
+
+### Release advice is not scan evidence
+
+`update-check` and `websec_check_updates` consume cached metadata unless explicitly given
+`--online` / `online: true`. Doctor and briefing rendering remain offline. AI guidance asks the
+human before online checking, respects a decline for that review, and requests separate approval
+before upgrading. MCP trusts the client's consent assertion; it cannot attest a human interaction.
+Only this metadata tool is independent of a repository path; HTTP authentication still applies,
+and every repository tool retains approved-root checks. Metadata is outside FACTS/ledger schemas,
+source digests, execution completeness and gate decisions. It cannot verify dirty/editable engine
+provenance or guarantee install compatibility. No package or plugin is installed or refreshed.
 
 ## Layer Boundaries
 

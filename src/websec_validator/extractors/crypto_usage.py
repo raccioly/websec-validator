@@ -107,9 +107,28 @@ _NON_CREDENTIAL_ARGUMENT = re.compile(
     r"(?:^|\.)(?:id|email|userId|user_id|tenantId|tenant_id|password" + _PW_METADATA + r")$", re.I)
 
 
+_METADATA_SUFFIXES = {"name", "type", "id", "method", "algorithm", "class", "url", "uri",
+                      "path", "count", "salt", "format", "state", "required", "status", "date", "time"}
+
+
+def _metadata_operand(value: str) -> bool:
+    """Name heuristic for a simple metadata value, never a compound secret expression."""
+    value = _unparenthesized(value)
+    if not re.fullmatch(r"[A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*", value):
+        return False
+    leaf = value.rsplit(".", 1)[-1].strip()
+    if "." in value and leaf in {"length", "size", "byteLength", "type"}:
+        return True
+    # Require actual snake/camel token boundaries: `secretValid` is not `secret_id`.
+    normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", leaf)
+    parts = normalized.lower().split("_")
+    return (len(parts) > 1 and parts[-1] in _METADATA_SUFFIXES
+            and bool(_CREDENTIAL_NAME.search("_".join(parts[:-1]))))
+
+
 def _credential_operand(value: str) -> bool:
     # Literal words in arbitrary message strings aren't credential variables.
-    if re.search(r'\.(?:length|size|byteLength|type)$', value):
+    if _metadata_operand(value):
         return False
     bare = re.sub(_TIMING_LITERAL, "''", value)
     if _CREDENTIAL_NAME.search(bare):

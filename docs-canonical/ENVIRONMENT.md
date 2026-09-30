@@ -37,6 +37,7 @@ The core CLI requires no environment variables. Optional integrations use:
 | `XDG_CACHE_HOME` | No | `~/.cache` | Base directory for the default intelligence cache. |
 | `WEBSEC_MCP_TOKEN` | HTTP MCP only | — | Bearer token required at startup by `websec mcp --http`; provide through a secret environment. |
 | `WEBSEC_CALIBRATION_HOME` | ❌ No | `~/.cache/websec-validator/` | Relocates the gitignored, local-only calibration overlay that personalizes confidence to your apps. |
+| `WEBSEC_UPDATE_HOME` | No | `~/.cache/websec-validator/` | Absolute operator-selected directory for version/check-time `release.json` only; does not enable online checks. |
 | `WEBSEC_HOOK_FAIL_ON` | No | `high` | Native pre-push severity gate; changing it invalidates accepted baseline policy. |
 | `WEBSEC_HOOK_SCAN` | No | `0` | Set to `1` to execute optional scanners in native hooks. |
 | `WEBSEC_HOOK_SCANNERS` | No | Empty | Comma-separated required adapters; requires `WEBSEC_HOOK_SCAN=1`. |
@@ -110,6 +111,32 @@ pipx install --editable .                # or: pip install -e . in a 3.11+ venv
 python3 -m unittest discover -s tests    # stdlib tests; see TEST-SPEC.md for verified inventory
 docguard guard                           # validate the documentation (CDD)
 ```
+
+## Advisory Version Checks
+
+Available beginning with 0.20.0. Refresh installed managed agent guidance after upgrading with
+`websec install <host>`; old guidance/plugin copies do not rewrite themselves. An older engine
+without `update-check` must report that limitation rather than silently run an alternate online check.
+
+```bash
+websec update-check                         # cached metadata only; zero network calls
+websec update-check --online                # explicit approval to check PyPI, never install
+websec update-check --online --format json  # structured advisory status
+```
+
+Every security review should offer a check and ask the human before going online. A decline
+does not block review. Doctor and generated briefings remain offline and give the same consent
+reminder. MCP `websec_check_updates` defaults to `online: false`; true is the client's assertion
+that the human approved a check. HTTP authentication applies even though this tool needs no repo.
+
+The per-user cache contains only version/check-time metadata, never project data. Observations
+older than 24 hours are stale and never refresh themselves. A failed check is `unavailable`, not
+evidence that the installation is current; source/preview engine versions are `unknown_version`.
+`current`, `ahead` and `update_available` compare the engine's stable version with the observed
+stable release, not source provenance or install compatibility. JSON includes `freshness`,
+`checked_at`, a bounded error code and `installation_performed: false`. Check-only exits remain
+zero even when unavailable; these notices do not affect scan, gate or hook exits. Upgrade approval
+is separate from check approval, and CLI and agent-plugin updates remain separate operations.
 
 ## Execution and HTTP MCP Options
 

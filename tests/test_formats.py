@@ -156,7 +156,8 @@ class McpServerTests(unittest.TestCase):
         out = self._cap()
         mcp.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         names = {t["name"] for t in out[0]["result"]["tools"]}
-        self.assertEqual(names, {"websec_recon", "websec_findings", "websec_sarif", "websec_briefing"})
+        self.assertEqual(names, {"websec_recon", "websec_findings", "websec_sarif", "websec_briefing",
+                                 "websec_check_updates"})
 
     def test_notification_gets_no_response(self):
         out = self._cap()

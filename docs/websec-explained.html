@@ -879,7 +879,7 @@ unsupported: []   gaps: []
       <tr><td>SARIF 2.1.0</td><td>Written on every run and importable back in, so GitHub code scanning, IDEs and other tools read the same ledger.</td></tr>
       <tr><td>GitHub Action</td><td>Composite action with a <code>fail-on</code> threshold, a baseline for legacy repositories, and SARIF upload. Every third-party action it calls is pinned by commit SHA. It installs the engine from its own checkout, never from the target repository.</td></tr>
       <tr><td>Docker</td><td>Everything bundled on a slim Python 3.14 image, running as a non-root user, with Noir 1.0.0, Gitleaks 8.30.1 and Trivy 0.74.0 pinned by version.</td></tr>
-      <tr><td>MCP server</td><td>Four read-only tools, <code>websec_recon</code>, <code>websec_findings</code>, <code>websec_sarif</code> and <code>websec_briefing</code>, over stdio or loopback-only HTTP that requires a token. Non-loopback bindings are rejected before listening.</td></tr>
+      <tr><td>MCP server</td><td>Four read-only repository tools, <code>websec_recon</code>, <code>websec_findings</code>, <code>websec_sarif</code> and <code>websec_briefing</code>, plus advisory <code>websec_check_updates</code>, over stdio or loopback-only HTTP that requires a token. Release checks default to offline metadata; online checks require consent and never install packages. Non-loopback bindings are rejected before listening.</td></tr>
       <tr><td>pre-commit</td><td>One hook id, defaulting to <code>--require-complete --fail-on high</code>, so a partial run cannot pass the commit.</td></tr>
       <tr><td>Claude Code plugin</td><td>A skill that runs the security pass, and a <code>PostToolUse</code> hook that checks each edit as it lands, failing open and loudly.</td></tr>
     </table>
