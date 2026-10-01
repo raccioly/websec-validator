@@ -44,6 +44,8 @@ class Value:
     builder: bool = False
     query_text: bool = False
     predicate: bool = False
+    vector: bool = False
+    vector_executable: str = ''
 
 
 def merge(*values):
@@ -52,7 +54,8 @@ def merge(*values):
                  any(v.request for v in values), any(v.uncertain for v in values),
                  values[0].callable_kind if values and all(v.callable_kind == values[0].callable_kind for v in values) else '',
                  bool(values) and all(v.builder for v in values), any(v.query_text for v in values),
-                 bool(values) and all(v.predicate or not v.sources for v in values))
+                 bool(values) and all(v.predicate or not v.sources for v in values),
+                 bool(values) and all(v.vector for v in values))
 
 
 class LimitReached(ValueError):
@@ -107,6 +110,18 @@ class Analysis:
                     bindings[root.id] = bindings.get(root.id, 0) + 1
             pending.extend(ast.iter_child_nodes(node))
         self.trusted_imports.update(identity for name, identity in imported if bindings[name] == 1)
+
+    def import_kind(self, node, alias):
+        if id(alias) not in self.trusted_imports or getattr(node, 'level', 0):
+            return ''
+        if isinstance(node, ast.Import) and alias.name == 'sqlalchemy':
+            return 'sqlalchemy'
+        if isinstance(node, ast.ImportFrom) and node.module == 'sqlalchemy' and alias.name in {'text', 'select'}:
+            return alias.name
+        return ''
+
+    def observe_node(self, node):
+        """Extension hook inside the already bounded node inventory."""
 
     def tick(self, amount=1):
         self.steps += amount
@@ -219,7 +234,10 @@ class Analysis:
             return
         def combined(item):
             return merge(*(combined(child) for child in item)) if isinstance(item, tuple) else item
-        self.bind(target, combined(value), env, line)
+        merged = combined(value)
+        if isinstance(target, ast.Name) and isinstance(value, tuple):
+            merged = replace(merged, vector=True)
+        self.bind(target, merged, env, line)
 
     def loop_gaps(self, statements):
         pending, calls, written = list(statements), [], set()
@@ -301,12 +319,11 @@ class Analysis:
                 for alias in node.names:
                     self.bind(ast.Name(id=alias.asname or alias.name),
                               Value(request=node.module == 'flask' and alias.name == 'request',
-                                    callable_kind=alias.name if node.module == 'sqlalchemy' and alias.name in {'text', 'select'}
-                                    and id(alias) in self.trusted_imports else ''), env, node.lineno, imported=True)
+                                    callable_kind=self.import_kind(node, alias)), env, node.lineno, imported=True)
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     self.bind(ast.Name(id=alias.asname or alias.name.split('.')[0]),
-                              Value(callable_kind='sqlalchemy' if alias.name == 'sqlalchemy' and id(alias) in self.trusted_imports else ''),
+                              Value(callable_kind=self.import_kind(node, alias)),
                               env, node.lineno, imported=True)
             elif isinstance(node, ast.If):
                 self.value(node.test, env)
@@ -347,12 +364,12 @@ class Analysis:
         return env
 
 
-def analyze(source, budget=None):
-    result = {'occurrences': [], 'unverified_queries': [], 'errors': [], 'nodes': 0, 'candidate': bool(QUERY_CALL.search(source))}
+def analyze(source, budget=None, *, analysis_type=Analysis, candidate_pattern=QUERY_CALL):
+    result = {'occurrences': [], 'unverified_queries': [], 'errors': [], 'nodes': 0, 'candidate': bool(candidate_pattern.search(source))}
     if not result['candidate']:
         return result
     budget = budget if budget is not None else Budget()
-    analysis = Analysis('', budget)
+    analysis = analysis_type('', budget)
     try:
         size = len(source.encode('utf-8'))
         if size > MAX_SOURCE_BYTES:
@@ -361,7 +378,7 @@ def analyze(source, budget=None):
                 or budget.steps >= MAX_TOTAL_STEPS):
             raise LimitReached('aggregate Python query-flow budget exceeded')
         budget.source_bytes += size
-        analysis = Analysis(source, budget)
+        analysis = analysis_type(source, budget)
         tree = ast.parse(source)
         for _node in ast.walk(tree):
             result['nodes'] += 1
@@ -370,6 +387,7 @@ def analyze(source, budget=None):
                 raise LimitReached('aggregate AST node budget exceeded')
             if result['nodes'] > MAX_NODES:
                 raise LimitReached('AST node budget exceeded')
+            analysis.observe_node(_node)
         analysis.imports(tree)
         analysis.block(tree.body, {'request': Value(request=True), 'req': Value(request=True)})
     except (SyntaxError, ValueError, RecursionError) as error:

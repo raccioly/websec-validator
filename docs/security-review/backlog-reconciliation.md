@@ -53,6 +53,23 @@ four concurrent POSTs, no followed 302, no inherited proxy and no reflected-secr
 Concurrency is bounded to 1–16, payloads to 16 KiB, and socket I/O has a five-second timeout—not a
 hard whole-request wall-clock deadline. Status-only observations do not validate business state.
 
+## Assigned-flow evidence
+
+Eleven paired tests and an actual subprocess CLI ledger contract cover retained JS SQL/command,
+Python command and import-bound Needle method gaps. Python reuses the bounded query AST engine's
+branch joins; JavaScript models simple local assignments with conservative branch may-taint.
+Literal overwrites/bind parameters/sibling scopes/inert interpolation stay distinct. Dynamic
+executables/interpreters, mutated runners and unknown shell options cannot borrow inert argv
+credit. Repeated sink identities stay distinct; outer callee classification cannot invent a SQL
+sink from a nested fixed query. Independent review confirmed its five negative controls fixed.
+
+Source byte/node/event/scope/binding budgets are visible; exhaustion is an execution gap, not a
+clean result. Loops, closure capture, destructuring, runtime dispatch and cross-function flow remain
+unverified. These tests do not measure unseen-project recall. A full-suite checkpoint encountered
+the existing MCP overload-close timing flake; the exact isolated assertion passes unchanged and
+the transport behavior is under separate investigation. The reviewed assigned-flow checkpoint
+subsequently passed all 1756 application tests with the original MCP assertion unchanged.
+
 The local Docker client has no available daemon; pre-commit is absent at baseline. Neither a
 configuration-shaped test nor an installed client establishes an executed integration lifecycle.
 Authored paired fixtures do not measure independent production precision. The separate manual

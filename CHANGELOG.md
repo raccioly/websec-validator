@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Preserve request provenance through supported local JavaScript SQL/shell assignments and Python
+  stdlib command assignments, including may-flow branches. Bound values, inert examples and
+  unrelated scopes do not taint query text. Dynamic executables/interpreters and unknown shell
+  options stay leads; only narrowly supported inert argv controls receive credit. Keep repeated
+  sink identities distinct and disclose byte/node/event/binding limits as execution gaps.
+- Add stable import-bound Needle HTTP methods without matching unrelated `.get` operations;
+  receiver shadowing/reassignment/computed mutation invalidates that binding evidence.
+
 - Replace the manually executed race draft's httpx requirement with a stdlib thread pool (default
   eight, maximum sixteen requests per endpoint), 16 KiB payload cap and socket-I/O timeout. Actual
   transports enforce localhost mutations, disable proxies/redirects and retain status/error kinds

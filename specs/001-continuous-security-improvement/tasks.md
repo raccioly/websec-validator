@@ -21,8 +21,8 @@ Independent test: endpoint-bound safe/no-op/unprotected sibling controls, no tar
 - [ ] T006 [US2] Bind visible dependency/middleware enforcement to its endpoint in `src/websec_validator/extractors/authz.py` (W05).
 - [ ] T007 [US2] Add source-registration/documentation-only/escaping/malformed Connexion controls in `tests/test_retained_frameworks.py` (W16/W20).
 - [ ] T008 [US2] Resolve bounded import-bound Connexion registration without promoting unregistered docs in `src/websec_validator/extractors/routes.py` (W16/W20).
-- [ ] T009 [US2] Add paired assigned JS SQL/Python+JS command controls in `tests/test_retained_flows.py` (W04/W10).
-- [ ] T010 [US2] Implement bounded local assignment provenance and disclosed work limits in `src/websec_validator/extractors/surface.py` and shared flow helper (W04/W10).
+- [x] T009 [US2] Add paired assigned JS SQL/Python+JS command controls in `tests/test_retained_flows.py` (W04/W10).
+- [x] T010 [US2] Implement bounded local assignment provenance and disclosed work limits in `src/websec_validator/extractors/surface.py` and shared flow helper (W04/W10).
 - [ ] T011 [US2] Add paired UploadFile/db.Model controls in `tests/test_retained_frameworks.py` (W11/W13).
 - [ ] T012 [US2] Implement bound Python upload/model evidence in `src/websec_validator/extractors/upload_security.py` and `schemas.py` (W11/W13).
 - [ ] T013 [US2] Validate Django same-response observations and native/profile limits against `tests/test_django_urls.py`, `tests/test_profiles.py`, `src/websec_validator/extractors/transport_security.py`; add missing paired evidence without claiming deployment.
@@ -37,7 +37,7 @@ Independent test: original reproducer no longer misclassified; real unsafe sibli
 - [ ] T017 [US1] Correct boolean and partial-removal PII output handling in `src/websec_validator/extractors/pii_exposure.py` (W12).
 - [ ] T018 [US1] Correct literal regex/error expression matching in `src/websec_validator/extractors/surface.py` (W18).
 - [ ] T019 [US1] Pair actual security invocation with executable catch returns in `src/websec_validator/extractors/llm_security.py` (W19).
-- [ ] T020 [US1] Add import-bound HTTP receiver controls and implementation in `tests/test_retained_flows.py` and `src/websec_validator/extractors/surface.py` (W03).
+- [x] T020 [US1] Add import-bound HTTP receiver controls and implementation in `tests/test_retained_flows.py` and `src/websec_validator/extractors/surface.py` (W03).
 
 ## Phase 5 — US4: Honest evidence (P1)
 

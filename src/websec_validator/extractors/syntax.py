@@ -181,7 +181,11 @@ def python_shell_safe(expression: str) -> bool:
                                         and isinstance(node.args[0].op, ast.Add)
                                         and isinstance(node.args[0].right, (ast.List, ast.Tuple))))
             and any(k.arg == "shell" and isinstance(k.value, ast.Constant)
-                    and k.value.value is False for k in node.keywords))
+                    and k.value.value is False for k in node.keywords)
+            and all(keyword.arg is not None for keyword in node.keywords)
+            and (not isinstance(node.args[0], (ast.List, ast.Tuple))
+                 or (node.args[0].elts and isinstance(node.args[0].elts[0], ast.Constant)
+                     and node.args[0].elts[0].value in {'echo', '/bin/echo', '/usr/bin/echo'})))
 
 
 def server_file(rel: str, text: str, legacy_client: bool) -> bool:
