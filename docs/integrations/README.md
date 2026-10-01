@@ -86,6 +86,51 @@ Tests execute the documented hook argv in an isolated stdlib venv containing a t
 including target import-shadowing, finding-gate and incomplete-read controls. The copy prunes private
 `.local` trees case-insensitively and skips every symlink before descent or payload copying.
 Configuration tests check the examples' limited scalar structure and revision-validation code.
-The pre-commit framework and a YAML parser were unavailable in the validation environment, so no
-full pre-commit installation/staging lifecycle or hosted workflow run was performed. Run
-`pre-commit validate-config` and review a workflow check in your configured environment before adoption.
+An opt-in development test now executes pre-commit 4.6.2 in an owned disposable environment:
+manifest/config validation, installation, an actual rejected staged commit, a clean index commit
+with unsafe unstaged content restored, manual/pre-push framework gates, no baseline acceptance,
+and restoration of an owned foreign hook on uninstall. No consumer hooks are activated by this
+test. An actual push to an owned local bare repository rejects unsafe working-tree input, then
+accepts clean input; no public-network push occurs. Normal stdlib tests
+skip this development-only dependency; the dedicated workflow runs it explicitly.
+
+The [adoption contract workflow](../../.github/workflows/adoption-contracts.yml) also executes the
+actual separate-engine Action with clean, unsafe and oversized owned target fixtures, hostile inert
+install/import surfaces, and current-attempt artifact checks. All four jobs passed on 2026-10-01 in
+[run 36818626389](https://github.com/raccioly/websec-validator/actions/runs/36818626389)
+at head `b383d2e221722d9beb73fff75618d170b045eaca`. This is controlled fixture execution, not a
+claim of a full consumer two-checkout deployment or a scheduled run. Review your selected engine
+revision and configured workflow result before adoption.
+
+## Container policy and reviewed downloads
+
+`docker build --target core -t websec-core .` builds the stdlib engine without bundled scanners;
+the default `bundled` target includes optional analyzers. Both run as a nonroot user. Pass an
+operator-selected UID/GID for mounted output ownership. The build context is allowlisted and
+private `.local` trees are excluded case-insensitively; no target checkout is installed in an image.
+
+The Python multi-architecture index and official Noir/Gitleaks/Trivy archive digests are fixed in
+reviewed source. The installer accepts only amd64/arm64, verifies all downloaded archives before
+any extraction/package installation, and refuses scanner-version overrides without digest review.
+Semgrep/Checkov top-level versions are pinned; apt packages, build tools and transitive Python
+dependencies are not fully locked. These controls detect substituted bytes, not upstream compromise
+or complete reproducibility. See the [installer](../../scripts/install-container-scanners.sh).
+
+`HEALTHCHECK NONE` is deliberate for the default one-shot CLI: no recurring self-scan, network
+check or health assurance is implied. For an explicitly selected long-lived `websec mcp --http`
+service, an operator may add an in-container loopback `GET /health` liveness check with a short
+timeout. That endpoint reports transport liveness only, not successful recon or authorization;
+MCP POST dispatch still requires its bearer token and allowed root. HTTP remains loopback-only,
+so publishing a container port does not expose its loopback listener. Do not weaken the bind or
+install an automatic target scan to obtain a green health indicator.
+[Docker healthcheck reference](https://docs.docker.com/reference/dockerfile/#healthcheck)
+
+The native amd64/arm64 [image contract workflow](../../.github/workflows/container-contracts.yml)
+builds core/bundled targets, records image identity, runs offline source-only fixtures and invokes
+bundled scanner versions. All four native jobs passed on 2026-10-01 in
+[run 36817563117](https://github.com/raccioly/websec-validator/actions/runs/36817563117),
+against PR head `89ede34473b4d0122c4ff6ef4eddf8851a3649ba`. The
+[evidence ledger](../security-review/backlog-reconciliation.md#executed-container-matrix)
+retains the resulting image identities. These checks validate image construction, nonroot/core
+execution and scanner executable versions—not every scanner's rules/database or adapter coverage.
+The local Docker daemon remains unavailable; hosted native execution supplied this evidence.

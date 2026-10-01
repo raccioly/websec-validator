@@ -2,7 +2,7 @@
 
 <!-- docguard:version 0.9.1 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-09-16 -->
+<!-- docguard:last-reviewed 2026-10-01 -->
 <!-- docguard:owner @raccioly -->
 
 > This project follows **Canonical-Driven Development (CDD)**.  
@@ -32,7 +32,7 @@ pass. Pure-Python, **stdlib only, zero runtime dependencies**; it shells out to 
 | Command | Purpose |
 |---------|---------|
 | `pipx install --editable .` | Install the CLI from source (or `pip install -e .` in a 3.11+ venv) |
-| `python3 -m unittest discover -s tests` | Run the suite (1713 tests, stdlib only, no public network) |
+| `python3 -m unittest discover -s tests` | Run the suite (1851 tests, stdlib only, no public network; one opt-in lifecycle skipped) |
 | `python3 scripts/build-brief.py --check` | Verify the committed HTML/PDF/renderer binding offline; rebuild and review all eight pages after source edits |
 | `websec run ./target` | Full pipeline → `FACTS.json` + `AGENT-BRIEFING.md` + `probes/` |
 | `websec doctor ./target` | Show which optional scanners are installed |
@@ -77,8 +77,9 @@ content instead of overwriting the name-guard.
 
 1. **Before any work**: read `docs-canonical/` and run `docguard guard` to see the compliance state.
 2. **After changing code or docs**: re-run `docguard guard`; keep the numbers (22 extractors, 17 sink
-   classes, 11 scanner entries, 1713 tests, dated 10/10 proof (not vulnerability recall)) consistent across every doc — DocGuard's metrics-consistency
-   validator cross-checks them.
+   classes, 11 scanner entries, 1851 tests, dated 10/10 proof (not vulnerability recall)) consistent across every doc — DocGuard's metrics-consistency
+   validator checks only configured matching statements; historical snapshots stay dated. A
+   `no-matches` result is not evidence these numbers were checked.
 3. **Update `CHANGELOG.md`** for any user-visible change.
 4. **Document drift**: if code must deviate from a canonical doc, add a `// DRIFT: reason` (or
    `# DRIFT: reason`) comment and a matching `DRIFT-LOG.md` entry.

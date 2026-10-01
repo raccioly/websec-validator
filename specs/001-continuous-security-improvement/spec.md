@@ -230,7 +230,7 @@ Story 2.3: db.Model import/receiver binding with unrelated Model classes as cont
 
 PRs: #53.
 
-Validate official v7 SHA consistently across CI/publish/composite callers, supported runners and input/output contracts (#53). Current release retains pinned v6; do not adopt the proposed floating composite ref.
+Validate official v7 SHA consistently across CI/publish/composite callers, supported runners and input/output contracts (#53). As reviewed 2026-09-30, all eight callers already pin v7.0.0 at `5fda3b95a4ea91299a34e894583c3862153e4b97`; preserve that immutable reference, not the proposed floating composite ref.
 
 ### W15 — file-response-binding
 

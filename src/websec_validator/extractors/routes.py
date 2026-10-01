@@ -28,6 +28,8 @@ from pathlib import Path
 from .base import SKIP_DIRS, Extractor, RepoContext, is_test_file, path_in_skip_dir
 from .profiles import service_for
 from .django_urls import analyze as analyze_django_urls
+from .connexion_routes import analyze as analyze_connexion
+from .trpc_routes import analyze as analyze_trpc
 
 
 def _route_key(ctx, row: dict) -> tuple:
@@ -560,17 +562,8 @@ class RoutesExtractor(Extractor):
                     normalized.append(row)
             routes = normalized
             engine = "noir"
-            # An app's OWN implemented OpenAPI spec (connexion / spec-first, e.g. VAmPI) IS its route
-            # list — SPEC_PATH excludes it by the openapi/swagger filename, but when the spec is the ONLY
-            # route source and not under a vendor/deps dir, promote it (else a whole spec-first API is
-            # 0-routes/unprobed — caught by the proof harness: VAmPI 19 endpoints → 0).
-            if not routes and spec_derived:
-                own = [r for r in spec_derived
-                       if not _VENDOR_DIR.search(str(r.get("code_path", "")).replace("\\", "/"))]
-                if own:
-                    routes = own
-                    spec_derived = [r for r in spec_derived if r not in own]
-                    engine = "noir (openapi-first: own spec is the route contract)"
+            # A non-vendored spec alone is still documentation, not registration.
+            # Connexion source evidence below is independent of Noir availability.
         elif eps is not None:                      # noir ran but found ZERO — back it up with the regex
             fb = _fallback(ctx)                     # pass so a framework noir can't parse doesn't become a
             routes, spec_derived = fb, []           # silent blind spot (0 routes → no authz, no probes)
@@ -662,6 +655,20 @@ class RoutesExtractor(Extractor):
                 engine += " + raw-server"
 
         existing = {_route_key(ctx, r) for r in routes}
+        connexion = analyze_connexion(ctx)
+        for row in connexion['routes']:
+            if _route_key(ctx, row) not in existing:
+                existing.add(_route_key(ctx, row))
+                routes.append(row)
+        if connexion['routes']:
+            engine += ' + connexion-registration'
+        trpc = analyze_trpc(ctx)
+        for row in trpc['routes']:
+            if _route_key(ctx, row) not in existing:
+                existing.add(_route_key(ctx, row))
+                routes.append(row)
+        if trpc['routes']:
+            engine += ' + trpc-registration'
         for row in (facts.get("stack", {}).get("profiles") or {}).get("routes", []):
             if _route_key(ctx, row) not in existing:
                 existing.add(_route_key(ctx, row))
@@ -707,6 +714,10 @@ class RoutesExtractor(Extractor):
         if not coverage_warning and (django["gaps"] or django["errors"]):
             coverage_warning = (f"Django URL discovery has {len(django['candidates'])} unresolved candidate(s); "
                                 "review routes.django gaps and errors before assuming mounts or HTTP methods.")
+        if not coverage_warning and (connexion['gaps'] or connexion['errors']):
+            coverage_warning = 'Connexion registration has unresolved evidence; review routes.connexion gaps/errors.'
+        if not coverage_warning and (trpc['gaps'] or trpc['errors']):
+            coverage_warning = 'tRPC composition has unresolved evidence; review routes.trpc gaps/errors.'
         out = {
             "engine": engine,
             "count": len(routes),
@@ -720,13 +731,15 @@ class RoutesExtractor(Extractor):
             "serverless_public_endpoints": sam_public,   # Function URLs with AuthType: NONE (unauthenticated)
             "raw_server_endpoints": raw_server_count,    # non-framework http.createServer/Bun.serve/http.server
             "django": django,
+            "connexion": connexion,
+            "trpc": trpc,
         }
         if spec_derived:
             from collections import Counter
             srcs = Counter(r["code_path"] for r in spec_derived)
             out["spec_derived_excluded"] = len(spec_derived)
             out["spec_derived_sources"] = [f"{n}× {f}" for f, n in srcs.most_common(8)]
-            out["note"] = (f"⚠ {len(spec_derived)} routes came from vendored API SPEC files "
+            out["note"] = (f"⚠ {len(spec_derived)} routes came from unregistered API SPEC files "
                            f"(OpenAPI/Swagger/GraphQL), not app handlers — EXCLUDED from the {len(routes)} "
                            f"app routes + all findings. Sources: {', '.join(f for f, _ in srcs.most_common(5))}.")
         if fixture_routes:

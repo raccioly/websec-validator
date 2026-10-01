@@ -1,11 +1,22 @@
-# websec-validator — bundles the tool + every scanner it orchestrates so it runs
-# reproducibly on any machine (no "install 5 tools" friction). Debian/glibc base
-# keeps Semgrep happy; OWASP Noir installs from its official .deb. Arch-aware via
-# Docker's TARGETARCH (amd64 / arm64).
-#
-#   docker build -t websec-validator .
-#   docker run --rm -v "$PWD:/scan" websec-validator run /scan --out /scan/websec-out
-FROM python:3.14-slim
+# Default bundles optional scanners; --target core selects only the stdlib engine.
+# Pins bind reviewed base/archive bytes, not apt or all transitive dependencies.
+FROM python:3.14-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS core
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt/websec
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN pip install --no-cache-dir . \
+    && useradd --create-home --uid 1001 websec
+WORKDIR /scan
+USER websec
+HEALTHCHECK NONE
+ENTRYPOINT ["websec"]
+CMD ["--help"]
+
+FROM core AS bundled
+USER root
 
 # TARGETARCH is auto-populated by BuildKit (arm64/amd64) — do NOT give it a
 # default, or it shadows the real build arch and pulls the wrong-arch packages.
@@ -13,43 +24,15 @@ ARG TARGETARCH
 ARG NOIR_VERSION=1.0.0
 ARG GITLEAKS_VERSION=8.30.1
 ARG TRIVY_VERSION=0.74.0
+ARG SEMGREP_VERSION=1.178.0
+ARG CHECKOV_VERSION=3.3.21
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl git \
+        curl \
     && rm -rf /var/lib/apt/lists/*
 
-# OWASP Noir (route engine) — official .deb for the target arch, deps via apt
-RUN curl -fsSL -o /tmp/noir.deb \
-      "https://github.com/owasp-noir/noir/releases/download/v${NOIR_VERSION}/noir_${NOIR_VERSION}_${TARGETARCH}.deb" \
-    && apt-get update && apt-get install -y --no-install-recommends /tmp/noir.deb \
-    && rm /tmp/noir.deb && rm -rf /var/lib/apt/lists/*
-
-# Trivy (SCA / secrets / IaC) — pin the installer to a TAGGED ref (not the mutable `main`
-# branch, which is a curl|sh-to-root supply-chain risk) and pin the version (install.sh takes
-# the tag as a trailing arg; it auto-detects arch). Bump TRIVY_VERSION + re-run `docker build`.
-RUN curl -sfL "https://raw.githubusercontent.com/aquasecurity/trivy/v${TRIVY_VERSION}/contrib/install.sh" \
-      | sh -s -- -b /usr/local/bin "v${TRIVY_VERSION}"
-
-# Gitleaks (secrets)
-RUN case "${TARGETARCH}" in amd64) GL=x64 ;; arm64) GL=arm64 ;; *) GL="${TARGETARCH}" ;; esac \
-    && curl -fsSL -o /tmp/gl.tgz \
-      "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GL}.tar.gz" \
-    && tar -xzf /tmp/gl.tgz -C /usr/local/bin gitleaks && rm /tmp/gl.tgz
-
-# Semgrep (SAST) + Checkov (IaC)
-RUN pip install --no-cache-dir semgrep checkov
-
-# The tool
-WORKDIR /opt/websec
-COPY pyproject.toml README.md ./
-COPY src ./src
-RUN pip install --no-cache-dir .
-
-# Run as a non-root user (hardening — the tool only needs to read code + write its
-# report). Pass `--user "$(id -u):$(id -g)"` at runtime so output written to a
-# mounted volume matches your host user.
-RUN useradd --create-home --uid 1001 websec
-WORKDIR /scan
+COPY scripts/install-container-scanners.sh /opt/websec/install-container-scanners.sh
+RUN NOIR_VERSION="${NOIR_VERSION}" GITLEAKS_VERSION="${GITLEAKS_VERSION}" TRIVY_VERSION="${TRIVY_VERSION}" \
+      sh /opt/websec/install-container-scanners.sh "${TARGETARCH}"
+RUN pip install --no-cache-dir "semgrep==${SEMGREP_VERSION}" "checkov==${CHECKOV_VERSION}"
 USER websec
-ENTRYPOINT ["websec"]
-CMD ["--help"]

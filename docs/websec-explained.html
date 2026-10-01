@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>websec-validator — The Deterministic Half of a Pentest</title>
-<meta name="description" content="An eight-page v0.20.0 technical brief on websec-validator: supported analysis, review leads, honest gaps, dated evidence, consent-driven release checks and publication safeguards.">
+<meta name="description" content="An eight-page v0.21.0 technical brief on websec-validator: bounded framework analysis, review leads, honest gaps, dated evidence, consent-driven release checks and publication safeguards.">
 <!--
   Self-contained: no scripts, no external requests, prints to Letter as-is.
   Selected facts are asserted by tests/test_explained_brief.py.
@@ -175,7 +175,7 @@
 <div class="page">
   <div class="masthead">
     <div class="wordmark">web<span class="mark">sec</span>-validator</div>
-    <div class="meta">Technical Brief · v0.20.0 · 30 Sep 2026</div>
+    <div class="meta">Technical Brief · v0.21.0 · 1 Oct 2026</div>
   </div>
 
   <h1>A scanner gives you findings. A pentester gives you a plan.</h1>
@@ -323,7 +323,7 @@ unsupported: []   gaps: []
       <tr><td>run a scanner unasked</td><td>TruffleHog verifies secrets against live services, so it runs only when named. <span class="note">scanners.py</span></td></tr>
       <tr><td>read a cell too thin to trust</td><td>A per-class probability needs at least five samples. One class reaches that today; the rest fall back a tier, and the output names which. <span class="note">calibration.MIN_N</span></td></tr>
       <tr><td>guess reachability</td><td>A vulnerable dependency is tagged <code>imported</code>, <code>no-import-found</code> or <code>n/a</code>. It never rounds <code>n/a</code> to safe. <span class="note">enrichment.py</span></td></tr>
-      <tr><td>claim a benchmark it has not run</td><td>The competitor comparison exists as a written protocol. Until it runs, no head-to-head claim is made. <span class="note">BENCHMARKS.md</span></td></tr>
+      <tr><td>claim a benchmark it has not run</td><td>An offline captured-report harness preserves reviewed TP/FP/unknown labels and unscored partial captures. No head-to-head or agent-benefit experiment has run. <span class="note">BENCHMARKS.md</span></td></tr>
     </table>
   </section>
 
@@ -466,7 +466,7 @@ unsupported: []   gaps: []
       <tr><th>Artifact</th><th>What it is</th></tr>
       <tr><td>AGENT-BRIEFING.md</td><td><strong>The product.</strong> Detected surface, the access-control map, targeting, findings, the method, and the staged probe list, written for the agent that will act on it.</td></tr>
       <tr><td>FACTS.json</td><td>The full structured recon: every fact the 22 extractors produced, schema-versioned, with a coverage block that says what was skipped and why.</td></tr>
-      <tr><td>findings-ledger.json</td><td>The traceable ledger. Each finding carries its evidence chain, CWE / ASVS / OWASP-API citation, remediation, and a calibrated probability with its interval and sample size. <code>REPORT.md</code> is the same ledger for humans.</td></tr>
+      <tr><td>findings-ledger.json</td><td>The traceable ledger: evidence chain, CWE / ASVS / OWASP-API citation, remediation and bucket-based confidence with provenance, interval and sample size. Priors are not measurements. <code>REPORT.md</code> is the same ledger for humans.</td></tr>
       <tr><td>results.sarif</td><td>SARIF 2.1.0, always written. GitHub code scanning, GitLab, Azure DevOps and the VS Code SARIF viewer read it as-is.</td></tr>
       <tr><td>probes/</td><td>Scripts staged from the 24 templates, pre-filled with the endpoints the recon found, for a human to review and run against a test instance.</td></tr>
     </table>
@@ -674,7 +674,7 @@ unsupported: []   gaps: []
       </div>
       <div>
         <h3>The corpus, pinned</h3>
-        <p class="note">Dated v0.14.0 proof, not a v0.20.0 rerun or vulnerability recall. Three deliberately vulnerable apps at fixed commits, retrieved 2026-09-12: VAmPI <code>f16052d</code>,
+        <p class="note">Dated v0.14.0 proof, not a v0.21.0 rerun or vulnerability recall. Three deliberately vulnerable apps at fixed commits, retrieved 2026-09-12: VAmPI <code>f16052d</code>,
         NodeGoat <code>c5cb68a</code>, DVGA <code>a961308</code>. The proof harness passes <strong>10/10</strong> surface checks with
         Noir present and <strong>8/10</strong> without it, with 7 truth labels left unknown. Both numbers are committed as
         JSON with the detector revision hash. DocGuard binds their validation-record statements to JSON fields;
@@ -729,13 +729,13 @@ unsupported: []   gaps: []
         <text class="s-sub" x="0" y="124" style="font-size:7.4px">ended two below the real suite: two tests deletable unnoticed. So the baseline is now counted from the base commit at CI time, with the</text>
         <text class="s-sub" x="0" y="135" style="font-size:7.4px">unittest loader, in a separate process per tree. A module that fails to import is a hard failure, not a count of one.</text>
         <text class="s-tiny" x="0" y="153">Why sixty seconds</text>
-        <text class="s-sub" x="0" y="166" style="font-size:7.4px">The suite runs in about ten. The known failure in this class was a 7.6× blowup that stayed green throughout. Sixty catches that shape and tolerates a slow runner.</text>
+        <text class="s-sub" x="0" y="166" style="font-size:7.4px">Runtime varies by host. A recorded 7.6× blowup stayed green; the sixty-second CI ceiling detects that failure shape without claiming a universal runtime.</text>
       </svg>
       <p class="figcap">Fig. 7 — The gate stack. The names in required-checks.json are the single source of truth; a required check that never runs would block every PR forever.</p>
     </figure>
 
     <div class="statband">
-      <div><div class="fig">1,713</div><div class="cap">tests across 87 files, stdlib only, no public network, at this snapshot</div><div class="src">tests/ · counted by the unittest loader</div></div>
+      <div><div class="fig">1,851</div><div class="cap">tests across 99 files, stdlib only, no public network, at this snapshot</div><div class="src">tests/ · one opt-in lifecycle skipped in the default suite</div></div>
       <div><div class="fig clay">0</div><div class="cap">runtime dependencies. The tool shells out to scanners and never imports them</div><div class="src">pyproject.toml · dependencies = []</div></div>
       <div><div class="fig sage">5</div><div class="cap">required checks, cross-verified against the jobs the run actually emits</div><div class="src">.github/required-checks.json</div></div>
     </div>
@@ -878,17 +878,17 @@ unsupported: []   gaps: []
       <tr><td>CLI</td><td><code>websec run .</code> is the whole pipeline. <code>gate</code> is the fast scoped pass on the files you just changed; <code>attest</code> projects a run into an audit-evidence table; <code>feedback</code> records that a finding is wrong, metadata-only by default, because a hardcoded-secret finding's snippet <em>is</em> the secret.</td></tr>
       <tr><td>SARIF 2.1.0</td><td>Written on every run and importable back in, so GitHub code scanning, IDEs and other tools read the same ledger.</td></tr>
       <tr><td>GitHub Action</td><td>Composite action with a <code>fail-on</code> threshold, a baseline for legacy repositories, and SARIF upload. Every third-party action it calls is pinned by commit SHA. It installs the engine from its own checkout, never from the target repository.</td></tr>
-      <tr><td>Docker</td><td>Everything bundled on a slim Python 3.14 image, running as a non-root user, with Noir 1.0.0, Gitleaks 8.30.1 and Trivy 0.74.0 pinned by version.</td></tr>
+      <tr><td>Docker</td><td>Core-only or bundled, non-root Python 3.14 images. Noir 1.0.0, Gitleaks 8.30.1 and Trivy 0.74.0 archives are checksum-bound. Native amd64/arm64 checks run; transitive builds and every scanner adapter are not certified.</td></tr>
       <tr><td>MCP server</td><td>Four read-only repository tools, <code>websec_recon</code>, <code>websec_findings</code>, <code>websec_sarif</code> and <code>websec_briefing</code>, plus advisory <code>websec_check_updates</code>, over stdio or loopback-only HTTP that requires a token. Release checks default to offline metadata; online checks require consent and never install packages. Non-loopback bindings are rejected before listening.</td></tr>
-      <tr><td>pre-commit</td><td>One hook id, defaulting to <code>--require-complete --fail-on high</code>, so a partial run cannot pass the commit.</td></tr>
+      <tr><td>pre-commit</td><td>One hook id, defaulting to <code>--require-complete --fail-on high</code>. Real disposable commit/pre-push checks pass, including staged/unstaged restoration; no consumer hooks are activated.</td></tr>
       <tr><td>Claude Code plugin</td><td>A security-pass skill and a <code>PostToolUse</code> hook: findings and incomplete analysis block; unexpected internal crashes fail open, loudly.</td></tr>
     </table>
   </section>
 
   <section class="rule-top">
-    <h2>Four months, thirty-two releases, one breaking change</h2>
+    <h2>Four months, thirty-three releases, one breaking change</h2>
     <figure>
-      <svg viewBox="0 0 760 130" role="img" aria-label="Release timeline from 30 May 2026 through v0.20.0 on 30 September 2026; dated milestones, security boundary fixes and consent-driven release advice">
+      <svg viewBox="0 0 760 130" role="img" aria-label="Release timeline from 30 May 2026 through v0.21.0 on 1 October 2026; dated milestones, security boundary fixes and bounded framework coverage">
         <line x1="10" y1="40" x2="750" y2="40" stroke="#191917" stroke-width="1.4"/>
         <g fill="#191917">
           <circle cx="10" cy="40" r="3.4"/><circle cx="60" cy="40" r="3.4"/><circle cx="150" cy="40" r="3.4"/><circle cx="215" cy="40" r="3.4"/>
@@ -906,18 +906,18 @@ unsupported: []   gaps: []
           <text x="560" y="24">0.14 · 14 Sep</text>
           <text x="600" y="58">0.16 · 18 Sep</text>
           <text x="648" y="24">0.17 · 22 Sep</text>
-          <text x="706" y="58" style="fill:#b85636">0.20 · 30 Sep</text>
+          <text x="706" y="58" style="fill:#b85636">0.21 · 1 Oct</text>
         </g>
         <g class="s-sub" style="font-size:6.9px">
           <text x="10" y="80">First public line. PyPI via Trusted Publishing from day one.</text>
           <text x="10" y="91">0.3 walks AWS-CDK, AppSync SDL and VTL: the managed-cloud boundary a real pentest exposed.</text>
           <text x="10" y="102">0.7 adds the LLM / agent extractor. 0.10 adds SARIF output and the CI gate. 0.11 adds MCP over HTTP and the benchmark protocol.</text>
           <text x="10" y="113">0.12 fixes the hermeticity bug and adds branch protection. 0.14 ships schema 2.0. 0.16 adds the in-loop gate and attest. 0.17 splits the exit codes: the one breaking change.</text>
-          <text x="10" y="124">0.18 measures calibration. 0.19.2 hardens transport, paths and incomplete gates. 0.20 adds consent-driven release checks and scoped precision fixes.</text>
+          <text x="10" y="124">0.18: reviewed calibration. 0.19.2: boundary fixes. 0.20: consent-driven advice. 0.21: bounded framework coverage and integration evidence.</text>
         </g>
         <text class="s-sub" x="395" y="24" style="font-size:6.6px;fill:#918d83">← gap: July to September →</text>
       </svg>
-      <p class="figcap">Fig. 9 — Shipped history through 30 September 2026. Releases do not imply rerunning the dated proof or public review.</p>
+      <p class="figcap">Fig. 9 — Release history through 1 October 2026. Releases do not imply rerunning dated proof or public review.</p>
     </figure>
   </section>
 
@@ -929,12 +929,13 @@ unsupported: []   gaps: []
   </section>
 
   <section class="rule-top">
-    <p class="note">This is a reviewed v0.20.0 snapshot, not a claim of complete detection. Selected fact tests and the PDF
-    freshness manifest guard publication; they do not prove every sentence. Dated review/proof artifacts retain their
-    original revisions. If the code does not support a claim here, please open an issue.</p>
+    <p class="note"><strong>New bounded source coverage:</strong> registered Connexion JSON/literal YAML, FastAPI dependencies,
+    mounted tRPC chains, Django returned-template CSP and Flask columns. Assigned SQL/command/upload flow is local,
+    not whole-program proof. Dynamic bindings, middleware, context identity and deployment still need review.
+    This reviewed v0.21.0 snapshot uses Selected fact tests and the PDF manifest; neither proves every sentence.</p>
   </section>
 
-  <div class="footer"><span>websec-validator — Technical Brief · v0.20.0 · MIT</span><span>Page 8 of 8 · Where it plugs in</span></div>
+  <div class="footer"><span>websec-validator — Technical Brief · v0.21.0 · MIT</span><span>Page 8 of 8 · Where it plugs in</span></div>
 </div>
 
 </body>

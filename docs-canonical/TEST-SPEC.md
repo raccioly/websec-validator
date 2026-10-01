@@ -2,7 +2,7 @@
 
 <!-- docguard:version 0.9.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-09-16 -->
+<!-- docguard:last-reviewed 2026-10-01 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — the suite deliberately uses no third-party runner, no network, and no running app; the negations describe real, intentional test constraints. -->
 
@@ -13,6 +13,8 @@ The suite uses stdlib `unittest` with synthetic fixtures and local loopback serv
 third-party runner, public network, external scanner, or running target app. Release CI also builds
 and smoke-tests the installed wheel. The 2026-09-16 source phase passed **1241 application tests** on
 Python 3.14.7 (33.393s) and Python 3.12.13 (33.955s), plus **41 repository automation tests**.
+The reviewed 2026-09-30 documentation snapshot passed **1713 application tests** on Python 3.12,
+plus **57 repository automation tests**. These are dated execution records, not future suite floors.
 CI enforces an application-test floor derived at run time from the base commit's own suite, so no floor constant is stored; a drop requires a `Test-Removal:` commit trailer. The package
 has **22 registered extractors**, **17 sink classes**, **11 scanner entries** and **9 named profiles**.
 The eleventh scanner entry is `gitleaks-dir`: gitleaks runs as two disjoint passes, git history and
@@ -25,6 +27,11 @@ python3 -m unittest discover -s tests
 ---
 
 ## Test Categories
+
+The 2026-10-01 retained-coverage checkpoint passed **1851 application tests** (one opt-in lifecycle
+skipped) and **57 repository automation tests**. Real disposable pre-commit and native core/bundled
+amd64/arm64 contracts are recorded separately in the backlog reconciliation; these are not live
+consumer deployments, a new public-corpus score or competitor measurement.
 
 | Category | Required | Applies To | Tool |
 |----------|----------|-----------|------|
@@ -136,6 +143,14 @@ A/B in [`corpus/PROOF-PROTOCOL.md`](../corpus/PROOF-PROTOCOL.md).
 Django URL tests must pair local include/path resolution with dynamic roots, unknown prefixes,
 cycles, unrelated bindings and resource caps. Service metadata tests must cover Rust workspaces
 and separate native React from browser renderers, preserving mixed-service browser review.
+Django response tests pair returned literal templates with same-response headers, unprotected
+siblings, late/shadowed imports, aliases/branches/overwrites and parser caps. Actual CLI facts and
+ledger assertions must preserve deployment uncertainty and prove no target execution.
+Connexion tests pair literal source registration and exact operation handlers with unregistered
+contracts, malformed/private/escaping destinations and dynamic composition. Actual YAML text must
+cover anchors/tags/merges/duplicate keys, block routing identifiers, ambiguous plain scalars,
+multi-document input, references and work caps. A partial informational parse is never targeting
+evidence; handler normalization and security declarations must not confer guard credit.
 Credential comparison tests pair literal presence/type checks with hardcoded, reversed and
 unsafe-sibling comparisons, while keeping sampled text distinct from executable interpolation.
 

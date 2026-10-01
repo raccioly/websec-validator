@@ -2,7 +2,7 @@
 
 <!-- docguard:version 0.9.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-09-16 -->
+<!-- docguard:last-reviewed 2026-10-01 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — a security model is correctly stated as invariants (MUST NOT, never, read-only, out-of-scope); negation is the right register for safety guarantees. -->
 
@@ -33,7 +33,11 @@ recon and is therefore a separate security boundary. It binds only to loopback, 
 `WEBSEC_MCP_TOKEN` bearer authentication, validates Host/Origin, and restricts requests to configured
 `--allow-root` directories (default: startup directory). Root selection pins canonical path and
 filesystem identity through request dispatch and context creation. Request framing, body limits,
-bounded workers, and an absolute receive deadline constrain malformed or slow clients. Stdio trusts
+bounded workers, and an absolute receive deadline constrain malformed or slow clients. When workers
+are exhausted, rejection sends 503 immediately and half-closes the response, then discards at most
+8 KiB under a 50 ms absolute deadline to avoid resetting ordinary split-header/body clients. This
+can delay the accept loop by at most that allowance per rejection; it grants no worker, authentication
+or dispatch. Over-cap, malformed or slower clients may still receive a connection error. Stdio trusts
 the launching process and its filesystem permissions.
 
 ## Repository Read Boundary and Limits
@@ -91,8 +95,9 @@ the previous cache; a cache-write failure does not invalidate a successful metad
 
 ## The Dynamic-Phase Safety Model (explicit and non-negotiable)
 
-The optional `websec dynamic` phase is the only part of the tool that contacts a live system. Its
-guarantees are enforced in code (`dynamic.py`, `cli.py`):
+The optional `websec dynamic` phase and explicitly executed staged drafts contact a live TEST
+application. Staging alone does not. Their guarantees are enforced at the actual transports as
+well as the CLI (`dynamic.py`, `templates/probes/_lib.py`, `templates/probes/_lib.bash`):
 
 - **Read-only by default.** `--config` (authenticated cross-tenant BOLA) and `--unauth` (reachability)
   issue **GET-only probes**. Explicit `--config` authentication may first POST operator-supplied
@@ -126,6 +131,14 @@ for HTTP MCP. The core pass requires no secrets; see ENVIRONMENT.md for optional
   package surface. External scanners are invoked as subprocesses, not imported.
 - Published to PyPI via **Trusted Publishing (OIDC)**; the release workflow builds, installs, and
   smoke-tests the wheel before it can reach PyPI, so a bad build fails CI instead of shipping.
+- Core/bundled container contracts execute natively on amd64 and arm64. Reviewed base/archive
+  digests are checked before installing scanner archives; apt and Python transitive dependencies
+  remain variable. Version execution checks do not certify every scanner adapter or database.
+
+The maintenance captured-report comparison imports bounded data only. It rejects private inputs and
+child aliases, excludes source/message/evidence text from sanitized outputs, and distinguishes
+partial/unavailable/malformed captures from completed observations. Engine/configuration/review
+provenance remains operator-declared; report hashes bind bytes, not independent execution assurance.
 
 ## Security Rules
 

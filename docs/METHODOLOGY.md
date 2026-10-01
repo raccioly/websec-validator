@@ -2,7 +2,7 @@
 
 <!-- docguard:version 0.9.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-09-18 -->
+<!-- docguard:last-reviewed 2026-10-01 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — this tool is defined by what it deliberately omits (no LLM, no server, no running app, no runtime deps); the negations describe real architectural properties, not phrasing defects. -->
 
@@ -38,8 +38,9 @@ Three actors, clear seams:
 | 🧑 the human | supply the running TEST instance + test accounts, review every diff, authorize any live probing |
 
 The seam that matters most: **static recon + the briefing need only the code; the *probes* need a
-live test instance + credentials.** The tool never touches a running app — that line is what keeps
-it safe to run anywhere.
+live test instance + credentials.** The default core pass does not contact that app; explicitly
+executed dynamic checks and staged drafts do. Optional external analyzers have their own trust
+and network boundaries, so read-only Python intake is not a sandbox for every executable.
 
 ---
 
@@ -75,13 +76,13 @@ extractors over it. Each answers one question a pentester asks first. The output
 | 4 | **authz** | Which endpoints have a visible auth guard, which don't? | **Broken access control is the #1 web risk (OWASP A01).** Builds the per-endpoint guard map and flags write endpoints with no visible guard. Models **router-mount auth** — `app.use('/x', authMiddleware, createXRouter())` — by resolving the mounted router factory to its file and walking the local-import graph, so an Express monorepo that splits routing from handlers isn't reported as one giant missing-auth cluster (the dominant false positive); also recognizes custom auth helpers (`getRequest*Auth`) and one-hop delegated guards in thin Next route handlers. |
 | 5 | **tenant** | Is this multi-tenant, and what field isolates one customer from another? | The tenant boundary (`groupId`, `orgId`, `tenantId`…) is what every cross-tenant BOLA probe depends on, and the easiest thing to get subtly wrong. |
 | 6 | **password_policy** | Is the password policy consistent across routes? | A strong policy on one route proves a weaker sibling is a *regression*, not a design choice. Fingerprints the `{min,upper,lower,digit,special}` requirement set per validator and flags any that is a strict subset of the strongest (the exact cross-route drift the pen test found). The subset comparison is logic a per-file linter can't express. |
-| 7 | **surface** | Where does user input reach a dangerous sink — and where does the app leak internals back? | Maps 17 sink classes: 15 user-input-gated (SSRF, command injection, SQLi, traversal, SSTI, redirect, deserialization, XXE, prototype-pollution, ReDoS, eval, **log-injection** (CWE-117 — user input concatenated into a `console`/`logger`/`logging` message with no CR/LF neutralization; structured-logging-suppressed, server-only), **mass-assignment via object spread** `{...record, ...req.body}`, and **reflected/DOM/template XSS** — `innerHTML`/`dangerouslySetInnerHTML`/`v-html`/`document.write`/Jinja `|safe`/`mark_safe`, suppressed on a file that sanitizes with DOMPurify/bleach/escape) **plus var-arg SSRF** (`axios.get(someVar)` a file away from `req.query`) and a **response-side error-disclosure** sink (a 500 echoing `err.stack`). SSRF requires a *request-derived* URL (not any template literal) and is server-only — so browser fetches and hardcoded-host calls don't false-fire. Also flags a **reverse-proxy prefix-escape** (`..` in a catch-all path joined onto a fixed upstream prefix → confused-deputy with a forwarded token), a **host-header open-redirect** (redirect built from `X-Forwarded-Host`), and an **SSRF-redirect-hardening** gap (follows redirects with no allow-list, incl. worker scripts). "User-gated" is the key filter — `exec("ls")` is not a vuln; `exec(req.body.cmd)` is. |
+| 7 | **surface** | Where does user input reach a dangerous sink — and where does the app leak internals back? | Maps 17 sink classes, including SSRF, command injection, SQLi, traversal, SSTI, redirect, deserialization, XXE, prototype pollution, ReDoS, eval, log injection, mass assignment and reflected/DOM/template XSS, plus variable-argument SSRF and response-side error disclosure. Request-derived values are review leads, not exploit proof. Supported sanitizers must wrap the relevant value; an import, helper name or sanitized sibling does not protect a different sink. Structured logging, hardcoded-host requests and literal examples have narrowly scoped controls. Also records reverse-proxy prefix escape, host-header redirects and unresolved redirect policy. Syntax/flow coverage is bounded: aliases, wrappers, cross-function flows and deployment behavior remain unverified. |
 | 8 | **schemas** | What are the data models, and which fields are *privileged*? | Finds ORM/schema models (Pydantic, SQLAlchemy, Django, Prisma, Mongoose, TypeORM, Zod, Sequelize) and the sensitive field names (`role`, `isAdmin`, `groupId`, `passwordHash`…). Turns mass-assignment into "try injecting *this* app's privileged fields." |
 | 9 | **iac_ci** | Misconfigurations in Docker/CI/IaC — and in the managed-cloud auth config? | Insecure defaults (containers as root, unpinned CI actions) are real and invisible at the app layer. Also reads **AWS-CDK**: an AppSync `defaultAuthorization: API_KEY` is effectively **anonymous/over-permissive access** (the key ships to the browser) — the retest clarified this is *not* CSWSH (that needs cookie-WS auth, checked in `client_integrity`). And a **WAF byte-match on an app-layer token** (`__schema`, SQL keywords) is flagged as a bypassable band-aid, never a fix. WAFv2 WebACL = *"present — VERIFY association,"* never mitigation. Also parses **docker-compose** (host-takeover mounts: `docker.sock`, `pid: host`, host-root bind, `privileged`) and audits **secret-suppression** (`.gitleaksignore` silencing a leak in a real `.env`/secrets file — a hidden true positive, not a fix). |
 | 10 | **client_exposure** | Do secrets leak into the browser bundle? | A secret in a `NEXT_PUBLIC_`/`VITE_` var ships to every visitor. Detected three ways: by **name**, by **value-shape** — **cloud-agnostic**: AWS (`da2-…` AppSync key, `AKIA`), Azure (storage `AccountKey=`, SAS, connection string), GCP (service-account JSON, PEM private key), plus generic (Stripe, JWT); survives a benign var rename — and by **build-injection** (a CloudFormation output wired into a public build var — invisible to every secret scanner). |
 | 11 | **client_integrity** | Does a page display a **security-critical sink value** (one the user reads or copies) that a browser-resident attacker could silently swap? | The man-in-the-browser class, generalized from the agent-wallet lesson and detected by **data-flow role, not app type**: a crypto/bank address, IBAN/routing, 2FA/TOTP seed, recovery phrase, API key or webhook URL rendered/copied client-side can be rewritten by malware / a rogue extension / a poisoned dependency. Severity tracks **irreversibility** (money/credential = HIGH); confidence stays LOW — **no web app can make on-screen display tamper-proof**. Checks the two controls that move the needle (a strict CSP + an out-of-band anchor), plus a **client round-trip tamper-vector** check (#2 — a sink value fetched client-side instead of server-rendered), a **grindable safety-code** check (#7), and an **over-claimed "tamper-proof" framing** check (#8). Paired with `transport_security` (row 16). |
 | 12 | **graphql** | Is there a GraphQL surface — is introspection / subscription authz sound? | GraphQL has its own failure modes. For **AppSync**: introspection **is** disablable engine-level (`introspectionConfig: IntrospectionConfig.DISABLED`), so it is flagged **only when not set** — the retest corrected an earlier over-flag, and the advice points to the engine control, not a WAF byte-match (which is bypassable via Unicode/JSON escapes). A `Subscription onEvent(groupId)` whose VTL resolver doesn't bind the tenant arg to the caller's identity is a **cross-group BOLA** (reads the `.graphql` SDL + co-located `.vtl`). |
-| 13 | **upload_security** | Are file uploads (and the serve path) safe? | The polyglot/MIME-spoof class. Flags a handler that deny-lists instead of allow-listing by **sniffed bytes**, builds the stored key from the client filename (`Jpg.php` → stored executable), trusts the client `Content-Type`, or accepts SVG; and a serve path that returns a stored file with **no `X-Content-Type-Options: nosniff`** (stored XSS, re-interpreted as HTML same-origin). Checks both upload and serve, because the fix is defense-in-depth across both. |
+| 13 | **upload_security** | Which upload and serve operations need review? | Leads cover deny-list-only validation, client filename flow into actual storage path/key arguments, client MIME trust and SVG acceptance. Supported sniff exemptions must reject on the original full bytes that are stored. Browser-serving paths without `X-Content-Type-Options: nosniff` need review. Source evidence does not establish executable storage, stored XSS or deployed exploitability. |
 | 14 | **pii_exposure** | Does customer PII leak at the API output boundary? | `res.json(rawEntity)` of a model with PII fields, with no DTO/masker — phone/email ship in cleartext, **including indirect carriers** (a phone embedded in a composed `providerMessageId`). The decisive tell: a masking helper / `view_full` permission **defined but with zero live call sites** (a dead control wired only into export paths). Verification is by **value shape, not field name** — a field allow-list misses the carriers. |
 | 15 | **integrations** | Third-party integrations + webhooks; are webhooks signed, outbound-action endpoints guarded, secrets fetched once? | An unverified webhook is a forgeable write path. Also flags **abusable outbound-action endpoints** (#5 — an email/SMS/push handler with no auth-guard or only IP-only rate-limiting → spam / bill amplification / harassment) and **redundant secret-fetches** (#6 — the same secret-manager key pulled more than once per path, widening the exposure window). Both LOW/architectural — auth may live in middleware, so "verify these controls." |
 | 16 | **transport_security** | Are the browser-hardening headers (CSP, HSTS, **CORS, SRI**) present and complete — across *all* responses, not just `/api`? | The enabling condition for the man-in-the-browser class: with no strict CSP an injected / supply-chain script can run and rewrite any on-screen value. Framework-agnostic baseline (React/Vue/Svelte/htmx/server-rendered): flags a missing/weak CSP (no nonce, `unsafe-inline`/`unsafe-eval`), inline event handlers that force `unsafe-inline`, and **partial HSTS** (set on `/api` but not the HTML document). Also flags **CORS misconfiguration** (an `Allow-Origin` that reflects the request `Origin` or `*` *together with* `Allow-Credentials: true` → any site reads authed responses), an **external script with no Subresource-Integrity** (CDN-compromise → arbitrary JS in your origin), and a **monorepo Next.js header gap** (no `headers()` security block in `packages/*/next.config.*`). Also runs a **framework-agnostic clickjacking baseline** (a web surface with neither `X-Frame-Options` nor a CSP `frame-ancestors` directive is framable — UI-redress) and a **CSRF baseline** (a cookie/session-authenticated app with HTTP routes but no anti-CSRF token library/middleware and no `SameSite` cookie — state-changing routes may be forgeable cross-site; a Bearer-token-only API is exempt, derived from the auth extractor to stay low-FP). LOW/architectural — a static scan can't see the edge/CDN layer, so verify against the live response headers. |
@@ -161,8 +162,9 @@ Recon signals, static-scanner hits, and (when run) dynamic results are correlate
 record set** (`findings-ledger.json` + the human-readable `REPORT.md`). Every finding carries:
 
 - **an evidence chain across layers** — e.g. a recon "no guard found" hypothesis (MEDIUM) and a
-  dynamic "executed unauthenticated" verdict **merge into one** HIGH/CRITICAL finding with a
-  `recon → dynamic` chain. One finding, full provenance.
+  scoped dynamic observation retain a `recon → dynamic` chain. Status-only observations never
+  promote a missing-auth lead to a verified HIGH/CRITICAL vulnerability. Controlled BOLA evidence
+  has separate identity, ownership and private-marker prerequisites.
 - **a standards citation** — CWE + ASVS + the relevant OWASP API Top-10 entry (see
   [Standards coverage](#standards-coverage)). So a finding is traceable to an authoritative
   requirement, not just an assertion.
@@ -173,10 +175,11 @@ record set** (`findings-ledger.json` + the human-readable `REPORT.md`). Every fi
 
 **The confidence rule (deterministic, no ML):**
 
-- **HIGH** — dynamically confirmed (executed unauth / cross-tenant leak), a verified secret, or a
-  fixed-version CVE at HIGH/CRITICAL.
-- **MEDIUM** — concrete static evidence (a recon no-guard write, a SAST hit, a user-input-gated sink).
-- **LOW** — a single-source hypothesis with no corroboration (a recon-only signal).
+- Confidence is assigned per detector/evidence path, not by one universal severity conversion.
+  A controlled confirmed BOLA result can be HIGH; an HTTP success alone cannot. Native Bandit
+  confidence is retained separately from severity; other adapter mappings are heuristic.
+- Concrete static evidence often receives MEDIUM and architectural hypotheses often LOW. Neither
+  label is verification of exploitability. The exact branch and its evidence remain authoritative.
 
 ### Layer 3b — Calibrated confidence (CJE)
 
@@ -189,8 +192,9 @@ something you can act on.
   and writes `calibration.json` (shipped, and applied at runtime). Each finding then gets a
   `P(real)` with a **95% confidence interval** and the sample size `n`.
 - **Why a confidence interval, not just a number.** With a small corpus the *interval is the
-  headline*. "MEDIUM = real ~57% of the time, CI 43–70%, n=51" honestly says "grounded, but here's
-  how sure we are." The math is a Wilson score interval (binomial proportion) — deliberately *not*
+  headline*. Always quote the measured bucket, reviewed date, `n` and interval together; the old
+  n=51 seed used an invalid unmatched-as-false policy and is not a current estimate.
+  The math is a Wilson score interval (binomial proportion) — deliberately *not*
   isotonic regression, which would overfit at this sample size. The structure upgrades to isotonic
   cleanly if a large labeled set ever exists.
 - **Evidence and uncertainty.** Unmatched corpus findings remain unknown unless explicit negative
@@ -218,11 +222,13 @@ something you can act on.
   on a vulnerable variant is reported as a recall gap, never silently dropped — a harness that
   scored nothing would otherwise publish a perfect table.
 - **A class earns a cell only from reviewed labels.** Appearing in `corpus.json` is not research:
-  the historical entries are class-level wildcards (`location_contains: "*"`, `is_real: null`) that
-  cannot separate a real vulnerability from a false positive inside the same class. A class is
+  unreviewed entries and class-level wildcards cannot separate a real vulnerability from a false
+  positive inside the same class. A class is
   published as a class-specific cell only when it has a truth entry with `review_status: "reviewed"`
   and an explicit boolean `is_real`; otherwise it falls back to the wider, honest label tier. Every
-  shipped entry carries a `promotion_requires` block stating exactly what a reviewer must supply.
+  unreviewed entry retains its promotion requirements. The September 22 table contains 21 reviewed
+  labels and 35 unknown findings; those rates describe that dated detector measurement, not an
+  automatically renewed evaluation of subsequent code.
 - **Learning is gated by evidence.** Only scoped evidence-backed labels enter the local calibration
   overlay (`~/.cache/websec-validator/`). Legacy unproven records are quarantined. Unknown-only input
   reports no successful measurement and leaves fitted calibration unchanged. Evidence may support a
@@ -533,6 +539,19 @@ Django route discovery reads bounded syntax and local bindings without importing
 modules. Supported root/include composition can resolve literal paths. Unknown roots, dynamic
 prefixes, cycles and parser budgets remain visible gaps or candidates; documented/source route
 uncertainty must survive downstream review.
+
+Registered Connexion contracts use literal top-level import-bound registration and exact operation
+identifiers; informational YAML docs alone cannot become targets. A strict stdlib literal YAML subset
+refuses constructors/aliases/composition/references. Django CSP observations belong to the exact
+returned render response and cannot protect siblings. FastAPI dependencies and mounted tRPC chains
+retain operation ownership; unresolved identity or earlier short-circuit middleware cannot borrow
+a later guard. None of these source lanes proves runtime registration, loader or deployment behavior.
+
+Comparative measurement uses captured native reports against explicit reviewed labels, not inferred
+negatives. The offline maintenance importer keeps each tool's denominator separate, marks unknown
+conflicts and leaves partial captures unscored. Distinct corpus, engine/package, detector, rule,
+label and scope bindings remain operator-declared. The harness and synthetic controls are available;
+real competitor and manual agent A/B outcomes remain unrun. See `BENCHMARKS.md` for the contract.
 
 Secret equality is a LOW review lead at its own operands. Literal presence/type checks differ from
 credential comparisons; a safe helper elsewhere cannot protect the site. This is not a timing

@@ -21,6 +21,7 @@ import socket
 import sys
 import tempfile
 import threading
+import time
 from contextvars import ContextVar
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -34,6 +35,8 @@ HTTP_MAX_BODY = 1024 * 1024
 HTTP_MAX_REQUESTS = 4
 HTTP_SOCKET_TIMEOUT = 5
 HTTP_RECEIVE_TIMEOUT = 10
+HTTP_REJECT_DRAIN_BYTES = 8192
+HTTP_REJECT_DRAIN_TIMEOUT = 0.05
 _HTTP_ROOT: ContextVar[tuple[Path, int, int] | None] = ContextVar("mcp_http_root", default=None)
 
 TOOLS = [
@@ -272,9 +275,13 @@ class _BoundedHTTPServer(ThreadingHTTPServer):
 
     def process_request(self, request, client_address):
         if not self._slots.acquire(blocking=False):
+            deadline = time.monotonic() + HTTP_REJECT_DRAIN_TIMEOUT
             try:
+                request.settimeout(HTTP_REJECT_DRAIN_TIMEOUT)
                 request.sendall(b"HTTP/1.1 503 Service Unavailable\r\n"
                                 b"Connection: close\r\nContent-Length: 0\r\n\r\n")
+                request.shutdown(socket.SHUT_WR)
+                self._discard_rejected_request(request, deadline)
             except OSError:
                 pass
             finally:
@@ -285,6 +292,38 @@ class _BoundedHTTPServer(ThreadingHTTPServer):
         except Exception:
             self._slots.release()
             raise
+
+    def _discard_rejected_request(self, request, deadline):
+        """Best-effort graceful 503, never parse/dispatch or consume an unbounded body.
+
+        Closing while a normal client sends its body can reset TCP before it reads
+        the rejection. Half-close the response first, then discard a small request
+        under byte AND absolute-time caps. Over-cap, malformed or slow clients may
+        still see a connection error. No worker, authentication or slot is granted.
+        """
+        received = bytearray()
+        while len(received) < HTTP_REJECT_DRAIN_BYTES:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            request.settimeout(remaining)
+            chunk = request.recv(min(4096, HTTP_REJECT_DRAIN_BYTES - len(received)))
+            if not chunk:
+                return
+            received.extend(chunk)
+            split = received.find(b'\r\n\r\n')
+            if split < 0:
+                continue
+            headers = received[:split].split(b'\r\n')[1:]
+            lengths = [line.split(b':', 1)[1].strip() for line in headers
+                       if b':' in line and line.split(b':', 1)[0].lower() == b'content-length']
+            chunked = any(line.split(b':', 1)[0].lower() == b'transfer-encoding'
+                          for line in headers if b':' in line)
+            if chunked or len(lengths) > 1 or (lengths and (len(lengths[0]) > 8 or not lengths[0].isdigit())):
+                continue  # unsupported framing gets no additional allowance
+            expected = split + 4 + (int(lengths[0]) if lengths else 0)
+            if len(received) >= expected:
+                return
 
     def process_request_thread(self, request, client_address):
         try:

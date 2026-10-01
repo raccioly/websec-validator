@@ -82,18 +82,80 @@ class ProbeTransportTests(unittest.TestCase):
             probes.stage({}, Path(directory))
             self.assertTrue((Path(directory) / "probes" / "_lib.bash").exists())
 
-    def test_async_race_transport_refuses_remote_before_request(self):
+    def test_stdlib_race_transport_refuses_remote_before_request(self):
         environment = {"TARGET": "https://remote.example", "OBJ_A": "1", "TOKEN_A": "test-token"}
         context = {"endpoints": {"writes": ["POST /item/{id}"]}}
         with patch.dict(os.environ, environment), patch.dict(sys.modules, {"_lib": lib, "httpx": types.SimpleNamespace()}), patch.object(lib, "context", return_value=context):
             module = runpy.run_path(str(TEMPLATES / "race-conditions.py"), run_name="probe_test")
-        client = types.SimpleNamespace(request=AsyncMock())
+        client = types.SimpleNamespace(open=Mock())
         with self.assertRaises(ValueError):
-            asyncio.run(module["fire"](client, {"method": "POST", "url": "https://remote.example/", "payload": {}}))
-        client.request.assert_not_called()
-        client.request.return_value = types.SimpleNamespace(status_code=201, text="REFLECTED_TEST_SECRET")
-        result = asyncio.run(module["fire"](client, {"method": "POST", "url": "http://localhost/x", "payload": {}}))
+            module["fire"]({"method": "POST", "url": "https://remote.example/", "payload": {}}, opener=client)
+        client.open.assert_not_called()
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.status = 201
+        client.open.return_value = response
+        result = module["fire"]({"method": "POST", "url": "http://localhost/x", "payload": {}}, opener=client)
         self.assertEqual(result, (201, None))
+        response.read.assert_not_called()
+
+    def test_race_rejects_invalid_concurrency_and_large_payload_before_transport(self):
+        with patch.dict(sys.modules, {'_lib': lib}):
+            module = runpy.run_path(str(TEMPLATES / 'race-conditions.py'), run_name='probe_test')
+        target = {'method': 'POST', 'url': 'http://localhost/x', 'payload': {}}
+        for count in (0, -1, 17, True):
+            with self.subTest(count=count), self.assertRaises(ValueError):
+                module['run_target'](target, parallel=count)
+        client = types.SimpleNamespace(open=Mock())
+        with self.assertRaises(ValueError):
+            module['fire'](dict(target, payload={'too_large': 'x' * 17000}), opener=client)
+        client.open.assert_not_called()
+
+    def test_race_actual_loopback_pool_is_bounded_and_does_not_follow_redirects(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        import threading
+        import time
+        with patch.dict(sys.modules, {'_lib': lib}):
+            module = runpy.run_path(str(TEMPLATES / 'race-conditions.py'), run_name='probe_test')
+        lock = threading.Lock()
+        observed = {'active': 0, 'peak': 0, 'calls': 0, 'followed': 0}
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                with lock:
+                    observed['active'] += 1
+                    observed['peak'] = max(observed['peak'], observed['active'])
+                    observed['calls'] += 1
+                time.sleep(0.02)
+                self.send_response(302)
+                self.send_header('Location', '/followed?credential=REFLECTED_TEST_SECRET')
+                self.end_headers()
+                with lock:
+                    observed['active'] -= 1
+            def do_GET(self):
+                observed['followed'] += 1
+                self.send_response(200)
+                self.end_headers()
+            def log_message(self, *args):
+                pass
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            target = {'method': 'POST', 'url': f'http://127.0.0.1:{server.server_port}/race',
+                      'payload': {}, 'name': 'owned race', 'expected_unique': 1, 'note': 'owned'}
+            with patch.dict(os.environ, {'http_proxy': 'http://remote.invalid:1'}), contextlib.redirect_stdout(io.StringIO()):
+                result = module['run_target'](target, parallel=4)
+            self.assertEqual(observed['calls'], 4)
+            self.assertLessEqual(observed['peak'], 4)
+            self.assertGreater(observed['peak'], 1)
+            self.assertEqual(observed['followed'], 0)
+            self.assertEqual(result['status_counts'], {302: 4})
+            self.assertNotIn('REFLECTED_TEST_SECRET', json.dumps(result))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
 
     def test_webhook_direct_curl_is_guarded_before_execution(self):
         with patch.dict(os.environ, {"TARGET": "https://remote.example"}), patch.dict(sys.modules, {"_lib": lib}), patch("subprocess.run") as run, contextlib.redirect_stdout(io.StringIO()):

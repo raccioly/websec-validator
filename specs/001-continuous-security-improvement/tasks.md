@@ -1,0 +1,176 @@
+# Tasks: Retained security coverage
+
+**Input**: `spec.md`, `plan.md`, `research.md`, `data-model.md`, `contracts/analysis.md`.
+Tests are required by FR-002. Starting source `2ee99673`; closed PRs are not delivery evidence.
+
+## Phase 1 — Setup
+
+- [x] T001 Audit W01–W20 independently and record reproductions in `research.md`.
+- [x] T002 Review canonical/agent/methodology contracts and run baseline DocGuard; inspect `.gitignore` and `.dockerignore` before implementation.
+
+## Phase 2 — Foundation
+
+- [x] T003 Correct reviewed contract/lifecycle drift in `docs-canonical/`, `docs/METHODOLOGY.md`, `AGENTS.md`, `specs/002-calibration-honesty-and-structural-coverage/spec.md`, `.docguard-specs.json` and `CHANGELOG.md`.
+- [x] T004 Preserve delivered W01/W07/W14/W15/W17 and record evidence in `docs/security-review/backlog-reconciliation.md`; keep the exact-head historical register intact.
+
+## Phase 3 — US2: Framework enforcement and provenance (P1)
+
+Independent test: endpoint-bound safe/no-op/unprotected sibling controls, no target execution.
+
+- [x] T005 [US2] Add failing FastAPI/tRPC auth controls in `tests/test_retained_frameworks.py` and `tests/test_trpc_routes.py` (W05).
+- [x] T006 [US2] Bind supported local dependency/middleware rejection evidence to its endpoint in `src/websec_validator/extractors/authz.py` (W05); disclose context/runtime composition limits.
+- [x] T007 [US2] Add source-registration/documentation-only/escaping/malformed Connexion controls in `tests/test_retained_frameworks.py` and `tests/test_connexion_yaml.py` (W16/W20).
+- [x] T008 [US2] Resolve bounded import-bound Connexion registration without promoting unregistered docs in `src/websec_validator/extractors/routes.py` (W16/W20).
+- [x] T009 [US2] Add paired assigned JS SQL/Python+JS command controls in `tests/test_retained_flows.py` (W04/W10).
+- [x] T010 [US2] Implement bounded local assignment provenance and disclosed work limits in `src/websec_validator/extractors/surface.py` and shared flow helper (W04/W10).
+- [x] T011 [US2] Add paired UploadFile/db.Model controls in `tests/test_retained_frameworks.py` and `tests/test_python_uploads.py` (W11/W13).
+- [x] T012 [US2] Implement supported local Python upload/model evidence in `src/websec_validator/extractors/upload_security.py` and `schemas.py` (W11/W13); disclose unresolved factories/composition.
+- [x] T013 [US2] Validate Django same-response observations and native/profile limits against `tests/test_django_routes.py`, `tests/test_django_responses.py`, `tests/test_profiles.py`, `src/websec_validator/extractors/transport_security.py`; add missing paired evidence without claiming deployment.
+
+## Phase 4 — US1: Keep unsafe neighbors visible (P1)
+
+Independent test: original reproducer no longer misclassified; real unsafe sibling still reported.
+
+- [x] T014 [US1] Add failing JWT/hash/upload/PII/literal/guard paired cases in `tests/test_retained_precision.py` (W08/W09/W12/W18/W19).
+- [x] T015 [US1] Scope direct JWT options/hash result use in `src/websec_validator/extractors/crypto_usage.py` (W09).
+- [x] T016 [US1] Scope filename storage/SVG acceptance in `src/websec_validator/extractors/upload_security.py` (W08).
+- [x] T017 [US1] Correct boolean and partial-removal PII output handling in `src/websec_validator/extractors/pii_exposure.py` (W12).
+- [x] T018 [US1] Correct literal regex/error expression matching in `src/websec_validator/extractors/surface.py` (W18).
+- [x] T019 [US1] Pair actual security invocation with executable catch returns in `src/websec_validator/extractors/llm_security.py` (W19).
+- [x] T020 [US1] Add import-bound HTTP receiver controls and implementation in `tests/test_retained_flows.py` and `src/websec_validator/extractors/surface.py` (W03).
+
+## Phase 5 — US4: Honest evidence (P1)
+
+Independent test: provenance-specific tables remain separate; unknown labels never become truth.
+
+- [x] T021 [US4] Add mixed-reviewed/Brier write regressions and recovered Elixir/newly authored Swift controls in `tests/test_retained_calibration.py`, `tests/test_language_fixtures.py` and owned fixtures. Original Swift replay is unavailable (T034), not claimed as delivered.
+- [x] T022 [US4] Finish class eligibility and every measurable-write scoring in `src/websec_validator/calibration.py`, `synthetic.py`, `cli.py`; reconcile spec 002 acceptance evidence.
+- [x] T023 [US4] Add reproducible offline per-tool capture comparison and sanitized raw unknown-labelled outcomes under `scripts/compare-reports.py` and `tests/test_compare_reports.py`; update `BENCHMARKS.md` without inventing unseen-project recall or agent benefit. Actual comparative measurements remain unrun.
+
+## Phase 6 — US3: Deliberate recurring integration (P2)
+
+Independent test: actual supported integration lifecycle; static config tests alone insufficient.
+
+- [x] T024 [US3] Add one-shot CLI versus long-lived MCP health policy and packaging controls in `Dockerfile`, `docs/integrations/README.md`, `tests/test_container_contracts.py` (W02).
+- [x] T025 [US3] Pin and verify supported scanner archives/platforms and execute available image matrix using `Dockerfile` and `tests/test_container_contracts.py` (W06).
+- [x] T026 [US3] Add remote-write/redirect/body/concurrency regressions then replace httpx race draft with bounded stdlib transport in `src/websec_validator/templates/probes/race-conditions.py` and `tests/test_probe_transport_boundaries.py` (W06).
+- [x] T027 [US3] Validate real disposable pre-commit lifecycle and controlled separate-engine/target CI using `docs/integrations/` and `tests/test_adoption_contracts.py`; record unavailable prerequisites as pending, not delivered.
+
+## Phase 7 — Polish and release
+
+- [x] T028 Independently review each detector unit and run actual CLI/ledger controls; record evidence/limitations in `docs/security-review/backlog-reconciliation.md` (FR-002/SC-001). Final comparison/language re-review passes fifteen methods; supplied partial/provenance blockers are fixed.
+- [x] T029 Run focused/full application and automation suites, compileall, DocGuard/evidence/spec checks and isolated built-wheel validation; update `AGENTS.md` dated counts and `CHANGELOG.md`. Frozen release suite1851/skip1, automation57, brief33 and isolated wheel125 byte-matched source/data files plus7 commands pass; DocGuard warnings remain qualified.
+- [ ] T030 Run Spec Kit convergence after all implementation tasks; append newly found gaps to this task file only.
+- [x] T031 Review release docs/brief publication pair and migration contracts for new package behavior; regenerate and visually inspect PDF only when its source changes. 0.21.0 source/PDF/manifest bound; all8pages reviewed; migration/README/canonical/methodology updated without inheriting dated benchmark results.
+- [ ] T032 Commit coherent units, normal checked-head CI merge and immutable release; verify actual GitHub/PyPI artifacts (FR-006).
+- [x] T033 Fix the reproduced MCP overload-close race without weakening the original 503 assertion;
+  validate split-send and byte/absolute-time caps in `tests/test_mcp_security.py`, independently
+  review `src/websec_validator/mcp_server.py`, and document the bounded accept-loop trade-off.
+
+## Dependencies and execution order
+
+T001–T004 precede stories. Prioritize unsafe auth/JWT overcredit among equal P1 stories. Each test
+task precedes its source task. US1/US2 share surface/upload source and therefore execute sequentially.
+US4 is independent after foundation; US3 follows safe transport boundaries. T028 applies after each
+unit, not only at the end. T029–T032 require all relevant implementation/validation complete.
+
+Parallel examples: US1 precision research and US2 framework research; US2 SQL and model test design;
+US3 tooling inventory and US4 label audit. These are read-only independent work; overlapping source
+writes are not parallel. Root owns implementation; independent agents own research/review only.
+
+No task may be checked merely because a PR closed, a warning vanished, a table exists or a tool is
+installed. Unrun platform matrices and manual agent A/B experiments remain explicitly pending.
+
+### First implementation batch
+
+FastAPI endpoint-local dependencies and JWT/literal/PII/fail-open pairs are implemented with an
+actual subprocess CLI/ledger contract and independent negative-control review. T005/T006 remain
+open for tRPC; T014/T015 remain open for principal/hash-purpose cases. Upload storage provenance
+and the remaining full-task acceptance checks are not marked complete by these narrower fixes.
+
+### Connexion registration checkpoint
+
+Ten new tests cover literal JSON registrations, exact operation handlers, invalid ordering,
+documentation-only Noir rows, malformed shapes, private/escaping paths, execution budgets and an
+actual subprocess CLI ledger. Independent review confirms its four negative controls fixed.
+T007/T008 remain open for deliberately unsupported YAML/dynamic composition: partial parsing is
+disclosed and does not automatically manufacture deployed routes or guard evidence.
+
+### Hash-purpose checkpoint
+
+Paired JS/Python digest, avatar, metadata, HIBP-prefix, closure/string/boolean, overwrite and
+primitive-binding controls extend W09. Supported local syntax is deliberately narrower than a
+whole-program proof; unknown wrappers, loops and cross-function flow remain unverified. HIBP
+lookup purpose is not proof of correct breached-password screening, and predictable IDs do not
+prove that the application relies on their secrecy. Source-analysis limits stay explicit.
+
+### Flask model checkpoint
+
+Seven new regression methods cover supported local Flask-SQLAlchemy bindings, model-path prose,
+late imports, overwritten fields, parser budgets and actual persisted CLI facts without importing
+target code. Independent review confirms all three supplied blockers fixed. Imported extension
+objects and app factories remain unresolved; T011/T012 also require the separate upload unit.
+
+### Python upload checkpoint
+
+Thirteen methods cover actual writes/decisions versus metadata, local assignment/branch flow,
+annotation/route bindings, byte rejection versus no-op/caught/partial/transformed/different-byte
+controls, parser limits and actual subprocess CLI/ledger output. Same-handler byte evidence is
+bound to stored bytes; it cannot certify filename-derived storage or browser-safe serving. Complex
+registrations, collections, wrappers and cross-function flow remain explicit review limits.
+
+### tRPC checkpoint
+
+Twelve paired methods include actual CLI facts/ledger outcomes. Only supported same-file
+initTRPC/procedure/router chains and direct import-bound Express mounts supply HTTP paths.
+Unmounted, conditional and unused composition remains candidate evidence, not probe targets.
+An unknown/short-circuiting middleware before a later guard cannot prove that guard executes.
+Context identity, other adapters, generic/input chains and cross-module composition remain review
+gaps; no target code is executed. Bounds enter coverage, not a clean scan certificate.
+
+### Container checkpoint
+
+Core/bundled targets, fixed multiarch base/archive digests, fail-closed architecture/version
+selection, checksum corruption controls, private allowlisted context and explicit health policy
+are implemented. Native amd64/arm64 CI built and executed both targets successfully in run
+36817563117 against head 89ede34473b4d0122c4ff6ef4eddf8851a3649ba. The evidence ledger retains
+actual image identities. Scanner version execution is not complete adapter/database testing;
+apt/transitive dependencies are not fully locked. T024/T025 are complete within this stated scope.
+
+### Adoption checkpoint
+
+Real pre-commit 4.6.2 installation/staged-commit/manual/pre-push/foreign-hook restoration passed
+locally in an owned disposable environment. The separate-engine Action workflow has clean,
+unsafe and oversized hostile inert targets with current-attempt artifact assertions. All four jobs
+passed in run 36818626389 at b383d2e221722d9beb73fff75618d170b045eaca; T027 is complete within
+this controlled fixture scope. No consumer hook or schedule is activated automatically.
+
+### Final bounded precision checkpoint
+
+Filename provenance now reaches actual supported storage arguments, regardless of the local
+variable's name; old standalone-assignment inputs remain as negative controls paired with real
+storage. Shared local-flow expression caps enter execution gaps. PII credit requires literal keys,
+unreplaced supported helpers and the whole assignment expression. Static f-strings remain inert;
+security calls inside a caught nested try cannot lend evidence to the outer catch. Six additional
+methods include actual CLI facts/ledger and independent supplied negative controls. Receiver
+runtime identity, closures/cross-function flows, aliases and complex rethrow/finally remain review
+limits. T014/T016–T019 are complete within these bounded supported contracts, not whole-program
+or production precision guarantees.
+
+### Registered YAML checkpoint
+
+Ten real-YAML/JSON-compatible methods now include actual subprocess CLI artifacts and source
+registration independent of Noir. A strict bounded data subset rejects tags, anchors/aliases,
+merges, duplicate keys, block routing identifiers, ambiguous plain scalars, document composition
+and path/operation references. Exact dotted operation identifiers select the exact source body;
+literal Flask config does not replace the Connexion receiver. Original pinned VAmPI config/schema
+f16052dce83f05847133ec98f01c5193a41de7d8 produced fourteen source routes without execution in an
+owned disposable source-only check. This is not runtime/deployment or vulnerability-recall proof.
+Dynamic specifications/options, custom resolvers and cross-module registration remain explicit
+review gaps. T007/T008 are complete within these supported literal registration contracts.
+
+### External acceptance evidence, not an implementation claim
+
+- [ ] T034 Recover the original Swift V9 source if its author supplies it and replay spec 002
+  FR-013/SC-005. PR 151's complete immutable tree/history has no such source. Newly authored
+  `lang_swift_vulnerable` tests the coverage disclosure but does not satisfy unchanged-original replay.

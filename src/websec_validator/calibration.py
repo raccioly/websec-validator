@@ -126,7 +126,7 @@ REVIEWED_STATUS = "reviewed"
 
 
 def reviewed_classes(corpus: list) -> set:
-    """Attack classes with at least one REVIEWED truth entry — the only ones eligible for a
+    """Attack classes whose EVERY truth entry is reviewed — the only ones eligible for a
     class-specific published cell.
 
     A truth entry qualifies when `review_status` is "reviewed" AND `is_real` is an explicit
@@ -137,13 +137,15 @@ def reviewed_classes(corpus: list) -> set:
     honest. Relabelling requires cloning the pinned revision and reviewing each finding by hand;
     there is deliberately no code path that promotes an unreviewed entry.
     """
-    out = set()
+    out, unresolved = set(), set()
     for entry in corpus or []:
         for truth in entry.get("truth") or []:
             if truth.get("review_status") == REVIEWED_STATUS and isinstance(truth.get("is_real"), bool):
                 if truth.get("class"):
                     out.add(truth["class"])
-    return out
+            elif truth.get("class"):
+                unresolved.add(truth["class"])
+    return out - unresolved
 
 
 def fit(labeled: list, corpus_names: list, researched_classes: set | None = None) -> dict:
@@ -170,7 +172,7 @@ def fit(labeled: list, corpus_names: list, researched_classes: set | None = None
     if researched_classes is not None:
         rc = set(researched_classes)
         cells = {k: c for k, c in cells.items() if k.split("|", 1)[0] in rc}
-    return {
+    table = {
         "meta": {"corpus": corpus_names, "n_total": len(labeled) - unknown, "n_unknown": unknown,
                  "method": "binomial proportion + Wilson 95% CI", "min_n": MIN_N,
                  "unmatched_rule": "unmatched finding = unknown (excluded from calibration)",
@@ -180,6 +182,8 @@ def fit(labeled: list, corpus_names: list, researched_classes: set | None = None
         "by_label": {k: _cell(v[0], v[1]) for k, v in sorted(by_l.items())},
         "prior": PRIOR,
     }
+    table['meta']['score'] = brier(labeled, table)
+    return table
 
 
 def load_shipped() -> dict | None:
@@ -218,6 +222,10 @@ def _merge(shipped: dict | None, local: dict | None) -> dict | None:
     base.setdefault("meta", {})
     if local:
         local = _upgrade_local(local)
+        shipped_score = base['meta'].pop('score', None)
+        base['meta']['source_scores'] = {
+            'shipped_snapshot': shipped_score, 'local_evidence': local.get('meta', {}).get('score'),
+            'note': 'Separate source-table scores; no score of merged predictions is available.'}
         for grp in ("by_class_label", "by_label"):
             merged = dict(base.get(grp, {}))
             for key, lc in (local.get(grp, {}) or {}).items():
@@ -288,6 +296,8 @@ def record_samples(labeled: list, runs: int = 1) -> dict | None:
             added += 1
         local["meta"]["samples"] = local["meta"].get("samples", 0) + added
         local["meta"]["runs"] = local["meta"].get("runs", 0) + (runs if added else 0)
+        # Score the local evidence table separately, not the shipped corpus or authored pairs.
+        local['meta']['score'] = brier(list(local.get('observations', {}).values()), _merge(None, local))
         _write_local(local)
         return local
     except Exception:
@@ -411,8 +421,13 @@ def review_candidate(candidate_id: str, *, accept: bool, reason: str = "",
                              "detector_revision": row.get("detector_revision", ""),
                              "analyzed_input_digest": row.get("analyzed_input_digest", ""),
                              "fingerprint": row.get("fingerprint", "")}}
-    record_samples([sample])
-    return {"ok": True, "error": "", "candidate": dict(row, state="accepted")}
+    stored = record_samples([sample])
+    if stored is None:
+        pending[candidate_id] = row
+        _write_local(local)
+        return {'ok': False, 'error': 'reviewed sample could not be persisted; candidate remains pending', 'candidate': row}
+    return {"ok": True, "error": "", "candidate": dict(row, state="accepted"),
+            'score': stored.get('meta', {}).get('score')}
 
 
 def _write_local(local: dict) -> None:
@@ -458,13 +473,17 @@ def fit_synthetic(pairs: list) -> dict:
             cell = group.setdefault(key, [0, 0])
             cell[1] += 1
             cell[0] += int(row["is_real"])
-    return {"meta": {"basis": "synthetic-paired", "n_total": len(pairs or []),
+    known = sum(isinstance(row.get('is_real'), bool) for row in pairs or [])
+    table = {"meta": {"basis": "synthetic-paired", "n_total": known,
+                     "n_unknown": len(pairs or []) - known,
                      "method": "binomial proportion + Wilson 95% CI", "min_n": MIN_N,
                      "caveat": SYNTHETIC_CAVEAT,
                      "never_merged": "apply() does not read this table; it is reported beside the "
                                      "measured one, never summed into it"},
             "by_class_label": {k: _cell(v[0], v[1]) for k, v in sorted(by_cl.items())},
             "by_label": {k: _cell(v[0], v[1]) for k, v in sorted(by_l.items())}}
+    table['meta']['score'] = brier(pairs, table)
+    return table
 
 
 def write_synthetic(table: dict) -> Path:

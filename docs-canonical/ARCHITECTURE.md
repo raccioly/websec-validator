@@ -2,7 +2,7 @@
 
 <!-- docguard:version 0.9.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-09-16 -->
+<!-- docguard:last-reviewed 2026-10-01 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — this tool is defined by what it deliberately omits (no LLM, no server, no running app, no runtime deps, no database); the negations describe real architectural properties, not phrasing defects. -->
 
@@ -36,9 +36,9 @@ scanner runs, a calibrated findings ledger, staged probes, and the briefing/repo
 
 | Component | Responsibility | Location | Tests |
 |-----------|---------------|----------|-------|
-| CLI entry point | Arg parsing + the `run` (with `--format`/`--fail-on`/`--baseline`) / `doctor` / `dynamic` / `mcp` commands (and hidden `recon` / `proof` / `calibrate`) | `src/websec_validator/cli.py` | `tests/test_recon.py`, `tests/test_hardening.py` |
+| CLI entry point | Arg parsing for `run`, `doctor`, `dynamic`, `mcp`, `gate`, `attest`, `capabilities`, `feedback`, `demo`, `explain`, `intel`, `research`, `repair-verify`, `update-check`, `install`, `hooks`, `init`, `emit-context` and advanced `recon` / `proof` / `calibrate` | `src/websec_validator/cli.py` | `tests/test_recon.py`, `tests/test_hardening.py`, `tests/test_workbench_cli.py` |
 | Recon driver | Thin wrapper that runs the extractor registry over one repo walk | `src/websec_validator/recon.py` | `tests/test_recon.py` |
-| Extractors (22) | One focused question each → the merged `FACTS.json` (stack, routes, auth, authz, **authz_dataflow**, tenant, password_policy, surface, schemas, iac_ci, client_exposure, client_integrity, transport_security, graphql, upload_security, pii_exposure, integrations, **llm_security**, **crypto_usage**, **webext**, **agent_config**, **offline_deps**) | `src/websec_validator/extractors/` | `tests/test_recon.py`, `tests/test_pentest_regressions.py`, `tests/test_entitlement_webext.py` |
+| Extractors (22) | One focused question each → the merged `FACTS.json`; `extractors.REGISTRY` is the ordered authority (including policy consistency and offline dependencies) | `src/websec_validator/extractors/` | `tests/test_recon.py`, `tests/test_pentest_regressions.py`, `tests/test_entitlement_webext.py` |
 | Static scanners | Detect + (with `--scan`) shell out to Trivy/Gitleaks/Semgrep/Checkov/Prowler and de-duplicate across tools | `src/websec_validator/scanners.py` | `tests/test_recon.py` |
 | Findings ledger | Correlate recon + static + dynamic into one ranked, standards-cited, calibrated record set | `src/websec_validator/findings.py` | `tests/test_pentest_regressions.py` |
 | Analysis scope | Narrow what is READ AND MATCHED to named files while inventorying the eligible tree and reporting exclusions | `src/websec_validator/extractors/base.py` | `tests/test_analysis_scope.py`, `tests/test_gate_policy_and_scope.py` |
@@ -132,13 +132,32 @@ completeness gating. None are Python imports — there are zero runtime package 
 
 | Tool | Purpose | Fallback |
 |------|---------|----------|
-| OWASP Noir | route engine (50+ frameworks) | built-in regex route extractor |
+| OWASP Noir | route engine (50+ frameworks) | built-in regex/AST route extractors |
 | Gitleaks | committed-secret detection | scanner reported missing |
 | Trivy | dependency CVEs | scanner reported missing |
 | Semgrep / OpenGrep | code-level SAST (ships 2 bundled rules) | scanner reported missing |
 | Checkov | IaC misconfiguration | scanner reported missing |
 | Prowler | cloud-account posture | scanner reported missing |
-| Docker | reproducible all-scanners-bundled run | run natively with whatever is installed |
+| Docker | core-only or selected-scanners-bundled run, checksum-bound archives and native architecture contracts; transitive builds remain variable | run natively with whatever is installed |
+
+Connexion's bounded AST adapter maps literal top-level, import-bound local JSON or supported
+literal-subset YAML `add_api`
+registrations even without Noir. It keeps source registration and spec provenance separate from
+the exact operation handler used for authorization hints. An unregistered specification is
+documentation, not a probe target. Registered YAML is a strict bounded data subset, distinct from
+the general informational OpenAPI partial parser: tags, anchors, aliases, merges, block routing
+identifiers, path/operation references and document composition cannot supply targets. Templates,
+dynamic composition and unknown handler bindings remain review gaps. Exact dotted operation IDs,
+not normalized slash paths or security declarations, select handler bodies. Literal Flask config
+items do not replace the registration receiver or supply authentication evidence.
+Source/node/route-budget failures enter execution coverage. No target module
+is imported or executed, and source evidence is not deployed-handler or auth enforcement proof.
+
+The Django response observer pairs supported import-bound literal `render()` calls with the
+exact returned response and its latest literal header assignments. Unknown branches, aliases,
+mutations, overwritten responses and sibling views cannot lend header credit. A strict CSP shape
+is only a source observation: template loaders, middleware, nonce generation and deployment remain
+unverified. Work caps enter execution coverage; this lane never imports Django or target code.
 
 ## Configuration Files
 
@@ -148,7 +167,7 @@ completeness gating. None are Python imports — there are zero runtime package 
 | `.websec-ignore` | Per-target suppressions for the findings ledger (glob paths or `category:<x>`) |
 | `dynamic-config.example.json` | Template for the dynamic phase's TEST target + role credentials (copy to a gitignored `dynamic-config.json`) |
 | `.docguard.json` / `.docguardignore` | DocGuard (CDD) config: which docs are canonical and which paths to exclude from doc validation (e.g. `tests/fixtures/`, the probe templates) |
-| `Dockerfile` / `.dockerignore` | The all-scanners-bundled image (arch-aware, amd64 + arm64) |
+| `Dockerfile` / `.dockerignore` | Core/bundled non-root images with allowlisted context (native amd64 + arm64 contracts) |
 
 ## Infrastructure (IaC)
 

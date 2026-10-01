@@ -2,7 +2,7 @@
 
 <!-- docguard:version 0.9.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-09-16 -->
+<!-- docguard:last-reviewed 2026-10-01 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — the tool's defining property is needing almost nothing (no runtime deps, no required env vars, no running app); the negations accurately describe optional-everything setup. -->
 
@@ -11,7 +11,8 @@
 
 The core pass needs **only Python 3.11+** — zero Python runtime dependencies. External scanners and
 the Noir route engine are **optional**: the tool detects them, uses them when present, reports them
-when absent. Explicitly selected unavailable tools make gated execution incomplete. Or skip all of it and run the Docker image, which bundles them.
+when absent. Explicitly selected unavailable tools make gated execution incomplete. The default
+Docker target bundles a selected scanner set; `--target core` builds a scanner-free image.
 
 ---
 
@@ -23,7 +24,7 @@ when absent. Explicitly selected unavailable tools make gated execution incomple
 | pipx | latest | Recommended install method (isolates the CLI, picks a 3.11+ interpreter) |
 | OWASP Noir | latest | **Optional** route engine (50+ frameworks); regex fallback if absent — `brew install noir` |
 | Trivy / Gitleaks / Semgrep (or OpenGrep) / Checkov / Prowler | latest | **Optional** static scanners, only run with `--scan`; install for fuller coverage |
-| Docker | latest | **Optional** — `docker build` for the all-scanners-bundled image (no local installs needed) |
+| Docker | latest | **Optional** — core/bundled image targets, with native amd64/arm64 contracts |
 
 `websec doctor` reports which of the optional tools are present on your machine.
 
@@ -81,9 +82,11 @@ websec run ./my-app            # recon + tailored probes + briefing
 websec run ./my-app --scan     # …and execute the available static scanners
 ```
 
-Then point your agent at the output: **"Read `websec-out/latest/AGENT-BRIEFING.md` and follow it."**
+For agent workflows, add `--format json` and preserve the exit code. The envelope's `generated`
+identifier selects the exact `websec-out/runs/<generated>/AGENT-BRIEFING.md`; do not substitute an
+older `latest` after an early error or partial attempt.
 
-### Or run via Docker (everything bundled, zero install)
+### Or run via Docker (selected scanners bundled, zero local scanner install)
 
 ```bash
 docker build -t websec-validator .
@@ -92,16 +95,21 @@ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/scan" websec-validator run 
 
 The image carries Noir + Trivy + Gitleaks + Semgrep + Checkov (arch-aware, amd64 + arm64); mount your
 repo at `/scan` and the artifacts land in `/scan/websec-out`.
+For the scanner-free target use `docker build --target core -t websec-core .`. Both targets are
+non-root one-shot CLIs with `HEALTHCHECK NONE`, not recurring scan services. Digest checks and
+native version/fixture execution do not certify fully reproducible transitive builds.
 
 ### Dynamic phase (optional, live TEST target)
 
 ```bash
 cp dynamic-config.example.json dynamic-config.json   # fill in TEST URL + role creds (gitignored)
-websec run ./my-app                                   # produces websec-out/latest/FACTS.json
-websec dynamic --config dynamic-config.json --facts websec-out/latest/FACTS.json
+websec run ./my-app --format json                     # capture generated from this attempt
+websec dynamic --config dynamic-config.json --facts websec-out/runs/RUN_ID/FACTS.json
 ```
 
 Never point the dynamic phase at production.
+Replace `RUN_ID` with the captured `generated` identifier; resolve and inspect that attempt's facts
+and coverage before invoking dynamic tests.
 
 ## Development Setup
 

@@ -29,7 +29,7 @@ import re
 
 from .base import Extractor, RepoContext, is_client_file, is_script_file, is_test_file
 from .syntax import (without_comments, call_expression, direct_options, expression_end,
-                     direct_call, server_file, split_arguments)
+                     direct_call, in_literal, js_functions, object_properties, server_file, split_arguments)
 
 # LLM SDK call sites (Vercel AI SDK, OpenAI, Anthropic, LangChain, litellm, Bedrock, Gemini).
 LLM_CALL = re.compile(
@@ -73,6 +73,63 @@ GUARD_FN = re.compile(r"\b(?:guard|scan(?:Input|Output)?|moderat\w*|checkContent
 FAIL_OPEN = re.compile(
     r"catch[^{]*\{[^}]*\breturn\b[^}]*(?:allowed\s*:\s*true|action\s*:\s*['\"](?:allow|error|continue)|true)"
     r"|fail[-_ ]?open|continuing[^.\n]{0,20}(?:fail|open)|return\s*\{\s*allowed\s*:\s*true", re.I)
+
+
+def _guard_failure_allows(source: str) -> bool:
+    """Bind a security invocation in a try to an executable allow in its own catch.
+
+    Filesystem scan_dir/Scanner names and unrelated handlers are not moderation.
+    Complex wrappers/finally/rethrow paths remain unverified, not certified safe.
+    """
+    security_call = re.compile(r'\b(?:checkContent|safetyCheck|moderat\w*|llmGuard\w*|promptGuard\w*|'
+                               r'scanInput|scanOutput|guard\w*)\s*\(', re.I)
+    outer_scopes = js_functions(source)
+    for attempt in re.finditer(r'\btry\s*\{', source):
+        if in_literal(source, attempt.start()):
+            continue
+        opening = source.find('{', attempt.start())
+        end = expression_end(source, opening, closing='}')
+        if not source[opening:end].endswith('}'):
+            continue
+        body = source[opening + 1:end - 1]
+        scopes = js_functions(body)
+        nested_owned = []
+        for nested in re.finditer(r'\btry\s*\{', body):
+            if in_literal(body, nested.start()):
+                continue
+            nested_end = expression_end(body, body.find('{', nested.start()), closing='}')
+            if re.match(r'\s*catch\b', body[nested_end:]):
+                nested_owned.append((nested.start(), nested_end))
+        containing = [scope for scope in outer_scopes if scope['body_start'] <= attempt.start() < scope['end']]
+        owner = min(containing, key=lambda scope: scope['end'] - scope['start']) if containing else None
+        named_guard = bool(owner and re.fullmatch(r'(?:scanInput|scanOutput|moderat\w*|guard\w*|llmGuard\w*)', owner['name'], re.I))
+        calls = list(security_call.finditer(body))
+        if named_guard:
+            # A security wrapper's own generic check is related evidence, unlike
+            # a separate function's catch or a filesystem Scanner/scan_dir.
+            calls += list(re.finditer(r'\bcheck\s*\(', body))
+        if not any(not in_literal(body, call.start()) and not any(
+                start <= call.start() < stop for start, stop in nested_owned) and not any(
+                scope['start'] <= call.start() < scope['end'] for scope in scopes)
+                   for call in calls):
+            continue
+        caught = re.match(r'\s*catch\s*(?:\([^)]*\))?\s*\{', source[end:])
+        if not caught:
+            continue
+        catch_start = end + caught.end() - 1
+        catch_end = expression_end(source, catch_start, closing='}')
+        catch_body = source[catch_start + 1:catch_end - 1]
+        scopes = js_functions(catch_body)
+        for returned in re.finditer(r'\breturn\b', catch_body):
+            if in_literal(catch_body, returned.start()) or any(
+                    scope['start'] <= returned.start() < scope['end'] for scope in scopes):
+                continue
+            value = catch_body[returned.end():expression_end(catch_body, returned.end())].strip()
+            options = object_properties(value)
+            if value == 'true' or (options and (options.get('allowed') == 'true'
+                    or re.fullmatch(r'''(['"])(?:allow|continue|error)\1''', options.get('action', '')))):
+                return True
+    return False
 
 
 def _llm_call_without(text: str, guard_rx: re.Pattern) -> bool:
@@ -229,7 +286,7 @@ class LlmSecurityExtractor(Extractor):
                     "executes them unattended, gate it behind explicit human approval and scope its authority.")
 
             # Guardrail fails open
-            if GUARD_FN.search(text) and FAIL_OPEN.search(text):
+            if _guard_failure_allows(text):
                 add("MEDIUM", "llm-guardrail-fail-open", "llm-guardrail", rel,
                     "A moderation/guard path appears to FAIL OPEN — on error/timeout it returns allow/continue "
                     "rather than blocking, so an attacker who stalls or floods the guard disables it while the "

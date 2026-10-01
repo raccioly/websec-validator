@@ -9,13 +9,14 @@ that exercises it, so the briefing can point probes at the right files.
 
 from __future__ import annotations
 
+import ast
 import re
 
 from .base import Extractor, RepoContext, is_client_file, is_script_file, is_test_file
 from .syntax import (without_comments, expression_end, call_expression, direct_call,
                      occurrence, python_shell_safe, server_file, split_arguments, direct_options, in_literal)
 from .profiles import service_for, java_fixed_argv
-from . import sql_flow
+from . import sql_flow, assigned_flow
 
 # user-controlled markers (kept loose on purpose)
 _U = r"(?:req\.|request\.|\+|`[^`]*\$\{|f['\"]|%\s*[\(%]|\.format\s*\(|searchParams|nextUrl|params\[)"
@@ -294,6 +295,15 @@ class SurfaceExtractor(Extractor):
         occurrences = []
         controls = []
         sql_budget = sql_flow.Budget()
+        command_budget = sql_flow.Budget()
+        assigned_budget = {'bytes': 0, 'events': 0}
+        assigned_analysis = {'candidate_files': 0, 'errors': [], 'limitations': assigned_flow.LIMITATIONS,
+                             'limits': {'source_bytes_per_file': assigned_flow.MAX_SOURCE_BYTES,
+                                        'events_per_file': assigned_flow.MAX_EVENTS,
+                                        'scopes_per_file': assigned_flow.MAX_SCOPES,
+                                        'bindings_per_scope': assigned_flow.MAX_BINDINGS,
+                                        'total_source_bytes': assigned_flow.MAX_TOTAL_SOURCE_BYTES,
+                                        'total_events': assigned_flow.MAX_TOTAL_EVENTS}}
         sql_analysis = {"candidate_files": 0, "nodes": 0, "errors": [], "unverified_queries": [],
                         "limitations": sql_flow.LIMITATIONS,
                         "limits": {"nodes_per_file": sql_flow.MAX_NODES, "scopes_per_file": sql_flow.MAX_SCOPES,
@@ -344,6 +354,22 @@ class SurfaceExtractor(Extractor):
                 seen = {}
                 for start, expression, rhs in candidates:
                     control = "none observed"
+                    if cls in {'redos', 'error-disclosure'} and in_literal(text, start):
+                        continue
+                    if cls == 'redos' and _p.suffix.lower() == '.py':
+                        args = split_arguments(expression[expression.find('(') + 1:-1])
+                        try:
+                            node = ast.parse(args[0], mode='eval').body if args else None
+                        except (SyntaxError, ValueError, RecursionError):
+                            node = None
+                        if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                                or isinstance(node, ast.JoinedStr) and not any(
+                                    isinstance(value, ast.FormattedValue) for value in node.values)):
+                            continue  # static f-string spelling does not introduce interpolation
+                        # Inspect the argument prefix, not the closing f-quote in "self".
+                        if not args or not (re.search(_REQ_SRC, args[0])
+                                            or re.match(r'(?i)^(?:f|rf|fr)[\'"]', args[0].strip())):
+                            continue
                     if cls == "command-injection" and python_shell_safe(expression):
                         continue
                     if cls == "command-injection" and _p.suffix.lower() == ".java" and java_fixed_argv(expression):
@@ -404,6 +430,46 @@ class SurfaceExtractor(Extractor):
                         if rel not in found["sql-injection"] and len(found["sql-injection"]) < 60:
                             found["sql-injection"].append(rel)
             if not nonserver and not no_request_surface:
+                flow = None
+                if _p.suffix.lower() == '.py':
+                    flow = assigned_flow.python_commands(raw, command_budget)
+                elif _p.suffix.lower() in {'.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.mts', '.cts'}:
+                    flow = assigned_flow.javascript(raw, assigned_budget)
+                    try:
+                        for start, expression, kind in assigned_flow.http_methods(raw, assigned_budget):
+                            flow['candidate'] = True
+                            flow['occurrences'].append({'offset': start, 'end': start + len(expression),
+                                'legacy_offset': start, 'sink_class': kind,
+                                'source_lines': [raw.count('\n', 0, start) + 1], 'assignment_lines': []})
+                    except sql_flow.LimitReached as error:
+                        flow['errors'].append({'kind': 'LimitReached', 'detail': str(error)})
+                if flow is not None:
+                    assigned_analysis['candidate_files'] += int(flow['candidate'])
+                    for error in flow['errors']:
+                        if len(assigned_analysis['errors']) < 50:
+                            assigned_analysis['errors'].append({'file': rel, **error})
+                    flow_ordinals = {}
+                    for item in flow['occurrences']:
+                        kind, start, end = item['sink_class'], item['offset'], item['end']
+                        expression = raw[start:end]
+                        identity = (kind, expression)
+                        ordinal = flow_ordinals.get(identity, 0)
+                        flow_ordinals[identity] = ordinal + 1
+                        existing = next((row for row in occurrences if row['file'] == rel
+                                         and row['sink_class'] == kind
+                                         and row.get('offset') in {start, item['legacy_offset']}), None)
+                        evidence = existing or occurrence(raw, start, expression, rel, kind, ordinal)
+                        evidence.update(source='Request value reaches sink argument through bounded local provenance',
+                                        source_lines=item['source_lines'], assignment_lines=item['assignment_lines'],
+                                        control_scope='May-flow review lead; wrappers, loops and cross-function dispatch are unverified')
+                        if existing is None:
+                            evidence['offset'] = start
+                            if service:
+                                evidence['service_id'] = service['id']
+                            occurrences.append(evidence)
+                            counts[kind] += 1
+                            if rel not in found[kind] and len(found[kind]) < 60:
+                                found[kind].append(rel)
                 outbound = []
                 for kind in ("ssrf", "ssrf-outbound-http"):
                     outbound.extend(call_expression(text, m.start()) for m in SINKS[kind][2].finditer(text))
@@ -440,10 +506,13 @@ class SurfaceExtractor(Extractor):
         sinks = {k: {"probe": SINKS[k][0], "count": counts[k], "files": found[k]}
                  for k in SINKS if counts[k]}
         sql_analysis["work"] = {"steps": sql_budget.steps, "source_bytes": sql_budget.source_bytes}
+        assigned_analysis['work'] = dict(assigned_budget, python_steps=command_budget.steps,
+                                         python_source_bytes=command_budget.source_bytes)
         return {
-            **({"error": "Python query-flow candidate analysis incomplete; see sql_flow.errors"}
-               if sql_analysis["errors"] else {}),
+            **({"error": "Source-flow candidate analysis incomplete; see sql_flow/assigned_flow errors"}
+               if sql_analysis["errors"] or assigned_analysis['errors'] else {}),
             "sql_flow": sql_analysis,
+            'assigned_flow': assigned_analysis,
             "sinks": sinks,
             "sink_occurrences": occurrences,
             "unverified_controls": controls,

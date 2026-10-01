@@ -7,7 +7,129 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-10-01
+
+### Fixed — operation-bound retained precision
+
+- Resolve supported literal registered YAML Connexion contracts without Noir, using a bounded
+  stdlib data subset. Keep informational partial parsing separate; unsupported composition,
+  aliases, references and malformed contracts never manufacture probe targets. Exact dotted
+  operation identifiers select source handlers; slash normalization and contract security text
+  cannot confer guard evidence. Preserve literal Flask configuration without treating it as a
+  replaced registration primitive. No target module is imported or executed.
+
+- Associate supported Django literal templates and header assignments with the actual returned
+  response. A strict CSP shape on one view cannot clear an unverified sibling. Record bounded
+  source observations separately from loader, middleware, nonce-generation and deployment proof.
+
+- Follow supported local client-filename assignments into actual storage path/key arguments,
+  rather than interpreting a variable named `filename` as storage. Preserve overwrite, branch,
+  scope and object-body distinctions; disclose expression/source/work budgets as execution gaps.
+  Source receiver evidence is not proof of executable storage or exploitation.
+- Require literal PII projection keys and the entire supported pick/omit assignment expression.
+  Unknown keys, spreads, visible helper replacement and raw-entity fallbacks cannot receive credit.
+- Distinguish static Python f-strings from interpolated regular-expression arguments, and keep
+  nested guard calls associated with their own catches instead of an unrelated outer allow catch.
+  Complex rethrow/finally flow remains unverified rather than certified safe.
+
+### Integration validation
+
+- Execute an opt-in disposable pre-commit lifecycle: real staged commit rejection, clean-index
+  handling with unsafe unstaged content restored, manual/pre-push framework gates, no baseline
+  acceptance and foreign-hook restoration. Add separate-engine Action jobs for clean, unsafe and
+  oversized hostile inert targets; no consumer hook or recurring schedule is activated.
+- Record successful native core/bundled container execution on amd64 and arm64, including nonroot
+  offline source-only fixtures and bundled executable versions. This does not certify every
+  scanner adapter/database or fully reproducible transitive builds.
+
+### Added
+
+- Add an offline captured-report comparison harness for WebSec, Semgrep and Bandit, with explicit
+  byte/scope bindings, reviewed exact-label matching, unknown outcomes and unscored partial/missing
+  captures. Keep per-tool counts separate and publish sanitized rows; no competitor measurement
+  or agent-benefit result is claimed.
+- Replay the recovered Elixir source and newly authored Swift control through actual CLI artifacts.
+  Disclose unsupported/thin-language coverage; original Swift application evidence remains missing.
+
+- Offer a core-only container target and native amd64/arm64 image contract checks. Explicit
+  one-shot `HEALTHCHECK NONE` performs no recurring scan; optional MCP liveness is distinct from
+  scan results and authenticated dispatch.
+
+### Fixed
+
+- Bind the container base and Noir/Gitleaks/Trivy archives to reviewed digests, verify all bytes
+  before installation, reject unsupported architectures/version overrides, and replace the remote
+  Trivy installer. Pin top-level Python scanners, allowlist build context and prune private trees;
+  apt/transitive dependency variability remains explicit rather than claiming reproducibility.
+
+- Map supported same-file tRPC procedures only through a visible import-bound Express adapter
+  mount. Unmounted/conditional/unused composition remains candidates, not invented HTTP targets.
+  Authorization hints belong to each middleware chain; unknown/short-circuiting prefixes, no-op
+  rejection, caught checks and mutated primitives cannot borrow a later guard. Context identity
+  and deployed enforcement remain unverified; parser/result budgets enter completeness reporting.
+
+- Follow supported import-bound FastAPI `UploadFile` filename/content-type values through local
+  assignments into actual writes and decisions. Metadata logs/returns, generated names and unused
+  closures are distinct. Byte-type rejection credit is handler-local and tied to the stored bytes;
+  caught/no-op checks, branches, partial/transformed/different bytes and shadowed primitives cannot
+  borrow it. Parser/binding/aggregate limits disclose incomplete analysis; target code never runs.
+
+- Inventory supported import-bound top-level Flask-SQLAlchemy `db.Model` declarations and actual
+  column fields without importing the target. Prose, unused nested models, mutated receivers,
+  late imports and overwritten fields do not contribute sensitive-field evidence. Imported
+  extension objects/app factories remain unresolved; byte/node budgets disclose execution gaps.
+
+- Bind predictable-principal leads to supported digest-result assignments and actual local principal
+  uses, not an avatar hash beside unrelated identity keywords. Inert strings/closures, boolean
+  comparisons, direct literal inputs and visible straight-line overwrites do not count as digests.
+  Recognize exact password-update metadata fields and one narrow SHA-1 HIBP prefix-lookup purpose;
+  unknown/shadowed primitives, extra uses, unsafe siblings and non-five-character/other-host flows
+  retain weak-hash leads. Expose source/node/scope/event budget failures as incomplete analysis.
+
+- Require visible import-bound Connexion source registration before a local JSON OpenAPI contract
+  supplies route targets; unregistered Noir spec documents stay informational. Preserve registration
+  and specification provenance and resolve authorization only against the exact operation body,
+  never the registering file or a `security` declaration. Disclose YAML/dynamic/escaping/malformed
+  contracts as uncertainty and bounded-parser exhaustion as an execution gap.
+
+- Preserve the bounded MCP HTTP overload 503 response when normal clients send headers and body
+  separately. Half-close first, then discard at most 8 KiB within 50 ms; keep the four-worker,
+  authentication and root-selection boundaries unchanged. Slow/over-cap requests remain best-effort.
+
+- Preserve request provenance through supported local JavaScript SQL/shell assignments and Python
+  stdlib command assignments, including may-flow branches. Bound values, inert examples and
+  unrelated scopes do not taint query text. Dynamic executables/interpreters and unknown shell
+  options stay leads; only narrowly supported inert argv controls receive credit. Keep repeated
+  sink identities distinct and disclose byte/node/event/binding limits as execution gaps.
+- Add stable import-bound Needle HTTP methods without matching unrelated `.get` operations;
+  receiver shadowing/reassignment/computed mutation invalidates that binding evidence.
+
+- Replace the manually executed race draft's httpx requirement with a stdlib thread pool (default
+  eight, maximum sixteen requests per endpoint), 16 KiB payload cap and socket-I/O timeout. Actual
+  transports enforce localhost mutations, disable proxies/redirects and retain status/error kinds
+  only. Status counts remain observations, not proof of state changes or race exploitation.
+
+- A calibration class qualifies only when every declared truth row is explicitly reviewed and
+  boolean-labelled. Persist/report Brier scores for measurable corpus, authored-pair and local
+  evidence tables without merging their provenance; unknown labels remain excluded. Clarify that
+  the shipped September 22 table is a dated snapshot, not a measurement of later detector changes.
+
+- Bind supported FastAPI dependency evidence to each endpoint, never to the presence of
+  `Depends` or a guarded sibling. No-op/imported/mutated/wildcard-bound helpers, disabled JWT
+  verification and fixed credentials remain unverified. Analysis is bounded and cached per file.
+- Inspect JWT algorithm options per invocation; nested, unknown, spread, duplicate, empty and
+  `none` options cannot suppress an unsafe neighbor. Ignore inert filename-key and regex/error
+  examples; retain executable upload acceptance and actual security-check fail-open branches.
+- Require removal of every known PII field using literal keys before crediting supported rest/omit
+  projections; partial and computed removal retain review leads. Primitive boolean projections
+  are not raw entity responses. Preserve the original partial-omit unsafe input as a regression.
+
 ### Documentation
+
+- Review canonical and agent contracts against the shipped v0.20.0 source; correct broad confidence,
+  dynamic-status and DocGuard-coverage claims while preserving dated measurements. Reconcile the
+  retained backlog against independent source reproductions; Spec Kit planning/task artifacts now
+  distinguish shipped controls from uncovered cases rather than equating closed PRs with delivery.
 
 - Refresh the eight-page technical brief, PDF and landing page for the reviewed v0.20.0 snapshot,
   including consent-driven release checks, hardened probe transports and incomplete-gate behavior.
@@ -1596,7 +1718,8 @@ The initial public line. Highlights across 0.2.1–0.2.9:
 ### Fixed
 - Scanner-contamination and rate-limit fixes (agent-wallet dogfood).
 
-[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/raccioly/websec-validator/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/raccioly/websec-validator/compare/v0.19.2...v0.20.0
 [0.19.2]: https://github.com/raccioly/websec-validator/compare/v0.19.1...v0.19.2
 [0.16.0]: https://github.com/raccioly/websec-validator/compare/v0.15.3...v0.16.0

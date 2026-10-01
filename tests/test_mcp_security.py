@@ -192,6 +192,49 @@ class HttpSecurityTests(unittest.TestCase):
                 self.server._slots.release()
         self.assertEqual(self.request()[0], 200)
 
+    def test_overload_503_survives_separate_header_and_body_sends(self):
+        import time
+        for _ in range(mcp_server.HTTP_MAX_REQUESTS):
+            self.assertTrue(self.server._slots.acquire(timeout=5))
+        try:
+            body = b'{"jsonrpc":"2.0","id":1,"method":"ping"}'
+            conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=5)
+            try:
+                conn.putrequest('POST', '/mcp')
+                conn.putheader('Content-Length', str(len(body)))
+                conn.endheaders()
+                time.sleep(0.01)  # force the old accept/close-before-body race
+                conn.send(body)
+                response = conn.getresponse()
+                self.assertEqual(response.status, 503)
+                self.assertEqual(response.read(), b'')
+            finally:
+                conn.close()
+        finally:
+            for _ in range(mcp_server.HTTP_MAX_REQUESTS):
+                self.server._slots.release()
+        self.assertEqual(self.request()[0], 200)
+
+    def test_rejected_socket_drain_has_both_byte_and_absolute_time_caps(self):
+        from unittest.mock import Mock
+        sock = Mock()
+        sock.recv.side_effect = lambda amount: b'x' * amount
+        with patch.object(mcp_server.time, 'monotonic', return_value=0):
+            self.server._discard_rejected_request(sock, deadline=1)
+        self.assertEqual(sum(call.args[0] for call in sock.recv.call_args_list), mcp_server.HTTP_REJECT_DRAIN_BYTES)
+        sock = Mock()
+        with patch.object(mcp_server.time, 'monotonic', return_value=2):
+            self.server._discard_rejected_request(sock, deadline=1)
+        sock.recv.assert_not_called()
+
+    def test_rejected_socket_stops_after_bounded_complete_request(self):
+        from unittest.mock import Mock
+        sock = Mock()
+        sock.recv.return_value = b'POST /mcp HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}'
+        with patch.object(mcp_server.time, 'monotonic', return_value=0):
+            self.server._discard_rejected_request(sock, deadline=1)
+        sock.recv.assert_called_once()
+
     def test_slow_unauthenticated_headers_have_absolute_receive_deadline(self):
         with patch.object(mcp_server, "HTTP_RECEIVE_TIMEOUT", 0.3), \
                 patch.object(mcp_server, "HTTP_SOCKET_TIMEOUT", 0.15):
