@@ -103,3 +103,10 @@ primitive-binding controls extend W09. Supported local syntax is deliberately na
 whole-program proof; unknown wrappers, loops and cross-function flow remain unverified. HIBP
 lookup purpose is not proof of correct breached-password screening, and predictable IDs do not
 prove that the application relies on their secrecy. Source-analysis limits stay explicit.
+
+### Flask model checkpoint
+
+Seven new regression methods cover supported local Flask-SQLAlchemy bindings, model-path prose,
+late imports, overwritten fields, parser budgets and actual persisted CLI facts without importing
+target code. Independent review confirms all three supplied blockers fixed. Imported extension
+objects and app factories remain unresolved; T011/T012 also require the separate upload unit.

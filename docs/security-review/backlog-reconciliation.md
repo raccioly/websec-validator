@@ -118,6 +118,21 @@ of correct breach matching, privacy under runtime mutation or principal secrecy 
 Independent review confirmed all supplied negative controls fixed; 77 focused root tests and
 1775 full application tests pass. Unknown wrappers, loops and cross-function flow remain unverified.
 
+## Flask model evidence
+
+Supported visible top-level Flask-SQLAlchemy constructor/model bindings now inventory actual column
+names, not comments, strings or method prose. Both ordinary app paths and `models/` paths preserve
+that distinction. Unrelated or mutated receivers, late imports, overwritten columns and unused
+nested model factories do not supply new model/field evidence. Imported extension objects and
+runtime factories remain unresolved; legacy non-Flask model lanes have not become AST proofs.
+
+Seven paired regression methods include a subprocess CLI facts contract whose target raises if
+imported; recon succeeds without executing it. Independent review confirmed all three supplied
+negative controls fixed; all 1782 application tests pass. Byte/node/aggregate budgets disclose
+incomplete execution. This follows
+the [Flask-SQLAlchemy model API](https://flask-sqlalchemy.palletsprojects.com/en/stable/models/);
+inventory is not a claim about deployed models, database permissions or complete field coverage.
+
 The local Docker client has no available daemon; pre-commit is absent at baseline. Neither a
 configuration-shaped test nor an installed client establishes an executed integration lifecycle.
 Authored paired fixtures do not measure independent production precision. The separate manual

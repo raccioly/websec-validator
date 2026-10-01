@@ -136,6 +136,90 @@ class FastApiCompositionTests(unittest.TestCase):
                     self.assertEqual(paths, {'/unprotected'} if protected else {'/private', '/unprotected'})
 
 
+class FlaskModelBindingTests(unittest.TestCase):
+    def scan(self, source, rel='app.py'):
+        from websec_validator.extractors.schemas import SchemasExtractor
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text(source)
+            return SchemasExtractor().extract(RepoContext(root), {})
+
+    def test_bound_db_model_and_actual_fields_enter_inventory(self):
+        source = ('from flask_sqlalchemy import SQLAlchemy as SA\ndb=SA(app)\n'
+                  'class User(db.Model):\n id=db.Column(db.Integer,primary_key=True)\n'
+                  ' owner_id=db.Column(db.Integer)\n password_hash=db.Column(db.String)\n'
+                  ' def describe(self):\n  return "admin secret"\n')
+        for rel in ('app.py', 'pkg/models/user.py'):
+            with self.subTest(rel=rel):
+                result = self.scan(source + '\n# secret admin example\n', rel)
+                self.assertIn('sqlalchemy', result['orms'])
+                self.assertEqual([(row['name'], row['type']) for row in result['entities']], [('User', 'sqlalchemy')])
+                self.assertEqual(result['sensitive_fields'], ['owner_id', 'password_hash'])
+
+    def test_alias_module_constructor_is_supported(self):
+        result = self.scan('import flask_sqlalchemy as fs\nstore=fs.SQLAlchemy()\n'
+                           'class Tenant(store.Model):\n tenant_id=store.Column(store.Integer)\n')
+        self.assertEqual(result['entities'][0]['name'], 'Tenant')
+        self.assertEqual(result['sensitive_fields'], ['tenant_id'])
+
+    def test_unrelated_shadowed_relative_or_unconstructed_model_is_not_sqlalchemy(self):
+        for source in ('class User(db.Model):\n owner_id="example"',
+                       'from .flask_sqlalchemy import SQLAlchemy\ndb=SQLAlchemy()\nclass User(db.Model):\n pass',
+                       'from flask_sqlalchemy import SQLAlchemy\nSQLAlchemy=lambda:fake\ndb=SQLAlchemy()\nclass User(db.Model):\n pass',
+                       'from flask_sqlalchemy import SQLAlchemy\ndb=SQLAlchemy()\ndb=fake\nclass User(db.Model):\n pass',
+                       'from flask_sqlalchemy import SQLAlchemy\ndb=SQLAlchemy()\ndb.Model=Fake\nclass User(db.Model):\n pass',
+                       'from flask_sqlalchemy import SQLAlchemy\nclass User(db.Model):\n pass\ndb=SQLAlchemy()',
+                       'db=SQLAlchemy()\nfrom flask_sqlalchemy import SQLAlchemy\nclass User(db.Model):\n pass',
+                       'from flask_sqlalchemy import SQLAlchemy\nfrom other import *\ndb=SQLAlchemy()\nclass User(db.Model):\n pass'):
+            with self.subTest(source=source):
+                self.assertNotIn('sqlalchemy', self.scan(source)['orms'])
+
+    def test_unused_nested_model_is_not_top_level_model_inventory(self):
+        source = 'from flask_sqlalchemy import SQLAlchemy\ndb=SQLAlchemy()\ndef unused():\n class User(db.Model):\n  owner_id=db.Column(db.Integer)'
+        self.assertEqual(self.scan(source)['entities'], [])
+
+    def test_overwritten_fields_and_later_column_imports_are_not_bound_fields(self):
+        prefix = 'from flask_sqlalchemy import SQLAlchemy\ndb=SQLAlchemy()\n'
+        for tail in ('class User(db.Model):\n owner_id=db.Column(db.Integer)\n owner_id="inert"',
+                     'class User(db.Model):\n owner_id=Column(Integer)\nfrom sqlalchemy import Column,Integer'):
+            with self.subTest(tail=tail):
+                self.assertEqual(self.scan(prefix + tail, 'models/user.py')['sensitive_fields'], [])
+
+    def test_model_analysis_budget_is_not_clean_execution(self):
+        from unittest.mock import patch
+        from websec_validator.extractors import schemas
+        with patch.object(schemas, 'MAX_MODEL_NODES', 3):
+            result = self.scan('from flask_sqlalchemy import SQLAlchemy\ndb=SQLAlchemy()\nclass User(db.Model):\n pass')
+        self.assertTrue(result.get('error'))
+        self.assertTrue(result['model_analysis']['errors'])
+
+    def test_cli_persists_model_fields_without_importing_target(self):
+        import json
+        import os
+        import subprocess
+        with tempfile.TemporaryDirectory() as td:
+            owner = Path(td)
+            root = owner / 'target'
+            root.mkdir()
+            (root / 'app.py').write_text('from flask_sqlalchemy import SQLAlchemy\n'
+                'raise RuntimeError("target must never execute")\ndb=SQLAlchemy()\n'
+                'class User(db.Model):\n owner_id=db.Column(db.Integer)\n'
+                ' def describe(self):\n  return "secret admin"\n')
+            out = owner / 'out'
+            env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1] / 'src'),
+                       PATH=str(owner / 'no-tools'), WEBSEC_CALIBRATION_HOME=str(owner / 'calibration'),
+                       WEBSEC_UPDATE_HOME=str(owner / 'release-metadata'))
+            run = subprocess.run([sys.executable, '-m', 'websec_validator.cli', 'run', str(root),
+                                  '--out', str(out), '--format', 'json'], env=env, cwd=owner,
+                                 capture_output=True, text=True, timeout=20)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            directory = out / 'runs' / json.loads(run.stdout)['generated']
+            facts = json.loads((directory / 'FACTS.json').read_text())
+            self.assertEqual(facts['schemas']['entities'][0]['name'], 'User')
+            self.assertEqual(facts['schemas']['sensitive_fields'], ['owner_id'])
+
+
 class ConnexionRegistrationTests(unittest.TestCase):
     def scan(self, source='', *, spec=None, noir=None, filename='api.json'):
         import json

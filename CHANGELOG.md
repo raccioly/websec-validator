@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Inventory supported import-bound top-level Flask-SQLAlchemy `db.Model` declarations and actual
+  column fields without importing the target. Prose, unused nested models, mutated receivers,
+  late imports and overwritten fields do not contribute sensitive-field evidence. Imported
+  extension objects/app factories remain unresolved; byte/node budgets disclose execution gaps.
+
 - Bind predictable-principal leads to supported digest-result assignments and actual local principal
   uses, not an avatar hash beside unrelated identity keywords. Inert strings/closures, boolean
   comparisons, direct literal inputs and visible straight-line overwrites do not count as digests.

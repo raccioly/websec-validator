@@ -10,7 +10,11 @@ depends on.
 
 from __future__ import annotations
 
+import ast
+from collections import Counter
+from itertools import islice
 import re
+import warnings
 
 from .base import Extractor, RepoContext
 
@@ -50,6 +54,111 @@ RLS_ENABLE = re.compile(r"\bALTER\s+TABLE\b[\s\S]{0,200}?\b(?:ENABLE|FORCE)\s+RO
 
 MODELISH_PATH = re.compile(r"/models?/|/schemas?/|/entit|\.prisma$|\.model\.|\.entity\.", re.I)
 IDENT = re.compile(r"\b([A-Za-z_]\w*)\b")
+MAX_MODEL_SOURCE = 512 * 1024
+MAX_MODEL_NODES = 20_000
+MAX_MODEL_TOTAL_BYTES = 8 * 1024 * 1024
+
+
+def _flask_models(source: str) -> list[dict]:
+    """Import-bound top-level db.Model declarations; target code remains data.
+
+    Imported extension objects and app factories remain unresolved, not runtime
+    model/DB proof. Only actual bound column/typed declarations supply new fields.
+    """
+    if len(source.encode('utf-8')) > MAX_MODEL_SOURCE:
+        raise ValueError('Flask model source byte budget exceeded')
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            tree = ast.parse(source)
+        nodes = list(islice(ast.walk(tree), MAX_MODEL_NODES + 1))
+    except (SyntaxError, RecursionError) as error:
+        raise ValueError('Flask model source syntax unresolved') from error
+    if len(nodes) > MAX_MODEL_NODES:
+        raise ValueError('Flask model AST node budget exceeded')
+    writes = Counter(node.id for node in nodes if isinstance(node, ast.Name)
+                     and isinstance(node.ctx, (ast.Store, ast.Del)))
+    writes.update(node.arg for node in nodes if isinstance(node, ast.arg))
+    writes.update(node.name for node in nodes if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)))
+    imports, import_lines = {}, {}
+    for node in nodes:
+        if isinstance(node, (ast.Attribute, ast.Subscript)) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            root = node.value
+            while isinstance(root, (ast.Attribute, ast.Subscript)):
+                root = root.value
+            if isinstance(root, ast.Name):
+                writes[root.id] += 1
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {'setattr', 'delattr'}:
+            if node.args and isinstance(node.args[0], ast.Name):
+                writes[node.args[0].id] += 1
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if alias.name == '*':
+                    return []
+                name = alias.asname or alias.name.split('.')[0]
+                writes[name] += 1
+                if node not in tree.body or (isinstance(node, ast.ImportFrom) and node.level):
+                    continue
+                imports[name] = ((node.module or '') + '.' + alias.name if isinstance(node, ast.ImportFrom)
+                                 else alias.name if alias.asname else alias.name.split('.')[0])
+                import_lines[name] = node.lineno
+    imports = {name: value for name, value in imports.items() if writes[name] == 1}
+
+    def qualified(expr):
+        if isinstance(expr, ast.Name):
+            return imports.get(expr.id, '')
+        if isinstance(expr, ast.Attribute):
+            base = qualified(expr.value)
+            return base + '.' + expr.attr if base else ''
+        return ''
+
+    receivers = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                and writes[node.targets[0].id] == 1 and isinstance(node.value, ast.Call)
+                and qualified(node.value.func) == 'flask_sqlalchemy.SQLAlchemy'):
+            root = node.value.func
+            while isinstance(root, ast.Attribute):
+                root = root.value
+            if isinstance(root, ast.Name) and import_lines.get(root.id, node.lineno) < node.lineno:
+                receivers[node.targets[0].id] = node.lineno
+    rows = []
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef) or not any(
+                isinstance(base, ast.Attribute) and base.attr == 'Model' and isinstance(base.value, ast.Name)
+                and base.value.id in receivers and receivers[base.value.id] < node.lineno for base in node.bases):
+            continue
+        fields = set()
+        field_writes = Counter()
+        for statement in node.body:
+            if isinstance(statement, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+                field_writes.update(target.id for target in targets if isinstance(target, ast.Name))
+            elif isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                field_writes[statement.name] += 1
+
+        def earlier_import(expr, line):
+            while isinstance(expr, ast.Attribute):
+                expr = expr.value
+            return isinstance(expr, ast.Name) and import_lines.get(expr.id, line) < line
+
+        for statement in node.body:
+            if not isinstance(statement, (ast.Assign, ast.AnnAssign)):
+                continue
+            value = statement.value
+            column = (isinstance(value, ast.Call) and (
+                (qualified(value.func) in {'sqlalchemy.Column', 'sqlalchemy.orm.mapped_column'}
+                 and earlier_import(value.func, statement.lineno))
+                or isinstance(value.func, ast.Attribute) and value.func.attr == 'Column'
+                and isinstance(value.func.value, ast.Name) and value.func.value.id in receivers))
+            annotation = statement.annotation if isinstance(statement, ast.AnnAssign) else None
+            typed = (isinstance(annotation, ast.Subscript) and qualified(annotation.value) == 'sqlalchemy.orm.Mapped'
+                     and earlier_import(annotation.value, statement.lineno))
+            if column or typed:
+                targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+                fields.update(target.id for target in targets if isinstance(target, ast.Name) and field_writes[target.id] == 1)
+        rows.append({'name': node.name, 'type': 'sqlalchemy', 'fields': sorted(fields)})
+    return rows
 
 
 _SQL_LINE_COMMENT = re.compile(r"--[^\n]*")
@@ -86,16 +195,34 @@ class SchemasExtractor(Extractor):
         orms: set = set()
         entities: list = []
         sensitive: set = set()
+        model_errors = []
+        model_bytes = 0
 
         for _p, rel, text in ctx.iter_code():
             is_model_file = bool(MODELISH_PATH.search(rel))
+            flask_candidate = _p.suffix == '.py' and bool(re.search(r'\b(?:from|import)\s+flask_sqlalchemy\b', text))
+            other_model = False
+            if flask_candidate:
+                model_bytes += len(text.encode('utf-8'))
+                try:
+                    if model_bytes > MAX_MODEL_TOTAL_BYTES:
+                        raise ValueError('Flask model aggregate source budget exceeded')
+                    for row in _flask_models(text):
+                        orms.add('sqlalchemy')
+                        if len(entities) < 80:
+                            entities.append({**row, 'file': rel})
+                        sensitive.update(field for field in row['fields'] if SENSITIVE.match(field))
+                except ValueError as error:
+                    if len(model_errors) < 50:
+                        model_errors.append({'file': rel, 'detail': str(error)})
             for label, rx in DECLS:
                 for m in rx.finditer(text):
                     orms.add(label)
                     is_model_file = True
+                    other_model = True
                     if m.groups() and m.group(1) and len(entities) < 80:
                         entities.append({"name": m.group(1), "type": label, "file": rel})
-            if is_model_file:
+            if is_model_file and (not flask_candidate or other_model):
                 for w in IDENT.findall(text):
                     if SENSITIVE.match(w):
                         sensitive.add(w)
@@ -137,6 +264,12 @@ class SchemasExtractor(Extractor):
                 ents.append(e)
 
         return {
+            **({'error': 'Flask model source analysis incomplete; see model_analysis.errors'} if model_errors else {}),
+            'model_analysis': {'errors': model_errors, 'source_bytes': model_bytes,
+                               'limits': {'source_bytes_per_file': MAX_MODEL_SOURCE,
+                                          'nodes_per_file': MAX_MODEL_NODES, 'source_bytes_total': MAX_MODEL_TOTAL_BYTES},
+                               'limitations': ['Literal top-level local extension/model declarations only; imported db objects, '
+                                               'factories and runtime model installation remain unverified.']},
             "orms": sorted(orms),
             "entity_count": len(ents),
             "entities": ents[:60],
