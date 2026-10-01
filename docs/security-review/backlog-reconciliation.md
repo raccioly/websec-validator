@@ -317,6 +317,29 @@ DocGuard did not catch earlier brief drift because its marked-Markdown staleness
 metrics checks did not cover this HTML/PDF publication pair or all qualitative claims. Separate
 fact tests and artifact binding now catch selected drift; accurate prose/layout still need review.
 
+## Published artifact verification — 2026-10-01
+
+[PR 178](https://github.com/raccioly/websec-validator/pull/178) was squash-merged at
+`5603f471e38bf5cbb6abca9dc660524a05927108`, byte-identical in tree to the checked release head
+`0580a7c7b6ecac8e50bebd90247218a3bc992842`. All thirteen exact-head CI/adoption/container checks
+passed. The immutable `v0.21.0` tag resolves to that merge commit.
+
+The [tag train](https://github.com/raccioly/websec-validator/actions/runs/36824050781) and
+[PyPI publishing](https://github.com/raccioly/websec-validator/actions/runs/36824061736) succeeded.
+The [GitHub Release](https://github.com/raccioly/websec-validator/releases/tag/v0.21.0) and
+[PyPI 0.21.0](https://pypi.org/project/websec-validator/0.21.0/) exist and are not draft/prerelease/yanked.
+The actual downloaded published wheel SHA256 matches PyPI:
+`08eb6f503249f0228f7c0a15ac159a147991b5fd3e5204669c5ccb47a7adae66`.
+Its 125 source/data members match the tagged checkout, metadata has no `Requires-Dist`, and all
+seven isolated commands pass, including version0.21.0 and completed source-only recon. No global
+installation was upgraded. Main CI and Pages deployment passed; the live brief manifest matches
+the inspected local publication pair. This verifies publication separately from local wheel success.
+
+Convergence found one secondary buildable US3/AC2 gap: the initial separate-target CI created data
+in a distinct directory, not a second Git checkout. T035 adds an owned real clone/detached exact
+commit and hostile template/hooks/fsmonitor controls. Local paired/CLI validation is recorded
+separately; it does not change the published engine or claim an arbitrary public PR deployment.
+
 The original [VAmPI configuration](https://github.com/erev0s/VAmPI/blob/f16052dce83f05847133ec98f01c5193a41de7d8/config.py)
 and [OpenAPI contract](https://github.com/erev0s/VAmPI/blob/f16052dce83f05847133ec98f01c5193a41de7d8/openapi_specs/openapi3.yml)
 were read as data in an owned disposable directory: fourteen source routes, zero parser gaps/errors,

@@ -102,6 +102,14 @@ at head `b383d2e221722d9beb73fff75618d170b045eaca`. This is controlled fixture e
 claim of a full consumer two-checkout deployment or a scheduled run. Review your selected engine
 revision and configured workflow result before adoption.
 
+The post-release convergence extension now creates an owned inert Git seed, clones a second target
+checkout without inherited templates/hooks or hard links, and detaches at the captured exact head.
+Hostile local hooks/fsmonitor remain in the target for metadata-intake controls. Four local methods
+verify real checkout identity, three actual CLI outcomes, unchanged target trees, inert hook/import/
+installer surfaces and runner metadata. The hosted extension is not yet claimed executed here until
+its exact-head jobs finish. This is controlled local-repository evidence, not an arbitrary fork or
+consumer schedule deployment. The packaged 0.21.0 analysis engine is unchanged.
+
 ## Container policy and reviewed downloads
 
 `docker build --target core -t websec-core .` builds the stdlib engine without bundled scanners;
