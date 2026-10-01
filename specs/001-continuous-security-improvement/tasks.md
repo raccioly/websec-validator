@@ -54,15 +54,15 @@ Independent test: actual supported integration lifecycle; static config tests al
 - [x] T024 [US3] Add one-shot CLI versus long-lived MCP health policy and packaging controls in `Dockerfile`, `docs/integrations/README.md`, `tests/test_container_contracts.py` (W02).
 - [x] T025 [US3] Pin and verify supported scanner archives/platforms and execute available image matrix using `Dockerfile` and `tests/test_container_contracts.py` (W06).
 - [x] T026 [US3] Add remote-write/redirect/body/concurrency regressions then replace httpx race draft with bounded stdlib transport in `src/websec_validator/templates/probes/race-conditions.py` and `tests/test_probe_transport_boundaries.py` (W06).
-- [x] T027 [US3] Validate real disposable pre-commit lifecycle and controlled separate-engine/target CI using `docs/integrations/` and `tests/test_adoption_contracts.py`; record unavailable prerequisites as pending, not delivered.
+- [x] T027 [US3] Validate real disposable pre-commit lifecycle and controlled separate-engine/target CI using `docs/integrations/README.md` and `tests/test_adoption_contracts.py`; record unavailable prerequisites as pending, not delivered.
 
 ## Phase 7 — Polish and release
 
 - [x] T028 Independently review each detector unit and run actual CLI/ledger controls; record evidence/limitations in `docs/security-review/backlog-reconciliation.md` (FR-002/SC-001). Final comparison/language re-review passes fifteen methods; supplied partial/provenance blockers are fixed.
 - [x] T029 Run focused/full application and automation suites, compileall, DocGuard/evidence/spec checks and isolated built-wheel validation; update `AGENTS.md` dated counts and `CHANGELOG.md`. Frozen release suite1851/skip1, automation57, brief33 and isolated wheel125 byte-matched source/data files plus7 commands pass; DocGuard warnings remain qualified.
-- [ ] T030 Run Spec Kit convergence after all implementation tasks; append newly found gaps to this task file only.
+- [x] T030 Run Spec Kit convergence after all implementation tasks; append newly found gaps to this task file only. SixFR/fourSC/17acceptance scenarios/W01–W20 were assessed; constitution skipped as template. Appended buildable second-checkout gap T035; missing original Swift stays external T034, not a fabricated replay.
 - [x] T031 Review release docs/brief publication pair and migration contracts for new package behavior; regenerate and visually inspect PDF only when its source changes. 0.21.0 source/PDF/manifest bound; all8pages reviewed; migration/README/canonical/methodology updated without inheriting dated benchmark results.
-- [ ] T032 Commit coherent units, normal checked-head CI merge and immutable release; verify actual GitHub/PyPI artifacts (FR-006).
+- [x] T032 Commit coherent units, normal checked-head CI merge and immutable release; verify actual GitHub/PyPI artifacts (FR-006). PR178 exact-head13checks pass; tag5603f471e38bf5cbb6abca9dc660524a05927108, GitHub/PyPI0.21.0 published. Actual wheelhash/125source-data files/zeroRequires-Dist/7isolatedcommands verified; livePages manifest matches.
 - [x] T033 Fix the reproduced MCP overload-close race without weakening the original 503 assertion;
   validate split-send and byte/absolute-time caps in `tests/test_mcp_security.py`, independently
   review `src/websec_validator/mcp_server.py`, and document the bounded accept-loop trade-off.
@@ -174,3 +174,25 @@ review gaps. T007/T008 are complete within these supported literal registration 
 - [ ] T034 Recover the original Swift V9 source if its author supplies it and replay spec 002
   FR-013/SC-005. PR 151's complete immutable tree/history has no such source. Newly authored
   `lang_swift_vulnerable` tests the coverage disclosure but does not satisfy unchanged-original replay.
+
+## Phase 8: Convergence
+
+- [x] T035 Exercise an actual separate owned Git target checkout at an exact immutable commit in
+  `.github/workflows/adoption-contracts.yml`, with hostile hook/template/install/import controls and
+  assertions that the target remains data, per US3/AC2 and FR-005 (partial). Replace the earlier
+  generated directory with a second Git checkout. Use an owned
+  inert local repository; this is not authorization to execute an arbitrary public PR or activate
+  consumer workflows.
+
+### Second-checkout completion — 2026-10-01
+
+Four new checkout tests pass, including three actual CLI outcomes with unchanged target HEAD and
+working tree. The final full suite passes 1,855 tests (one optional lifecycle skipped) in 44.950s;
+independent review reran all four new methods. All four hosted adoption jobs pass in
+[run 36825412497](https://github.com/raccioly/websec-validator/actions/runs/36825412497) at
+`eaac95e3f0f383d96d89a5b0ca96ba3a90d1c54b`, alongside all five required CI checks in
+[run 36825412100](https://github.com/raccioly/websec-validator/actions/runs/36825412100).
+Final convergence finds no new buildable gap in the six FRs, four SCs, 17 acceptance scenarios, W01–W20
+and six plan decisions assessed; constitution remains an unfilled template. Existing external
+T034 remains open. No empty convergence phase is appended and no original Swift or unrun
+comparative/agent experiment is represented as completed.

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Development integration evidence
+
+- Extend the controlled separate-engine Action matrix to a real second owned Git checkout at an
+  exact commit, with hostile template/hooks/fsmonitor and inert target install/import controls.
+  This development workflow change does not alter the already published 0.21.0 analysis engine,
+  activate consumer workflows or establish arbitrary public-fork deployment safety.
+- Record the actual second-checkout hosted matrix, verified published wheel and live brief hashes.
+  Classify four dependency alerts as inert deliberately vulnerable demo manifests without silently
+  upgrading the sample, dismissing alerts or claiming a full environment supply-chain audit.
+
 ## [0.21.0] — 2026-10-01
 
 ### Fixed — operation-bound retained precision
