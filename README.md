@@ -23,7 +23,7 @@ A senior pentester's "here's what to test and how" handoff — auto-generated fr
 **New here?** Read the eight-page technical brief — what it reads, how a finding earns its severity,
 what it refuses to say, and the field evidence:
 **[raccioly.github.io/websec-validator](https://raccioly.github.io/websec-validator/websec-explained.html)**
-· [PDF](https://raccioly.github.io/websec-validator/websec-explained.pdf). The reviewed v0.20.0 snapshot
+· [PDF](https://raccioly.github.io/websec-validator/websec-explained.pdf). The reviewed v0.21.0 snapshot
 has selected fact assertions in `tests/test_explained_brief.py` and an HTML/PDF/renderer hash binding
 in `tests/test_brief_artifacts.py`. Prose accuracy and rendered layout still require review;
 see [rebuilding the brief](CONTRIBUTING.md#publishing-the-technical-brief).
@@ -116,6 +116,11 @@ reported as missing rather than silently skipped. **Bundling them is not the sam
 Noir is the route engine and runs on every `run`, but the four static scanners execute only under
 `--scan` — a plain `run` lists them and prints `(add --scan to execute them)`, exactly as it does
 outside Docker. Mount your repo at `/scan`; artifacts land in `/scan/websec-out`.
+
+For a scanner-free image, use `docker build --target core -t websec-core .`. Both image targets
+run non-root and explicitly disable recurring health checks for the one-shot CLI. Native amd64 and
+arm64 contract jobs execute source-only fixtures and bundled executable version checks. Base/archive
+digest checks do not make apt/transitive builds fully reproducible or certify every scanner adapter.
 
 ## Usage
 
@@ -733,6 +738,14 @@ analyzable source from reporting as a completed clean run (`--require-analyzed`,
 The [remaining-work specification](specs/001-continuous-security-improvement/spec.md) consolidates
 unresolved gaps and acceptance tests so overlapping old-base PRs do not become competing roadmaps.
 Existing runtime probes are opt-in; their earlier isolated results are not current deployment proofs.
+
+0.21.0 adds bounded Connexion JSON/literal-YAML registration, FastAPI dependency and mounted tRPC
+middleware observations, returned-template Django CSP, actual Flask model columns, and local assigned
+SQL/command/upload provenance. These source observations are not whole-program or deployment proof.
+It also hardens MCP overload handling, separates reviewed calibration labels and validates real
+disposable hook/native container contracts. The [0.21.0 migration notes](docs/MIGRATING-0.21.0.md)
+explain changed findings and unchanged consent/exit contracts. Offline competitor-report imports are
+documented in [BENCHMARKS.md](BENCHMARKS.md); no head-to-head or agent-benefit measurement is claimed.
 
 ## Using it as a Claude Code skill / plugin
 

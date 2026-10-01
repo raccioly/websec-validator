@@ -2,7 +2,7 @@
 
 <!-- docguard:version 0.9.1 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-09-30 -->
+<!-- docguard:last-reviewed 2026-10-01 -->
 <!-- docguard:owner @raccioly -->
 
 > This project follows **Canonical-Driven Development (CDD)**.  

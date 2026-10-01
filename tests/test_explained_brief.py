@@ -33,7 +33,7 @@ PKG = REPO / "src" / "websec_validator"
 # The version the brief was written at. It is NOT required to equal pyproject's current
 # version — the weekly release-propose workflow bumps pyproject without touching docs, and a
 # hard equality would fail every release PR. It IS required to be a version that shipped.
-STATED_VERSION = "0.20.0"
+STATED_VERSION = "0.21.0"
 
 
 class _Text(HTMLParser):
@@ -98,8 +98,8 @@ class BriefIsSelfContained(unittest.TestCase):
         shipped = re.findall(r"^## \[(\d+\.\d+[^\]]*)\]", changelog, flags=re.M)
         self.assertIn(STATED_VERSION, shipped)
         releases = len(shipped[shipped.index(STATED_VERSION):])
-        self.assertTrue(_has("thirty-two releases"), "release count wording drifted")
-        self.assertEqual(releases, 32)
+        self.assertTrue(_has("thirty-three releases"), "release count wording drifted")
+        self.assertEqual(releases, 33)
         breaking = changelog.count("### Changed — BREAKING")
         self.assertEqual(breaking, 1, "the brief says 'one breaking change'")
 
@@ -249,7 +249,10 @@ class BriefMatchesSelfGuarding(unittest.TestCase):
         for fragment in ("findings + incomplete exits 1", "completed-but-incomplete analysis",
                          "localhost-only at every transport", "status alone is inconclusive",
                          "Checking never installs anything", "upgrade needs separate approval",
-                         "respects a decline", "not a v0.20.0 rerun or vulnerability recall"):
+                         "respects a decline", "not a v0.21.0 rerun or vulnerability recall",
+                         "literal YAML", "mounted tRPC chains", "not whole-program proof",
+                         "unscored partial captures", "No head-to-head or agent-benefit experiment has run",
+                         "Native amd64/arm64 checks run", "no consumer hooks are activated"):
             self.assertTrue(_has(fragment), fragment)
         self.assertFalse(_has("A 200 with a body is BOLA"))
 

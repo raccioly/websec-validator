@@ -2,7 +2,7 @@
 
 <!-- docguard:version 0.9.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-09-30 -->
+<!-- docguard:last-reviewed 2026-10-01 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — the suite deliberately uses no third-party runner, no network, and no running app; the negations describe real, intentional test constraints. -->
 
@@ -27,6 +27,11 @@ python3 -m unittest discover -s tests
 ---
 
 ## Test Categories
+
+The 2026-10-01 retained-coverage checkpoint passed **1851 application tests** (one opt-in lifecycle
+skipped) and **57 repository automation tests**. Real disposable pre-commit and native core/bundled
+amd64/arm64 contracts are recorded separately in the backlog reconciliation; these are not live
+consumer deployments, a new public-corpus score or competitor measurement.
 
 | Category | Required | Applies To | Tool |
 |----------|----------|-----------|------|

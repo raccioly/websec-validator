@@ -297,6 +297,26 @@ now remain partial/malformed with null scores. Engine source, package and detect
 separate and explicitly declared; grading policy and raw manifest bytes are hashed. The reviewer
 reran all fifteen focused methods and found no further concrete blocker in this bounded review.
 
+## 0.21.0 release validation — 2026-10-01
+
+The frozen-source release suite passed **1,851 application tests in 49.410 seconds**, with one
+optional lifecycle integration skipped. All **57 automation tests** passed; byte compilation,
+33 technical-brief/artifact checks, five declared-evidence checks and the instruction audit passed
+within their respective scopes. DocGuard has warnings, not a whole-document accuracy verdict.
+
+An isolated locally built 0.21.0 wheel contains **125 source/data files matching this checkout** and
+no `Requires-Dist`. Seven isolated commands (version/help/doctor/capabilities/explain/offline
+update-check/source-only run) pass, with completed source-only execution. Local wheel SHA256:
+`ebfd435ed93c929020bac276d62bf7a48a0b57d69f3103e7565cdd3470068fd3`.
+This is not the future published wheel digest or proof of publication.
+
+The v0.21.0 HTML/landing snapshot and generated eight-page PDF have current hash binding; all eight
+rendered pages were inspected without clipping/overflow. New bounded framework/provenance and
+integration claims are qualified. Historical proof/public-review dates and revisions remain intact.
+DocGuard did not catch earlier brief drift because its marked-Markdown staleness and configured
+metrics checks did not cover this HTML/PDF publication pair or all qualitative claims. Separate
+fact tests and artifact binding now catch selected drift; accurate prose/layout still need review.
+
 The original [VAmPI configuration](https://github.com/erev0s/VAmPI/blob/f16052dce83f05847133ec98f01c5193a41de7d8/config.py)
 and [OpenAPI contract](https://github.com/erev0s/VAmPI/blob/f16052dce83f05847133ec98f01c5193a41de7d8/openapi_specs/openapi3.yml)
 were read as data in an owned disposable directory: fourteen source routes, zero parser gaps/errors,

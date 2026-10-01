@@ -2,7 +2,7 @@
 
 <!-- docguard:version 0.9.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-09-30 -->
+<!-- docguard:last-reviewed 2026-10-01 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — this tool is defined by what it deliberately omits (no LLM, no server, no running app, no runtime deps, no database); the negations describe real architectural properties, not phrasing defects. -->
 
@@ -138,7 +138,7 @@ completeness gating. None are Python imports — there are zero runtime package 
 | Semgrep / OpenGrep | code-level SAST (ships 2 bundled rules) | scanner reported missing |
 | Checkov | IaC misconfiguration | scanner reported missing |
 | Prowler | cloud-account posture | scanner reported missing |
-| Docker | reproducible all-scanners-bundled run | run natively with whatever is installed |
+| Docker | core-only or selected-scanners-bundled run, checksum-bound archives and native architecture contracts; transitive builds remain variable | run natively with whatever is installed |
 
 Connexion's bounded AST adapter maps literal top-level, import-bound local JSON or supported
 literal-subset YAML `add_api`
@@ -167,7 +167,7 @@ unverified. Work caps enter execution coverage; this lane never imports Django o
 | `.websec-ignore` | Per-target suppressions for the findings ledger (glob paths or `category:<x>`) |
 | `dynamic-config.example.json` | Template for the dynamic phase's TEST target + role credentials (copy to a gitignored `dynamic-config.json`) |
 | `.docguard.json` / `.docguardignore` | DocGuard (CDD) config: which docs are canonical and which paths to exclude from doc validation (e.g. `tests/fixtures/`, the probe templates) |
-| `Dockerfile` / `.dockerignore` | The all-scanners-bundled image (arch-aware, amd64 + arm64) |
+| `Dockerfile` / `.dockerignore` | Core/bundled non-root images with allowlisted context (native amd64 + arm64 contracts) |
 
 ## Infrastructure (IaC)
 

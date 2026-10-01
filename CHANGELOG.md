@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-10-01
+
 ### Fixed — operation-bound retained precision
 
 - Resolve supported literal registered YAML Connexion contracts without Noir, using a bounded
@@ -1716,7 +1718,8 @@ The initial public line. Highlights across 0.2.1–0.2.9:
 ### Fixed
 - Scanner-contamination and rate-limit fixes (agent-wallet dogfood).
 
-[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/raccioly/websec-validator/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/raccioly/websec-validator/compare/v0.19.2...v0.20.0
 [0.19.2]: https://github.com/raccioly/websec-validator/compare/v0.19.1...v0.19.2
 [0.16.0]: https://github.com/raccioly/websec-validator/compare/v0.15.3...v0.16.0

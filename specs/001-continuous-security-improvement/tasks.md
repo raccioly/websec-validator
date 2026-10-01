@@ -59,9 +59,9 @@ Independent test: actual supported integration lifecycle; static config tests al
 ## Phase 7 — Polish and release
 
 - [x] T028 Independently review each detector unit and run actual CLI/ledger controls; record evidence/limitations in `docs/security-review/backlog-reconciliation.md` (FR-002/SC-001). Final comparison/language re-review passes fifteen methods; supplied partial/provenance blockers are fixed.
-- [ ] T029 Run focused/full application and automation suites, compileall, DocGuard/evidence/spec checks and isolated built-wheel validation; update `AGENTS.md` dated counts and `CHANGELOG.md`.
+- [x] T029 Run focused/full application and automation suites, compileall, DocGuard/evidence/spec checks and isolated built-wheel validation; update `AGENTS.md` dated counts and `CHANGELOG.md`. Frozen release suite1851/skip1, automation57, brief33 and isolated wheel125 byte-matched source/data files plus7 commands pass; DocGuard warnings remain qualified.
 - [ ] T030 Run Spec Kit convergence after all implementation tasks; append newly found gaps to this task file only.
-- [ ] T031 Review release docs/brief publication pair and migration contracts for new package behavior; regenerate and visually inspect PDF only when its source changes.
+- [x] T031 Review release docs/brief publication pair and migration contracts for new package behavior; regenerate and visually inspect PDF only when its source changes. 0.21.0 source/PDF/manifest bound; all8pages reviewed; migration/README/canonical/methodology updated without inheriting dated benchmark results.
 - [ ] T032 Commit coherent units, normal checked-head CI merge and immutable release; verify actual GitHub/PyPI artifacts (FR-006).
 - [x] T033 Fix the reproduced MCP overload-close race without weakening the original 503 assertion;
   validate split-send and byte/absolute-time caps in `tests/test_mcp_security.py`, independently

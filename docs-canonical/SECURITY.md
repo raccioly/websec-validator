@@ -2,7 +2,7 @@
 
 <!-- docguard:version 0.9.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-09-30 -->
+<!-- docguard:last-reviewed 2026-10-01 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — a security model is correctly stated as invariants (MUST NOT, never, read-only, out-of-scope); negation is the right register for safety guarantees. -->
 
@@ -131,6 +131,14 @@ for HTTP MCP. The core pass requires no secrets; see ENVIRONMENT.md for optional
   package surface. External scanners are invoked as subprocesses, not imported.
 - Published to PyPI via **Trusted Publishing (OIDC)**; the release workflow builds, installs, and
   smoke-tests the wheel before it can reach PyPI, so a bad build fails CI instead of shipping.
+- Core/bundled container contracts execute natively on amd64 and arm64. Reviewed base/archive
+  digests are checked before installing scanner archives; apt and Python transitive dependencies
+  remain variable. Version execution checks do not certify every scanner adapter or database.
+
+The maintenance captured-report comparison imports bounded data only. It rejects private inputs and
+child aliases, excludes source/message/evidence text from sanitized outputs, and distinguishes
+partial/unavailable/malformed captures from completed observations. Engine/configuration/review
+provenance remains operator-declared; report hashes bind bytes, not independent execution assurance.
 
 ## Security Rules
 
