@@ -32,7 +32,7 @@ Independent test: endpoint-bound safe/no-op/unprotected sibling controls, no tar
 Independent test: original reproducer no longer misclassified; real unsafe sibling still reported.
 
 - [ ] T014 [US1] Add failing JWT/hash/upload/PII/literal/guard paired cases in `tests/test_retained_precision.py` (W08/W09/W12/W18/W19).
-- [ ] T015 [US1] Scope direct JWT options/hash result use in `src/websec_validator/extractors/crypto_usage.py` (W09).
+- [x] T015 [US1] Scope direct JWT options/hash result use in `src/websec_validator/extractors/crypto_usage.py` (W09).
 - [ ] T016 [US1] Scope filename storage/SVG acceptance in `src/websec_validator/extractors/upload_security.py` (W08).
 - [ ] T017 [US1] Correct boolean and partial-removal PII output handling in `src/websec_validator/extractors/pii_exposure.py` (W12).
 - [ ] T018 [US1] Correct literal regex/error expression matching in `src/websec_validator/extractors/surface.py` (W18).
@@ -95,3 +95,11 @@ documentation-only Noir rows, malformed shapes, private/escaping paths, executio
 actual subprocess CLI ledger. Independent review confirms its four negative controls fixed.
 T007/T008 remain open for deliberately unsupported YAML/dynamic composition: partial parsing is
 disclosed and does not automatically manufacture deployed routes or guard evidence.
+
+### Hash-purpose checkpoint
+
+Paired JS/Python digest, avatar, metadata, HIBP-prefix, closure/string/boolean, overwrite and
+primitive-binding controls extend W09. Supported local syntax is deliberately narrower than a
+whole-program proof; unknown wrappers, loops and cross-function flow remain unverified. HIBP
+lookup purpose is not proof of correct breached-password screening, and predictable IDs do not
+prove that the application relies on their secrecy. Source-analysis limits stay explicit.

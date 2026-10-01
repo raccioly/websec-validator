@@ -45,6 +45,82 @@ class RetainedPrecisionTests(unittest.TestCase):
         for source in ('const example="jwt.verify(token,key)";', '// jwt.verify(token,key)\n'):
             self.assertNotIn('jwt-verify-no-algorithms', self.kinds(CryptoUsageExtractor, source))
 
+    def test_identity_hash_must_flow_to_actual_principal_use(self):
+        for source in ('function avatar(email){const h=createHash("sha256").update(email).digest("hex");return h;}\nconst userId=req.user.id;',
+                       'const avatar=createHash("sha256").update(email).digest("hex");const tenantId=randomUUID();',
+                       'function avatar(email){const h=createHash("sha256").update(email).digest("hex");const userId=req.user.id;return h;}',
+                       'function id(email){let h=createHash("sha256").update(email).digest("hex");h=randomUUID();return formatUuid(h);}',
+                       'const tenantId=()=>createHash("sha256").update(email).digest("hex");',
+                       'const tenantId=createHash("sha256").update("email").digest("hex");',
+                       'const tenantId=createHash("sha256").update(email).digest("hex")==="";',
+                       'const example="tenantId = createHash(\'sha256\').update(email).digest(\'hex\')";'):
+            with self.subTest(source=source):
+                self.assertNotIn('predictable-principal', self.kinds(CryptoUsageExtractor, source))
+        for source in ('const tenantId=createHash("sha256").update(email).digest("hex");',
+                       'function id(email){const h=createHash("sha256").update(email).digest("hex");return formatUuid(h);}',
+                       'function id(email){const h=createHash("sha256").update(email).digest("hex");const tenantId=h;return tenantId;}'):
+            with self.subTest(source=source):
+                self.assertIn('predictable-principal', self.kinds(CryptoUsageExtractor, source))
+
+    def test_password_update_metadata_does_not_hide_actual_credentials(self):
+        for value in ('passwordUpdatedAt', 'password_updated_at', 'passwordUpdatedTimestamp'):
+            with self.subTest(value=value):
+                self.assertNotIn('weak-password-hash', self.kinds(CryptoUsageExtractor,
+                    'createHash("sha256").update(' + value + ').digest("hex");'))
+                self.assertIn('weak-password-hash', self.kinds(CryptoUsageExtractor,
+                    'createHash("sha256").update(' + value + ' + password).digest("hex");'))
+                self.assertNotIn('weak-password-hash', self.kinds(CryptoUsageExtractor,
+                    'function verifyPassword(){return createHash("sha256").update(' + value + ').digest("hex");}'))
+
+    def test_hibp_prefix_purpose_binds_only_its_own_digest(self):
+        safe = ('import { createHash } from "node:crypto";\nasync function checkBreached(password){'
+                'const hash=createHash("sha1").update(password).digest("hex").toUpperCase();'
+                'const prefix=hash.slice(0,5);const suffix=hash.slice(5);'
+                'const response=await fetch(`https://api.pwnedpasswords.com/range/${prefix}`);'
+                'return (await response.text()).includes(suffix);}')
+        self.assertNotIn('weak-password-hash', self.kinds(CryptoUsageExtractor, safe))
+        for source in (safe + 'function setPassword(password){return createHash("sha1").update(password).digest("hex");}',
+                       safe.replace('hash.slice(0,5)', 'hash.slice(0,6)'),
+                       safe.replace('api.pwnedpasswords.com', 'api.pwnedpasswords.com.evil.test'),
+                       safe.replace('${prefix}', '${hash}'),
+                       safe.replace('(password){', '(password,fetch){'),
+                       safe.replace('(password){', '(password,createHash){'),
+                       'fetch=sendToElsewhere;' + safe,
+                       'createHash=fakeHash;' + safe,
+                       'const {fetch}=other;' + safe,
+                       'Object.defineProperty(globalThis,"fetch",{value:other});' + safe,
+                       safe.split('\n')[0] + '\nfunction outer(fetch){' + safe.split('\n',1)[1] + '}',
+                       safe.split('\n')[0] + '\nfunction outer(createHash){' + safe.split('\n',1)[1] + '}',
+                       safe.replace('return (await', 'savePasswordHash(hash);return (await')):
+            with self.subTest(source=source):
+                self.assertIn('weak-password-hash', self.kinds(CryptoUsageExtractor, source))
+
+    def test_python_principal_result_binding_and_unrelated_identity_hash(self):
+        for source, expected in (
+                ('import hashlib\navatar=hashlib.sha256(email.encode()).hexdigest()\nuser_id=random_id()', False),
+                ('import hashlib\ntenant_id=hashlib.sha256(email.encode()).hexdigest()', True),
+                ('import hashlib\nh=hashlib.sha256(email.encode()).hexdigest()\nuser_id=h', True),
+                ('import hashlib\nh=hashlib.sha256(email.encode()).hexdigest()\nh=random_id()\nuser_id=h', False),
+                ('tenant_id="hashlib.sha256(email)"', False),
+                ('import hashlib\ntenant_id=lambda:hashlib.sha256(email.encode()).hexdigest()', False),
+                ('import hashlib\ntenant_id=hashlib.sha256(b"email").hexdigest()', False),
+                ('import hashlib\ndef avatar(email):\n h=hashlib.sha256(email.encode()).hexdigest()\n return h\ndef other():\n user_id=h', False)):
+            with self.subTest(source=source):
+                self.assertEqual('predictable-principal' in self.kinds(CryptoUsageExtractor, source, '.py'), expected)
+
+    def test_principal_branch_overwrite_does_not_clear_may_flow(self):
+        source = ('function id(email){let h=createHash("sha256").update(email).digest("hex");'
+                  'if(flag){h=randomUUID();}return formatUuid(h);}')
+        self.assertIn('predictable-principal', self.kinds(CryptoUsageExtractor, source))
+
+    def test_hash_analysis_budget_discloses_incompleteness(self):
+        from unittest.mock import patch
+        from websec_validator.extractors import crypto_usage
+        with patch.object(crypto_usage, 'MAX_HASH_EVENTS', 1):
+            result = self.scan(CryptoUsageExtractor, 'const h=createHash("sha256").update(email).digest("hex");const tenantId=h;')
+        self.assertTrue(result.get('error'))
+        self.assertTrue(result['hash_flow']['errors'])
+
     def test_upload_logs_comments_and_generated_key_are_not_name_storage(self):
         for middle in ('console.log("key="+req.file.originalname);', '// key = req.file.originalname\n'):
             source = 'app.post("/upload",(req,res)=>{' + middle + 'store({Key:randomUUID()});});'

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Bind predictable-principal leads to supported digest-result assignments and actual local principal
+  uses, not an avatar hash beside unrelated identity keywords. Inert strings/closures, boolean
+  comparisons, direct literal inputs and visible straight-line overwrites do not count as digests.
+  Recognize exact password-update metadata fields and one narrow SHA-1 HIBP prefix-lookup purpose;
+  unknown/shadowed primitives, extra uses, unsafe siblings and non-five-character/other-host flows
+  retain weak-hash leads. Expose source/node/scope/event budget failures as incomplete analysis.
+
 - Require visible import-bound Connexion source registration before a local JSON OpenAPI contract
   supplies route targets; unregistered Noir spec documents stay informational. Preserve registration
   and specification provenance and resolve authorization only against the exact operation body,

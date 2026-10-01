@@ -100,6 +100,24 @@ review gaps, not claimed completed acceptance or a new corpus measurement. This 
 [Connexion registration API](https://connexion.readthedocs.io/en/stable/quickstart.html); source
 registration alone does not establish deployed handlers or enforced authorization.
 
+## Hash-purpose evidence
+
+Six new paired regression methods bind actual supported digest values to local principal use.
+Avatar/cache neighbors, inert strings/closures, literal identity text and boolean-valued comparisons
+do not become principal hashes. Visible straight-line overwrites clear supported local provenance;
+branch uncertainty conservatively retains may-flow. Python AST and JS source/event/scope limits
+disclose failures rather than return a clean scan.
+
+Exact password-update metadata suffixes do not hide real credential bytes or compound inputs.
+A narrow supported SHA-1 hex/five-character-prefix/fixed HTTPS range lookup shape is distinct from
+password storage, following the [HIBP API](https://haveibeenpwned.com/API/v3#PwnedPasswords).
+Unknown/shadowed/reassigned/destructured/reflected crypto or fetch primitives, extra hash uses,
+other hosts/prefixes and unsafe siblings retain leads. This is purpose evidence, not a guarantee
+of correct breach matching, privacy under runtime mutation or principal secrecy reliance.
+
+Independent review confirmed all supplied negative controls fixed; 77 focused root tests and
+1775 full application tests pass. Unknown wrappers, loops and cross-function flow remain unverified.
+
 The local Docker client has no available daemon; pre-commit is absent at baseline. Neither a
 configuration-shaped test nor an installed client establishes an executed integration lifecycle.
 Authored paired fixtures do not measure independent production precision. The separate manual
