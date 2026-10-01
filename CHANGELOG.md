@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.21.1] — 2026-10-01
+
+### Performance
+
+- Reuse identical comment-masked text within each recon scan. Bound retained strings to 32 MiB
+  and 1,024 entries, clear them on success or failure, and isolate concurrent/nested scans.
+  Admission failures and eviction recompute the same analysis; source read checks, evidence,
+  coverage losses and detector behavior remain unchanged. Standalone helper calls retain no cache.
+- Skip comment-mask lexing only when the required comment markers are absent, and search ordinary
+  non-Python spans with a compiled stdlib pattern while preserving existing quote/comment handling,
+  displayed-source masking and original character/newline offsets.
+
+### Migration
+
+- No migration required from 0.21.0. CLI options, exit codes, artifact schemas, detection scope
+  and offline/consent boundaries remain unchanged; no runtime dependencies were added.
+
 ### Development integration evidence
 
 - Extend the controlled separate-engine Action matrix to a real second owned Git checkout at an
@@ -1728,7 +1745,8 @@ The initial public line. Highlights across 0.2.1–0.2.9:
 ### Fixed
 - Scanner-contamination and rate-limit fixes (agent-wallet dogfood).
 
-[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.21.1...HEAD
+[0.21.1]: https://github.com/raccioly/websec-validator/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/raccioly/websec-validator/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/raccioly/websec-validator/compare/v0.19.2...v0.20.0
 [0.19.2]: https://github.com/raccioly/websec-validator/compare/v0.19.1...v0.19.2
