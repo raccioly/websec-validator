@@ -339,6 +339,21 @@ Convergence found one secondary buildable US3/AC2 gap: the initial separate-targ
 in a distinct directory, not a second Git checkout. T035 adds an owned real clone/detached exact
 commit and hostile template/hooks/fsmonitor controls. Local paired/CLI validation is recorded
 separately; it does not change the published engine or claim an arbitrary public PR deployment.
+The final local suite passes 1,855 tests (one opt-in integration skipped) in 44.950s; independent
+review reran the four new methods without a concrete blocker. Hosted adoption
+[run 36825412497](https://github.com/raccioly/websec-validator/actions/runs/36825412497) passes
+all four jobs at `eaac95e3f0f383d96d89a5b0ca96ba3a90d1c54b`; required
+[CI run 36825412100](https://github.com/raccioly/websec-validator/actions/runs/36825412100)
+passes all five checks. T035 is complete within that controlled local-checkout scope.
+The live Pages HTML and PDF SHA256 values separately match the reviewed manifest, not merely its
+metadata. The released 0.21.0 brief remains a dated 1,851-test snapshot; the later development
+suite is 1,855, not a silently rewritten release measurement.
+
+Four open GitHub dependency alerts were rechecked against their exact manifest. All point to the
+inert deliberately vulnerable demo `requirements.txt.txt`, not engine runtime dependencies.
+They remain visible, not silently dismissed or upgraded away. The scoped
+[dependency-alert review](../../reports/SUPPLY-CHAIN-AUDIT-2026-10-01.md) explains that classification
+and its limits. No full installed-environment supply-chain audit or absence of compromise is claimed.
 
 The original [VAmPI configuration](https://github.com/erev0s/VAmPI/blob/f16052dce83f05847133ec98f01c5193a41de7d8/config.py)
 and [OpenAPI contract](https://github.com/erev0s/VAmPI/blob/f16052dce83f05847133ec98f01c5193a41de7d8/openapi_specs/openapi3.yml)

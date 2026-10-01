@@ -54,7 +54,7 @@ Independent test: actual supported integration lifecycle; static config tests al
 - [x] T024 [US3] Add one-shot CLI versus long-lived MCP health policy and packaging controls in `Dockerfile`, `docs/integrations/README.md`, `tests/test_container_contracts.py` (W02).
 - [x] T025 [US3] Pin and verify supported scanner archives/platforms and execute available image matrix using `Dockerfile` and `tests/test_container_contracts.py` (W06).
 - [x] T026 [US3] Add remote-write/redirect/body/concurrency regressions then replace httpx race draft with bounded stdlib transport in `src/websec_validator/templates/probes/race-conditions.py` and `tests/test_probe_transport_boundaries.py` (W06).
-- [x] T027 [US3] Validate real disposable pre-commit lifecycle and controlled separate-engine/target CI using `docs/integrations/` and `tests/test_adoption_contracts.py`; record unavailable prerequisites as pending, not delivered.
+- [x] T027 [US3] Validate real disposable pre-commit lifecycle and controlled separate-engine/target CI using `docs/integrations/README.md` and `tests/test_adoption_contracts.py`; record unavailable prerequisites as pending, not delivered.
 
 ## Phase 7 — Polish and release
 
@@ -177,9 +177,22 @@ review gaps. T007/T008 are complete within these supported literal registration 
 
 ## Phase 8: Convergence
 
-- [ ] T035 Exercise an actual separate owned Git target checkout at an exact immutable commit in
+- [x] T035 Exercise an actual separate owned Git target checkout at an exact immutable commit in
   `.github/workflows/adoption-contracts.yml`, with hostile hook/template/install/import controls and
-  assertions that the target remains data, per US3/AC2 and FR-005 (partial). The existing CI test
-  generates a separate directory but does not yet validate a second Git checkout. Use an owned
+  assertions that the target remains data, per US3/AC2 and FR-005 (partial). Replace the earlier
+  generated directory with a second Git checkout. Use an owned
   inert local repository; this is not authorization to execute an arbitrary public PR or activate
   consumer workflows.
+
+### Second-checkout completion — 2026-10-01
+
+Four new checkout tests pass, including three actual CLI outcomes with unchanged target HEAD and
+working tree. The final full suite passes 1,855 tests (one optional lifecycle skipped) in 44.950s;
+independent review reran all four new methods. All four hosted adoption jobs pass in
+[run 36825412497](https://github.com/raccioly/websec-validator/actions/runs/36825412497) at
+`eaac95e3f0f383d96d89a5b0ca96ba3a90d1c54b`, alongside all five required CI checks in
+[run 36825412100](https://github.com/raccioly/websec-validator/actions/runs/36825412100).
+Final convergence finds no new buildable gap in the six FRs, four SCs, 17 acceptance scenarios, W01–W20
+and six plan decisions assessed; constitution remains an unfilled template. Existing external
+T034 remains open. No empty convergence phase is appended and no original Swift or unrun
+comparative/agent experiment is represented as completed.

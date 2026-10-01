@@ -106,8 +106,10 @@ The post-release convergence extension now creates an owned inert Git seed, clon
 checkout without inherited templates/hooks or hard links, and detaches at the captured exact head.
 Hostile local hooks/fsmonitor remain in the target for metadata-intake controls. Four local methods
 verify real checkout identity, three actual CLI outcomes, unchanged target trees, inert hook/import/
-installer surfaces and runner metadata. The hosted extension is not yet claimed executed here until
-its exact-head jobs finish. This is controlled local-repository evidence, not an arbitrary fork or
+installer surfaces and runner metadata. All four hosted adoption jobs passed in
+[run 36825412497](https://github.com/raccioly/websec-validator/actions/runs/36825412497) at
+`eaac95e3f0f383d96d89a5b0ca96ba3a90d1c54b`; all five required CI checks passed at the same head.
+This is controlled local-repository evidence, not an arbitrary fork or
 consumer schedule deployment. The packaged 0.21.0 analysis engine is unchanged.
 
 ## Container policy and reviewed downloads
