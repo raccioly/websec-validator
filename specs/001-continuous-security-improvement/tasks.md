@@ -23,8 +23,8 @@ Independent test: endpoint-bound safe/no-op/unprotected sibling controls, no tar
 - [ ] T008 [US2] Resolve bounded import-bound Connexion registration without promoting unregistered docs in `src/websec_validator/extractors/routes.py` (W16/W20).
 - [x] T009 [US2] Add paired assigned JS SQL/Python+JS command controls in `tests/test_retained_flows.py` (W04/W10).
 - [x] T010 [US2] Implement bounded local assignment provenance and disclosed work limits in `src/websec_validator/extractors/surface.py` and shared flow helper (W04/W10).
-- [ ] T011 [US2] Add paired UploadFile/db.Model controls in `tests/test_retained_frameworks.py` (W11/W13).
-- [ ] T012 [US2] Implement bound Python upload/model evidence in `src/websec_validator/extractors/upload_security.py` and `schemas.py` (W11/W13).
+- [x] T011 [US2] Add paired UploadFile/db.Model controls in `tests/test_retained_frameworks.py` and `tests/test_python_uploads.py` (W11/W13).
+- [x] T012 [US2] Implement supported local Python upload/model evidence in `src/websec_validator/extractors/upload_security.py` and `schemas.py` (W11/W13); disclose unresolved factories/composition.
 - [ ] T013 [US2] Validate Django same-response observations and native/profile limits against `tests/test_django_urls.py`, `tests/test_profiles.py`, `src/websec_validator/extractors/transport_security.py`; add missing paired evidence without claiming deployment.
 
 ## Phase 4 — US1: Keep unsafe neighbors visible (P1)
@@ -110,3 +110,11 @@ Seven new regression methods cover supported local Flask-SQLAlchemy bindings, mo
 late imports, overwritten fields, parser budgets and actual persisted CLI facts without importing
 target code. Independent review confirms all three supplied blockers fixed. Imported extension
 objects and app factories remain unresolved; T011/T012 also require the separate upload unit.
+
+### Python upload checkpoint
+
+Thirteen methods cover actual writes/decisions versus metadata, local assignment/branch flow,
+annotation/route bindings, byte rejection versus no-op/caught/partial/transformed/different-byte
+controls, parser limits and actual subprocess CLI/ledger output. Same-handler byte evidence is
+bound to stored bytes; it cannot certify filename-derived storage or browser-safe serving. Complex
+registrations, collections, wrappers and cross-function flow remain explicit review limits.

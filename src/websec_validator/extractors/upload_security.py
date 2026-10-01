@@ -18,6 +18,9 @@ import re
 from .base import Extractor, RepoContext, is_client_file, is_test_file
 from .syntax import call_expression, direct_call, expression_end, in_literal, js_functions, split_arguments, without_comments
 from .syntax import object_properties as _object_properties
+from .python_uploads import analyze as python_uploads, MAX_SOURCE_BYTES, MAX_NODES, MAX_BINDINGS
+
+MAX_PYTHON_TOTAL_BYTES = 8 * 1024 * 1024
 
 UPLOAD_MARK = re.compile(r"\bmulter\b|req\.files?\b|multipart/form-data|formidable|busboy|fileFilter"
                          r"|uploadMedia|presignedPost|\.upload\s*\(", re.I)
@@ -241,12 +244,28 @@ class UploadSecurityExtractor(Extractor):
     def extract(self, ctx: RepoContext, facts: dict) -> dict:
         findings = []
         upload_files, serve_files = [], []
+        python_errors, python_handlers = [], []
+        python_bytes = 0
         for _p, rel, text in ctx.iter_code():
             # test fixtures/mocks aren't a deployed surface; a React CLIENT component (.tsx / 'use client')
             # renders <img src> and calls uploadMedia(file) but can NOT set HTTP response headers or build
             # an S3 key — flagging serve-nosniff/upload-from-filename on it is a category error (real-repo FP).
             if is_test_file(rel) or is_client_file(rel, text):
                 continue
+            if _p.suffix == '.py' and re.search(r'\b(?:from|import)\s+fastapi\b', text):
+                python_bytes += len(text.encode('utf-8'))
+                try:
+                    if python_bytes > MAX_PYTHON_TOTAL_BYTES:
+                        raise ValueError('Python upload aggregate source budget exceeded')
+                    result = python_uploads(text)
+                    python_handlers.extend(dict(row, file=rel) for row in result['handlers'])
+                    findings.extend(dict(row, file=rel) for row in result['findings'])
+                    if result['handlers']:
+                        upload_files.append(rel)
+                except ValueError as error:
+                    if len(python_errors) < 50:
+                        python_errors.append({'file': rel, 'detail': str(error)})
+                continue  # never apply JavaScript syntax heuristics to Python source
             is_upload = bool(UPLOAD_MARK.search(text))
             if is_upload:
                 upload_files.append(rel)
@@ -298,6 +317,11 @@ class UploadSecurityExtractor(Extractor):
         for f in findings:
             by_sev[f["severity"]] = by_sev.get(f["severity"], 0) + 1
         return {
+            **({'error': 'Python upload analysis incomplete; see python_analysis.errors'} if python_errors else {}),
+            'python_analysis': {'handlers': python_handlers[:80], 'errors': python_errors,
+                                'limits': {'source_bytes_per_file': MAX_SOURCE_BYTES, 'nodes_per_file': MAX_NODES,
+                                           'bindings_per_handler': MAX_BINDINGS, 'source_bytes_total': MAX_PYTHON_TOTAL_BYTES},
+                                'note': 'Supported local FastAPI source only; complex registrations/validation remain unverified'},
             "findings": findings,
             "upload_handlers": sorted(set(upload_files))[:20],
             "serve_paths_no_nosniff": sorted(set(serve_files))[:20],

@@ -133,6 +133,28 @@ incomplete execution. This follows
 the [Flask-SQLAlchemy model API](https://flask-sqlalchemy.palletsprojects.com/en/stable/models/);
 inventory is not a claim about deployed models, database permissions or complete field coverage.
 
+## Python upload evidence
+
+Supported import-bound literal FastAPI route handlers with `UploadFile` or `Annotated[UploadFile,...]`
+parameters now preserve local filename/content-type provenance into actual writes/decisions.
+Metadata logs/returns and unused closures do not become storage; generated names and straight-line
+overwrites remain separate from possible branch flow. This follows the
+[FastAPI upload API](https://fastapi.tiangolo.com/tutorial/request-files/); caller declarations are
+not evidence of content bytes. No target module or dependency is imported.
+
+Validation credit is deliberately narrow: the same original full read, import-bound
+`magic.from_buffer(...,mime=True)`, a literal supported-type rejection raising HTTP 415, and matching
+stored bytes. Names, no-op/caught checks, partial/transformed/other bytes and unsupported branches
+cannot establish that evidence. It does not certify polyglot rejection or safe serving. Thirteen
+regressions include an actual subprocess CLI/ledger contract; source/node/binding/aggregate limits
+disclose incomplete execution. Dynamic registration, collections, factories and cross-function
+flow remain unverified rather than executed to discover runtime behavior.
+
+One intermediate full run correctly refused changed detector revision because source was edited
+while the research suite evaluated it. Its original integrity assertion was preserved; final full
+validation passes all 1795 application tests against an unchanged detector revision. Independent
+review confirms the supplied branch, stored-byte and shadowed-print controls fixed.
+
 The local Docker client has no available daemon; pre-commit is absent at baseline. Neither a
 configuration-shaped test nor an installed client establishes an executed integration lifecycle.
 Authored paired fixtures do not measure independent production precision. The separate manual

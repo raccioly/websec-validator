@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Follow supported import-bound FastAPI `UploadFile` filename/content-type values through local
+  assignments into actual writes and decisions. Metadata logs/returns, generated names and unused
+  closures are distinct. Byte-type rejection credit is handler-local and tied to the stored bytes;
+  caught/no-op checks, branches, partial/transformed/different bytes and shadowed primitives cannot
+  borrow it. Parser/binding/aggregate limits disclose incomplete analysis; target code never runs.
+
 - Inventory supported import-bound top-level Flask-SQLAlchemy `db.Model` declarations and actual
   column fields without importing the target. Prose, unused nested models, mutated receivers,
   late imports and overwritten fields do not contribute sensitive-field evidence. Imported
