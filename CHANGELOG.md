@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Preserve the bounded MCP HTTP overload 503 response when normal clients send headers and body
+  separately. Half-close first, then discard at most 8 KiB within 50 ms; keep the four-worker,
+  authentication and root-selection boundaries unchanged. Slow/over-cap requests remain best-effort.
+
 - Preserve request provenance through supported local JavaScript SQL/shell assignments and Python
   stdlib command assignments, including may-flow branches. Bound values, inert examples and
   unrelated scopes do not taint query text. Dynamic executables/interpreters and unknown shell

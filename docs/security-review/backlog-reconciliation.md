@@ -66,9 +66,23 @@ sink from a nested fixed query. Independent review confirmed its five negative c
 Source byte/node/event/scope/binding budgets are visible; exhaustion is an execution gap, not a
 clean result. Loops, closure capture, destructuring, runtime dispatch and cross-function flow remain
 unverified. These tests do not measure unseen-project recall. A full-suite checkpoint encountered
-the existing MCP overload-close timing flake; the exact isolated assertion passes unchanged and
-the transport behavior is under separate investigation. The reviewed assigned-flow checkpoint
+the existing MCP overload-close timing race; the exact isolated assertion passed unchanged and
+the transport behavior was investigated separately. The reviewed assigned-flow checkpoint
 subsequently passed all 1756 application tests with the original MCP assertion unchanged.
+
+## MCP overload evidence
+
+Owned-loopback reproduction established that closing an overloaded socket before a normal client
+sends its body can reset TCP instead of delivering 503. The new split-header/body regression failed
+before the fix; the original worker-limit assertion is preserved. Send rejection immediately, then
+half-close and discard at most 8 KiB under an absolute 50 ms deadline. No worker, slot, authentication
+or root permission is granted. This costs up to 50 ms of accept-loop time per rejection; oversized,
+malformed and slower clients remain best-effort, not an unlimited graceful-close guarantee.
+
+Independent review of the actual implementation found no defect in this bounded unit and observed
+503 for 300/300 ordinary and 25/25 delayed-body requests. Full checkpoint: 1759 application tests,
+57 automation tests, compileall and offline brief artifact binding pass. These are local regression
+results, not a claim of broad MCP availability or throughput under arbitrary load.
 
 The local Docker client has no available daemon; pre-commit is absent at baseline. Neither a
 configuration-shaped test nor an installed client establishes an executed integration lifecycle.

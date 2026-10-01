@@ -11,7 +11,7 @@ from websec_validator import calibration, cli
 
 
 class RetainedCalibrationTests(unittest.TestCase):
-    # @req specs/002-calibration-honesty-and-structural-coverage/spec.md#FR-008
+    # Story 3.5: incomplete review cannot qualify an entire calibration class.
     def test_every_truth_row_in_class_must_be_explicitly_reviewed(self):
         reviewed = {'class': 'sqli', 'review_status': 'reviewed', 'is_real': True}
         self.assertEqual(calibration.reviewed_classes([{'truth': [reviewed]}]), {'sqli'})

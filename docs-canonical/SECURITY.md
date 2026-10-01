@@ -33,7 +33,11 @@ recon and is therefore a separate security boundary. It binds only to loopback, 
 `WEBSEC_MCP_TOKEN` bearer authentication, validates Host/Origin, and restricts requests to configured
 `--allow-root` directories (default: startup directory). Root selection pins canonical path and
 filesystem identity through request dispatch and context creation. Request framing, body limits,
-bounded workers, and an absolute receive deadline constrain malformed or slow clients. Stdio trusts
+bounded workers, and an absolute receive deadline constrain malformed or slow clients. When workers
+are exhausted, rejection sends 503 immediately and half-closes the response, then discards at most
+8 KiB under a 50 ms absolute deadline to avoid resetting ordinary split-header/body clients. This
+can delay the accept loop by at most that allowance per rejection; it grants no worker, authentication
+or dispatch. Over-cap, malformed or slower clients may still receive a connection error. Stdio trusts
 the launching process and its filesystem permissions.
 
 ## Repository Read Boundary and Limits

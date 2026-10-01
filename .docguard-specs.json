@@ -66,11 +66,6 @@
           },
           {
             "requirementId": "FR-008",
-            "file": "tests/test_retained_calibration.py",
-            "line": 14
-          },
-          {
-            "requirementId": "FR-008",
             "file": "tests/test_unanalyzed_coverage.py",
             "line": 60
           },
@@ -163,7 +158,7 @@
       "reviewed": {
         "lifecycle": {
           "approval": "approved",
-          "delivery": "planned",
+          "delivery": "in_progress",
           "context": "current",
           "retirementReason": null,
           "storage": "working_tree",
@@ -210,12 +205,12 @@
           },
           {
             "path": "specs/001-continuous-security-improvement/tasks.md",
-            "digest": "sha256:a7a0d33d59215254419a031a12fcf424f3be3614004e586bc2a29b1ba6b6e493"
+            "digest": "sha256:7d43c36fe7398df3e7b3082dbc9f683761fa3e7b85a11691b3f65052cece243d"
           }
         ],
         "taskCompletion": {
-          "checked": 9,
-          "total": 32
+          "checked": 10,
+          "total": 33
         },
         "implementationEvidence": [],
         "testEvidence": []

@@ -63,6 +63,9 @@ Independent test: actual supported integration lifecycle; static config tests al
 - [ ] T030 Run Spec Kit convergence after all implementation tasks; append newly found gaps to this task file only.
 - [ ] T031 Review release docs/brief publication pair and migration contracts for new package behavior; regenerate and visually inspect PDF only when its source changes.
 - [ ] T032 Commit coherent units, normal checked-head CI merge and immutable release; verify actual GitHub/PyPI artifacts (FR-006).
+- [x] T033 Fix the reproduced MCP overload-close race without weakening the original 503 assertion;
+  validate split-send and byte/absolute-time caps in `tests/test_mcp_security.py`, independently
+  review `src/websec_validator/mcp_server.py`, and document the bounded accept-loop trade-off.
 
 ## Dependencies and execution order
 
