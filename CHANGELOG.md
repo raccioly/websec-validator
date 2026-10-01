@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Replace the manually executed race draft's httpx requirement with a stdlib thread pool (default
+  eight, maximum sixteen requests per endpoint), 16 KiB payload cap and socket-I/O timeout. Actual
+  transports enforce localhost mutations, disable proxies/redirects and retain status/error kinds
+  only. Status counts remain observations, not proof of state changes or race exploitation.
+
+- A calibration class qualifies only when every declared truth row is explicitly reviewed and
+  boolean-labelled. Persist/report Brier scores for measurable corpus, authored-pair and local
+  evidence tables without merging their provenance; unknown labels remain excluded. Clarify that
+  the shipped September 22 table is a dated snapshot, not a measurement of later detector changes.
+
 - Bind supported FastAPI dependency evidence to each endpoint, never to the presence of
   `Depends` or a guarded sibling. No-op/imported/mutated/wildcard-bound helpers, disabled JWT
   verification and fixed credentials remain unverified. Analysis is bounded and cached per file.

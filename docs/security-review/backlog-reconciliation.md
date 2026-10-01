@@ -42,6 +42,17 @@ precision/recall measurements. tRPC, principal/hash-purpose and integration work
 
 ### Environment limits
 
+Second checkpoint: every declared truth row must be reviewed and boolean-labelled before a
+class-specific corpus cell qualifies. Measurable corpus/authored/local tables report Brier scores;
+merged metadata retains only source-scoped scores, explicitly not a score of merged predictions.
+Original language fixtures and comparative measurements remain pending. Independent review and
+88 focused tests pass; the full application suite passes 1744 tests.
+
+The race draft now imports only stdlib/shared probe helpers. A real owned-loopback test observes
+four concurrent POSTs, no followed 302, no inherited proxy and no reflected-secret artifact.
+Concurrency is bounded to 1–16, payloads to 16 KiB, and socket I/O has a five-second timeout—not a
+hard whole-request wall-clock deadline. Status-only observations do not validate business state.
+
 The local Docker client has no available daemon; pre-commit is absent at baseline. Neither a
 configuration-shaped test nor an installed client establishes an executed integration lifecycle.
 Authored paired fixtures do not measure independent production precision. The separate manual

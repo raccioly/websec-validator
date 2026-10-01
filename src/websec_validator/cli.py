@@ -1389,13 +1389,16 @@ def cmd_calibrate(args) -> int:
             return 2
         row = result["candidate"]
         if getattr(args, "format", None) == "json":
-            _emit_json_result({"candidate": row})
+            _emit_json_result({"candidate": row, 'score': result.get('score')})
             return 0
         if row["state"] == "accepted":
             print(f"accepted {row['candidate_id']}: recorded one is_real=False sample for "
                   f"{row['attack_class']}|{row['confidence']} in {calibration.LOCAL_PATH}.")
             est = calibration.apply(row["attack_class"], row["confidence"], calibration.load())
             print(f"  bucket now p={est['p']} ci={est['ci']} n={est['n']} basis={est['basis']}")
+            score = result.get('score')
+            if score:
+                print(f"  Local-evidence Brier {score['brier']} on {score['n']} label(s); reported, not optimized.")
         else:
             print(f"rejected {row['candidate_id']}: discarded, no probability changed.")
         return 0
@@ -1424,6 +1427,9 @@ def cmd_calibrate(args) -> int:
             print(f"    {key + ' (aggregate)':28} {cell['k']}/{cell['n']} · p={cell['p']} · 95% CI {cell['ci']}")
         for err in res["errors"]:
             print(f"    ! {err.get('pair')}: {err.get('error')}")
+        score = table['meta'].get('score')
+        if score:
+            print(f"  Authored-pair Brier {score['brier']} on {score['n']} label(s); reported, not optimized.")
         print(f"\n  {calibration.SYNTHETIC_CAVEAT}")
         print("  This table is NOT merged into P(real); `websec explain <class>` reports it separately.")
         return 0
@@ -1482,6 +1488,9 @@ def cmd_calibrate(args) -> int:
               f"silence proves nothing); {res['skipped_blind']} blind-spot finding(s) unscored. "
               f"Folded {len(res['labels'])} sample(s) into {calibration.LOCAL_PATH} → "
               f"{rec['meta']['samples']} total; P(real) now personalizes to your app.")
+        score = rec['meta'].get('score')
+        if score:
+            print(f"  Local-evidence Brier {score['brier']} on {score['n']} label(s); reported, not optimized.")
         return 0
 
     # --ingest: fold a hand-labeled findings file into your LOCAL overlay (the manual real-repo path)
@@ -1505,6 +1514,9 @@ def cmd_calibrate(args) -> int:
         nr = sum(1 for s in verified if s["is_real"] is True)
         print(f"websec calibrate --ingest: processed {len(verified)} evidence-backed sample(s) "
               f"({nr} real / {len(verified) - nr} FP) into {calibration.LOCAL_PATH} → {rec['meta']['samples']} total.")
+        score = rec['meta'].get('score')
+        if score:
+            print(f"  Local-evidence Brier {score['brier']} on {score['n']} label(s); reported, not optimized.")
         return 0
 
     corpus_path = (Path(args.corpus).expanduser().resolve() if args.corpus
@@ -1547,7 +1559,7 @@ def cmd_calibrate(args) -> int:
         print("\n  no labeled findings produced — is the corpus cloned? (needs network on first run)")
         return 1
 
-    # A class is RESEARCHED only when it has at least one REVIEWED truth entry. Merely appearing in
+    # A class is RESEARCHED only when EVERY truth entry has an explicit reviewed label. Appearing in
     # corpus.json is not research: the historical entries are class-level wildcards
     # (location_contains "*") with is_real null, which cannot separate a real vulnerability from a
     # false positive within the same class. Publishing a class-specific cell on that basis would

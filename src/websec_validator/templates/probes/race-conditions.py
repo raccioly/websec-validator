@@ -1,99 +1,93 @@
 #!/usr/bin/env python3
-# ⚠ DEFENSIVE CHECK — run only against a system you own/operate, with consent. Not for production or third-party targets.
+"""Authorized TEST-only race observation; bounded stdlib threads, never exploit proof.
+
+Eight simultaneous requests by default (maximum sixteen), at most eight endpoints.
+Review each endpoint's actual invariant before interpreting status counts. Multiple
+2xx responses alone do not prove a race or that state changed. No response bodies,
+redirect locations or exception text are saved. No extra package installation.
 """
-Race condition probe — fires N parallel requests at race-prone endpoints
-and checks if the server's invariants hold.
-
-Common race targets:
-  - "claim" / "assign" endpoints — only one parallel claim should succeed
-  - status / state toggles — multiple parallel calls should converge
-  - inventory / quota decrements — should not allow over-spend
-  - tag/label-add endpoints — should dedupe
-
-For each target:
-  - Fire PARALLEL_REQUESTS in parallel
-  - Count successes (200/201)
-  - Compare to expected_unique (usually 1 — only one assignment should win)
-  - If success_count > expected_unique -> race condition likely
-
-Uses async httpx for true parallelism (synchronous loops can't trigger races).
-
-Install: pip install httpx
-"""
-import asyncio, httpx, json, os, re, sys
-from pathlib import Path
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+import json
+import os
+from pathlib import Path
+import re
+import sys
+import urllib.error
+import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _lib  # noqa: E402
+import _lib
 
-TARGET = _lib.base_url()
-_lib.require("OBJ_A")                      # an object id you own (the single-winner target)
-OBJ_A = os.environ["OBJ_A"]
-_tok, _cookie = os.environ.get("TOKEN_A"), os.environ.get("COOKIE_A")
-HEADERS = {"Authorization": f"Bearer {_tok}"} if _tok else ({"Cookie": _cookie} if _cookie else {})
-if not HEADERS:
-    sys.exit("Supply auth: TOKEN_A=<jwt> (or COOKIE_A). See _lib.py.")
+PARALLEL = 8
+MAX_PARALLEL = 16
+MAX_PAYLOAD = 16_384
+TIMEOUT = 5
 
-PARALLEL = 50  # concurrent requests per target
 
-# Race-prone targets = this app's mutating endpoints (from probe-context.json). For each, the
-# server should keep its single-winner / converge / dedupe invariant under PARALLEL concurrency.
-TARGETS = [{"name": f"{m} {p}", "method": m, "url": TARGET + re.sub(r"\{[^}]+\}", OBJ_A, p),
-            "payload": {}, "expected_unique": 1,
-            "note": "parallel fire — a single-winner/converge/dedupe invariant should hold"}
-           for m, p in _lib.write_endpoints()][:8]
-if not TARGETS:
-    sys.exit("No write endpoints in probe-context.json — nothing to probe.")
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
-async def fire(client, t):
-    """Single request, return (status_code, response_body_preview)"""
-    _lib.guard_request(t['method'], t['url'])
+
+def fire(target, *, headers=None, opener=None):
+    """One guarded request; status/error-kind only, including HTTP redirect errors."""
+    _lib.guard_request(target['method'], target['url'])
+    payload = json.dumps(target.get('payload', {})).encode('utf-8')
+    if len(payload) > MAX_PAYLOAD:
+        raise ValueError('race payload exceeds bounded request size')
+    request = urllib.request.Request(target['url'], data=payload,
+        method=target['method'], headers=dict(headers or {}, **{'Content-Type': 'application/json'}))
+    transport = opener if opener is not None else urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), NoRedirect())
     try:
-        r = await client.request(
-            t['method'], t['url'],
-            json=t['payload'],
-            headers=HEADERS,
-            timeout=30.0,
-        )
-        return (r.status_code, None)
-    except Exception as e:
-        return (None, type(e).__name__)
+        with transport.open(request, timeout=TIMEOUT) as response:
+            return response.status, None  # deliberately never read arbitrary response bytes
+    except urllib.error.HTTPError as error:
+        status = error.code
+        error.close()
+        return status, None
+    except Exception as error:
+        return None, type(error).__name__  # exception text can reflect credentials
 
-async def run_target(t):
-    print(f"  Firing {PARALLEL} parallel {t['method']} to {t['url'][len(TARGET):]}")
-    async with httpx.AsyncClient(trust_env=False, follow_redirects=False) as client:
-        results = await asyncio.gather(*[fire(client, t) for _ in range(PARALLEL)])
-    codes = Counter(r[0] for r in results)
-    success = sum(1 for r in results if r[0] and 200 <= r[0] < 300)
-    race_likely = success > t['expected_unique']
-    print(f"  -> status counts: {dict(codes)}, successes: {success}, expected: {t['expected_unique']}")
-    if race_likely:
-        print(f"    !! RACE CONDITION SUSPECTED -- {success} successes vs {t['expected_unique']} expected")
-    return {
-        'name': t['name'],
-        'parallel': PARALLEL,
-        'status_counts': dict(codes),
-        'success_count': success,
-        'expected_unique': t['expected_unique'],
-        'race_suspected': race_likely,
-        'note': t['note'],
-        'sample_responses': [r for r in results if r[0] and r[0] < 500][:3],
-    }
 
-async def main():
-    findings = []
-    for t in TARGETS:
-        print(f"\n=== {t['name']}: {t['note']}")
-        f = await run_target(t)
-        findings.append(f)
-    out = _lib.save("race-conditions", findings)
-    crit = sum(1 for f in findings if f['race_suspected'])
-    print(f"\n=== Summary ===")
-    print(f"  race suspected on {crit}/{len(findings)} endpoints")
-    print(f"  saved to {out}")
-    return crit
+def run_target(target, *, headers=None, parallel=PARALLEL):
+    if isinstance(parallel, bool) or not isinstance(parallel, int) or not 1 <= parallel <= MAX_PARALLEL:
+        raise ValueError('race concurrency must be an integer from 1 to 16')
+    _lib.guard_request(target['method'], target['url'])
+    with ThreadPoolExecutor(max_workers=parallel) as pool:
+        results = list(pool.map(lambda _: fire(target, headers=headers), range(parallel)))
+    codes = Counter(row[0] for row in results)
+    successes = sum(1 for status, _ in results if status and 200 <= status < 300)
+    expected = target.get('expected_unique', 1)
+    suspected = successes > expected
+    print(f"  status counts: {dict(codes)}; successes: {successes}, expected: {expected}")
+    return {'name': target.get('name', 'race observation'), 'parallel': parallel,
+            'status_counts': dict(codes), 'success_count': successes, 'expected_unique': expected,
+            'race_suspected': suspected, 'error_kinds': dict(Counter(error for _, error in results if error)),
+            'note': 'Status-only observation; validate endpoint invariant and state before claiming a race.'}
+
+
+def main():
+    base = _lib.base_url()
+    _lib.require('OBJ_A')
+    token, cookie = os.environ.get('TOKEN_A'), os.environ.get('COOKIE_A')
+    headers = {'Authorization': f'Bearer {token}'} if token else ({'Cookie': cookie} if cookie else {})
+    if not headers:
+        sys.exit('Supply TOKEN_A or COOKIE_A for an authorized test account; see _lib.py.')
+    targets = [{'name': f'{method} {path}', 'method': method,
+                'url': base + re.sub(r'\{[^}]+\}', os.environ['OBJ_A'], path),
+                'payload': {}, 'expected_unique': 1}
+               for method, path in _lib.write_endpoints()][:8]
+    if not targets:
+        sys.exit('No write endpoints in probe-context.json; nothing to probe.')
+    # Validate every destination before starting even the first request.
+    for target in targets:
+        _lib.guard_request(target['method'], target['url'])
+    results = [run_target(target, headers=headers) for target in targets]
+    _lib.save('race-conditions', results)
+    return 1 if any(row['race_suspected'] for row in results) else 0
+
 
 if __name__ == '__main__':
-    rc = asyncio.run(main())
-    sys.exit(1 if rc > 0 else 0)
+    sys.exit(main())

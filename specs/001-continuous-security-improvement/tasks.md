@@ -44,7 +44,7 @@ Independent test: original reproducer no longer misclassified; real unsafe sibli
 Independent test: provenance-specific tables remain separate; unknown labels never become truth.
 
 - [ ] T021 [US4] Add mixed-reviewed/Brier write/original language fixture regressions in `tests/test_retained_calibration.py` and owned fixture directories.
-- [ ] T022 [US4] Finish class eligibility and every measurable-write scoring in `src/websec_validator/calibration.py`, `synthetic.py`, `cli.py`; reconcile spec 002 acceptance evidence.
+- [x] T022 [US4] Finish class eligibility and every measurable-write scoring in `src/websec_validator/calibration.py`, `synthetic.py`, `cli.py`; reconcile spec 002 acceptance evidence.
 - [ ] T023 [US4] Add reproducible per-tool comparison harness/raw unknown-labelled outcomes under `scripts/` and `tests/`; update `BENCHMARKS.md` without inventing unseen-project recall or agent benefit.
 
 ## Phase 6 — US3: Deliberate recurring integration (P2)
@@ -53,7 +53,7 @@ Independent test: actual supported integration lifecycle; static config tests al
 
 - [ ] T024 [US3] Add one-shot CLI versus long-lived MCP health policy and packaging controls in `Dockerfile`, `docs/integrations/README.md`, `tests/test_container_contracts.py` (W02).
 - [ ] T025 [US3] Pin and verify supported scanner archives/platforms and execute available image matrix using `Dockerfile` and `tests/test_container_contracts.py` (W06).
-- [ ] T026 [US3] Add remote-write/redirect/body/concurrency regressions then replace httpx race draft with bounded stdlib transport in `src/websec_validator/templates/probes/race-conditions.py` and `tests/test_probe_transport_boundaries.py` (W06).
+- [x] T026 [US3] Add remote-write/redirect/body/concurrency regressions then replace httpx race draft with bounded stdlib transport in `src/websec_validator/templates/probes/race-conditions.py` and `tests/test_probe_transport_boundaries.py` (W06).
 - [ ] T027 [US3] Validate real disposable pre-commit lifecycle and controlled separate-engine/target CI using `docs/integrations/` and `tests/test_adoption_contracts.py`; record unavailable prerequisites as pending, not delivered.
 
 ## Phase 7 — Polish and release
