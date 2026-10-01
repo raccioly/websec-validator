@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Offer a core-only container target and native amd64/arm64 image contract checks. Explicit
+  one-shot `HEALTHCHECK NONE` performs no recurring scan; optional MCP liveness is distinct from
+  scan results and authenticated dispatch.
+
 ### Fixed
+
+- Bind the container base and Noir/Gitleaks/Trivy archives to reviewed digests, verify all bytes
+  before installation, reject unsupported architectures/version overrides, and replace the remote
+  Trivy installer. Pin top-level Python scanners, allowlist build context and prune private trees;
+  apt/transitive dependency variability remains explicit rather than claiming reproducibility.
 
 - Map supported same-file tRPC procedures only through a visible import-bound Express adapter
   mount. Unmounted/conditional/unused composition remains candidates, not invented HTTP targets.

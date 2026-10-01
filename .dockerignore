@@ -1,4 +1,11 @@
 # keep the build context small + private
+**
+!pyproject.toml
+!README.md
+!src/
+!src/**
+!scripts/
+!scripts/install-container-scanners.sh
 base-research/
 .git/
 websec-out/
@@ -11,3 +18,5 @@ tests/
 .venv/
 venv/
 .DS_Store
+.local/
+**/.[lL][oO][cC][aA][lL]/

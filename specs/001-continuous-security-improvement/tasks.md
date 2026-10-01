@@ -127,3 +127,10 @@ Unmounted, conditional and unused composition remains candidate evidence, not pr
 An unknown/short-circuiting middleware before a later guard cannot prove that guard executes.
 Context identity, other adapters, generic/input chains and cross-module composition remain review
 gaps; no target code is executed. Bounds enter coverage, not a clean scan certificate.
+
+### Container checkpoint
+
+Core/bundled targets, fixed multiarch base/archive digests, fail-closed architecture/version
+selection, checksum corruption controls, private allowlisted context and explicit health policy
+are implemented. Native amd64/arm64 CI will build and execute both targets; T024/T025 remain
+unchecked until actual runtime checks pass. Apt/transitive dependencies are not fully locked.

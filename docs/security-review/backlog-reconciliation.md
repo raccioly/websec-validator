@@ -174,6 +174,20 @@ execution loss. Generic/input chains, imports across files and other adapters re
 Independent review confirms all three supplied blockers fixed; final unchanged-source checkpoint
 passes 1807 application tests. Unsupported generic instance composition has an explicit scope gap.
 
+## Container checkpoint
+
+Official release metadata independently confirms the checked-in Noir 1.0.0, Gitleaks 8.30.1 and
+Trivy 0.74.0 amd64/arm64 filenames and digests. All archive bytes are checked before extraction
+or package installation; an actual corrupted-byte subprocess control never invokes privileged
+installation. Unsupported architectures and unreviewed archive-version overrides fail before
+network access. The Python index is fixed; Semgrep/Checkov top-level versions are pinned, not apt
+or every transitive dependency. No claim of complete reproducibility or upstream trust follows.
+
+The one-shot image explicitly has no periodic healthcheck; optional in-container MCP transport
+liveness is not scan or authentication assurance. The build context is allowlisted and private
+trees excluded. Native core/bundled image jobs are authored, not treated as executed results.
+T024/T025 stay pending until actual runtime evidence from those jobs is available.
+
 The local Docker client has no available daemon; pre-commit is absent at baseline. Neither a
 configuration-shaped test nor an installed client establishes an executed integration lifecycle.
 Authored paired fixtures do not measure independent production precision. The separate manual

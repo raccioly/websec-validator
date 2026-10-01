@@ -89,3 +89,31 @@ Configuration tests check the examples' limited scalar structure and revision-va
 The pre-commit framework and a YAML parser were unavailable in the validation environment, so no
 full pre-commit installation/staging lifecycle or hosted workflow run was performed. Run
 `pre-commit validate-config` and review a workflow check in your configured environment before adoption.
+
+## Container policy and reviewed downloads
+
+`docker build --target core -t websec-core .` builds the stdlib engine without bundled scanners;
+the default `bundled` target includes optional analyzers. Both run as a nonroot user. Pass an
+operator-selected UID/GID for mounted output ownership. The build context is allowlisted and
+private `.local` trees are excluded case-insensitively; no target checkout is installed in an image.
+
+The Python multi-architecture index and official Noir/Gitleaks/Trivy archive digests are fixed in
+reviewed source. The installer accepts only amd64/arm64, verifies all downloaded archives before
+any extraction/package installation, and refuses scanner-version overrides without digest review.
+Semgrep/Checkov top-level versions are pinned; apt packages, build tools and transitive Python
+dependencies are not fully locked. These controls detect substituted bytes, not upstream compromise
+or complete reproducibility. See the [installer](../../scripts/install-container-scanners.sh).
+
+`HEALTHCHECK NONE` is deliberate for the default one-shot CLI: no recurring self-scan, network
+check or health assurance is implied. For an explicitly selected long-lived `websec mcp --http`
+service, an operator may add an in-container loopback `GET /health` liveness check with a short
+timeout. That endpoint reports transport liveness only, not successful recon or authorization;
+MCP POST dispatch still requires its bearer token and allowed root. HTTP remains loopback-only,
+so publishing a container port does not expose its loopback listener. Do not weaken the bind or
+install an automatic target scan to obtain a green health indicator.
+[Docker healthcheck reference](https://docs.docker.com/reference/dockerfile/#healthcheck)
+
+The native amd64/arm64 [image contract workflow](../../.github/workflows/container-contracts.yml)
+builds core/bundled targets, records image identity, runs offline source-only fixtures and invokes
+bundled scanner versions. Configuration and installer controls pass locally; image runtime results
+remain pending until that workflow actually executes. The local Docker daemon is unavailable.
