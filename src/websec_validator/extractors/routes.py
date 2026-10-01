@@ -29,6 +29,7 @@ from .base import SKIP_DIRS, Extractor, RepoContext, is_test_file, path_in_skip_
 from .profiles import service_for
 from .django_urls import analyze as analyze_django_urls
 from .connexion_routes import analyze as analyze_connexion
+from .trpc_routes import analyze as analyze_trpc
 
 
 def _route_key(ctx, row: dict) -> tuple:
@@ -661,6 +662,13 @@ class RoutesExtractor(Extractor):
                 routes.append(row)
         if connexion['routes']:
             engine += ' + connexion-registration'
+        trpc = analyze_trpc(ctx)
+        for row in trpc['routes']:
+            if _route_key(ctx, row) not in existing:
+                existing.add(_route_key(ctx, row))
+                routes.append(row)
+        if trpc['routes']:
+            engine += ' + trpc-registration'
         for row in (facts.get("stack", {}).get("profiles") or {}).get("routes", []):
             if _route_key(ctx, row) not in existing:
                 existing.add(_route_key(ctx, row))
@@ -708,6 +716,8 @@ class RoutesExtractor(Extractor):
                                 "review routes.django gaps and errors before assuming mounts or HTTP methods.")
         if not coverage_warning and (connexion['gaps'] or connexion['errors']):
             coverage_warning = 'Connexion registration has unresolved evidence; review routes.connexion gaps/errors.'
+        if not coverage_warning and (trpc['gaps'] or trpc['errors']):
+            coverage_warning = 'tRPC composition has unresolved evidence; review routes.trpc gaps/errors.'
         out = {
             "engine": engine,
             "count": len(routes),
@@ -722,6 +732,7 @@ class RoutesExtractor(Extractor):
             "raw_server_endpoints": raw_server_count,    # non-framework http.createServer/Bun.serve/http.server
             "django": django,
             "connexion": connexion,
+            "trpc": trpc,
         }
         if spec_derived:
             from collections import Counter

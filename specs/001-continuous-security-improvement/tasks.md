@@ -17,8 +17,8 @@ Tests are required by FR-002. Starting source `2ee99673`; closed PRs are not del
 
 Independent test: endpoint-bound safe/no-op/unprotected sibling controls, no target execution.
 
-- [ ] T005 [US2] Add failing FastAPI/tRPC auth controls in `tests/test_retained_frameworks.py` (W05).
-- [ ] T006 [US2] Bind visible dependency/middleware enforcement to its endpoint in `src/websec_validator/extractors/authz.py` (W05).
+- [x] T005 [US2] Add failing FastAPI/tRPC auth controls in `tests/test_retained_frameworks.py` and `tests/test_trpc_routes.py` (W05).
+- [x] T006 [US2] Bind supported local dependency/middleware rejection evidence to its endpoint in `src/websec_validator/extractors/authz.py` (W05); disclose context/runtime composition limits.
 - [ ] T007 [US2] Add source-registration/documentation-only/escaping/malformed Connexion controls in `tests/test_retained_frameworks.py` (W16/W20).
 - [ ] T008 [US2] Resolve bounded import-bound Connexion registration without promoting unregistered docs in `src/websec_validator/extractors/routes.py` (W16/W20).
 - [x] T009 [US2] Add paired assigned JS SQL/Python+JS command controls in `tests/test_retained_flows.py` (W04/W10).
@@ -118,3 +118,12 @@ annotation/route bindings, byte rejection versus no-op/caught/partial/transforme
 controls, parser limits and actual subprocess CLI/ledger output. Same-handler byte evidence is
 bound to stored bytes; it cannot certify filename-derived storage or browser-safe serving. Complex
 registrations, collections, wrappers and cross-function flow remain explicit review limits.
+
+### tRPC checkpoint
+
+Twelve paired methods include actual CLI facts/ledger outcomes. Only supported same-file
+initTRPC/procedure/router chains and direct import-bound Express mounts supply HTTP paths.
+Unmounted, conditional and unused composition remains candidate evidence, not probe targets.
+An unknown/short-circuiting middleware before a later guard cannot prove that guard executes.
+Context identity, other adapters, generic/input chains and cross-module composition remain review
+gaps; no target code is executed. Bounds enter coverage, not a clean scan certificate.

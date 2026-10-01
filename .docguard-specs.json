@@ -205,11 +205,11 @@
           },
           {
             "path": "specs/001-continuous-security-improvement/tasks.md",
-            "digest": "sha256:f20bc9a1fe5970c0b6b0b09b0f59e02893bd714473bf7e209283eeee92896af4"
+            "digest": "sha256:406d1249c5b182e80d12d930c35f9fba876da5d20647b7bd9f0dcb8b26769cc6"
           }
         ],
         "taskCompletion": {
-          "checked": 13,
+          "checked": 15,
           "total": 33
         },
         "implementationEvidence": [],
@@ -218,6 +218,11 @@
             "requirementId": "FR-002",
             "file": "tests/test_python_uploads.py",
             "line": 26
+          },
+          {
+            "requirementId": "FR-002",
+            "file": "tests/test_trpc_routes.py",
+            "line": 31
           }
         ]
       }

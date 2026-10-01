@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Map supported same-file tRPC procedures only through a visible import-bound Express adapter
+  mount. Unmounted/conditional/unused composition remains candidates, not invented HTTP targets.
+  Authorization hints belong to each middleware chain; unknown/short-circuiting prefixes, no-op
+  rejection, caught checks and mutated primitives cannot borrow a later guard. Context identity
+  and deployed enforcement remain unverified; parser/result budgets enter completeness reporting.
+
 - Follow supported import-bound FastAPI `UploadFile` filename/content-type values through local
   assignments into actual writes and decisions. Metadata logs/returns, generated names and unused
   closures are distinct. Byte-type rejection credit is handler-local and tied to the stored bytes;

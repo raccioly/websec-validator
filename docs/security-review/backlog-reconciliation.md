@@ -155,6 +155,25 @@ while the research suite evaluated it. Its original integrity assertion was pres
 validation passes all 1795 application tests against an unchanged detector revision. Independent
 review confirms the supplied branch, stored-byte and shadowed-print controls fixed.
 
+## tRPC composition evidence
+
+Supported same-file `initTRPC.create()` procedure/router chains become HTTP targets only when a
+visible import-bound Express app directly mounts the reviewed adapter with that router and a
+literal base path. Unmounted/conditional/unused composition remains candidates with scope gaps.
+Nested procedure names use transport dot segments; queries and mutations retain distinct methods.
+This follows the [tRPC router](https://trpc.io/docs/server/routers) and
+[Express adapter](https://trpc.io/docs/server/adapters/express) contracts, not runtime deployment.
+
+Middleware hints are chain-local: a complete supported rejecting branch plus `next()` can supply
+evidence only when earlier middleware is known to continue or has already rejected unauthenticated
+context. Unknown/short-circuiting prefixes, names, no-op/caught checks, primitive mutation and sibling
+guards cannot confer protection. The context supplier's identity/authentication remains unverified;
+these source hints are not validated JWT or deployed authorization proof. Twelve methods include
+subprocess CLI coverage/ledger artifacts; limits on bytes, bindings, depth and result count disclose
+execution loss. Generic/input chains, imports across files and other adapters remain review gaps.
+Independent review confirms all three supplied blockers fixed; final unchanged-source checkpoint
+passes 1807 application tests. Unsupported generic instance composition has an explicit scope gap.
+
 The local Docker client has no available daemon; pre-commit is absent at baseline. Neither a
 configuration-shaped test nor an installed client establishes an executed integration lifecycle.
 Authored paired fixtures do not measure independent production precision. The separate manual

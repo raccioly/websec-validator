@@ -804,6 +804,9 @@ class AuthzExtractor(Extractor):
                 guarded = fastapi['guarded']
             if connexion:
                 guarded = local_guard  # registration files/Next mounts/security declarations cannot guard this operation
+            trpc = e.get('source') == 'trpc-registration'
+            if trpc:
+                guarded = e.get('trpc_guarded') is True  # exact procedure chain, never names or sibling/file guards
             # The contract's declaration stands in when no implementing file was located: an
             # operation carrying `security:` is guarded by the only evidence that exists. It is
             # never used to REFUTE code analysis — if we read a handler, that reading wins.
@@ -815,6 +818,7 @@ class AuthzExtractor(Extractor):
                         "unverified_controls": ([fastapi['reason']] if fastapi and fastapi['reason'] else [])
                             + (["Connexion operation handler is unresolved; registration is not authorization evidence"]
                                if connexion and not text else [])
+                            + (["tRPC middleware/context identity and runtime composition require verification"] if trpc else [])
                             + (["Fastify hook presence does not establish this route's instance/registration scope"]
                                if fastify_global_auth and not guarded else []),
                         "public_hint": bool(PUBLIC_HINT.search(e.get("path", "")))})

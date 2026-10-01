@@ -162,7 +162,7 @@ def thin_languages(cov: dict) -> set:
 
 def add_routes(facts: dict) -> None:
     """Preserve route-parser scope uncertainty separately from execution loss."""
-    for engine in ('django', 'connexion'):
+    for engine in ('django', 'connexion', 'trpc'):
         _add_route_analysis(facts, engine)
 
 
