@@ -94,11 +94,13 @@ test. An actual push to an owned local bare repository rejects unsafe working-tr
 accepts clean input; no public-network push occurs. Normal stdlib tests
 skip this development-only dependency; the dedicated workflow runs it explicitly.
 
-The [adoption contract workflow](../../.github/workflows/adoption-contracts.yml) also exercises the
-actual separate-engine Action with clean, unsafe and oversized targets, hostile inert target
-install/import surfaces, and current-attempt artifact checks. Its first hosted run remains pending;
-authored YAML and local subprocess tests are not substitutes for hosted execution. Review your
-selected engine revision and workflow result before adoption.
+The [adoption contract workflow](../../.github/workflows/adoption-contracts.yml) also executes the
+actual separate-engine Action with clean, unsafe and oversized owned target fixtures, hostile inert
+install/import surfaces, and current-attempt artifact checks. All four jobs passed on 2026-10-01 in
+[run 36818626389](https://github.com/raccioly/websec-validator/actions/runs/36818626389)
+at head `b383d2e221722d9beb73fff75618d170b045eaca`. This is controlled fixture execution, not a
+claim of a full consumer two-checkout deployment or a scheduled run. Review your selected engine
+revision and configured workflow result before adoption.
 
 ## Container policy and reviewed downloads
 

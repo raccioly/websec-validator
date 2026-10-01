@@ -19,6 +19,7 @@ from .base import Extractor, RepoContext, is_client_file, is_test_file
 from .syntax import call_expression, direct_call, expression_end, in_literal, js_functions, split_arguments, without_comments
 from .syntax import object_properties as _object_properties
 from .python_uploads import analyze as python_uploads, MAX_SOURCE_BYTES, MAX_NODES, MAX_BINDINGS
+from . import assigned_flow
 
 MAX_PYTHON_TOTAL_BYTES = 8 * 1024 * 1024
 
@@ -30,8 +31,8 @@ DENY_LIST = re.compile(r"isExecutableMimeType|blockedMimeTypes|blacklist|deny[_-
 ALLOW_LIST = re.compile(r"isAllowedMediaType|allowedMimeTypes|allow[_-]?list|whitelist|ALLOWED_(?:MIME|TYPES|EXT)"
                         r"|ACCEPTED_(?:MIME|TYPES?|EXT)|accepted(?:Mime|File|Content)?(?:Types?|Extensions?)"
                         r"|\bfile-type\b|fileTypeFrom|magic[_-]?byte|detectContentType|\.fromBuffer\b|sniff", re.I)
-KEY_FROM_NAME = re.compile(r"(?:Key|key|path|filename|filepath|destination|filename\s*\()\s*[:=(][^;\n]{0,90}"
-                           r"\b(?:originalname|originalName|file\.name)\b", re.I)
+FILENAME_SOURCE = re.compile(r'\b(?:(?:req|request)\.files?(?:\.[\w$]+|\[\d+\])*|file)\.(?:originalname|originalName|name)\b')
+FILENAME_STORAGE = re.compile(r'\b(?:[\w$]+\.)?(?:store|save|putObject|upload|writeFile|writeFileSync|createWriteStream)\s*\(')
 TRUST_CLIENT_MIME = re.compile(r"(?:\b(?:req|request)\.files?(?:\.[\w$]+)*|\bfile)\.mimetype\b|headers\[['\"]content-type['\"]\]", re.I)
 ACCEPT_SVG = re.compile(r"image/svg\+xml|['\"]svg['\"]", re.I)
 # file-serving: streaming a STORED/PROXIED object back to the client. Tightened to genuine
@@ -63,6 +64,18 @@ def _response_file_sites(source: str) -> list[dict]:
                       "kind": match[2] or ("pipe" if match[3] else "response"),
                       "receiver": match[1] or match[3] or ""})
     return sites
+
+
+def _storage_path_argument(expression: str, arguments: list[str]) -> str:
+    """Recognize direct path arguments or literal key fields, not object Body metadata."""
+    argument = arguments[0]
+    if argument.lstrip().startswith('{'):
+        properties = _object_properties(argument)
+        if properties is None:
+            return argument  # ambiguous/spread storage options retain a review lead
+        return ' '.join(value for key, value in properties.items()
+                        if key.lower() in {'key', 'path', 'filename', 'filepath', 'destination'})
+    return argument
 
 
 def _response_header_control(source: str, site: dict, scopes: list[dict]) -> bool:
@@ -246,6 +259,8 @@ class UploadSecurityExtractor(Extractor):
         upload_files, serve_files = [], []
         python_errors, python_handlers = [], []
         python_bytes = 0
+        filename_errors, filename_sites = [], []
+        filename_budget = {'bytes': 0, 'events': 0}
         for _p, rel, text in ctx.iter_code():
             # test fixtures/mocks aren't a deployed surface; a React CLIENT component (.tsx / 'use client')
             # renders <img src> and calls uploadMedia(file) but can NOT set HTTP response headers or build
@@ -280,12 +295,19 @@ class UploadSecurityExtractor(Extractor):
                                      "detail": "Upload handler blocks a deny-list but has no positive allow-list by "
                                                "SNIFFED magic bytes — a payload that sniffs to octet-stream/unknown "
                                                "passes. Allow-list the supported types by detected content, reject the rest."})
-                if any(not in_literal(source, match.start()) for match in KEY_FROM_NAME.finditer(source)):
+                filename_flow = assigned_flow.javascript(source, filename_budget,
+                    source_pattern=FILENAME_SOURCE, sink_pattern=FILENAME_STORAGE,
+                    sink_kind='upload-key-from-filename', argument_selector=_storage_path_argument)
+                filename_errors.extend(dict(row, file=rel) for row in filename_flow['errors'])
+                filename_sites.extend(dict(row, file=rel) for row in filename_flow['occurrences'])
+                if filename_flow['occurrences']:
                     findings.append({"severity": "HIGH", "kind": "upload-key-from-filename", "file": rel,
-                                     "detail": "Stored object key/path is built from the client filename "
-                                               "(`originalname`) — a polyglot named `Jpg.php` with valid image magic "
-                                               "bytes is stored executable. Derive the stored name/extension from the "
-                                               "DETECTED type, never the upload filename."})
+                                     "line": filename_flow['occurrences'][0]['line'],
+                                     "control_scope": "supported local filename flow to a storage call; receiver/runtime unverified",
+                                     "detail": "Client filename provenance reaches a supported storage key/path "
+                                               "argument. Verify the receiver, actual stored object and serving policy; "
+                                               "this source observation does not prove executable storage. Derive the "
+                                               "stored name/extension from detected type, never the upload filename."})
                 if unsafe_mime:
                     findings.append({"severity": "MEDIUM", "kind": "upload-trusts-client-mime", "file": rel,
                                      "line": source.count("\n", 0, unsafe_mime[0].start()) + 1,
@@ -317,7 +339,15 @@ class UploadSecurityExtractor(Extractor):
         for f in findings:
             by_sev[f["severity"]] = by_sev.get(f["severity"], 0) + 1
         return {
-            **({'error': 'Python upload analysis incomplete; see python_analysis.errors'} if python_errors else {}),
+            **({'error': 'Upload analysis incomplete; see analysis errors'} if python_errors or filename_errors else {}),
+            'filename_analysis': {'occurrences': filename_sites[:80], 'errors': filename_errors[:50],
+                                  'limits': {'source_bytes_per_file': assigned_flow.MAX_SOURCE_BYTES,
+                                             'source_bytes_total': assigned_flow.MAX_TOTAL_SOURCE_BYTES,
+                                             'events_per_file': assigned_flow.MAX_EVENTS,
+                                             'events_total': assigned_flow.MAX_TOTAL_EVENTS,
+                                             'scopes_per_file': assigned_flow.MAX_SCOPES,
+                                             'bindings_per_scope': assigned_flow.MAX_BINDINGS},
+                                  'note': 'Local assignments only; aliases, closures and runtime storage require review'},
             'python_analysis': {'handlers': python_handlers[:80], 'errors': python_errors,
                                 'limits': {'source_bytes_per_file': MAX_SOURCE_BYTES, 'nodes_per_file': MAX_NODES,
                                            'bindings_per_handler': MAX_BINDINGS, 'source_bytes_total': MAX_PYTHON_TOTAL_BYTES},

@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 
 from .base import Extractor, RepoContext, is_test_file
-from .syntax import call_expression, direct_call, in_literal, js_functions, split_arguments, without_comments
+from .syntax import call_expression, direct_call, expression_end, in_literal, js_functions, split_arguments, without_comments
 
 # helper/permission DEFINITIONS (function/arrow/def) — not variable assignments to a call result
 MASK_DEF = re.compile(
@@ -83,6 +83,11 @@ def _projected_binding(code: str, position: int, argument: str, scopes: list[dic
             keys.append(match[1] or match[3])
         return removes_known_fields(','.join(keys))
 
+    def projector_call(match, names):
+        start = prefix.find('=', match.start()) + 1
+        expression = prefix[start:expression_end(prefix, start)].strip()
+        return direct_call(expression, names, program=code)
+
     boolean = re.search(r'\bconst\s+' + name + r'\s*=\s*(?:Boolean\(\s*[\w$.]+\s*\)|!![\w$.]+|true|false)\s*;\s*$', prefix)
     if boolean and not in_literal(prefix, boolean.start()):
         # Local implementations/shadowed Boolean cannot certify a primitive result.
@@ -100,14 +105,18 @@ def _projected_binding(code: str, position: int, argument: str, scopes: list[dic
 
     # Lodash omit equivalent: const safeAdmin = omit(admin, ['ssn', 'email']);
     omit_match = re.search(r"\b(?:const|let)\s+" + re.escape(name) + r"\s*=\s*(?:_\.)?omit\s*\([^,]+,\s*\[(.*?)\]\s*\)", prefix)
-    if (omit_match and all(re.fullmatch(r'''(['"])[\w$]+\1''', item)
+    if (omit_match and projector_call(omit_match, r'(?:_\.)?omit')
+            and all(re.fullmatch(r'''(['"])[\w$]+\1''', item)
                           for item in split_arguments(omit_match.group(1)))
             and removes_known_fields(omit_match.group(1))):
         return True
 
     # Lodash pick equivalent: const safeAdmin = pick(admin, ['id', 'name']);
     pick_match = re.search(r"\b(?:const|let)\s+" + re.escape(name) + r"\s*=\s*(?:_\.)?pick\s*\([^,]+,\s*\[(.*?)\]\s*\)", prefix)
-    if pick_match and not bool(PII_FIELD.search(pick_match.group(1))):
+    if (pick_match and projector_call(pick_match, r'(?:_\.)?pick')
+            and all(re.fullmatch(r'''(['"])[\w$]+\1''', item)
+                    for item in split_arguments(pick_match.group(1)))
+            and not bool(PII_FIELD.search(pick_match.group(1)))):
         return True
 
     # Array map destructuring: const safe = arr.map(({ pii, ...rest }) => rest)

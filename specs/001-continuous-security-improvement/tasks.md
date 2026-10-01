@@ -31,12 +31,12 @@ Independent test: endpoint-bound safe/no-op/unprotected sibling controls, no tar
 
 Independent test: original reproducer no longer misclassified; real unsafe sibling still reported.
 
-- [ ] T014 [US1] Add failing JWT/hash/upload/PII/literal/guard paired cases in `tests/test_retained_precision.py` (W08/W09/W12/W18/W19).
+- [x] T014 [US1] Add failing JWT/hash/upload/PII/literal/guard paired cases in `tests/test_retained_precision.py` (W08/W09/W12/W18/W19).
 - [x] T015 [US1] Scope direct JWT options/hash result use in `src/websec_validator/extractors/crypto_usage.py` (W09).
-- [ ] T016 [US1] Scope filename storage/SVG acceptance in `src/websec_validator/extractors/upload_security.py` (W08).
-- [ ] T017 [US1] Correct boolean and partial-removal PII output handling in `src/websec_validator/extractors/pii_exposure.py` (W12).
-- [ ] T018 [US1] Correct literal regex/error expression matching in `src/websec_validator/extractors/surface.py` (W18).
-- [ ] T019 [US1] Pair actual security invocation with executable catch returns in `src/websec_validator/extractors/llm_security.py` (W19).
+- [x] T016 [US1] Scope filename storage/SVG acceptance in `src/websec_validator/extractors/upload_security.py` (W08).
+- [x] T017 [US1] Correct boolean and partial-removal PII output handling in `src/websec_validator/extractors/pii_exposure.py` (W12).
+- [x] T018 [US1] Correct literal regex/error expression matching in `src/websec_validator/extractors/surface.py` (W18).
+- [x] T019 [US1] Pair actual security invocation with executable catch returns in `src/websec_validator/extractors/llm_security.py` (W19).
 - [x] T020 [US1] Add import-bound HTTP receiver controls and implementation in `tests/test_retained_flows.py` and `src/websec_validator/extractors/surface.py` (W03).
 
 ## Phase 5 — US4: Honest evidence (P1)
@@ -54,7 +54,7 @@ Independent test: actual supported integration lifecycle; static config tests al
 - [x] T024 [US3] Add one-shot CLI versus long-lived MCP health policy and packaging controls in `Dockerfile`, `docs/integrations/README.md`, `tests/test_container_contracts.py` (W02).
 - [x] T025 [US3] Pin and verify supported scanner archives/platforms and execute available image matrix using `Dockerfile` and `tests/test_container_contracts.py` (W06).
 - [x] T026 [US3] Add remote-write/redirect/body/concurrency regressions then replace httpx race draft with bounded stdlib transport in `src/websec_validator/templates/probes/race-conditions.py` and `tests/test_probe_transport_boundaries.py` (W06).
-- [ ] T027 [US3] Validate real disposable pre-commit lifecycle and controlled separate-engine/target CI using `docs/integrations/` and `tests/test_adoption_contracts.py`; record unavailable prerequisites as pending, not delivered.
+- [x] T027 [US3] Validate real disposable pre-commit lifecycle and controlled separate-engine/target CI using `docs/integrations/` and `tests/test_adoption_contracts.py`; record unavailable prerequisites as pending, not delivered.
 
 ## Phase 7 — Polish and release
 
@@ -141,5 +141,18 @@ apt/transitive dependencies are not fully locked. T024/T025 are complete within 
 
 Real pre-commit 4.6.2 installation/staged-commit/manual/pre-push/foreign-hook restoration passed
 locally in an owned disposable environment. The separate-engine Action workflow has clean,
-unsafe and oversized hostile inert targets with current-attempt artifact assertions. T027 stays
-open until its actual hosted jobs pass; no consumer hook or schedule is activated automatically.
+unsafe and oversized hostile inert targets with current-attempt artifact assertions. All four jobs
+passed in run 36818626389 at b383d2e221722d9beb73fff75618d170b045eaca; T027 is complete within
+this controlled fixture scope. No consumer hook or schedule is activated automatically.
+
+### Final bounded precision checkpoint
+
+Filename provenance now reaches actual supported storage arguments, regardless of the local
+variable's name; old standalone-assignment inputs remain as negative controls paired with real
+storage. Shared local-flow expression caps enter execution gaps. PII credit requires literal keys,
+unreplaced supported helpers and the whole assignment expression. Static f-strings remain inert;
+security calls inside a caught nested try cannot lend evidence to the outer catch. Six additional
+methods include actual CLI facts/ledger and independent supplied negative controls. Receiver
+runtime identity, closures/cross-function flows, aliases and complex rethrow/finally remain review
+limits. T014/T016–T019 are complete within these bounded supported contracts, not whole-program
+or production precision guarantees.

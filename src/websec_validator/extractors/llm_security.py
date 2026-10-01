@@ -93,6 +93,13 @@ def _guard_failure_allows(source: str) -> bool:
             continue
         body = source[opening + 1:end - 1]
         scopes = js_functions(body)
+        nested_owned = []
+        for nested in re.finditer(r'\btry\s*\{', body):
+            if in_literal(body, nested.start()):
+                continue
+            nested_end = expression_end(body, body.find('{', nested.start()), closing='}')
+            if re.match(r'\s*catch\b', body[nested_end:]):
+                nested_owned.append((nested.start(), nested_end))
         containing = [scope for scope in outer_scopes if scope['body_start'] <= attempt.start() < scope['end']]
         owner = min(containing, key=lambda scope: scope['end'] - scope['start']) if containing else None
         named_guard = bool(owner and re.fullmatch(r'(?:scanInput|scanOutput|moderat\w*|guard\w*|llmGuard\w*)', owner['name'], re.I))
@@ -102,6 +109,7 @@ def _guard_failure_allows(source: str) -> bool:
             # a separate function's catch or a filesystem Scanner/scan_dir.
             calls += list(re.finditer(r'\bcheck\s*\(', body))
         if not any(not in_literal(body, call.start()) and not any(
+                start <= call.start() < stop for start, stop in nested_owned) and not any(
                 scope['start'] <= call.start() < scope['end'] for scope in scopes)
                    for call in calls):
             continue

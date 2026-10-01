@@ -9,6 +9,7 @@ that exercises it, so the briefing can point probes at the right files.
 
 from __future__ import annotations
 
+import ast
 import re
 
 from .base import Extractor, RepoContext, is_client_file, is_script_file, is_test_file
@@ -357,6 +358,14 @@ class SurfaceExtractor(Extractor):
                         continue
                     if cls == 'redos' and _p.suffix.lower() == '.py':
                         args = split_arguments(expression[expression.find('(') + 1:-1])
+                        try:
+                            node = ast.parse(args[0], mode='eval').body if args else None
+                        except (SyntaxError, ValueError, RecursionError):
+                            node = None
+                        if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                                or isinstance(node, ast.JoinedStr) and not any(
+                                    isinstance(value, ast.FormattedValue) for value in node.values)):
+                            continue  # static f-string spelling does not introduce interpolation
                         # Inspect the argument prefix, not the closing f-quote in "self".
                         if not args or not (re.search(_REQ_SRC, args[0])
                                             or re.match(r'(?i)^(?:f|rf|fr)[\'"]', args[0].strip())):

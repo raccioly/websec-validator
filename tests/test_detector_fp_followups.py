@@ -132,15 +132,19 @@ class UploadLoggingTests(unittest.TestCase):
             (root / 'app.js').write_text(source)
             return {row['kind'] for row in UploadSecurityExtractor().extract(RepoContext(root), {})['findings']}
 
-    def test_filename_log_is_not_a_storage_key_but_assignments_remain(self):
+    def test_filename_log_and_bare_assignments_are_not_storage_operations(self):
         log = 'console.log(`Received file: ${req.file.originalname}`);'
         self.assertNotIn('upload-key-from-filename', self.kinds(log))
         for storage in ('const key = `${req.file.originalname}`;',
                         'const destination = req.file.originalname;',
-                        'store({Key: `uploads/${req.file.originalname}`});',
                         'const filename = req.file.originalname;'):
             with self.subTest(storage=storage):
-                self.assertIn('upload-key-from-filename', self.kinds(log + storage))
+                # Preserve the old naming-only inputs as negative controls; each
+                # becomes unsafe when its actual storage consumption is added.
+                self.assertNotIn('upload-key-from-filename', self.kinds(log + storage))
+                name = storage.split('=', 1)[0].split()[-1]
+                self.assertIn('upload-key-from-filename', self.kinds(log + storage + 'store({Key:' + name + '});'))
+        self.assertIn('upload-key-from-filename', self.kinds(log + 'store({Key: `uploads/${req.file.originalname}`});'))
 
     def test_direct_mime_logging_is_not_a_decision(self):
         for log in ('console.log(req.file.mimetype);',

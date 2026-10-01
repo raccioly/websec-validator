@@ -220,5 +220,27 @@ to an owned local bare repository rejects unsafe working-tree input and accepts 
 no public-network push occurs. The normal application suite passes 1813
 tests with this one development-only lifecycle skipped; the opt-in lifecycle passes separately.
 
-The authored hosted workflow parses as YAML and exercises the actual separate-engine Action for
-clean, unsafe and oversized inputs. Its first hosted execution is pending, so T027 remains open.
+All four hosted adoption jobs passed in
+[run 36818626389](https://github.com/raccioly/websec-validator/actions/runs/36818626389)
+at head `b383d2e221722d9beb73fff75618d170b045eaca`: the real framework lifecycle and actual
+separate-engine composite Action for clean, unsafe and oversized owned hostile inert fixtures.
+The Action asserts current-attempt outputs, expected findings/completeness and no target execution.
+T027 is complete within this controlled integration scope, not a full consumer two-checkout or
+scheduled deployment. The optional development dependency is not a WebSec runtime requirement.
+
+## Final bounded precision evidence
+
+Six additional methods extend the paired JWT/hash/upload/PII/literal/guard controls and include
+actual subprocess CLI facts, execution completeness and findings-ledger artifacts. Client filename
+flow is now tied to supported storage arguments, not intermediate variable spelling; old bare
+assignments remain negative controls and their actual storage consumption remains positive.
+Object-body metadata, literal overwrites and sibling scopes stay separate. The bounded local
+assignment walker now reports expression truncation as execution loss rather than silent success.
+
+PII projection credit requires literal keys, an unreplaced supported helper and its entire assigned
+expression. Dynamic fields, spread keys, local helper implementations and raw-entity fallbacks
+remain leads. Static Python f-strings without interpolation are inert. A caught nested try owns
+its security invocation; an outer catch cannot borrow that call to manufacture fail-open evidence.
+Unknown aliases/runtime storage, closure capture and complex rethrow/finally flow remain manual
+review limits. Independent review supplied both whole-expression and expression-cap controls;
+137 focused regression tests pass. These tests do not measure public-project precision or recall.

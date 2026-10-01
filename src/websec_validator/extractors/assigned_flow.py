@@ -9,7 +9,7 @@ from dataclasses import replace
 import re
 
 from . import sql_flow
-from .syntax import call_expression, expression_end, js_functions, split_arguments, without_comments
+from .syntax import MAX_EXPRESSION, call_expression, expression_end, js_functions, split_arguments, without_comments
 
 MAX_SOURCE_BYTES = 512 * 1024
 MAX_EVENTS = 2048
@@ -116,7 +116,7 @@ def _masked(source):
     return LITERAL.sub(mask, source)
 
 
-def _value(expression, environment, line):
+def _value(expression, environment, line, source_pattern=REQUEST):
     # Ordinary literal examples are opaque; supported template interpolation is code.
     interpolations = []
     for literal in LITERAL.finditer(expression):
@@ -129,7 +129,7 @@ def _value(expression, environment, line):
                     interpolations.append(interpolation[1])
     executable = _masked(expression) + ' '.join(interpolations)
     sources, assignments = set(), set()
-    if REQUEST.search(executable):
+    if source_pattern.search(executable):
         sources.add(line)
     for name in re.findall(r'\b[\w$]+\b', executable):
         previous = environment.get(name)
@@ -139,8 +139,10 @@ def _value(expression, environment, line):
     return set(sorted(sources)[:8]), set(sorted(assignments)[:8])
 
 
-def javascript(source, budget):
-    result = {'occurrences': [], 'errors': [], 'candidate': bool(JS_CALL.search(source))}
+def javascript(source, budget, *, source_pattern=REQUEST, sink_pattern=JS_CALL,
+               sink_kind=None, argument_selector=None):
+    """Shared bounded assignment walk; internal consumers select actual sink arguments."""
+    result = {'occurrences': [], 'errors': [], 'candidate': bool(sink_pattern.search(source))}
     if not result['candidate']:
         return result
     size = len(source.encode())
@@ -162,7 +164,7 @@ def javascript(source, budget):
         matches = [scope for scope in scopes if scope['body_start'] <= position < scope['end']]
         return min(matches, key=lambda row: row['end'] - row['start'])['body_start'] if matches else 0
     events = [(match.start(), 'assign', match) for match in ASSIGNMENT.finditer(masked)]
-    events += [(match.start(), 'sink', match) for match in JS_CALL.finditer(masked)]
+    events += [(match.start(), 'sink', match) for match in sink_pattern.finditer(masked)]
     if len(events) > MAX_EVENTS or budget['events'] + len(events) > MAX_TOTAL_EVENTS:
         result['errors'].append({'kind': 'LimitReached', 'detail': 'JS assignment event budget exceeded'})
         return result
@@ -173,7 +175,10 @@ def javascript(source, budget):
         line = source.count('\n', 0, position) + 1
         if kind == 'assign':
             end = expression_end(code, match.end())
-            value = _value(code[match.end():end], env, line)
+            if end - match.end() >= MAX_EXPRESSION:
+                result['errors'].append({'kind': 'LimitReached', 'detail': 'JS assignment expression budget exceeded'})
+                break
+            value = _value(code[match.end():end], env, line, source_pattern)
             prior = env.get(match[1])
             prefix = masked[max(0, position - 128):position].rstrip()
             conditional = not prefix or prefix[-1] not in ';{}'
@@ -193,9 +198,10 @@ def javascript(source, budget):
         arguments = split_arguments(expression[expression.find('(') + 1:-1])
         if not arguments:
             continue
-        value = _value(arguments[0], env, line)
+        argument = argument_selector(expression, arguments) if argument_selector else arguments[0]
+        value = _value(argument, env, line, source_pattern)
         if value[0]:
-            sink_class = 'sql-injection' if re.search(r'\.(?:query|execute|raw)\s*\(', match[0]) else 'command-injection'
+            sink_class = sink_kind or ('sql-injection' if re.search(r'\.(?:query|execute|raw)\s*\(', match[0]) else 'command-injection')
             result['occurrences'].append({'offset': position, 'end': position + len(expression), 'line': line,
                 'legacy_offset': position + expression.find('.') if sink_class == 'sql-injection' else position,
                 'sink_class': sink_class, 'source_lines': sorted(value[0])[:8], 'assignment_lines': sorted(value[1])[:8]})

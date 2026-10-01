@@ -128,6 +128,91 @@ class RetainedPrecisionTests(unittest.TestCase):
         self.assertIn('upload-key-from-filename', self.kinds(UploadSecurityExtractor,
                       'app.post("/upload",(req,res)=>{store({Key:req.file.originalname});});'))
 
+    def test_filename_binding_requires_storage_not_a_variable_name(self):
+        for middle, unsafe in (
+                ('const filename=req.file.originalname;logger.info(filename);store({Key:randomUUID()});', False),
+                ('const chosen=req.file.originalname;store({Key:chosen});', True),
+                ('let chosen=req.file.originalname;chosen=randomUUID();store({Key:chosen});', False),
+                ('let chosen=req.file.originalname;if(flag){chosen=randomUUID();}store({Key:chosen});', True),
+                ('function unused(){const chosen=req.file.originalname;}store({Key:chosen});', False),
+                ('const chosen=req.file.originalname;store({Key:randomUUID(),Body:chosen});', False),
+                ('const chosen=req.file.originalname;fs.writeFile(chosen,req.file.buffer);', True)):
+            with self.subTest(middle=middle):
+                source = 'app.post("/upload",(req,res)=>{' + middle + '});'
+                self.assertEqual('upload-key-from-filename' in self.kinds(UploadSecurityExtractor, source), unsafe)
+
+    def test_pii_projector_keys_and_implementation_must_be_unambiguous(self):
+        for projection, unsafe in (
+                ('const safe=pick(customer,["id"]);', False),
+                ('const safe=pick(customer,[field]);', True),
+                ('const safe=pick(customer,["id",...fields]);', True),
+                ('const safe=pick(customer,["id"]) && customer;', True),
+                ('const safe=omit(customer,["email","phone"]) || customer;', True),
+                ('function omit(customer,keys){return customer;}const safe=omit(customer,["email","phone"]);', True),
+                ('omit=passthrough;const safe=omit(customer,["email","phone"]);', True),
+                ('_.pick=passthrough;const safe=_.pick(customer,["id"]);', True),
+                ('const safe=omit(customer,["email","phone"]);', False)):
+            with self.subTest(projection=projection):
+                source = 'app.get("/x",(req,res)=>{const customer=db.get("email phone");' + projection + 'res.json(safe);});'
+                self.assertEqual('raw-entity-pii-response' in self.kinds(PiiExposureExtractor, source), unsafe)
+
+    def test_filename_assignment_expression_budget_is_an_execution_gap(self):
+        source = 'const chosen=' + ' '*9000 + 'req.file.originalname;store({Key:chosen});'
+        result = self.scan(UploadSecurityExtractor, source)
+        self.assertTrue(result.get('error'))
+        self.assertTrue(result['filename_analysis']['errors'])
+
+    def test_static_fstring_and_dynamic_interpolation_are_distinct(self):
+        for argument, count in (('f"self"', 0), ('rf"self"', 0), ('f"request.args"', 0),
+                                ('f"{{self}}"', 0), ('f"{request.args[\'pattern\']}"', 1)):
+            with self.subTest(argument=argument):
+                out = self.scan(SurfaceExtractor, 'import re\npattern=re.compile(' + argument + ')\n', '.py')
+                self.assertEqual(out['sink_counts'].get('redos', 0), count)
+
+    def test_nested_try_security_failure_belongs_to_its_own_catch(self):
+        deny = ('async function moderate(text){try{try{return await checkContent(text);}'
+                'catch(e){return {allowed:false};}otherWork();}catch(e){return {allowed:true};}}')
+        self.assertNotIn('llm-guardrail-fail-open', self.kinds(LlmSecurityExtractor, deny))
+        self.assertIn('llm-guardrail-fail-open', self.kinds(LlmSecurityExtractor,
+                      deny.replace('return {allowed:false}', 'return {allowed:true}')))
+        self.assertIn('llm-guardrail-fail-open', self.kinds(LlmSecurityExtractor,
+                      deny.replace('otherWork()', 'checkContent(text)')))
+
+    def test_actual_cli_persists_operation_bound_precision_facts_and_ledger(self):
+        import json
+        import os
+        import subprocess
+        with tempfile.TemporaryDirectory() as td:
+            owner = Path(td)
+            target = owner / 'target'
+            target.mkdir()
+            (target / 'app.js').write_text(
+                'app.post("/upload",(req,res)=>{const chosen=req.file.originalname;store({Key:chosen});});'
+                'app.get("/pii",(req,res)=>{const customer=db.get("email phone");const safe=pick(customer,[field]);res.json(safe);});'
+                'async function moderate(text){try{return await checkContent(text);}catch(e){return {allowed:true};}}')
+            (target / 'patterns.py').write_text('from flask import request\nimport re\n'
+                'inert=re.compile(f"self")\npattern=re.compile(f"{request.args[\'pattern\']}")\n')
+            out = owner / 'out'
+            env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1] / 'src'),
+                       PATH=str(owner / 'no-tools'), WEBSEC_CALIBRATION_HOME=str(owner / 'calibration'),
+                       WEBSEC_UPDATE_HOME=str(owner / 'release-metadata'))
+            result = subprocess.run([sys.executable, '-m', 'websec_validator.cli', 'run', str(target),
+                '--out', str(out), '--format', 'json', '--fail-on', 'medium', '--require-complete'],
+                cwd=owner, env=env, capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            envelope = json.loads(result.stdout)
+            run = out / 'runs' / envelope['generated']
+            facts = json.loads((run / 'FACTS.json').read_text())
+            self.assertTrue(facts['coverage']['execution_complete'])
+            self.assertEqual(facts['surface']['sink_counts']['redos'], 1)
+            self.assertTrue(facts['upload_security']['filename_analysis']['occurrences'])
+            for dimension, kind in (('upload_security', 'upload-key-from-filename'),
+                                    ('pii_exposure', 'raw-entity-pii-response'),
+                                    ('llm_security', 'llm-guardrail-fail-open')):
+                self.assertTrue(any(row['kind'] == kind for row in facts[dimension]['findings']))
+            ledger = json.loads((run / 'findings-ledger.json').read_text())
+            self.assertTrue(ledger['findings'])
+
     def test_svg_rejection_prose_vs_actual_acceptance(self):
         reject = 'app.post("/upload",(req,res)=>{if(req.file.mimetype==="image/svg+xml") return res.status(415).end();store(req.file.buffer);});'
         self.assertNotIn('upload-accepts-svg', self.kinds(UploadSecurityExtractor, reject))

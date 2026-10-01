@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — operation-bound retained precision
+
+- Follow supported local client-filename assignments into actual storage path/key arguments,
+  rather than interpreting a variable named `filename` as storage. Preserve overwrite, branch,
+  scope and object-body distinctions; disclose expression/source/work budgets as execution gaps.
+  Source receiver evidence is not proof of executable storage or exploitation.
+- Require literal PII projection keys and the entire supported pick/omit assignment expression.
+  Unknown keys, spreads, visible helper replacement and raw-entity fallbacks cannot receive credit.
+- Distinguish static Python f-strings from interpolated regular-expression arguments, and keep
+  nested guard calls associated with their own catches instead of an unrelated outer allow catch.
+  Complex rethrow/finally flow remains unverified rather than certified safe.
+
 ### Integration validation
 
 - Execute an opt-in disposable pre-commit lifecycle: real staged commit rejection, clean-index
