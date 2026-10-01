@@ -28,6 +28,7 @@ from .routes import RoutesExtractor
 from .schemas import SchemasExtractor
 from .stack import StackExtractor
 from .surface import SurfaceExtractor
+from .syntax import with_derived_text_cache
 from .tenant import TenantExtractor
 from .transport_security import TransportSecurityExtractor
 from .upload_security import UploadSecurityExtractor
@@ -63,6 +64,7 @@ REGISTRY: list[Extractor] = [
 ]
 
 
+@with_derived_text_cache
 def run_all(root: Path, version: str, excludes: list | None = None,
             include_fixtures: bool = False, *,
             expected_root: tuple[Path, int, int] | None = None,

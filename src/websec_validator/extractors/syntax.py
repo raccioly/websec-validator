@@ -10,9 +10,74 @@ import hashlib
 import io
 import re
 import tokenize
+import sys
+from collections import OrderedDict
+from contextlib import contextmanager
+from contextvars import ContextVar
+from functools import wraps
 from pathlib import Path
 
 MAX_EXPRESSION = 8192
+MAX_DERIVED_TEXT_BYTES = 32 * 1024 * 1024
+MAX_DERIVED_TEXT_ENTRIES = 1024
+
+
+class _TextCache:
+    """Bound retained strings separately from the reader's raw-source budget."""
+
+    def __init__(self, max_bytes: int, max_entries: int):
+        self.max_bytes = max(0, max_bytes)
+        self.max_entries = max(0, max_entries)
+        self.entries = OrderedDict()
+        self.retained_bytes = 0
+
+    def transform(self, text: str, suffix: str) -> str:
+        key = (text, suffix)
+        cached = self.entries.get(key)
+        if cached is not None:
+            self.entries.move_to_end(key)
+            return cached[0]
+        result = _without_comments(text, suffix)
+        # Conservatively count shared strings for every entry. Container overhead
+        # is additionally bounded by max_entries; this is not a process RSS cap.
+        size = sum(sys.getsizeof(value) for value in (text, suffix, result, key))
+        if not self.max_entries or size > self.max_bytes:
+            return result  # admission failure changes speed, never analysis
+        while self.entries and (len(self.entries) >= self.max_entries
+                                or self.retained_bytes + size > self.max_bytes):
+            _, (_, removed_size) = self.entries.popitem(last=False)
+            self.retained_bytes -= removed_size
+        self.entries[key] = (result, size)
+        self.retained_bytes += size
+        return result
+
+    def clear(self) -> None:
+        self.entries.clear()
+        self.retained_bytes = 0
+
+
+_TEXT_CACHE: ContextVar[_TextCache | None] = ContextVar('websec_derived_text_cache', default=None)
+
+
+@contextmanager
+def derived_text_cache(*, max_bytes: int | None = None, max_entries: int | None = None):
+    """Own pure text reuse for one scan; nested scans and threads get distinct caches."""
+    cache = _TextCache(MAX_DERIVED_TEXT_BYTES if max_bytes is None else max_bytes,
+                       MAX_DERIVED_TEXT_ENTRIES if max_entries is None else max_entries)
+    token = _TEXT_CACHE.set(cache)
+    try:
+        yield cache
+    finally:
+        _TEXT_CACHE.reset(token)
+        cache.clear()
+
+
+def with_derived_text_cache(function):
+    @wraps(function)
+    def scan(*args, **kwargs):
+        with derived_text_cache():
+            return function(*args, **kwargs)
+    return scan
 
 # `<pre>` and `<code>` hold source that is DISPLAYED, not executed. A tutorial page that documents
 # `eval(req.body.preTax)` under the caption "Insecure use of eval() to parse inputs" is teaching
@@ -21,6 +86,7 @@ MAX_EXPRESSION = 8192
 # never for `.js`/`.ts`, where the same characters would be code.
 _HTML_SUFFIXES = {".html", ".htm", ".jinja", ".jinja2", ".j2", ".vue", ".svelte"}
 _DISPLAYED_SOURCE = re.compile(r"<(pre|code)\b[^>]*>.*?</\1\s*>", re.I | re.S)
+_COMMENT_OR_QUOTE = re.compile(r'''["'`]|//|/\*|<!--''')
 
 
 def _mask_displayed_source(text: str) -> str:
@@ -34,8 +100,18 @@ def _mask_displayed_source(text: str) -> str:
 
 
 def without_comments(text: str, suffix: str = "") -> str:
+    cache = _TEXT_CACHE.get()
+    return cache.transform(text, suffix) if cache is not None else _without_comments(text, suffix)
+
+
+def _without_comments(text: str, suffix: str = "") -> str:
     if suffix in _HTML_SUFFIXES:
         text = _mask_displayed_source(text)
+    # Necessary markers only: their absence proves this transform has no work.
+    # Literals containing a marker still take the original boundary-aware path.
+    if (('#' not in text) if suffix == '.py'
+            else not any(marker in text for marker in ('//', '/*', '<!--'))):
+        return text
     chars = list(text)
     if suffix == ".py":
         offsets = [0]
@@ -76,7 +152,12 @@ def without_comments(text: str, suffix: str = "") -> str:
                 if chars[j] != "\n":
                     chars[j] = " "
         else:
-            i += 1
+            # Search ordinary spans in the stdlib engine instead of revisiting
+            # every character in Python; quote/comment handling is unchanged.
+            marker = _COMMENT_OR_QUOTE.search(text, i)
+            if marker is None:
+                break
+            i = marker.start()
     return "".join(chars)
 
 
