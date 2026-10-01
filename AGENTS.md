@@ -32,7 +32,7 @@ pass. Pure-Python, **stdlib only, zero runtime dependencies**; it shells out to 
 | Command | Purpose |
 |---------|---------|
 | `pipx install --editable .` | Install the CLI from source (or `pip install -e .` in a 3.11+ venv) |
-| `python3 -m unittest discover -s tests` | Run the suite (1759 tests, stdlib only, no public network) |
+| `python3 -m unittest discover -s tests` | Run the suite (1769 tests, stdlib only, no public network) |
 | `python3 scripts/build-brief.py --check` | Verify the committed HTML/PDF/renderer binding offline; rebuild and review all eight pages after source edits |
 | `websec run ./target` | Full pipeline → `FACTS.json` + `AGENT-BRIEFING.md` + `probes/` |
 | `websec doctor ./target` | Show which optional scanners are installed |
@@ -77,7 +77,7 @@ content instead of overwriting the name-guard.
 
 1. **Before any work**: read `docs-canonical/` and run `docguard guard` to see the compliance state.
 2. **After changing code or docs**: re-run `docguard guard`; keep the numbers (22 extractors, 17 sink
-   classes, 11 scanner entries, 1759 tests, dated 10/10 proof (not vulnerability recall)) consistent across every doc — DocGuard's metrics-consistency
+   classes, 11 scanner entries, 1769 tests, dated 10/10 proof (not vulnerability recall)) consistent across every doc — DocGuard's metrics-consistency
    validator checks only configured matching statements; historical snapshots stay dated. A
    `no-matches` result is not evidence these numbers were checked.
 3. **Update `CHANGELOG.md`** for any user-visible change.

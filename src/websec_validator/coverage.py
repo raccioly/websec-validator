@@ -162,7 +162,12 @@ def thin_languages(cov: dict) -> set:
 
 def add_routes(facts: dict) -> None:
     """Preserve route-parser scope uncertainty separately from execution loss."""
-    analysis = (facts.get("routes") or {}).get("django") or {}
+    for engine in ('django', 'connexion'):
+        _add_route_analysis(facts, engine)
+
+
+def _add_route_analysis(facts: dict, engine: str) -> None:
+    analysis = (facts.get("routes") or {}).get(engine) or {}
     if not analysis:
         return
     if (not isinstance(analysis, dict)
@@ -171,17 +176,17 @@ def add_routes(facts: dict) -> None:
                    for key in ("routes", "candidates", "gaps", "errors"))):
         add_gap(facts, "route_error", "Route discovery returned malformed diagnostics")
         return
-    facts["coverage"]["route_discovery"] = {"django": {
+    facts["coverage"].setdefault("route_discovery", {})[engine] = {
         "routes": len(analysis.get("routes", [])), "candidates": len(analysis.get("candidates", [])),
         "gaps": analysis.get("gaps", []), "errors": analysis.get("errors", []),
-        "limits": analysis.get("limits", {}), "diagnostics_truncated": analysis.get("diagnostics_truncated", 0)}}
+        "limits": analysis.get("limits", {}), "diagnostics_truncated": analysis.get("diagnostics_truncated", 0)}
     for row in analysis.get("gaps", []):
         add_gap(facts, "route_scope", f"{row.get('file', '?')}: {row.get('kind', '?')}: {row.get('detail', '')}",
                 execution=False)
     for row in analysis.get("errors", []):
         add_gap(facts, "route_error", f"{row.get('file', '?')}: {row.get('kind', '?')}: {row.get('detail', '')}")
     if analysis.get("diagnostics_truncated"):
-        add_gap(facts, "route_diagnostics_truncated", "Django diagnostics exceeded the reporting budget")
+        add_gap(facts, "route_diagnostics_truncated", f"{engine} diagnostics exceeded the reporting budget")
 
 
 def add_scanners(facts: dict, detected: dict, results: list, unified: dict | None, *,

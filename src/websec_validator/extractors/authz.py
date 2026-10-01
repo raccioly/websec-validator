@@ -141,10 +141,10 @@ def route_middleware_guarded(text: str, method: str, path: str) -> bool:
 
 
 def _spec_handler(ctx: RepoContext, spec: Path, endpoint: dict) -> tuple:
-    """→ (implementing_file | "", declares_security | None) for one spec-derived endpoint.
+    """→ (implementing_file | "", declares_security | None, function_name) for one spec operation.
 
     The operation map is parsed once per spec and cached on the context. A miss returns
-    ("", None), which the caller must treat as UNANALYSED — never as unguarded.
+    ("", None, ""), which the caller must treat as UNANALYSED — never as unguarded.
     """
     cache = getattr(ctx, "_spec_operation_cache", None)
     if cache is None:
@@ -162,16 +162,16 @@ def _spec_handler(ctx: RepoContext, spec: Path, endpoint: dict) -> tuple:
             cache[key] = {}
     operations = cache[key]
     if not operations:
-        return "", None
+        return "", None, ""
     entry = operations.get((endpoint.get("path", ""), str(endpoint.get("method", "")).upper()))
     if entry is None:
-        return "", None
+        return "", None, ""
     resolved = ""
     if entry.get("operation_id"):
         from .. import openapi as _openapi
         try:
             resolved = _openapi.resolve_operation_file(
-                entry["operation_id"], [ctx.rel(p) for p in ctx._files])
+                entry["operation_id"], [ctx.rel(p) for p in ctx.code_files])
         except Exception:
             resolved = ""
     function_name = entry["operation_id"].replace("/", ".").split(".")[-1] if entry.get("operation_id") else ""
@@ -746,6 +746,7 @@ class AuthzExtractor(Extractor):
         protected = no_guard = unknown = 0
         no_guard_writes, egs = [], []
         fastapi_by_file = {}
+        connexion_by_file = {}
 
         for e in endpoints:
             cp = e.get("code_path", "")
@@ -755,14 +756,23 @@ class AuthzExtractor(Extractor):
             # implements it; failing that, use the contract's own `security:`; failing both, leave
             # the route UNANALYSED — a file we never read cannot be said to lack a guard.
             spec_security, operation_fn = None, ""
-            if cp and _is_spec_derived(str(cp).replace("\\", "/")):
+            connexion = e.get('source') == 'connexion-registration'
+            if connexion:
+                cp, _declared_security, operation_fn = _spec_handler(ctx, Path(e['spec_path']),
+                    dict(e, path=e.get('contract_path', '')))
+            elif cp and _is_spec_derived(str(cp).replace("\\", "/")):
                 resolved, spec_security, operation_fn = _spec_handler(ctx, Path(cp), e)
                 if resolved:
                     cp = resolved
             text = ctx.text(Path(cp)) if cp else ""
             # Narrow to the named operation when the spec identified one: nine operations can share
             # a file and disagree about auth, and crediting the file would clear the unguarded ones.
-            scoped = operation_body(text, operation_fn, Path(cp).suffix.lower()) if operation_fn else ""
+            scoped = operation_body(text, operation_fn, Path(cp).suffix.lower()) if operation_fn and not connexion else ""
+            if connexion:
+                from .connexion_routes import operation_bodies
+                if cp not in connexion_by_file:
+                    connexion_by_file[cp] = operation_bodies(text) if Path(cp).suffix == '.py' else {}
+                text = scoped = connexion_by_file[cp].get(operation_fn, '')
             guard_text = _without_hooks(scoped or text)
             _collect_roles(text, roles)
             relcp = ctx.rel(Path(cp)) if cp else ""
@@ -777,9 +787,10 @@ class AuthzExtractor(Extractor):
             # a matcher only counts as a guard when the middleware actually does auth — a
             # non-auth middleware.ts (i18n/headers) must NOT mark routes protected. Mount coverage,
             # the project's custom auth helper, and a one-hop delegated guard also count.
-            guarded = (bool(guard_text and (GUARD.search(guard_text) or CUSTOM_GUARD.search(guard_text)
+            local_guard = bool(guard_text and (GUARD.search(guard_text) or CUSTOM_GUARD.search(guard_text)
                                       or PREHANDLER_AUTH.search(guard_text) or SECRET_BEARER_GUARD.search(guard_text)
                                       or (INLINE_AUTHN.search(guard_text) and AUTHN_REJECT.search(guard_text))))
+            guarded = (local_guard
                        or (alias_call is not None and bool(guard_text) and bool(alias_call.search(guard_text)))
                        or _fastify_covers(text, e, (facts.get("stack") or {}).get("frameworks", []))
                        or (relcp and relcp in mount_covered)
@@ -791,6 +802,8 @@ class AuthzExtractor(Extractor):
                 # Dependency names/imports or an enforcing sibling never guard
                 # this endpoint. Unsupported composition remains explicitly unverified.
                 guarded = fastapi['guarded']
+            if connexion:
+                guarded = local_guard  # registration files/Next mounts/security declarations cannot guard this operation
             # The contract's declaration stands in when no implementing file was located: an
             # operation carrying `security:` is guarded by the only evidence that exists. It is
             # never used to REFUTE code analysis — if we read a handler, that reading wins.
@@ -800,6 +813,8 @@ class AuthzExtractor(Extractor):
             egs.append({"method": e.get("method"), "path": e.get("path"), "code_path": relcp,
                         "guarded": bool(guarded), "analyzed": analyzed,
                         "unverified_controls": ([fastapi['reason']] if fastapi and fastapi['reason'] else [])
+                            + (["Connexion operation handler is unresolved; registration is not authorization evidence"]
+                               if connexion and not text else [])
                             + (["Fastify hook presence does not establish this route's instance/registration scope"]
                                if fastify_global_auth and not guarded else []),
                         "public_hint": bool(PUBLIC_HINT.search(e.get("path", "")))})
@@ -829,6 +844,8 @@ class AuthzExtractor(Extractor):
             if unsafe_guards:
                 call = re.compile(r"\b(?:" + "|".join(re.escape(g) for g in sorted(unsafe_guards)) + r")\s*\(")
                 for e in endpoints:
+                    if e.get('source') == 'connexion-registration':
+                        continue  # registration-file decoder names are not operation evidence
                     cp = e.get("code_path", "")
                     t = ctx.text(Path(cp)) if cp else ""
                     if t and call.search(t):

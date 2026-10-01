@@ -132,13 +132,20 @@ completeness gating. None are Python imports — there are zero runtime package 
 
 | Tool | Purpose | Fallback |
 |------|---------|----------|
-| OWASP Noir | route engine (50+ frameworks) | built-in regex route extractor |
+| OWASP Noir | route engine (50+ frameworks) | built-in regex/AST route extractors |
 | Gitleaks | committed-secret detection | scanner reported missing |
 | Trivy | dependency CVEs | scanner reported missing |
 | Semgrep / OpenGrep | code-level SAST (ships 2 bundled rules) | scanner reported missing |
 | Checkov | IaC misconfiguration | scanner reported missing |
 | Prowler | cloud-account posture | scanner reported missing |
 | Docker | reproducible all-scanners-bundled run | run natively with whatever is installed |
+
+Connexion's bounded AST adapter maps literal top-level, import-bound local JSON `add_api`
+registrations even without Noir. It keeps source registration and spec provenance separate from
+the exact operation handler used for authorization hints. An unregistered specification is
+documentation, not a probe target. YAML, templates, dynamic composition and unknown handler bindings
+remain review gaps; source/node/route-budget failures enter execution coverage. No target module
+is imported or executed, and source evidence is not deployed-handler or auth enforcement proof.
 
 ## Configuration Files
 

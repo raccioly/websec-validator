@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Require visible import-bound Connexion source registration before a local JSON OpenAPI contract
+  supplies route targets; unregistered Noir spec documents stay informational. Preserve registration
+  and specification provenance and resolve authorization only against the exact operation body,
+  never the registering file or a `security` declaration. Disclose YAML/dynamic/escaping/malformed
+  contracts as uncertainty and bounded-parser exhaustion as an execution gap.
+
 - Preserve the bounded MCP HTTP overload 503 response when normal clients send headers and body
   separately. Half-close first, then discard at most 8 KiB within 50 ms; keep the four-worker,
   authentication and root-selection boundaries unchanged. Slow/over-cap requests remain best-effort.

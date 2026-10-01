@@ -87,3 +87,11 @@ FastAPI endpoint-local dependencies and JWT/literal/PII/fail-open pairs are impl
 actual subprocess CLI/ledger contract and independent negative-control review. T005/T006 remain
 open for tRPC; T014/T015 remain open for principal/hash-purpose cases. Upload storage provenance
 and the remaining full-task acceptance checks are not marked complete by these narrower fixes.
+
+### Connexion registration checkpoint
+
+Ten new tests cover literal JSON registrations, exact operation handlers, invalid ordering,
+documentation-only Noir rows, malformed shapes, private/escaping paths, execution budgets and an
+actual subprocess CLI ledger. Independent review confirms its four negative controls fixed.
+T007/T008 remain open for deliberately unsupported YAML/dynamic composition: partial parsing is
+disclosed and does not automatically manufacture deployed routes or guard evidence.

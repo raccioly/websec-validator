@@ -84,6 +84,22 @@ Independent review of the actual implementation found no defect in this bounded 
 57 automation tests, compileall and offline brief artifact binding pass. These are local regression
 results, not a claim of broad MCP availability or throughput under arbitrary load.
 
+## Connexion registration evidence
+
+Ten new regressions map import-bound top-level literal local JSON contracts independently of Noir,
+preserving `code_path` (registration), `spec_path` and original contract path across base-path mounting.
+Unregistered Noir spec rows never become write targets. Authorization reads only the exact immutable
+top-level operation body; unrelated registering-file guards and declared `security` cannot confer
+protection. Unresolved handlers remain unanalysed with explicit reasons, not certified safe.
+
+Paired malformed/declaration-order/private/escaping controls and an actual subprocess CLI artifact
+test pass. Parser execution budgets enter coverage; supported-source uncertainty remains separate.
+Independent review found and confirmed fixes for four integration/input gaps. Full checkpoint passes
+1769 application tests. YAML, dynamic options, templates and cross-module composition remain manual
+review gaps, not claimed completed acceptance or a new corpus measurement. This follows the
+[Connexion registration API](https://connexion.readthedocs.io/en/stable/quickstart.html); source
+registration alone does not establish deployed handlers or enforced authorization.
+
 The local Docker client has no available daemon; pre-commit is absent at baseline. Neither a
 configuration-shaped test nor an installed client establishes an executed integration lifecycle.
 Authored paired fixtures do not measure independent production precision. The separate manual
