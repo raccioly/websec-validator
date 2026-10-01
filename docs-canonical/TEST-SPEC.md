@@ -2,7 +2,7 @@
 
 <!-- docguard:version 0.9.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-09-16 -->
+<!-- docguard:last-reviewed 2026-09-30 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — the suite deliberately uses no third-party runner, no network, and no running app; the negations describe real, intentional test constraints. -->
 
@@ -13,6 +13,8 @@ The suite uses stdlib `unittest` with synthetic fixtures and local loopback serv
 third-party runner, public network, external scanner, or running target app. Release CI also builds
 and smoke-tests the installed wheel. The 2026-09-16 source phase passed **1241 application tests** on
 Python 3.14.7 (33.393s) and Python 3.12.13 (33.955s), plus **41 repository automation tests**.
+The reviewed 2026-09-30 documentation snapshot passed **1713 application tests** on Python 3.12,
+plus **57 repository automation tests**. These are dated execution records, not future suite floors.
 CI enforces an application-test floor derived at run time from the base commit's own suite, so no floor constant is stored; a drop requires a `Test-Removal:` commit trailer. The package
 has **22 registered extractors**, **17 sink classes**, **11 scanner entries** and **9 named profiles**.
 The eleventh scanner entry is `gitleaks-dir`: gitleaks runs as two disjoint passes, git history and

@@ -21,7 +21,8 @@ from __future__ import annotations
 import re
 
 from .base import Extractor, RepoContext, is_test_file
-from .syntax import expression_end, in_literal, js_functions, without_comments
+from .syntax import (call_expression, expression_end, in_literal, js_functions,
+                     object_properties, split_arguments, without_comments)
 
 # Exact metadata suffixes are not password bytes. Hashes/tokens in general remain
 # credential-shaped; a broad suffix exemption would hide double-hashed passwords.
@@ -58,6 +59,25 @@ _CREDENTIAL_NAME = re.compile(
     r"\b[\w$]*(?:authorization|signature|hmac|token|password|passwd|passphrase|secret|api[_-]?key)[\w$]*\b"
     r"|\bexpectedAuth\b", re.I)
 MAX_COMPARISON_OPERAND = 1024
+
+
+def _jwt_without_algorithms(source: str) -> bool:
+    """Only this invocation's direct nonempty literal allowlist is supported evidence."""
+    for match in JWT_VERIFY.finditer(source):
+        if in_literal(source, match.start()):
+            continue
+        call = call_expression(source, match.start())
+        arguments = split_arguments(call[call.find('(') + 1:-1])
+        # jose jwtVerify(token,key,options), jsonwebtoken verify(token,key,options).
+        options = object_properties(arguments[2]) if len(arguments) >= 3 and call.endswith(')') else None
+        value = (options or {}).get('algorithms', '')
+        if not value.startswith('[') or not value.endswith(']'):
+            return True
+        algorithms = split_arguments(value[1:-1])
+        if not algorithms or not all(re.fullmatch(r'''(['"])[A-Za-z][A-Za-z0-9_-]*\1''', item)
+                                     and item[1:-1].lower() != 'none' for item in algorithms):
+            return True
+    return False
 
 
 def _comparison_operand(source: str, position: int, direction: int) -> tuple[str, bool]:
@@ -292,7 +312,7 @@ class CryptoUsageExtractor(Extractor):
                     "(SHA-256/SHA-1/MD5). These are GPU-crackable at billions/sec and rainbow-tableable "
                     "with no per-credential salt (CWE-916/759). Use a memory-hard KDF — argon2id / scrypt "
                     "/ bcrypt — with a random per-password salt. Never commit credential material to source.")
-            if JWT_VERIFY.search(text) and not JWT_ALGS.search(text):
+            if _jwt_without_algorithms(source):
                 add("LOW", "jwt-verify-no-algorithms", "jwt-verify-options", rel,
                     "A JWT verify call doesn't pin an `algorithms` allowlist. Safe TODAY only if the key is "
                     "symmetric (the library constrains it to HMAC) — but it silently re-opens alg-confusion / "

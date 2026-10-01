@@ -7,6 +7,15 @@
 
 ## Active Drift
 
+### Retained acceptance reconciliation — 2026-09-30
+
+Full-document review corrected broad confidence/dynamic-status and DocGuard coverage statements.
+Spec 002's shipped workstream header did not establish all acceptance conditions: every-row label
+review, scoring on every measurable write and original language fixture evidence remain tasks.
+The reviewed registry now records approved/in-progress, rather than draft/planned or falsely
+verified. Original exit-2 proposals stay dated; current reviewed contracts remain run exit 3 and
+gate missed-path exit 1. See `docs/security-review/backlog-reconciliation.md` for evidence.
+
 ### Resolved publication gap — technical brief, 2026-09-30 (bug-363)
 
 The published PDF retained the v0.18.0 snapshot while the HTML acquired the v0.20.0 MCP tool.

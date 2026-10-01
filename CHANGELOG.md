@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Bind supported FastAPI dependency evidence to each endpoint, never to the presence of
+  `Depends` or a guarded sibling. No-op/imported/mutated/wildcard-bound helpers, disabled JWT
+  verification and fixed credentials remain unverified. Analysis is bounded and cached per file.
+- Inspect JWT algorithm options per invocation; nested, unknown, spread, duplicate, empty and
+  `none` options cannot suppress an unsafe neighbor. Ignore inert filename-key and regex/error
+  examples; retain executable upload acceptance and actual security-check fail-open branches.
+- Require removal of every known PII field using literal keys before crediting supported rest/omit
+  projections; partial and computed removal retain review leads. Primitive boolean projections
+  are not raw entity responses. Preserve the original partial-omit unsafe input as a regression.
+
 ### Documentation
+
+- Review canonical and agent contracts against the shipped v0.20.0 source; correct broad confidence,
+  dynamic-status and DocGuard-coverage claims while preserving dated measurements. Reconcile the
+  retained backlog against independent source reproductions; Spec Kit planning/task artifacts now
+  distinguish shipped controls from uncovered cases rather than equating closed PRs with delivery.
 
 - Refresh the eight-page technical brief, PDF and landing page for the reviewed v0.20.0 snapshot,
   including consent-driven release checks, hardened probe transports and incomplete-gate behavior.

@@ -43,9 +43,14 @@ class PiiProjectionTests(unittest.TestCase):
         self.assertEqual(self.pii("const {email,phone,ssn,...safe}=customer;", "safe"), [])
 
     def test_omit_of_pii_fields_is_a_projection(self):
-        for call in ("omit(customer,['email','phone','ssn'])", "_.omit(customer,['email','ssn'])"):
+        for call in ("omit(customer,['email','phone','ssn'])", "_.omit(customer,['email','phone','ssn'])"):
             with self.subTest(call=call):
                 self.assertEqual(self.pii(f"const safe={call};", "safe"), [])
+
+    def test_partial_omit_must_not_hide_the_remaining_phone(self):
+        # The old purported safe _.omit control removed email/ssn but retained
+        # FETCH's phone field. Correct the fixture and retain that input as unsafe.
+        self.assertTrue(self.pii("const safe=_.omit(customer,['email','ssn']);", "safe"))
 
     def test_pick_of_only_non_pii_fields_is_a_projection(self):
         for call in ("pick(customer,['id','name'])", "_.pick(customer,['id','createdAt'])"):

@@ -344,6 +344,14 @@ class SurfaceExtractor(Extractor):
                 seen = {}
                 for start, expression, rhs in candidates:
                     control = "none observed"
+                    if cls in {'redos', 'error-disclosure'} and in_literal(text, start):
+                        continue
+                    if cls == 'redos' and _p.suffix.lower() == '.py':
+                        args = split_arguments(expression[expression.find('(') + 1:-1])
+                        # Inspect the argument prefix, not the closing f-quote in "self".
+                        if not args or not (re.search(_REQ_SRC, args[0])
+                                            or re.match(r'(?i)^(?:f|rf|fr)[\'"]', args[0].strip())):
+                            continue
                     if cls == "command-injection" and python_shell_safe(expression):
                         continue
                     if cls == "command-injection" and _p.suffix.lower() == ".java" and java_fixed_argv(expression):

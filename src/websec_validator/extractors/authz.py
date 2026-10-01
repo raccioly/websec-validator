@@ -26,6 +26,7 @@ from pathlib import Path
 from .base import Extractor, RepoContext, is_client_file, is_test_file
 from .profiles import service_for
 from .syntax import without_comments, expression_end, in_literal, js_functions
+from .framework_auth import fastapi_guards
 
 
 # --- Spec-first routes: find the code that actually implements the operation ------------------
@@ -744,6 +745,7 @@ class AuthzExtractor(Extractor):
         roles: set = set(mw.get("role_checks", []))
         protected = no_guard = unknown = 0
         no_guard_writes, egs = [], []
+        fastapi_by_file = {}
 
         for e in endpoints:
             cp = e.get("code_path", "")
@@ -764,6 +766,14 @@ class AuthzExtractor(Extractor):
             guard_text = _without_hooks(scoped or text)
             _collect_roles(text, roles)
             relcp = ctx.rel(Path(cp)) if cp else ""
+            fastapi = None
+            technology = str(e.get('technology', '')).lower()
+            if Path(cp).suffix.lower() == '.py' and (not technology or 'fastapi' in technology):
+                if relcp not in fastapi_by_file:
+                    fastapi_by_file[relcp] = fastapi_guards(text)
+                analysis = fastapi_by_file[relcp]
+                if analysis is not None:
+                    fastapi = analysis['routes'].get((e.get('method'), e.get('path')), analysis['unknown'])
             # a matcher only counts as a guard when the middleware actually does auth — a
             # non-auth middleware.ts (i18n/headers) must NOT mark routes protected. Mount coverage,
             # the project's custom auth helper, and a one-hop delegated guard also count.
@@ -777,6 +787,10 @@ class AuthzExtractor(Extractor):
                        or _imported_guard(relcp, text)
                        # Express per-route middleware, scoped to THIS registration.
                        or route_middleware_guarded(text, e.get("method", ""), e.get("path", "")))
+            if fastapi is not None:
+                # Dependency names/imports or an enforcing sibling never guard
+                # this endpoint. Unsupported composition remains explicitly unverified.
+                guarded = fastapi['guarded']
             # The contract's declaration stands in when no implementing file was located: an
             # operation carrying `security:` is guarded by the only evidence that exists. It is
             # never used to REFUTE code analysis — if we read a handler, that reading wins.
@@ -785,8 +799,9 @@ class AuthzExtractor(Extractor):
                 guarded, analyzed = bool(spec_security), True
             egs.append({"method": e.get("method"), "path": e.get("path"), "code_path": relcp,
                         "guarded": bool(guarded), "analyzed": analyzed,
-                        "unverified_controls": (["Fastify hook presence does not establish this route's instance/registration scope"]
-                                                if fastify_global_auth and not guarded else []),
+                        "unverified_controls": ([fastapi['reason']] if fastapi and fastapi['reason'] else [])
+                            + (["Fastify hook presence does not establish this route's instance/registration scope"]
+                               if fastify_global_auth and not guarded else []),
                         "public_hint": bool(PUBLIC_HINT.search(e.get("path", "")))})
             if guarded:
                 protected += 1

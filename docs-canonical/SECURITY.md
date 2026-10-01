@@ -2,7 +2,7 @@
 
 <!-- docguard:version 0.9.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-09-16 -->
+<!-- docguard:last-reviewed 2026-09-30 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — a security model is correctly stated as invariants (MUST NOT, never, read-only, out-of-scope); negation is the right register for safety guarantees. -->
 
@@ -91,8 +91,9 @@ the previous cache; a cache-write failure does not invalidate a successful metad
 
 ## The Dynamic-Phase Safety Model (explicit and non-negotiable)
 
-The optional `websec dynamic` phase is the only part of the tool that contacts a live system. Its
-guarantees are enforced in code (`dynamic.py`, `cli.py`):
+The optional `websec dynamic` phase and explicitly executed staged drafts contact a live TEST
+application. Staging alone does not. Their guarantees are enforced at the actual transports as
+well as the CLI (`dynamic.py`, `templates/probes/_lib.py`, `templates/probes/_lib.bash`):
 
 - **Read-only by default.** `--config` (authenticated cross-tenant BOLA) and `--unauth` (reachability)
   issue **GET-only probes**. Explicit `--config` authentication may first POST operator-supplied

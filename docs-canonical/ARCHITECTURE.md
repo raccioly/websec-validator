@@ -2,7 +2,7 @@
 
 <!-- docguard:version 0.9.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-09-16 -->
+<!-- docguard:last-reviewed 2026-09-30 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — this tool is defined by what it deliberately omits (no LLM, no server, no running app, no runtime deps, no database); the negations describe real architectural properties, not phrasing defects. -->
 
@@ -36,9 +36,9 @@ scanner runs, a calibrated findings ledger, staged probes, and the briefing/repo
 
 | Component | Responsibility | Location | Tests |
 |-----------|---------------|----------|-------|
-| CLI entry point | Arg parsing + the `run` (with `--format`/`--fail-on`/`--baseline`) / `doctor` / `dynamic` / `mcp` commands (and hidden `recon` / `proof` / `calibrate`) | `src/websec_validator/cli.py` | `tests/test_recon.py`, `tests/test_hardening.py` |
+| CLI entry point | Arg parsing for `run`, `doctor`, `dynamic`, `mcp`, `gate`, `attest`, `capabilities`, `feedback`, `demo`, `explain`, `intel`, `research`, `repair-verify`, `update-check`, `install`, `hooks`, `init`, `emit-context` and advanced `recon` / `proof` / `calibrate` | `src/websec_validator/cli.py` | `tests/test_recon.py`, `tests/test_hardening.py`, `tests/test_workbench_cli.py` |
 | Recon driver | Thin wrapper that runs the extractor registry over one repo walk | `src/websec_validator/recon.py` | `tests/test_recon.py` |
-| Extractors (22) | One focused question each → the merged `FACTS.json` (stack, routes, auth, authz, **authz_dataflow**, tenant, password_policy, surface, schemas, iac_ci, client_exposure, client_integrity, transport_security, graphql, upload_security, pii_exposure, integrations, **llm_security**, **crypto_usage**, **webext**, **agent_config**, **offline_deps**) | `src/websec_validator/extractors/` | `tests/test_recon.py`, `tests/test_pentest_regressions.py`, `tests/test_entitlement_webext.py` |
+| Extractors (22) | One focused question each → the merged `FACTS.json`; `extractors.REGISTRY` is the ordered authority (including policy consistency and offline dependencies) | `src/websec_validator/extractors/` | `tests/test_recon.py`, `tests/test_pentest_regressions.py`, `tests/test_entitlement_webext.py` |
 | Static scanners | Detect + (with `--scan`) shell out to Trivy/Gitleaks/Semgrep/Checkov/Prowler and de-duplicate across tools | `src/websec_validator/scanners.py` | `tests/test_recon.py` |
 | Findings ledger | Correlate recon + static + dynamic into one ranked, standards-cited, calibrated record set | `src/websec_validator/findings.py` | `tests/test_pentest_regressions.py` |
 | Analysis scope | Narrow what is READ AND MATCHED to named files while inventorying the eligible tree and reporting exclusions | `src/websec_validator/extractors/base.py` | `tests/test_analysis_scope.py`, `tests/test_gate_policy_and_scope.py` |

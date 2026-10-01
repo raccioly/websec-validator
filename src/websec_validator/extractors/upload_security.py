@@ -16,7 +16,8 @@ from __future__ import annotations
 import re
 
 from .base import Extractor, RepoContext, is_client_file, is_test_file
-from .syntax import call_expression, direct_call, in_literal, js_functions, split_arguments, without_comments
+from .syntax import call_expression, direct_call, expression_end, in_literal, js_functions, split_arguments, without_comments
+from .syntax import object_properties as _object_properties
 
 UPLOAD_MARK = re.compile(r"\bmulter\b|req\.files?\b|multipart/form-data|formidable|busboy|fileFilter"
                          r"|uploadMedia|presignedPost|\.upload\s*\(", re.I)
@@ -59,26 +60,6 @@ def _response_file_sites(source: str) -> list[dict]:
                       "kind": match[2] or ("pipe" if match[3] else "response"),
                       "receiver": match[1] or match[3] or ""})
     return sites
-
-
-def _object_properties(value: str, *, header_names: bool = False) -> dict | None:
-    """Read direct object fields only; ambiguous spreads/duplicates stay unknown."""
-    value = value.strip()
-    if not value.startswith("{") or not value.endswith("}"):
-        return None
-    properties = {}
-    for field in split_arguments(value[1:-1]):
-        if not field:
-            continue
-        match = re.fullmatch(r'''(?:([\w$]+)|"([^"\\]+)"|'([^'\\]+)')\s*:\s*(.+)''', field, re.S)
-        if not match:
-            return None
-        key = match[1] or match[2] or match[3]
-        key = key.lower() if header_names else key
-        if key in properties:
-            return None
-        properties[key] = match[4].strip()
-    return properties
 
 
 def _response_header_control(source: str, site: dict, scopes: list[dict]) -> bool:
@@ -191,6 +172,68 @@ def _mime_unsafe(source: str, match, scopes: list[dict]) -> bool:
     return not _byte_allowlist(scope, file_match[1] if file_match else "", source)
 
 
+def _accepts_svg(source: str) -> bool:
+    """Supported positive SVG branches, not rejection text or unused MIME examples."""
+    condition_rx = re.compile(r'''^\s*[\w$.]+\.(?:mimetype|content_type)\s*(===|==)\s*(['"])image/svg\+xml\2\s*$''')
+    acceptance = re.compile(r'\b(?:store|save|putObject|upload|writeFile)\s*\(|\b(?:cb|callback)\s*\(\s*null\s*,\s*true\b')
+    scopes = js_functions(source)
+
+    def owner(position):
+        containing = [scope for scope in scopes if scope['body_start'] <= position < scope['end']]
+        return min(containing, key=lambda row: row['end'] - row['start']) if containing else None
+
+    def positive_condition(condition, position):
+        if condition_rx.fullmatch(condition):
+            return True
+        included = re.fullmatch(r'\s*([\w$]+)\.includes\(\s*[\w$.]+\.(?:mimetype|content_type)\s*\)\s*', condition)
+        if not included:
+            return False
+        declaration = re.compile(r'\bconst\s+' + re.escape(included[1]) + r'\s*=\s*(\[[^\[\];]*\])\s*;')
+        for binding in declaration.finditer(source[:position]):
+            if in_literal(source, binding.start()) or owner(binding.start()) != owner(position):
+                continue
+            if re.search(r'\b' + re.escape(included[1]) + r'\s*(?:=|\[|\.(?:push|pop|splice|shift|unshift)\s*\()', source[binding.end():position]):
+                continue
+            values = split_arguments(binding[1][1:-1])
+            if values and all(re.fullmatch(r'''(['"])[^'"\\]*\1''', value) for value in values):
+                if 'image/svg+xml' in [value[1:-1] for value in values]:
+                    return True
+        return False
+
+    for callback in re.finditer(r'\b(?:cb|callback)\s*\(', source):
+        if in_literal(source, callback.start()):
+            continue
+        scope = owner(callback.start())
+        if not scope or not re.search(r'\bfileFilter\s*:\s*$', source[max(0, scope['start'] - 40):scope['start']]):
+            continue  # an unused nested function is not the registered file filter
+        expression = call_expression(source, callback.start())
+        args = split_arguments(expression[expression.find('(') + 1:-1])
+        if len(args) == 2 and args[0] == 'null' and positive_condition(args[1], callback.start()):
+            return True
+    for match in re.finditer(r'\bif\s*\(', source):
+        if in_literal(source, match.start()):
+            continue
+        opening = source.find('(', match.start())
+        end = expression_end(source, opening, closing=')')
+        if not positive_condition(source[opening + 1:end - 1], match.start()):
+            continue
+        start = end
+        while start < len(source) and source[start].isspace():
+            start += 1
+        if start >= len(source):
+            continue
+        stop = expression_end(source, start, closing='}') if source[start] == '{' else expression_end(source, start)
+        body = source[start + 1:stop - 1] if source[start] == '{' else source[start:stop]
+        if re.match(r'\s*(?:return\s+(?:false|null)|throw\b|return\s+\w+\.status\(\s*(?:400|403|415)\s*\))', body):
+            continue
+        nested = js_functions(body)
+        if any(not in_literal(body, site.start())
+               and not any(scope['start'] <= site.start() < scope['end'] for scope in nested)
+               for site in acceptance.finditer(body)):
+            return True
+    return False
+
+
 class UploadSecurityExtractor(Extractor):
     name = "upload_security"
     category = "sinks"
@@ -218,7 +261,7 @@ class UploadSecurityExtractor(Extractor):
                                      "detail": "Upload handler blocks a deny-list but has no positive allow-list by "
                                                "SNIFFED magic bytes — a payload that sniffs to octet-stream/unknown "
                                                "passes. Allow-list the supported types by detected content, reject the rest."})
-                if KEY_FROM_NAME.search(text):
+                if any(not in_literal(source, match.start()) for match in KEY_FROM_NAME.finditer(source)):
                     findings.append({"severity": "HIGH", "kind": "upload-key-from-filename", "file": rel,
                                      "detail": "Stored object key/path is built from the client filename "
                                                "(`originalname`) — a polyglot named `Jpg.php` with valid image magic "
@@ -231,7 +274,7 @@ class UploadSecurityExtractor(Extractor):
                                                "Content-Type, which is attacker-controlled. No supported enforcing "
                                                "byte-type allowlist was found for that file in the same handler; "
                                                "named helpers and complex controls remain unverified. Sniff the bytes instead."})
-                if ACCEPT_SVG.search(text):
+                if _accepts_svg(source):
                     findings.append({"severity": "MEDIUM", "kind": "upload-accepts-svg", "file": rel,
                                      "detail": "`image/svg+xml` is accepted — SVG can carry inline <script> and renders "
                                                "as HTML. Drop SVG from the allow-list, or sanitize + serve as attachment."})

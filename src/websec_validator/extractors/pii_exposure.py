@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 
 from .base import Extractor, RepoContext, is_test_file
-from .syntax import call_expression, in_literal, js_functions, split_arguments, without_comments
+from .syntax import call_expression, direct_call, in_literal, js_functions, split_arguments, without_comments
 
 # helper/permission DEFINITIONS (function/arrow/def) — not variable assignments to a call result
 MASK_DEF = re.compile(
@@ -53,6 +53,8 @@ def _projected_binding(code: str, position: int, argument: str, scopes: list[dic
     Aliases, spreads, mutation, nested bindings and unknown calls remain review
     leads. This proves a small projection idiom, not authorization or PII policy.
     """
+    if argument in {'true', 'false'}:
+        return True
     if not re.fullmatch(r"[A-Za-z_$][\w$]*", argument):
         return False
     containing = [scope for scope in scopes if scope["body_start"] <= position < scope["end"]]
@@ -66,17 +68,41 @@ def _projected_binding(code: str, position: int, argument: str, scopes: list[dic
     if len(re.findall(r"\b" + re.escape(name) + r"\b", body)) != 2:
         return False
     prefix = code[scope["body_start"]:position]
+    required = {name.lower() for name in PII_FIELD.findall(code)}
+
+    def removes_known_fields(fields):
+        removed = {name.lower() for name in PII_FIELD.findall(fields)}
+        return bool(required) and required <= removed
+
+    def removes_literal_keys(fields):
+        keys = []
+        for field in split_arguments(fields.rstrip().rstrip(',')):
+            match = re.fullmatch(r'''\s*(?:([\w$]+)|(['"])([\w$]+)\2)(?:\s*:\s*[\w$]+)?\s*''', field)
+            if not match:
+                return False  # computed/default/nested keys cannot prove removal
+            keys.append(match[1] or match[3])
+        return removes_known_fields(','.join(keys))
+
+    boolean = re.search(r'\bconst\s+' + name + r'\s*=\s*(?:Boolean\(\s*[\w$.]+\s*\)|!![\w$.]+|true|false)\s*;\s*$', prefix)
+    if boolean and not in_literal(prefix, boolean.start()):
+        # Local implementations/shadowed Boolean cannot certify a primitive result.
+        value = boolean[0].split('=', 1)[1].strip().rstrip(';').strip()
+        if ('Boolean(' not in value or (direct_call(value, 'Boolean', program=code)
+                and not re.search(r'\bimport\b[^;\n]*\bBoolean\b', code))):
+            return True
 
     # Destructuring rest parameter: const { email, ...safeProfile } = user;
     destruct_match = re.search(r"\b(?:const|let)\s*\{\s*([^}]*?)\.\.\.\s*" + re.escape(name) + r"\s*\}\s*=\s*[^;]+;", prefix)
     if destruct_match:
         destructured_fields = [f.strip() for f in destruct_match.group(1).split(",") if f.strip()]
-        if any(PII_FIELD.search(f) for f in destructured_fields):
+        if removes_literal_keys(','.join(destructured_fields)):
             return True
 
     # Lodash omit equivalent: const safeAdmin = omit(admin, ['ssn', 'email']);
     omit_match = re.search(r"\b(?:const|let)\s+" + re.escape(name) + r"\s*=\s*(?:_\.)?omit\s*\([^,]+,\s*\[(.*?)\]\s*\)", prefix)
-    if omit_match and bool(PII_FIELD.search(omit_match.group(1))):
+    if (omit_match and all(re.fullmatch(r'''(['"])[\w$]+\1''', item)
+                          for item in split_arguments(omit_match.group(1)))
+            and removes_known_fields(omit_match.group(1))):
         return True
 
     # Lodash pick equivalent: const safeAdmin = pick(admin, ['id', 'name']);
@@ -88,7 +114,7 @@ def _projected_binding(code: str, position: int, argument: str, scopes: list[dic
     map_destruct_match = re.search(r"\b(?:const|let)\s+" + re.escape(name) + r"\s*=\s*[\w$.]+\.map\s*\(\s*\(\s*\{\s*([^}]*?)\.\.\.\s*([A-Za-z_$][\w$]*)\s*\}\s*\)\s*=>\s*\2\s*\)\s*;", prefix)
     if map_destruct_match:
         destructured_fields = [f.strip() for f in map_destruct_match.group(1).split(",") if f.strip()]
-        if any(PII_FIELD.search(f) for f in destructured_fields):
+        if removes_literal_keys(','.join(destructured_fields)):
             return True
 
     # Map projection to object literal: const safe = arr.map(u => ({ id: u.id }))

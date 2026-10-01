@@ -239,6 +239,26 @@ def direct_options(expression: str) -> dict[str, str]:
     return options
 
 
+def object_properties(value: str, *, header_names: bool = False) -> dict | None:
+    """Read direct object fields only; ambiguous spreads/duplicates stay unknown."""
+    value = value.strip()
+    if not value.startswith('{') or not value.endswith('}'):
+        return None
+    properties = {}
+    for field in split_arguments(value[1:-1]):
+        if not field:
+            continue
+        match = re.fullmatch(r'''(?:([\w$]+)|"([^"\\]+)"|'([^'\\]+)')\s*:\s*(.+)''', field, re.S)
+        if not match:
+            return None
+        key = match[1] or match[2] or match[3]
+        key = key.lower() if header_names else key
+        if key in properties:
+            return None
+        properties[key] = match[4].strip()
+    return properties
+
+
 def js_functions(text: str) -> list[dict]:
     """Locate ordinary JS scopes with one lexical pass and bounded header work.
 

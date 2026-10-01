@@ -3,13 +3,28 @@
 **Spec ID**: `websec.calibration-honesty-structural-coverage`
 **Feature Branch**: `claude/eager-fermat-1f1b81` (specification only)
 **Created**: 2026-09-21
-**Status**: Approved 2026-09-21 (D1 two-step · D2 opt-in · D3 include · D4 include). ALL FOUR WORKSTREAMS IMPLEMENTED (W01 scoring-rule constraint, W02 structural coverage, W03 feedback loop, W04 disposition axis).
+**Status**: Approved 2026-09-21 (D1 two-step · D2 opt-in · D3 include · D4 include). Four workstream implementations shipped; acceptance reconciliation on 2026-09-30 remains partial (see below).
 **Input**: Design review of Laya (Apache-2.0 local decision model; RLCD against strictly proper
 scoring rules, act/escalate head, per-shape temperature calibration, structural OOD detection)
 applied to websec-validator. Every claim below was verified against source and by execution on
 2026-09-21; the verification log is in the session record and summarised in "Verified findings".
 
 ## Verified findings (the evidence this spec rests on)
+
+### Current acceptance reconciliation — 2026-09-30
+
+The findings and implementation records below are dated historical evidence, not current-state
+claims. Current opt-in exit contracts are `run --require-analyzed`: 3 and `gate --fail-on-missed`:
+1, as introduced by the reviewed exit split; references to 2 below describe the original proposal.
+Do not change shipped behavior backward to match those historical literals.
+
+Current audit found unmet clauses: Story 3.5 every-row reviewed-class eligibility; FR-011 Brier
+reporting for measurable synthetic/accepted-feedback table writes; FR-013/SC-005 original full
+language fixtures. Existing focused tests pass but do not cover those cases. These now have one
+owner in [retained-work tasks](../001-continuous-security-improvement/tasks.md), T021–T022.
+The September 22 table has 21 reviewed labels and 35 unknown findings; it is a dated measurement,
+not a fresh benchmark after subsequent detector changes. Registry approval can be approved while
+delivery remains partial until those acceptance gaps are verified.
 
 Baseline at `7b2f945` (v0.16.0): `python3 -m unittest discover -s tests` → 1295 tests OK
 (skipped=1); `docguard guard` → 177/183 (six low-confidence FRS002 freshness warnings, no failures).

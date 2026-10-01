@@ -2,7 +2,7 @@
 
 <!-- docguard:version 0.9.0 -->
 <!-- docguard:status approved -->
-<!-- docguard:last-reviewed 2026-09-18 -->
+<!-- docguard:last-reviewed 2026-09-30 -->
 <!-- docguard:owner @raccioly -->
 <!-- docguard:quality negation-load off — this tool is defined by what it deliberately omits (no LLM, no server, no running app, no runtime deps); the negations describe real architectural properties, not phrasing defects. -->
 
@@ -38,8 +38,9 @@ Three actors, clear seams:
 | 🧑 the human | supply the running TEST instance + test accounts, review every diff, authorize any live probing |
 
 The seam that matters most: **static recon + the briefing need only the code; the *probes* need a
-live test instance + credentials.** The tool never touches a running app — that line is what keeps
-it safe to run anywhere.
+live test instance + credentials.** The default core pass does not contact that app; explicitly
+executed dynamic checks and staged drafts do. Optional external analyzers have their own trust
+and network boundaries, so read-only Python intake is not a sandbox for every executable.
 
 ---
 
@@ -75,7 +76,7 @@ extractors over it. Each answers one question a pentester asks first. The output
 | 4 | **authz** | Which endpoints have a visible auth guard, which don't? | **Broken access control is the #1 web risk (OWASP A01).** Builds the per-endpoint guard map and flags write endpoints with no visible guard. Models **router-mount auth** — `app.use('/x', authMiddleware, createXRouter())` — by resolving the mounted router factory to its file and walking the local-import graph, so an Express monorepo that splits routing from handlers isn't reported as one giant missing-auth cluster (the dominant false positive); also recognizes custom auth helpers (`getRequest*Auth`) and one-hop delegated guards in thin Next route handlers. |
 | 5 | **tenant** | Is this multi-tenant, and what field isolates one customer from another? | The tenant boundary (`groupId`, `orgId`, `tenantId`…) is what every cross-tenant BOLA probe depends on, and the easiest thing to get subtly wrong. |
 | 6 | **password_policy** | Is the password policy consistent across routes? | A strong policy on one route proves a weaker sibling is a *regression*, not a design choice. Fingerprints the `{min,upper,lower,digit,special}` requirement set per validator and flags any that is a strict subset of the strongest (the exact cross-route drift the pen test found). The subset comparison is logic a per-file linter can't express. |
-| 7 | **surface** | Where does user input reach a dangerous sink — and where does the app leak internals back? | Maps 17 sink classes: 15 user-input-gated (SSRF, command injection, SQLi, traversal, SSTI, redirect, deserialization, XXE, prototype-pollution, ReDoS, eval, **log-injection** (CWE-117 — user input concatenated into a `console`/`logger`/`logging` message with no CR/LF neutralization; structured-logging-suppressed, server-only), **mass-assignment via object spread** `{...record, ...req.body}`, and **reflected/DOM/template XSS** — `innerHTML`/`dangerouslySetInnerHTML`/`v-html`/`document.write`/Jinja `|safe`/`mark_safe`, suppressed on a file that sanitizes with DOMPurify/bleach/escape) **plus var-arg SSRF** (`axios.get(someVar)` a file away from `req.query`) and a **response-side error-disclosure** sink (a 500 echoing `err.stack`). SSRF requires a *request-derived* URL (not any template literal) and is server-only — so browser fetches and hardcoded-host calls don't false-fire. Also flags a **reverse-proxy prefix-escape** (`..` in a catch-all path joined onto a fixed upstream prefix → confused-deputy with a forwarded token), a **host-header open-redirect** (redirect built from `X-Forwarded-Host`), and an **SSRF-redirect-hardening** gap (follows redirects with no allow-list, incl. worker scripts). "User-gated" is the key filter — `exec("ls")` is not a vuln; `exec(req.body.cmd)` is. |
+| 7 | **surface** | Where does user input reach a dangerous sink — and where does the app leak internals back? | Maps 17 sink classes, including SSRF, command injection, SQLi, traversal, SSTI, redirect, deserialization, XXE, prototype pollution, ReDoS, eval, log injection, mass assignment and reflected/DOM/template XSS, plus variable-argument SSRF and response-side error disclosure. Request-derived values are review leads, not exploit proof. Supported sanitizers must wrap the relevant value; an import, helper name or sanitized sibling does not protect a different sink. Structured logging, hardcoded-host requests and literal examples have narrowly scoped controls. Also records reverse-proxy prefix escape, host-header redirects and unresolved redirect policy. Syntax/flow coverage is bounded: aliases, wrappers, cross-function flows and deployment behavior remain unverified. |
 | 8 | **schemas** | What are the data models, and which fields are *privileged*? | Finds ORM/schema models (Pydantic, SQLAlchemy, Django, Prisma, Mongoose, TypeORM, Zod, Sequelize) and the sensitive field names (`role`, `isAdmin`, `groupId`, `passwordHash`…). Turns mass-assignment into "try injecting *this* app's privileged fields." |
 | 9 | **iac_ci** | Misconfigurations in Docker/CI/IaC — and in the managed-cloud auth config? | Insecure defaults (containers as root, unpinned CI actions) are real and invisible at the app layer. Also reads **AWS-CDK**: an AppSync `defaultAuthorization: API_KEY` is effectively **anonymous/over-permissive access** (the key ships to the browser) — the retest clarified this is *not* CSWSH (that needs cookie-WS auth, checked in `client_integrity`). And a **WAF byte-match on an app-layer token** (`__schema`, SQL keywords) is flagged as a bypassable band-aid, never a fix. WAFv2 WebACL = *"present — VERIFY association,"* never mitigation. Also parses **docker-compose** (host-takeover mounts: `docker.sock`, `pid: host`, host-root bind, `privileged`) and audits **secret-suppression** (`.gitleaksignore` silencing a leak in a real `.env`/secrets file — a hidden true positive, not a fix). |
 | 10 | **client_exposure** | Do secrets leak into the browser bundle? | A secret in a `NEXT_PUBLIC_`/`VITE_` var ships to every visitor. Detected three ways: by **name**, by **value-shape** — **cloud-agnostic**: AWS (`da2-…` AppSync key, `AKIA`), Azure (storage `AccountKey=`, SAS, connection string), GCP (service-account JSON, PEM private key), plus generic (Stripe, JWT); survives a benign var rename — and by **build-injection** (a CloudFormation output wired into a public build var — invisible to every secret scanner). |
@@ -161,8 +162,9 @@ Recon signals, static-scanner hits, and (when run) dynamic results are correlate
 record set** (`findings-ledger.json` + the human-readable `REPORT.md`). Every finding carries:
 
 - **an evidence chain across layers** — e.g. a recon "no guard found" hypothesis (MEDIUM) and a
-  dynamic "executed unauthenticated" verdict **merge into one** HIGH/CRITICAL finding with a
-  `recon → dynamic` chain. One finding, full provenance.
+  scoped dynamic observation retain a `recon → dynamic` chain. Status-only observations never
+  promote a missing-auth lead to a verified HIGH/CRITICAL vulnerability. Controlled BOLA evidence
+  has separate identity, ownership and private-marker prerequisites.
 - **a standards citation** — CWE + ASVS + the relevant OWASP API Top-10 entry (see
   [Standards coverage](#standards-coverage)). So a finding is traceable to an authoritative
   requirement, not just an assertion.
@@ -173,10 +175,11 @@ record set** (`findings-ledger.json` + the human-readable `REPORT.md`). Every fi
 
 **The confidence rule (deterministic, no ML):**
 
-- **HIGH** — dynamically confirmed (executed unauth / cross-tenant leak), a verified secret, or a
-  fixed-version CVE at HIGH/CRITICAL.
-- **MEDIUM** — concrete static evidence (a recon no-guard write, a SAST hit, a user-input-gated sink).
-- **LOW** — a single-source hypothesis with no corroboration (a recon-only signal).
+- Confidence is assigned per detector/evidence path, not by one universal severity conversion.
+  A controlled confirmed BOLA result can be HIGH; an HTTP success alone cannot. Native Bandit
+  confidence is retained separately from severity; other adapter mappings are heuristic.
+- Concrete static evidence often receives MEDIUM and architectural hypotheses often LOW. Neither
+  label is verification of exploitability. The exact branch and its evidence remain authoritative.
 
 ### Layer 3b — Calibrated confidence (CJE)
 
@@ -189,8 +192,9 @@ something you can act on.
   and writes `calibration.json` (shipped, and applied at runtime). Each finding then gets a
   `P(real)` with a **95% confidence interval** and the sample size `n`.
 - **Why a confidence interval, not just a number.** With a small corpus the *interval is the
-  headline*. "MEDIUM = real ~57% of the time, CI 43–70%, n=51" honestly says "grounded, but here's
-  how sure we are." The math is a Wilson score interval (binomial proportion) — deliberately *not*
+  headline*. Always quote the measured bucket, reviewed date, `n` and interval together; the old
+  n=51 seed used an invalid unmatched-as-false policy and is not a current estimate.
+  The math is a Wilson score interval (binomial proportion) — deliberately *not*
   isotonic regression, which would overfit at this sample size. The structure upgrades to isotonic
   cleanly if a large labeled set ever exists.
 - **Evidence and uncertainty.** Unmatched corpus findings remain unknown unless explicit negative
@@ -218,11 +222,13 @@ something you can act on.
   on a vulnerable variant is reported as a recall gap, never silently dropped — a harness that
   scored nothing would otherwise publish a perfect table.
 - **A class earns a cell only from reviewed labels.** Appearing in `corpus.json` is not research:
-  the historical entries are class-level wildcards (`location_contains: "*"`, `is_real: null`) that
-  cannot separate a real vulnerability from a false positive inside the same class. A class is
+  unreviewed entries and class-level wildcards cannot separate a real vulnerability from a false
+  positive inside the same class. A class is
   published as a class-specific cell only when it has a truth entry with `review_status: "reviewed"`
   and an explicit boolean `is_real`; otherwise it falls back to the wider, honest label tier. Every
-  shipped entry carries a `promotion_requires` block stating exactly what a reviewer must supply.
+  unreviewed entry retains its promotion requirements. The September 22 table contains 21 reviewed
+  labels and 35 unknown findings; those rates describe that dated detector measurement, not an
+  automatically renewed evaluation of subsequent code.
 - **Learning is gated by evidence.** Only scoped evidence-backed labels enter the local calibration
   overlay (`~/.cache/websec-validator/`). Legacy unproven records are quarantined. Unknown-only input
   reports no successful measurement and leaves fitted calibration unchanged. Evidence may support a

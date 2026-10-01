@@ -7,8 +7,8 @@
       "path": "specs/002-calibration-honesty-and-structural-coverage/spec.md",
       "reviewed": {
         "lifecycle": {
-          "approval": "draft",
-          "delivery": "planned",
+          "approval": "approved",
+          "delivery": "in_progress",
           "context": "current",
           "retirementReason": null,
           "storage": "working_tree",
@@ -50,7 +50,7 @@
         "artifacts": [
           {
             "path": "specs/002-calibration-honesty-and-structural-coverage/spec.md",
-            "digest": "sha256:1fcbd4a6fa5bf3f2e55efe30e937c383ec147bf392b85e19331131aa819d3dd1"
+            "digest": "sha256:24b39800b90f9595e392c7741042d4a72a246ac0de3e6d61462666690fdbd2cb"
           }
         ],
         "taskCompletion": {
@@ -142,7 +142,7 @@
       "path": "specs/001-continuous-security-improvement/spec.md",
       "reviewed": {
         "lifecycle": {
-          "approval": "draft",
+          "approval": "approved",
           "delivery": "planned",
           "context": "current",
           "retirementReason": null,
@@ -182,12 +182,20 @@
         "artifacts": [
           {
             "path": "specs/001-continuous-security-improvement/spec.md",
-            "digest": "sha256:fbcfb384fb5fc724bcf3d0425d54ec74b43c21bb1b1836e2a5b396318683c11e"
+            "digest": "sha256:e4a81731dae2dab3d602e7d773be4a3e4442578da04644103d20b92f0b2c86f2"
+          },
+          {
+            "path": "specs/001-continuous-security-improvement/plan.md",
+            "digest": "sha256:aaaf28a87445542c59462129d4b2d6e6df8e028217f05b6ddb4e1dcacc766c80"
+          },
+          {
+            "path": "specs/001-continuous-security-improvement/tasks.md",
+            "digest": "sha256:233dffe7c58b71ccf2773131ce11ef34aff8c89d23f3bbaee566ab1f87a9eeb2"
           }
         ],
         "taskCompletion": {
-          "checked": 0,
-          "total": 0
+          "checked": 4,
+          "total": 32
         },
         "implementationEvidence": [],
         "testEvidence": []
