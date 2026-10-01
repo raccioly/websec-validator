@@ -51,8 +51,8 @@ Independent test: provenance-specific tables remain separate; unknown labels nev
 
 Independent test: actual supported integration lifecycle; static config tests alone insufficient.
 
-- [ ] T024 [US3] Add one-shot CLI versus long-lived MCP health policy and packaging controls in `Dockerfile`, `docs/integrations/README.md`, `tests/test_container_contracts.py` (W02).
-- [ ] T025 [US3] Pin and verify supported scanner archives/platforms and execute available image matrix using `Dockerfile` and `tests/test_container_contracts.py` (W06).
+- [x] T024 [US3] Add one-shot CLI versus long-lived MCP health policy and packaging controls in `Dockerfile`, `docs/integrations/README.md`, `tests/test_container_contracts.py` (W02).
+- [x] T025 [US3] Pin and verify supported scanner archives/platforms and execute available image matrix using `Dockerfile` and `tests/test_container_contracts.py` (W06).
 - [x] T026 [US3] Add remote-write/redirect/body/concurrency regressions then replace httpx race draft with bounded stdlib transport in `src/websec_validator/templates/probes/race-conditions.py` and `tests/test_probe_transport_boundaries.py` (W06).
 - [ ] T027 [US3] Validate real disposable pre-commit lifecycle and controlled separate-engine/target CI using `docs/integrations/` and `tests/test_adoption_contracts.py`; record unavailable prerequisites as pending, not delivered.
 
@@ -132,5 +132,14 @@ gaps; no target code is executed. Bounds enter coverage, not a clean scan certif
 
 Core/bundled targets, fixed multiarch base/archive digests, fail-closed architecture/version
 selection, checksum corruption controls, private allowlisted context and explicit health policy
-are implemented. Native amd64/arm64 CI will build and execute both targets; T024/T025 remain
-unchecked until actual runtime checks pass. Apt/transitive dependencies are not fully locked.
+are implemented. Native amd64/arm64 CI built and executed both targets successfully in run
+36817563117 against head 89ede34473b4d0122c4ff6ef4eddf8851a3649ba. The evidence ledger retains
+actual image identities. Scanner version execution is not complete adapter/database testing;
+apt/transitive dependencies are not fully locked. T024/T025 are complete within this stated scope.
+
+### Adoption checkpoint
+
+Real pre-commit 4.6.2 installation/staged-commit/manual/pre-push/foreign-hook restoration passed
+locally in an owned disposable environment. The separate-engine Action workflow has clean,
+unsafe and oversized hostile inert targets with current-attempt artifact assertions. T027 stays
+open until its actual hosted jobs pass; no consumer hook or schedule is activated automatically.

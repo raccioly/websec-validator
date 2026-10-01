@@ -185,10 +185,40 @@ or every transitive dependency. No claim of complete reproducibility or upstream
 
 The one-shot image explicitly has no periodic healthcheck; optional in-container MCP transport
 liveness is not scan or authentication assurance. The build context is allowlisted and private
-trees excluded. Native core/bundled image jobs are authored, not treated as executed results.
-T024/T025 stay pending until actual runtime evidence from those jobs is available.
+trees excluded. Actual native core/bundled image execution now supplies the bounded T024/T025
+acceptance evidence below; this is not complete scanner-adapter or database coverage.
 
-The local Docker client has no available daemon; pre-commit is absent at baseline. Neither a
+The local Docker client has no available daemon; pre-commit was absent at baseline. Neither a
 configuration-shaped test nor an installed client establishes an executed integration lifecycle.
 Authored paired fixtures do not measure independent production precision. The separate manual
 agent A/B protocol is still an experiment, not an implied result from unit tests.
+
+### Executed container matrix
+
+All four native jobs passed on 2026-10-01 in
+[run 36817563117](https://github.com/raccioly/websec-validator/actions/runs/36817563117),
+for PR head `89ede34473b4d0122c4ff6ef4eddf8851a3649ba`. Each built the reviewed engine,
+asserted its runtime architecture, nonroot user, zero engine runtime requirements and disabled
+periodic healthcheck, then executed an offline source-only fixture. Both bundled images executed
+the five optional scanner version commands. These are local build image IDs, not published registry
+manifests or a claim of byte-reproducible builds.
+
+| Target | Architecture | Observed image SHA-256 |
+|---|---|---|
+| core | amd64 | `b52ab80de4a95773bbaf7f264feac721ebbb95245f9d1180db2831ac9095d34a` |
+| core | arm64 | `370bc1a5ea0cd3d37dd1c9bc9ced067d4ce49a577b0088a71342f6044541e814` |
+| bundled | amd64 | `428711270039d1b661e3134f7c6a31ef9c006917e13883addf85d8f4df1849c6` |
+| bundled | arm64 | `d7e77f3ebc9c520e3d82ec6f1c8b71e9f8a6e3fc85f63f9d9d31e700b81e9575` |
+
+### Adoption lifecycle checkpoint
+
+The owned local test passed with pre-commit 4.6.2 in a disposable development environment. It
+validated real installation, an actual rejected staged commit, clean-index/unsafe-unstaged restore,
+manual and pre-push framework gates, no implicit baseline acceptance and foreign-hook restoration.
+No user project hooks, global packages or scheduled consumer scans were changed. An actual push
+to an owned local bare repository rejects unsafe working-tree input and accepts clean input;
+no public-network push occurs. The normal application suite passes 1813
+tests with this one development-only lifecycle skipped; the opt-in lifecycle passes separately.
+
+The authored hosted workflow parses as YAML and exercises the actual separate-engine Action for
+clean, unsafe and oversized inputs. Its first hosted execution is pending, so T027 remains open.

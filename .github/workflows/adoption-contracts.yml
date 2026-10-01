@@ -1,0 +1,107 @@
+name: Adoption contracts
+
+on:
+  pull_request:
+    paths:
+      - src/**
+      - pyproject.toml
+      - action.yml
+      - scripts/run-action.py
+      - .pre-commit-hooks.yaml
+      - tests/test_precommit_lifecycle.py
+      - .github/workflows/adoption-contracts.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  precommit:
+    name: pre-commit lifecycle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Development-only framework installation on disposable runner
+        run: python -m pip install pre-commit==4.6.2
+      - name: Execute owned install/staged/manual/pre-push/foreign-hook lifecycle
+        env:
+          WEBSEC_VALIDATE_PRECOMMIT: '1'
+          PYTHONPATH: src:tests
+        run: python -m unittest test_precommit_lifecycle -v
+
+  separate-engine:
+    name: separate engine (${{ matrix.case }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        case: [clean, unsafe, incomplete]
+    steps:
+      - name: Check out reviewed development engine, not target Action
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: .websec-engine
+          persist-credentials: false
+          submodules: false
+      - name: Create owned inert target with hostile install/import surfaces
+        env:
+          CASE: ${{ matrix.case }}
+        run: |
+          python3 -I - <<'PY'
+          import os
+          from pathlib import Path
+          target=Path('.websec-target')
+          target.mkdir()
+          marker=target.resolve()/'TARGET_EXECUTED'
+          hostile='from pathlib import Path\nPath('+repr(str(marker))+').touch()\nraise RuntimeError("target must stay data")\n'
+          (target/'hostile_backend.py').write_text(hostile)
+          (target/'websec_validator').mkdir()
+          (target/'websec_validator/__init__.py').write_text(hostile)
+          (target/'pyproject.toml').write_text('[build-system]\nrequires=[]\nbuild-backend="hostile_backend"\nbackend-path=["."]\n')
+          (target/'action.yml').write_text('runs:\n  using: composite\n  steps:\n  - shell: bash\n    run: exit 99\n')
+          source='x=1\n'
+          if os.environ['CASE']=='unsafe':
+              source='import hashlib\ndef login(password):\n return hashlib.md5(password).hexdigest()\n'
+          elif os.environ['CASE']=='incomplete':
+              source='#'*(16*1024*1024+1)
+          (target/'app.py').write_text(source)
+          PY
+      - name: Review target through separate engine Action
+        id: audit
+        continue-on-error: true
+        uses: ./.websec-engine
+        with:
+          path: .websec-target
+          out: ${{ runner.temp }}/websec-owned-action
+          scan: 'false'
+          require-complete: 'true'
+          fail-on: high
+          upload-sarif: 'false'
+      - name: Verify actual current-attempt outcomes and no target execution
+        env:
+          CASE: ${{ matrix.case }}
+          OUTCOME: ${{ steps.audit.outcome }}
+          CURRENT_RUN: ${{ steps.audit.outputs.run-directory }}
+        run: |
+          python3 -I - <<'PY'
+          import json,os
+          from pathlib import Path
+          case=os.environ['CASE']
+          assert os.environ['OUTCOME']==('success' if case=='clean' else 'failure'),os.environ['OUTCOME']
+          assert not Path('.websec-target/TARGET_EXECUTED').exists()
+          assert os.environ['CURRENT_RUN'], 'no current artifact output'
+          run=Path(os.environ['CURRENT_RUN'])
+          facts=json.loads((run/'FACTS.json').read_text())
+          assert facts['coverage']['execution_complete']==(case!='incomplete')
+          ledger=json.loads((run/'findings-ledger.json').read_text())
+          if case=='unsafe':
+              assert any(row['attack_class']=='weak-password-hash' for row in ledger['findings'])
+          print('separate engine contract passed:',case,run.name)
+          PY

@@ -86,9 +86,19 @@ Tests execute the documented hook argv in an isolated stdlib venv containing a t
 including target import-shadowing, finding-gate and incomplete-read controls. The copy prunes private
 `.local` trees case-insensitively and skips every symlink before descent or payload copying.
 Configuration tests check the examples' limited scalar structure and revision-validation code.
-The pre-commit framework and a YAML parser were unavailable in the validation environment, so no
-full pre-commit installation/staging lifecycle or hosted workflow run was performed. Run
-`pre-commit validate-config` and review a workflow check in your configured environment before adoption.
+An opt-in development test now executes pre-commit 4.6.2 in an owned disposable environment:
+manifest/config validation, installation, an actual rejected staged commit, a clean index commit
+with unsafe unstaged content restored, manual/pre-push framework gates, no baseline acceptance,
+and restoration of an owned foreign hook on uninstall. No consumer hooks are activated by this
+test. An actual push to an owned local bare repository rejects unsafe working-tree input, then
+accepts clean input; no public-network push occurs. Normal stdlib tests
+skip this development-only dependency; the dedicated workflow runs it explicitly.
+
+The [adoption contract workflow](../../.github/workflows/adoption-contracts.yml) also exercises the
+actual separate-engine Action with clean, unsafe and oversized targets, hostile inert target
+install/import surfaces, and current-attempt artifact checks. Its first hosted run remains pending;
+authored YAML and local subprocess tests are not substitutes for hosted execution. Review your
+selected engine revision and workflow result before adoption.
 
 ## Container policy and reviewed downloads
 
@@ -115,5 +125,10 @@ install an automatic target scan to obtain a green health indicator.
 
 The native amd64/arm64 [image contract workflow](../../.github/workflows/container-contracts.yml)
 builds core/bundled targets, records image identity, runs offline source-only fixtures and invokes
-bundled scanner versions. Configuration and installer controls pass locally; image runtime results
-remain pending until that workflow actually executes. The local Docker daemon is unavailable.
+bundled scanner versions. All four native jobs passed on 2026-10-01 in
+[run 36817563117](https://github.com/raccioly/websec-validator/actions/runs/36817563117),
+against PR head `89ede34473b4d0122c4ff6ef4eddf8851a3649ba`. The
+[evidence ledger](../security-review/backlog-reconciliation.md#executed-container-matrix)
+retains the resulting image identities. These checks validate image construction, nonroot/core
+execution and scanner executable versions—not every scanner's rules/database or adapter coverage.
+The local Docker daemon remains unavailable; hosted native execution supplied this evidence.

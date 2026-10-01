@@ -205,11 +205,11 @@
           },
           {
             "path": "specs/001-continuous-security-improvement/tasks.md",
-            "digest": "sha256:615b4def3e82343e931db7f38a604bb42c7289a47b3c6830fe8e98e6e4b3e374"
+            "digest": "sha256:b74b9ef872db7daa9f52e11c7daed432347a6c7aea88503cff83c175cb494a17"
           }
         ],
         "taskCompletion": {
-          "checked": 15,
+          "checked": 17,
           "total": 33
         },
         "implementationEvidence": [],
@@ -228,6 +228,11 @@
             "requirementId": "FR-005",
             "file": "tests/test_container_contracts.py",
             "line": 17
+          },
+          {
+            "requirementId": "FR-005",
+            "file": "tests/test_precommit_lifecycle.py",
+            "line": 16
           }
         ]
       }

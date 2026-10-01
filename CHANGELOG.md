@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Integration validation
+
+- Execute an opt-in disposable pre-commit lifecycle: real staged commit rejection, clean-index
+  handling with unsafe unstaged content restored, manual/pre-push framework gates, no baseline
+  acceptance and foreign-hook restoration. Add separate-engine Action jobs for clean, unsafe and
+  oversized hostile inert targets; no consumer hook or recurring schedule is activated.
+- Record successful native core/bundled container execution on amd64 and arm64, including nonroot
+  offline source-only fixtures and bundled executable versions. This does not certify every
+  scanner adapter/database or fully reproducible transitive builds.
+
 ### Added
 
 - Offer a core-only container target and native amd64/arm64 image contract checks. Explicit
