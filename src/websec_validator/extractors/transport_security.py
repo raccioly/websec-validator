@@ -22,6 +22,7 @@ import re
 from .base import Extractor, RepoContext, is_script_file, is_test_file
 from .profiles import manifest_paths, node_metadata, service_for
 from .syntax import call_expression, in_literal, js_functions, split_arguments, without_comments
+from . import django_responses
 
 CSP_ANY = re.compile(r"Content-Security-Policy|contentSecurityPolicy|helmet[\s\S]{0,40}?\bcsp\b"
                      r"|useCspNonce|cspDirectives", re.I)
@@ -197,6 +198,8 @@ class TransportSecurityExtractor(Extractor):
         hsts_files, hsts_api_only, hsts_html = [], True, False
         extra_findings: list = []     # CORS / SRI / next-config — emitted alongside the CSP/HSTS set
         cookie_sites = []
+        django_observations, django_errors = [], []
+        django_budget = {'bytes': 0, 'observations': 0}
         default_auth_handlers: dict[str, set[str]] = {}
         inventory = (facts.get("stack") or {}).get("service_inventory", [])
 
@@ -209,6 +212,12 @@ class TransportSecurityExtractor(Extractor):
             if is_test_file(rel) or is_script_file(rel):
                 continue
             code = without_comments(text, _p.suffix)
+            if _p.suffix == '.py':
+                observed = django_responses.analyze(text, django_budget)
+                django_observations.extend(dict(row, file=rel) for row in observed['observations'])
+                django_errors.extend(dict(row, file=rel) for row in observed['errors'])
+                if observed['observations']:
+                    html_surface = serves_html = True
             browser_dom = any(not in_literal(code, match.start()) for match in BROWSER_DOM.finditer(code))
             if browser_dom:
                 html_surface = serves_html = True
@@ -347,6 +356,16 @@ class TransportSecurityExtractor(Extractor):
                                        "clickjacking/XSS-defense headers (verify against the live response if the edge sets some)."})
 
         strict_csp = bool(csp_present and csp_self and csp_nonce and not csp_unsafe)
+        if django_observations:
+            strict_csp = strict_csp and all(row['strict_csp_shape'] for row in django_observations)
+            for row in django_observations:
+                if not row['strict_csp_shape']:
+                    extra_findings.append({'severity': 'LOW', 'kind': 'django-response-csp-unverified',
+                        'attack_class': 'missing-csp', 'file': row['file'], 'line': row['line'], 'view': row['view'],
+                        'control_scope': 'same returned Django render response; runtime middleware unverified',
+                        'detail': 'No supported strict literal CSP shape on this returned template response. '
+                                  'A sibling response cannot supply protection. Verify actual response headers, '
+                                  'middleware and nonce generation; source observations are not deployment proof.'})
         # Only HTTP routes or browser/serving hints enable the baseline. General
         # framework labels cannot turn a library's generated HTML into a website.
         served_web = has_routes or serves_html
@@ -467,6 +486,12 @@ class TransportSecurityExtractor(Extractor):
                                            "Verify against the live Set-Cookie."})
 
         return {
+            **({'error': 'Django response analysis incomplete; see django_responses.errors'} if django_errors else {}),
+            'django_responses': {'observations': django_observations[:django_responses.MAX_OBSERVATIONS],
+                'errors': django_errors[:50], 'limits': {'source_bytes_per_file': django_responses.MAX_SOURCE_BYTES,
+                    'nodes_per_file': django_responses.MAX_NODES, 'source_bytes_total': django_responses.MAX_TOTAL_BYTES,
+                    'observations': django_responses.MAX_OBSERVATIONS},
+                'note': 'Literal local source only; template loaders, middleware and deployment remain unverified'},
             "web_surface": web_surface, "html_surface": html_surface,
             "browser_renderers": sorted(renderers),
             "surface_note": "Static browser/HTTP hints, not proof of deployment. React or JSX alone does not establish a browser renderer.",

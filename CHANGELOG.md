@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed — operation-bound retained precision
 
+- Associate supported Django literal templates and header assignments with the actual returned
+  response. A strict CSP shape on one view cannot clear an unverified sibling. Record bounded
+  source observations separately from loader, middleware, nonce-generation and deployment proof.
+
 - Follow supported local client-filename assignments into actual storage path/key arguments,
   rather than interpreting a variable named `filename` as storage. Preserve overwrite, branch,
   scope and object-body distinctions; disclose expression/source/work budgets as execution gaps.

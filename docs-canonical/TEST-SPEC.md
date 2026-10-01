@@ -138,6 +138,9 @@ A/B in [`corpus/PROOF-PROTOCOL.md`](../corpus/PROOF-PROTOCOL.md).
 Django URL tests must pair local include/path resolution with dynamic roots, unknown prefixes,
 cycles, unrelated bindings and resource caps. Service metadata tests must cover Rust workspaces
 and separate native React from browser renderers, preserving mixed-service browser review.
+Django response tests pair returned literal templates with same-response headers, unprotected
+siblings, late/shadowed imports, aliases/branches/overwrites and parser caps. Actual CLI facts and
+ledger assertions must preserve deployment uncertainty and prove no target execution.
 Credential comparison tests pair literal presence/type checks with hardcoded, reversed and
 unsafe-sibling comparisons, while keeping sampled text distinct from executable interpolation.
 

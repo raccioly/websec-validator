@@ -244,3 +244,18 @@ its security invocation; an outer catch cannot borrow that call to manufacture f
 Unknown aliases/runtime storage, closure capture and complex rethrow/finally flow remain manual
 review limits. Independent review supplied both whole-expression and expression-cap controls;
 137 focused regression tests pass. These tests do not measure public-project precision or recall.
+
+## Django same-response checkpoint
+
+Seven new methods bind import-bound literal render/template evidence to the exact returned
+response and latest same-receiver literal headers. Unrelated responses, shadowed/late imports,
+mutated bindings, unknown branches/aliases and overwritten responses cannot lend protection.
+Strict CSP is a supported directive shape, not valid runtime nonce generation or a deployment
+certificate. An unverified sibling retains a response-specific lead even beside a protected view.
+An actual subprocess CLI facts/ledger contract succeeds without executing a target that raises.
+Byte/node/aggregate/observation limits disclose execution loss. The 61 focused Django response,
+route, profile and public precision tests pass. Independent review supplied and confirmed fixes
+for header/render expression mutation and actual unaliased module bindings. Final unchanged-source
+validation passes all 1826 application tests with the original assertions preserved.
+Existing native profile tests preserve manual C/C++ scope, unknown malformed configurations and
+authored-only holdout limits; no new native vulnerability recall is implied.

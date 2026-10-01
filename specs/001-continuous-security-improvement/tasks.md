@@ -25,7 +25,7 @@ Independent test: endpoint-bound safe/no-op/unprotected sibling controls, no tar
 - [x] T010 [US2] Implement bounded local assignment provenance and disclosed work limits in `src/websec_validator/extractors/surface.py` and shared flow helper (W04/W10).
 - [x] T011 [US2] Add paired UploadFile/db.Model controls in `tests/test_retained_frameworks.py` and `tests/test_python_uploads.py` (W11/W13).
 - [x] T012 [US2] Implement supported local Python upload/model evidence in `src/websec_validator/extractors/upload_security.py` and `schemas.py` (W11/W13); disclose unresolved factories/composition.
-- [ ] T013 [US2] Validate Django same-response observations and native/profile limits against `tests/test_django_urls.py`, `tests/test_profiles.py`, `src/websec_validator/extractors/transport_security.py`; add missing paired evidence without claiming deployment.
+- [x] T013 [US2] Validate Django same-response observations and native/profile limits against `tests/test_django_routes.py`, `tests/test_django_responses.py`, `tests/test_profiles.py`, `src/websec_validator/extractors/transport_security.py`; add missing paired evidence without claiming deployment.
 
 ## Phase 4 — US1: Keep unsafe neighbors visible (P1)
 

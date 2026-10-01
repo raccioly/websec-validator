@@ -147,6 +147,12 @@ documentation, not a probe target. YAML, templates, dynamic composition and unkn
 remain review gaps; source/node/route-budget failures enter execution coverage. No target module
 is imported or executed, and source evidence is not deployed-handler or auth enforcement proof.
 
+The Django response observer pairs supported import-bound literal `render()` calls with the
+exact returned response and its latest literal header assignments. Unknown branches, aliases,
+mutations, overwritten responses and sibling views cannot lend header credit. A strict CSP shape
+is only a source observation: template loaders, middleware, nonce generation and deployment remain
+unverified. Work caps enter execution coverage; this lane never imports Django or target code.
+
 ## Configuration Files
 
 | File | Purpose |
