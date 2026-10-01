@@ -19,8 +19,8 @@ Independent test: endpoint-bound safe/no-op/unprotected sibling controls, no tar
 
 - [x] T005 [US2] Add failing FastAPI/tRPC auth controls in `tests/test_retained_frameworks.py` and `tests/test_trpc_routes.py` (W05).
 - [x] T006 [US2] Bind supported local dependency/middleware rejection evidence to its endpoint in `src/websec_validator/extractors/authz.py` (W05); disclose context/runtime composition limits.
-- [ ] T007 [US2] Add source-registration/documentation-only/escaping/malformed Connexion controls in `tests/test_retained_frameworks.py` (W16/W20).
-- [ ] T008 [US2] Resolve bounded import-bound Connexion registration without promoting unregistered docs in `src/websec_validator/extractors/routes.py` (W16/W20).
+- [x] T007 [US2] Add source-registration/documentation-only/escaping/malformed Connexion controls in `tests/test_retained_frameworks.py` and `tests/test_connexion_yaml.py` (W16/W20).
+- [x] T008 [US2] Resolve bounded import-bound Connexion registration without promoting unregistered docs in `src/websec_validator/extractors/routes.py` (W16/W20).
 - [x] T009 [US2] Add paired assigned JS SQL/Python+JS command controls in `tests/test_retained_flows.py` (W04/W10).
 - [x] T010 [US2] Implement bounded local assignment provenance and disclosed work limits in `src/websec_validator/extractors/surface.py` and shared flow helper (W04/W10).
 - [x] T011 [US2] Add paired UploadFile/db.Model controls in `tests/test_retained_frameworks.py` and `tests/test_python_uploads.py` (W11/W13).
@@ -156,3 +156,15 @@ methods include actual CLI facts/ledger and independent supplied negative contro
 runtime identity, closures/cross-function flows, aliases and complex rethrow/finally remain review
 limits. T014/T016–T019 are complete within these bounded supported contracts, not whole-program
 or production precision guarantees.
+
+### Registered YAML checkpoint
+
+Ten real-YAML/JSON-compatible methods now include actual subprocess CLI artifacts and source
+registration independent of Noir. A strict bounded data subset rejects tags, anchors/aliases,
+merges, duplicate keys, block routing identifiers, ambiguous plain scalars, document composition
+and path/operation references. Exact dotted operation identifiers select the exact source body;
+literal Flask config does not replace the Connexion receiver. Original pinned VAmPI config/schema
+f16052dce83f05847133ec98f01c5193a41de7d8 produced fourteen source routes without execution in an
+owned disposable source-only check. This is not runtime/deployment or vulnerability-recall proof.
+Dynamic specifications/options, custom resolvers and cross-module registration remain explicit
+review gaps. T007/T008 are complete within these supported literal registration contracts.

@@ -146,6 +146,16 @@ def _spec_handler(ctx: RepoContext, spec: Path, endpoint: dict) -> tuple:
     The operation map is parsed once per spec and cached on the context. A miss returns
     ("", None, ""), which the caller must treat as UNANALYSED — never as unguarded.
     """
+    if endpoint.get('source') == 'connexion-registration':
+        # Exact registered document evidence, never the informational partial YAML walk.
+        operation_id = endpoint.get('operation_id')
+        if (not isinstance(operation_id, str)
+                or not re.fullmatch(r'[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+', operation_id)):
+            return '', None, ''
+        from .. import openapi as _openapi
+        resolved = _openapi.resolve_operation_file(operation_id, [ctx.rel(path) for path in ctx.code_files])
+        return (str(ctx.root / resolved) if resolved else '', None,
+                operation_id.split('.')[-1])
     cache = getattr(ctx, "_spec_operation_cache", None)
     if cache is None:
         cache = {}

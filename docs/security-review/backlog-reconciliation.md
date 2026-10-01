@@ -259,3 +259,27 @@ for header/render expression mutation and actual unaliased module bindings. Fina
 validation passes all 1826 application tests with the original assertions preserved.
 Existing native profile tests preserve manual C/C++ scope, unknown malformed configurations and
 authored-only holdout limits; no new native vulnerability recall is implied.
+
+## Registered YAML Connexion checkpoint
+
+Ten additional methods exercise actual YAML text (not JSON merely renamed `.yaml`), exact source
+registration/operation bodies and persisted subprocess CLI facts/ledger. The new stdlib parser is
+a strict bounded data subset, separate from general informational OpenAPI partial parsing. Tags,
+anchors/aliases, merges, duplicate keys, block routing identifiers, ambiguous plain scalars,
+multi-document input and path/operation references cannot supply targets. Unknown composition
+retains scope gaps; resource caps enter execution coverage. No constructors or target imports run.
+
+The exact dotted Python operation supplier is preserved; slash/hyphen normalization and contract
+security declarations cannot mark a handler guarded. Literal Flask config assignments do not
+replace the Connexion registration primitive or provide authentication evidence. Independent
+review supplied block-scalar, quoting/comment, document-marker and normalized-handler controls.
+All 80 focused framework/OpenAPI/source tests pass. The unchanged-source full suite passes
+1,836 tests with one optional development integration skipped.
+
+The original [VAmPI configuration](https://github.com/erev0s/VAmPI/blob/f16052dce83f05847133ec98f01c5193a41de7d8/config.py)
+and [OpenAPI contract](https://github.com/erev0s/VAmPI/blob/f16052dce83f05847133ec98f01c5193a41de7d8/openapi_specs/openapi3.yml)
+were read as data in an owned disposable directory: fourteen source routes, zero parser gaps/errors,
+with no target import or execution. This is a source-registration reproduction, not a new full
+corpus score, deployed-route check or vulnerability-recall measurement. Dynamic options/resolvers,
+templates and cross-module registration remain manual scope; unsupported syntax never borrows
+the informational YAML parser's partial route or security hints.

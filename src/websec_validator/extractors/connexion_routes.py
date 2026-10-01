@@ -4,13 +4,13 @@ from __future__ import annotations
 import ast
 from collections import Counter
 from itertools import islice
-import json
 from pathlib import Path
 import re
 from urllib.parse import urlsplit
 import warnings
 
 from .framework_auth import MAX_NODES, MAX_SOURCE_BYTES
+from .. import literal_yaml
 
 MAX_TOTAL_NODES = 100_000
 MAX_ROUTES = 1024
@@ -51,7 +51,7 @@ def analyze(ctx):
               'limits': {'source_bytes': MAX_SOURCE_BYTES, 'nodes_per_file': MAX_NODES,
                          'nodes_total': MAX_TOTAL_NODES, 'routes': MAX_ROUTES},
               'note': 'Literal top-level local registrations are source evidence, not deployed '
-                      'handler or security enforcement proof. YAML parsing is partial; dynamic '
+                      'handler or security enforcement proof. Registered YAML uses a strict literal subset; dynamic '
                       'registration, templates, resolvers and cross-module composition remain unverified.'}
     total = 0
 
@@ -94,6 +94,13 @@ def analyze(ctx):
         wildcard = False
         for node in nodes:
             if isinstance(node, (ast.Attribute, ast.Subscript)) and isinstance(node.ctx, (ast.Store, ast.Del)):
+                # A literal Flask configuration item does not replace the Connexion
+                # receiver or add_api primitive. It supplies no auth/route-runtime credit.
+                if (isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant)
+                        and isinstance(node.slice.value, str) and isinstance(node.value, ast.Attribute)
+                        and node.value.attr == 'config' and isinstance(node.value.value, ast.Attribute)
+                        and node.value.value.attr == 'app' and isinstance(node.value.value.value, ast.Name)):
+                    continue
                 root = node.value
                 while isinstance(root, (ast.Attribute, ast.Subscript)):
                     root = root.value
@@ -177,28 +184,35 @@ def analyze(ctx):
                 continue
             from .. import openapi
             try:
-                contract = openapi.parse(destination, context=ctx)
-            except (AttributeError, TypeError, ValueError, RecursionError):
-                gap(rel, 'Registered specification shape malformed')
+                doc, mode = literal_yaml.load(text)
+            except literal_yaml.LimitReached as error:
+                gap(rel, str(error), error=True)
                 continue
-            if not contract['ok'] or not contract['paths']:
+            except (AttributeError, TypeError, ValueError, RecursionError):
+                gap(rel, 'Registered specification malformed or outside supported literal syntax')
+                continue
+            if not isinstance(doc, dict) or not (doc.get('openapi') or doc.get('swagger')) or not doc.get('paths'):
                 gap(rel, 'Registered specification has no usable contract paths')
                 continue
-            if contract['mode'] != 'json':
-                gap(rel, 'Registered YAML contract is partial; routes require manual review')
-                continue
-            doc = json.loads(text)
             if not isinstance(doc.get('paths'), dict) or not all(
                     isinstance(item, dict) and all(isinstance(value, dict) for key, value in item.items()
                                                    if key in openapi._HTTP_METHODS)
                     for item in doc['paths'].values()):
                 gap(rel, 'Registered operation shape malformed')
                 continue
+            if any('$ref' in item or any('$ref' in value for key, value in item.items()
+                                        if key in openapi._HTTP_METHODS) for item in doc['paths'].values()):
+                gap(rel, 'Registered path/operation references unresolved')
+                continue
+            if any(isinstance(value.get('operationId'), literal_yaml.BlockText) for item in doc['paths'].values()
+                   for key, value in item.items() if key in openapi._HTTP_METHODS):
+                gap(rel, 'Block-scalar routing identifiers are outside the literal subset')
+                continue
             base = literal(options.get('base_path')) if 'base_path' in options else doc.get('basePath', '')
             if 'base_path' not in options and 'servers' in doc:
                 servers = doc['servers']
                 if (not isinstance(servers, list) or len(servers) != 1 or not isinstance(servers[0], dict)
-                        or not isinstance(servers[0].get('url'), str) or servers[0].get('variables')):
+                        or type(servers[0].get('url')) is not str or servers[0].get('variables')):
                     gap(rel, 'OpenAPI server path unresolved')
                     continue
                 try:
@@ -206,15 +220,15 @@ def analyze(ctx):
                 except ValueError:
                     gap(rel, 'OpenAPI server URL malformed')
                     continue
-            if (not isinstance(base, str) or (base and not base.startswith('/'))
+            if (type(base) is not str or (base and not base.startswith('/'))
                     or any(c in base for c in ('{', '}', '?', '#', '\\'))):
                 gap(rel, 'Registered base path unresolved')
                 continue
-            for endpoint, methods in contract['paths'].items():
+            for endpoint, item in doc['paths'].items():
                 if not isinstance(endpoint, str) or not endpoint.startswith('/') or any(c in endpoint for c in ('?', '#', '\\')):
                     gap(rel, 'Registered endpoint path malformed')
                     continue
-                for method in methods:
+                for method in (key for key in openapi._HTTP_METHODS if key in item):
                     if len(result['routes']) >= MAX_ROUTES:
                         gap(rel, 'Connexion route budget exceeded', error=True)
                         return result
@@ -222,5 +236,7 @@ def analyze(ctx):
                                              'params': [], 'technology': 'connexion', 'code_path': rel,
                                              'spec_path': ctx.rel(destination), 'source': 'connexion-registration',
                                              'contract_path': endpoint,
+                                             'contract_mode': mode,
+                                             'operation_id': item[method].get('operationId') if isinstance(item[method].get('operationId'), str) else None,
                                              'registration_line': call.lineno})
     return result

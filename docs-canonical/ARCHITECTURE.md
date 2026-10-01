@@ -140,11 +140,17 @@ completeness gating. None are Python imports — there are zero runtime package 
 | Prowler | cloud-account posture | scanner reported missing |
 | Docker | reproducible all-scanners-bundled run | run natively with whatever is installed |
 
-Connexion's bounded AST adapter maps literal top-level, import-bound local JSON `add_api`
+Connexion's bounded AST adapter maps literal top-level, import-bound local JSON or supported
+literal-subset YAML `add_api`
 registrations even without Noir. It keeps source registration and spec provenance separate from
 the exact operation handler used for authorization hints. An unregistered specification is
-documentation, not a probe target. YAML, templates, dynamic composition and unknown handler bindings
-remain review gaps; source/node/route-budget failures enter execution coverage. No target module
+documentation, not a probe target. Registered YAML is a strict bounded data subset, distinct from
+the general informational OpenAPI partial parser: tags, anchors, aliases, merges, block routing
+identifiers, path/operation references and document composition cannot supply targets. Templates,
+dynamic composition and unknown handler bindings remain review gaps. Exact dotted operation IDs,
+not normalized slash paths or security declarations, select handler bodies. Literal Flask config
+items do not replace the registration receiver or supply authentication evidence.
+Source/node/route-budget failures enter execution coverage. No target module
 is imported or executed, and source evidence is not deployed-handler or auth enforcement proof.
 
 The Django response observer pairs supported import-bound literal `render()` calls with the

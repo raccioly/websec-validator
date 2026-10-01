@@ -141,6 +141,11 @@ and separate native React from browser renderers, preserving mixed-service brows
 Django response tests pair returned literal templates with same-response headers, unprotected
 siblings, late/shadowed imports, aliases/branches/overwrites and parser caps. Actual CLI facts and
 ledger assertions must preserve deployment uncertainty and prove no target execution.
+Connexion tests pair literal source registration and exact operation handlers with unregistered
+contracts, malformed/private/escaping destinations and dynamic composition. Actual YAML text must
+cover anchors/tags/merges/duplicate keys, block routing identifiers, ambiguous plain scalars,
+multi-document input, references and work caps. A partial informational parse is never targeting
+evidence; handler normalization and security declarations must not confer guard credit.
 Credential comparison tests pair literal presence/type checks with hardcoded, reversed and
 unsafe-sibling comparisons, while keeping sampled text distinct from executable interpolation.
 

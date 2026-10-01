@@ -205,11 +205,11 @@
           },
           {
             "path": "specs/001-continuous-security-improvement/tasks.md",
-            "digest": "sha256:70a7c9f38af3b73f2639c9cc571f2aac26e1890e8bbc45db5b91d1d2badb5ff7"
+            "digest": "sha256:a5e24a26fad397ab6a13e8ba9af8aa51b569fd9cee998026b9457aaf402678a2"
           }
         ],
         "taskCompletion": {
-          "checked": 24,
+          "checked": 26,
           "total": 33
         },
         "implementationEvidence": [],

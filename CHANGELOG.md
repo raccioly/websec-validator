@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed — operation-bound retained precision
 
+- Resolve supported literal registered YAML Connexion contracts without Noir, using a bounded
+  stdlib data subset. Keep informational partial parsing separate; unsupported composition,
+  aliases, references and malformed contracts never manufacture probe targets. Exact dotted
+  operation identifiers select source handlers; slash normalization and contract security text
+  cannot confer guard evidence. Preserve literal Flask configuration without treating it as a
+  replaced registration primitive. No target module is imported or executed.
+
 - Associate supported Django literal templates and header assignments with the actual returned
   response. A strict CSP shape on one view cannot clear an unverified sibling. Record bounded
   source observations separately from loader, middleware, nonce-generation and deployment proof.
