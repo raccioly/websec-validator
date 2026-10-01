@@ -1,8 +1,7 @@
 # Benchmarks
 
-How websec-validator is measured, on an open and reproducible harness. Every number here is produced
-by a command in this repo against a **public** corpus — nothing is hand-tuned, and the protocol for
-the one comparison that isn't yet run is documented rather than estimated.
+How websec-validator is measured. Historical public-corpus measurements, authored regression controls
+and unrun experiments are identified separately. A harness being available is not a measurement.
 
 Last updated: 2026-09-14. Historical measurements below retain their original scope; a current
 measurement requires a recorded corpus revision, detector revision and execution manifest.
@@ -70,9 +69,9 @@ Fits a binomial proportion + **Wilson 95% CI** per bucket against `corpus.json`'
 | **MEDIUM (aggregate)** | 29 / 51 | 0.57 | [0.43, 0.70] |
 | **LOW (aggregate)** | 1 / 8 | 0.13 | [0.02, 0.47] |
 
-The point is not the headline number — it's that **each finding ships with its own measured hit-rate
-and interval**, and a wide CI or a `basis: prior` bucket is surfaced as "thin data, verify manually"
-rather than dressed up as certainty.
+Findings can inherit a reviewed measured bucket estimate and interval; that is not an individual
+finding's measured probability. Unmeasured/prior and legacy-unreviewed buckets must remain distinct
+from reviewed evidence. Wide intervals mean thin evidence, not certainty.
 
 **Objective constraint.** Anything fitted from labels is chosen by a **strictly proper scoring rule**
 (Brier or log score), never by accuracy/precision/recall/F1 — those are maximized by confident
@@ -98,16 +97,78 @@ To compare precision honestly against general-purpose SAST (Semgrep, Bandit), th
 from **identical conditions**: same pinned corpus, same reviewed positive/negative/unknown ground truth, and the same scope rules. That run isn't in this repo yet — rather than estimate it, here is the exact protocol
 so the comparison is reproducible and not cherry-picked:
 
-1. On each corpus app, run websec (`websec run --scan`), Semgrep (`--config auto`), and Bandit.
-2. Map every tool's findings to the corpus `truth` labels by (file, class), applying the same
-   reviewed-label policy to all three; leave unadjudicated findings unknown.
-3. Report, per tool: precision (real / total), recall (real-found / real-total), and for websec the
-   calibration reliability (does observed hit-rate fall inside the reported CI?).
-4. Publish the harness script and raw per-finding CSV alongside the summary, as this file does for
-   the websec-only numbers.
+1. Pin the same corpus commit and explicit source-file scope. Capture each tool's version and
+   configuration/rule bytes (SHA256). Use an offline captured Semgrep rule set, not floating
+   `--config auto`; record Bandit plugins/configuration and WebSec detector/calibration provenance.
+2. Run each tool separately in an operator-controlled environment. Record failed/partial/unavailable
+   runs rather than omitting them. Normalize capture paths to corpus-relative paths without guessing.
+3. Review explicit positive and negative labels and per-tool rule-to-class mappings. Match exact
+   (file, line, class); unmatched, unreviewed and contradictory evidence stays unknown. Route-only
+   WebSec locations cannot silently match file/line labels.
+4. Import captured reports with `scripts/compare-reports.py`; publish its sanitized per-finding CSV
+   and JSON alongside restricted original captures, provenance and reviewer decisions. Do not publish
+   raw source excerpts/credentials just because they occur in a scanner report.
+5. Report each tool's TP/FP/unknown separately. Precision is TP/(TP+FP), not TP/all findings.
+   Reviewed-positive label hit coverage deduplicates label IDs and is **not general vulnerability
+   recall**. Partial captures have no precision score. An unavailable/malformed capture is not clean.
 
 This mirrors the identical-conditions discipline of good retrieval benchmarks: one shared corpus, one
 grader, no per-tool tuning. Until it's run, we make **no** head-to-head precision claim.
+
+### Offline report-import contract — 2026-10-01
+
+The stdlib maintenance harness accepts native Semgrep/Bandit JSON or a WebSec findings ledger; it
+does not execute scanners, import target code or access the network. Reports stay separated: no
+cross-tool deduplication changes a denominator. Byte/row bounds, duplicate-key rejection and
+contained input/output checks fail closed. `.local` inputs are forbidden. CSV formula prefixes are
+escaped; source, messages and evidence text are not copied to outputs.
+
+```bash
+python3 scripts/compare-reports.py comparison-manifest.json --out comparison-output
+```
+
+The manifest uses schema version 1 and the following fields:
+
+```json
+{
+  "schema_version": 1,
+  "corpus_revision": "<40-lowercase-hex immutable commit>",
+  "scope": ["app.py"],
+  "labels": "reviewed-labels.json",
+  "labels_sha256": "<SHA256 of exact label bytes>",
+  "reports": [{
+    "tool": "semgrep",
+    "version": "<captured version>",
+    "engine_source_revision": "<40-lowercase-hex tool source commit>",
+    "package_sha256": "<SHA256 of captured installed distribution>",
+    "configuration_sha256": "<SHA256 of reviewed captured configuration>",
+    "scope_sha256": "<SHA256 of canonical sorted unique scope JSON>",
+    "status": "completed",
+    "report": "semgrep.json",
+    "report_sha256": "<SHA256 of exact report bytes>",
+    "rules": {"sql-rule": {"attack_class": "sqli", "reviewed": true}}
+  }]
+}
+```
+
+`labels` is a JSON list of objects with unique `id`, corpus-relative `file`, positive integer `line`,
+`attack_class`, literal boolean `reviewed` and literal boolean `real`. Only reviewed boolean decisions
+enter TP/FP. All labels must be in the common scope. To calculate `scope_sha256`, hash UTF-8 bytes of
+`json.dumps(sorted(set(scope)), separators=(',', ':'))`. Supply at most one capture per tool
+(`websec`, `semgrep`, `bandit`). Status is `completed`, `partial` or `unavailable`; the importer derives
+`malformed` for unusable report bytes/structure/bindings and downgrades native execution errors,
+skipped rules/paths and Bandit suppression counts to `partial`. Unavailable captures need
+version/configuration/scope declarations but no report file.
+
+Every capture declares a distinct immutable engine source revision and package byte digest. WebSec
+captures additionally require `detector_sha256`, separate from the corpus/source and configuration
+digests. Canonical grading-manifest and rule-mapping digests plus the CLI's exact manifest-byte digest
+bind the grading policy; no raw source snippets or unrestricted report text are emitted.
+
+The importer verifies report and label byte bindings and consistency of the declared common scope.
+Versions, actual execution, configuration and review remain **operator-declared**, not independently
+authenticated. Its paired fixture tests are synthetic contract evidence only: no new competitor
+accuracy, current public-corpus recall or agent-benefit experiment has been run by this harness.
 
 ## Reproduce everything here
 

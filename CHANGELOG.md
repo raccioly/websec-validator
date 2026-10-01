@@ -42,6 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Add an offline captured-report comparison harness for WebSec, Semgrep and Bandit, with explicit
+  byte/scope bindings, reviewed exact-label matching, unknown outcomes and unscored partial/missing
+  captures. Keep per-tool counts separate and publish sanitized rows; no competitor measurement
+  or agent-benefit result is claimed.
+- Replay the recovered Elixir source and newly authored Swift control through actual CLI artifacts.
+  Disclose unsupported/thin-language coverage; original Swift application evidence remains missing.
+
 - Offer a core-only container target and native amd64/arm64 image contract checks. Explicit
   one-shot `HEALTHCHECK NONE` performs no recurring scan; optional MCP liveness is distinct from
   scan results and authenticated dispatch.

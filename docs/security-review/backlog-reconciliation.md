@@ -276,6 +276,27 @@ review supplied block-scalar, quoting/comment, document-marker and normalized-ha
 All 80 focused framework/OpenAPI/source tests pass. The unchanged-source full suite passes
 1,836 tests with one optional development integration skipped.
 
+## Language controls and captured-report comparison — 2026-10-01
+
+Two new actual offline CLI fixture regressions persist honest Elixir/Swift coverage limits. The
+Elixir source is recovered from PR 151 at `9f93abae0930523ffefb86da7a82be06a482336f`;
+the Swift fixture is newly authored, not the unavailable original V9 application. See
+`tests/fixtures/LANGUAGE-PROVENANCE.md`. Neither fixture is executed or establishes vulnerability recall.
+Spec 002's original Swift replay evidence remains unavailable rather than silently satisfied.
+
+`scripts/compare-reports.py` imports byte-bound WebSec/Semgrep/Bandit captures offline against
+explicit reviewed positive/negative labels. Exact source/line/class matches, unknown contradictions,
+per-tool denominators, deduplicated positive label hits and partial/unavailable/malformed statuses
+are paired-tested. Messages/source excerpts are excluded; contained writers reject child aliases.
+Capture execution and reviewer provenance remain declared, not authenticated. Fifteen focused
+methods pass; real head-to-head and manual agent A/B experiments remain unrun. The reproducible
+manifest contract is in `BENCHMARKS.md`.
+
+Independent re-review reproduced the initial skipped-Bandit and malformed-diagnostic cases: they
+now remain partial/malformed with null scores. Engine source, package and detector bindings are
+separate and explicitly declared; grading policy and raw manifest bytes are hashed. The reviewer
+reran all fifteen focused methods and found no further concrete blocker in this bounded review.
+
 The original [VAmPI configuration](https://github.com/erev0s/VAmPI/blob/f16052dce83f05847133ec98f01c5193a41de7d8/config.py)
 and [OpenAPI contract](https://github.com/erev0s/VAmPI/blob/f16052dce83f05847133ec98f01c5193a41de7d8/openapi_specs/openapi3.yml)
 were read as data in an owned disposable directory: fourteen source routes, zero parser gaps/errors,

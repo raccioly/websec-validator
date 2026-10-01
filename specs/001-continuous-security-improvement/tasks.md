@@ -43,9 +43,9 @@ Independent test: original reproducer no longer misclassified; real unsafe sibli
 
 Independent test: provenance-specific tables remain separate; unknown labels never become truth.
 
-- [ ] T021 [US4] Add mixed-reviewed/Brier write/original language fixture regressions in `tests/test_retained_calibration.py` and owned fixture directories.
+- [x] T021 [US4] Add mixed-reviewed/Brier write regressions and recovered Elixir/newly authored Swift controls in `tests/test_retained_calibration.py`, `tests/test_language_fixtures.py` and owned fixtures. Original Swift replay is unavailable (T034), not claimed as delivered.
 - [x] T022 [US4] Finish class eligibility and every measurable-write scoring in `src/websec_validator/calibration.py`, `synthetic.py`, `cli.py`; reconcile spec 002 acceptance evidence.
-- [ ] T023 [US4] Add reproducible per-tool comparison harness/raw unknown-labelled outcomes under `scripts/` and `tests/`; update `BENCHMARKS.md` without inventing unseen-project recall or agent benefit.
+- [x] T023 [US4] Add reproducible offline per-tool capture comparison and sanitized raw unknown-labelled outcomes under `scripts/compare-reports.py` and `tests/test_compare_reports.py`; update `BENCHMARKS.md` without inventing unseen-project recall or agent benefit. Actual comparative measurements remain unrun.
 
 ## Phase 6 — US3: Deliberate recurring integration (P2)
 
@@ -58,7 +58,7 @@ Independent test: actual supported integration lifecycle; static config tests al
 
 ## Phase 7 — Polish and release
 
-- [ ] T028 Independently review each detector unit and run actual CLI/ledger controls; record evidence/limitations in `docs/security-review/backlog-reconciliation.md` (FR-002/SC-001).
+- [x] T028 Independently review each detector unit and run actual CLI/ledger controls; record evidence/limitations in `docs/security-review/backlog-reconciliation.md` (FR-002/SC-001). Final comparison/language re-review passes fifteen methods; supplied partial/provenance blockers are fixed.
 - [ ] T029 Run focused/full application and automation suites, compileall, DocGuard/evidence/spec checks and isolated built-wheel validation; update `AGENTS.md` dated counts and `CHANGELOG.md`.
 - [ ] T030 Run Spec Kit convergence after all implementation tasks; append newly found gaps to this task file only.
 - [ ] T031 Review release docs/brief publication pair and migration contracts for new package behavior; regenerate and visually inspect PDF only when its source changes.
@@ -168,3 +168,9 @@ f16052dce83f05847133ec98f01c5193a41de7d8 produced fourteen source routes without
 owned disposable source-only check. This is not runtime/deployment or vulnerability-recall proof.
 Dynamic specifications/options, custom resolvers and cross-module registration remain explicit
 review gaps. T007/T008 are complete within these supported literal registration contracts.
+
+### External acceptance evidence, not an implementation claim
+
+- [ ] T034 Recover the original Swift V9 source if its author supplies it and replay spec 002
+  FR-013/SC-005. PR 151's complete immutable tree/history has no such source. Newly authored
+  `lang_swift_vulnerable` tests the coverage disclosure but does not satisfy unchanged-original replay.
