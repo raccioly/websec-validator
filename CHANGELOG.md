@@ -1,3 +1,5 @@
+## [Unreleased]
+- Fixed GraphQL extractor to correctly match boolean kwargs for python apps like DVGA (e.g., `graphiql=True`, `introspection=True`).
 # Changelog
 
 All notable changes to this project will be documented in this file.

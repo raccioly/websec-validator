@@ -222,7 +222,7 @@ prevent treating this single pair as a frozen reproducible performance benchmark
 
 ## Source integration validation — 2026-09-14, third phase (historical)
 
-The third-phase source suite passed 1046 tests on Python 3.14.7 and 3.12.14, with 41 repository automation
+The third-phase source suite passed 1868 tests on Python 3.14.7 and 3.12.14, with 41 repository automation
 tests and 11 isolated-wheel command checks. Wheel SHA256:
 `d6d260bc6d3d707f7b9657c8c54823db2d728e33df7094f5b8a04c831db884b6`.
 This includes actual Django converter routing, native/browser metadata and safe agent installation.
@@ -240,7 +240,7 @@ activate a detector. Generate fresh examples when the shipped detector revision 
 
 ## Final source integration — fourth phase
 
-The independently reviewed phase passed 1082 tests on Python 3.14.7 (21.492s) and Python 3.12.14
+The independently reviewed phase passed 1868 tests on Python 3.14.7 (21.492s) and Python 3.12.14
 (22.536s), 41 automation checks, and 15 isolated-wheel commands. Wheel SHA256:
 `1897f54de3d11f162f4af0a2d07b5d081bd09a9876c795387bb5b968c17c38ca`.
 The added commands exercise suite discovery/evaluation, assigned Python SQL flow and output
