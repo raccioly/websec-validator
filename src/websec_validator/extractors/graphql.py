@@ -16,11 +16,11 @@ SCHEMA_CODE = re.compile(
     r"makeExecutableSchema|buildSchema|new ApolloServer|createYoga|type-graphql|"
     r"@Resolver|@ObjectType|gql`|type\s+Query\b|type\s+Mutation\b|strawberry\.|"
     r"graphene\.|ariadne|mercurius", re.I)
-INTROSPECTION_ON = re.compile(r"introspection\s*:\s*true")
-INTROSPECTION_OFF = re.compile(r"introspection\s*:\s*false|NoSchemaIntrospection|NoIntrospection")
-PLAYGROUND = re.compile(r"playground\s*:\s*true|graphiql\s*:\s*true|LandingPageGraphQLPlayground|LandingPageLocalDefault")
+INTROSPECTION_ON = re.compile(r"introspection\s*[:=]\s*(?:true|True)")
+INTROSPECTION_OFF = re.compile(r"introspection\s*[:=]\s*(?:false|False)|NoSchemaIntrospection|NoIntrospection|IntrospectionMiddleware")
+PLAYGROUND = re.compile(r"playground\s*[:=]\s*(?:true|True)|graphiql\s*[:=]\s*(?:true|True)|LandingPageGraphQLPlayground|LandingPageLocalDefault")
 LIMITING = re.compile(r"graphql-depth-limit|depthLimit|costAnalysis|graphql-cost-analysis|"
-                      r"createComplexityLimitRule|query-complexity|graphql-armor")
+                      r"createComplexityLimitRule|query-complexity|graphql-armor|DepthProtection|CostProtection")
 
 # --- AppSync / managed GraphQL (REF-PENTEST #2 introspection-via-WAF-bypass, #5 sub-authz) ---
 APPSYNC_MARK = re.compile(r"appsync\.GraphqlApi|CfnGraphQLApi|Definition\.fromSchema|aws-appsync|aws_appsync", re.I)
