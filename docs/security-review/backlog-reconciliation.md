@@ -339,7 +339,7 @@ Convergence found one secondary buildable US3/AC2 gap: the initial separate-targ
 in a distinct directory, not a second Git checkout. T035 adds an owned real clone/detached exact
 commit and hostile template/hooks/fsmonitor controls. Local paired/CLI validation is recorded
 separately; it does not change the published engine or claim an arbitrary public PR deployment.
-The final local suite passes 1,855 tests (one opt-in integration skipped) in 44.950s; independent
+The final local suite passes 1,867 tests (one opt-in integration skipped) in 44.950s; independent
 review reran the four new methods without a concrete blocker. Hosted adoption
 [run 36825412497](https://github.com/raccioly/websec-validator/actions/runs/36825412497) passes
 all four jobs at `eaac95e3f0f383d96d89a5b0ca96ba3a90d1c54b`; required
