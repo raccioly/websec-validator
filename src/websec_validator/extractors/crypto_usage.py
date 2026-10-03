@@ -292,7 +292,7 @@ def _unparenthesized(value: str) -> str:
 
 # Identifier-shaped arguments: not credentials, so hashing them weakly is not a password-hash bug.
 _NON_CREDENTIAL_ARGUMENT = re.compile(
-    r"(?:^|\.)(?:id|email|userId|user_id|tenantId|tenant_id|password" + _PW_METADATA + r")$", re.I)
+    r"(?:(?:^|\.)(?:id|email|userId|user_id|tenantId|tenant_id|password" + _PW_METADATA + r")$|Math\.random|\.toString\(|JSON\.stringify|uuid\.v4|crypto\.randomBytes)", re.I)
 
 
 _METADATA_SUFFIXES = {"name", "type", "id", "method", "algorithm", "class", "url", "uri",

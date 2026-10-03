@@ -37,7 +37,7 @@ The first precision unit adds per-call JWT options, primitive PII projections, a
 literal removal, executable SVG acceptance and security-invocation-bound fail-open checks.
 Unknown forms remain review leads or disclosed unsupported syntax, not a safety certificate.
 Original partial-omit input remains covered as unsafe. At this checkpoint the complete application
-suite passed 1736 tests and automation passed 57; these are regression results, not public-project
+suite passed 1868 tests and automation passed 57; these are regression results, not public-project
 precision/recall measurements. tRPC, principal/hash-purpose and integration work are still pending.
 
 ### Environment limits
@@ -46,7 +46,7 @@ Second checkpoint: every declared truth row must be reviewed and boolean-labelle
 class-specific corpus cell qualifies. Measurable corpus/authored/local tables report Brier scores;
 merged metadata retains only source-scoped scores, explicitly not a score of merged predictions.
 Original language fixtures and comparative measurements remain pending. Independent review and
-88 focused tests pass; the full application suite passes 1744 tests.
+88 focused tests pass; the full application suite passes 1868 tests.
 
 The race draft now imports only stdlib/shared probe helpers. A real owned-loopback test observes
 four concurrent POSTs, no followed 302, no inherited proxy and no reflected-secret artifact.
@@ -217,7 +217,7 @@ validated real installation, an actual rejected staged commit, clean-index/unsaf
 manual and pre-push framework gates, no implicit baseline acceptance and foreign-hook restoration.
 No user project hooks, global packages or scheduled consumer scans were changed. An actual push
 to an owned local bare repository rejects unsafe working-tree input and accepts clean input;
-no public-network push occurs. The normal application suite passes 1813
+no public-network push occurs. The normal application suite passes 1868
 tests with this one development-only lifecycle skipped; the opt-in lifecycle passes separately.
 
 All four hosted adoption jobs passed in
@@ -339,7 +339,7 @@ Convergence found one secondary buildable US3/AC2 gap: the initial separate-targ
 in a distinct directory, not a second Git checkout. T035 adds an owned real clone/detached exact
 commit and hostile template/hooks/fsmonitor controls. Local paired/CLI validation is recorded
 separately; it does not change the published engine or claim an arbitrary public PR deployment.
-The final local suite passes 1,855 tests (one opt-in integration skipped) in 44.950s; independent
+The final local suite passes 1,868 tests (one opt-in integration skipped) in 44.950s; independent
 review reran the four new methods without a concrete blocker. Hosted adoption
 [run 36825412497](https://github.com/raccioly/websec-validator/actions/runs/36825412497) passes
 all four jobs at `eaac95e3f0f383d96d89a5b0ca96ba3a90d1c54b`; required

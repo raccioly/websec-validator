@@ -32,7 +32,7 @@ pass. Pure-Python, **stdlib only, zero runtime dependencies**; it shells out to 
 | Command | Purpose |
 |---------|---------|
 | `pipx install --editable .` | Install the CLI from source (or `pip install -e .` in a 3.11+ venv) |
-| `python3 -m unittest discover -s tests` | Run the suite (1855 tests, stdlib only, no public network; one opt-in lifecycle skipped) |
+| `python3 -m unittest discover -s tests` | Run the suite (1868 tests, stdlib only, no public network; one opt-in lifecycle skipped) |
 | `python3 scripts/build-brief.py --check` | Verify the committed HTML/PDF/renderer binding offline; rebuild and review all eight pages after source edits |
 | `websec run ./target` | Full pipeline → `FACTS.json` + `AGENT-BRIEFING.md` + `probes/` |
 | `websec doctor ./target` | Show which optional scanners are installed |
@@ -77,7 +77,7 @@ content instead of overwriting the name-guard.
 
 1. **Before any work**: read `docs-canonical/` and run `docguard guard` to see the compliance state.
 2. **After changing code or docs**: re-run `docguard guard`; keep the numbers (22 extractors, 17 sink
-   classes, 11 scanner entries, 1855 tests, dated 10/10 proof (not vulnerability recall)) consistent across every doc — DocGuard's metrics-consistency
+   classes, 11 scanner entries, 1868 tests, dated 10/10 proof (not vulnerability recall)) consistent across every doc — DocGuard's metrics-consistency
    validator checks only configured matching statements; historical snapshots stay dated. A
    `no-matches` result is not evidence these numbers were checked.
 3. **Update `CHANGELOG.md`** for any user-visible change.
@@ -94,7 +94,7 @@ and hash manifest with the source. Selected fact tests and matching hashes do no
 - Python 3.11+, stdlib only — **do not add runtime dependencies**. Integrate external tools by shelling
   out (see `src/websec_validator/scanners.py`), never by importing.
 - Add a recon dimension by dropping a module in `src/websec_validator/extractors/` and appending it to
-  `REGISTRY` in `extractors/__init__.py`. One extractor must never crash the whole run (wrap in the
+  `REGISTRY` in `src/websec_validator/extractors/base.py`. One extractor must never crash the whole run (wrap in the
   registry driver's try/except, as existing extractors do).
 - Keep recon **read-only and offline**; keep dynamic write probes **localhost-only**. These are
   security invariants, not preferences — see `docs-canonical/SECURITY.md`.
