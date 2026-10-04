@@ -86,7 +86,8 @@ SINKS = {
         r"|\{\s*\.\.\.[\w.$]+[^{}]{0,80}?,\s*(?:role|roles|tier|plan|isAdmin|is_admin|admin|permissions?"
         r"|balance|credits|isOwner|isSuperuser|superuser)\s*[,}]")),
     "redos": ("ssrf-probes", None, re.compile(
-        r"new\s+RegExp\s*\([^)]*(?:req\.|request\.|\+)|re\.(?:compile|match|search|fullmatch)\s*\([^,)]*(?:request\.|f['\"])")),
+        r"new\s+RegExp\s*\([^)]*(?:req\.|request\.|\+)|re\.(?:compile|match|search|fullmatch)\s*\([^,)]*(?:request\.|f['\"])|"
+        r"/[^/\n]{0,80}?\([^)\n]*?(?:\+|\*)[^)\n]*?\)(?:\+|\*)[^/\n]{0,80}?/[gimsuy]*")),
     "eval-injection": ("bola-write-verbs", None, re.compile(
         r"\beval\s*\([^)]*" + _U + r"|new\s+Function\s*\([^)]*" + _U)),
     # Var-arg SSRF: an http client called with a BARE identifier first-arg (not a string literal) —
