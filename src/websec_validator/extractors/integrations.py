@@ -74,7 +74,7 @@ ENTITLEMENT_VERIFY = re.compile(
     r"|activate_?licen[sc]e|licen[sc]e_?key|\bentitlement|subscriptions?/|/customers?/"
     r"|checkout/sessions|has_?active_?subscription|is_?subscribed|verify_?subscription", re.I)
 # The grant keys on a truthy success/valid/activated flag …
-GRANT_ON_SUCCESS = re.compile(r"\.success\b|\.valid\b|\.activated\b|\.meta\.valid\b|['\"]valid['\"]\s*:", re.I)
+GRANT_ON_SUCCESS = re.compile(r"(?<!req)(?<!res)(?<!form)(?<!schema)(?<!request)(?<!response)(?<!body)(?<!query)(?<!params)(?<!headers)(?<!session)(?<!payload)(?<!input)(?<!data)(?<!event)(?:\.success\b|\.valid\b|\.activated\b|\.meta\.valid\b|['\"]valid['\"]\s*:)", re.I)
 # … but a SOUND check ALSO inspects revocation/validity state. PROVIDER-AGNOSTIC concept vocabulary
 # (refund / chargeback / dispute / cancel / expire / revoke / suspend / a status compared to
 # active|paid), matched as CODE — a property access, a quoted key/value, or a *_at/status field —
@@ -155,7 +155,9 @@ RATE_PER_PRINCIPAL = re.compile(r"keyGenerator[\s\S]{0,70}?(?:user|sub|principal
 # in one path widens the exposure window and signals bespoke loading. AWS/GCP/Azure/Vault.
 SECRET_FETCH = re.compile(
     r"(?:getSecretValue|getSecret|accessSecretVersion|GetSecretValueCommand|getParameter|GetParameterCommand"
-    r"|read_secret|kv\.get|getSecretString)\s*\(\s*\{?[^)]*?['\"]([^'\"]+)['\"]", re.I)
+    r"|read_secret|kv\.get|getSecretString)\s*\(\s*\{?[^)]*?['\"]"
+    r"(?![^'\"]*\.(?:txt|json|pem|env|xml|yaml|yml)(?:['\"]|$))"  # NOT a local file
+    r"([^'\"]+)['\"]", re.I)
 
 
 def _webhook_scope(source: str, endpoint: dict) -> dict | None:
@@ -288,7 +290,7 @@ class IntegrationsExtractor(Extractor):
                 # #1 — entitlement-gated feature with NO per-license seat/device cap, rate limit, or
                 # server-side use-count (LOW confidence: verify the control isn't in middleware).
                 if (not RATE_LIMIT.search(text) and not USAGE_CAP.search(text)
-                        and LICENSED_APP.search(text)):     # only a licensed-app (key-across-devices), not web SaaS
+                        and LICENSED_APP.search(text) and GRANT_ON_SUCCESS.search(text)):     # only a licensed-app (key-across-devices), not web SaaS
                     findings.append({"severity": "MEDIUM", "confidence": "LOW",
                                      "kind": "no-per-license-usage-cap",
                                      "attack_class": "missing-usage-cap", "file": rel,
