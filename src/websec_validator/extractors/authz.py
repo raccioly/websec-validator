@@ -277,7 +277,7 @@ GUARD = re.compile(
     r"@login_required|@jwt_required|@permission_required|@roles_required|ensureAuth|"
     r"withAuth|getServerSession|getToken\s*\(|verifyToken|authMiddleware|@UseGuards|"
     r"@Roles\b|Depends\s*\(\s*(?:get_current_user|oauth2_scheme|require_)|Security\s*\(|"
-    r"PermissionRequired|LoginRequired|passport\.authenticate|"
+    r"PermissionRequired|LoginRequired|passport\.authenticate|(?:\bauth\s*\(\)|\breq\.auth)\.protect\s*\(|"
     # `.use(authMw)` OR `.use('/prefix', authMw)` — the path-first form (Express-5 `router.use('/Users',
     # scimAuth)`) was uncredited, a real-repo FP on SCIM routes.
     r"\.use\s*\(\s*(?:['\"][^'\"]*['\"]\s*,\s*)?[\w.]*(?:[Aa]uth|[Vv]erifyToken|[Rr]equire|[Gg]uard|jwt)\w*", re.I)
@@ -287,7 +287,7 @@ GUARD = re.compile(
 # NOT credit (that over-credit hid a real Next.js app's unauthenticated /api/auth/seed backdoor).
 INLINE_AUTHN = re.compile(
     r"await\s+auth\s*\(\s*\)|getServerSession\s*\(|getToken\s*\(|\bauth\s*\(\)\s*;|"
-    r"currentUser\s*\(|requireSession\s*\(|await\s+getSession\s*\(|"
+    r"currentUser\s*\(|getUser\s*\(|requireSession\s*\(|await\s+getSession\s*\(|"
     # A *validator* call naming a credential — `token_validator(request.headers.get(...))` is how
     # a connexion/Flask app authenticates without a decorator. Still only credited alongside an
     # AUTHN_REJECT, so calling a validator and ignoring its verdict does NOT count as a guard.

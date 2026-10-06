@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Support Next.js Server Actions and Route Handlers using Clerk's `auth().protect()` idiom and Supabase's `supabase.auth.getUser()` pattern to accurately credit authorization guard presence.
+
 ## [0.21.1] — 2026-10-01
 
 ### Performance
