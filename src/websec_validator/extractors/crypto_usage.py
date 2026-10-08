@@ -26,7 +26,7 @@ from .syntax import (call_expression, expression_end, in_literal, js_functions,
 
 # Exact metadata suffixes are not password bytes. Hashes/tokens in general remain
 # credential-shaped; a broad suffix exemption would hide double-hashed passwords.
-_PW_METADATA = r"_?(?:reset_?(?:token|url)|attempt_?count|file_?path|salt|updated_?(?:at|timestamp))"
+_PW_METADATA = r"_?(?:reset_?(?:token|url|code|link)|attempt_?count|file(?:_?path|name|id)?|salt|updated_?(?:at|timestamp|date)|url|secret_?(?:arn|id|name)?|_?prompt_?msg|less_?(?:token|auth)|_?id)"
 _PW = r"(?:password|passwd|passphrase|\bpwd\b|userPassword|plainPassword)(?!" + _PW_METADATA + r"\b)"
 # a fast digest fed a password-shaped value (either arg order, within a small window)
 WEAK_PW_HASH = re.compile(

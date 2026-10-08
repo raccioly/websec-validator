@@ -187,7 +187,7 @@ review gaps. T007/T008 are complete within these supported literal registration 
 ### Second-checkout completion — 2026-10-01
 
 Four new checkout tests pass, including three actual CLI outcomes with unchanged target HEAD and
-working tree. The final full suite passes 1,855 tests (one optional lifecycle skipped) in 44.950s;
+working tree. The final full suite passes 1,868 tests (one optional lifecycle skipped) in 44.950s;
 independent review reran all four new methods. All four hosted adoption jobs pass in
 [run 36825412497](https://github.com/raccioly/websec-validator/actions/runs/36825412497) at
 `eaac95e3f0f383d96d89a5b0ca96ba3a90d1c54b`, alongside all five required CI checks in
