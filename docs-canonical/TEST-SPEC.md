@@ -16,7 +16,7 @@ Python 3.14.7 (33.393s) and Python 3.12.13 (33.955s), plus **41 repository autom
 The reviewed 2026-09-30 documentation snapshot passed **1713 application tests** on Python 3.12,
 plus **57 repository automation tests**. These are dated execution records, not future suite floors.
 CI enforces an application-test floor derived at run time from the base commit's own suite, so no floor constant is stored; a drop requires a `Test-Removal:` commit trailer. The package
-has **22 registered extractors**, **17 sink classes**, **11 scanner entries** and **9 named profiles**.
+has **31 registered extractors**, **17 sink classes**, **11 scanner entries** and **9 named profiles**.
 The eleventh scanner entry is `gitleaks-dir`: gitleaks runs as two disjoint passes, git history and
 working tree, because neither surface subsumes the other.
 

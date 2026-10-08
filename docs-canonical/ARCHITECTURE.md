@@ -31,14 +31,14 @@ that makes the agent + human dramatically more effective.
 ## Component Map
 
 The tool is a single pure-Python package, `src/websec_validator/`. Recon walks the repo **once** into a
-shared `RepoContext`, then runs 22 extractors over it; the downstream modules turn those facts into
+shared `RepoContext`, then runs 31 extractors over it; the downstream modules turn those facts into
 scanner runs, a calibrated findings ledger, staged probes, and the briefing/report artifacts.
 
 | Component | Responsibility | Location | Tests |
 |-----------|---------------|----------|-------|
 | CLI entry point | Arg parsing for `run`, `doctor`, `dynamic`, `mcp`, `gate`, `attest`, `capabilities`, `feedback`, `demo`, `explain`, `intel`, `research`, `repair-verify`, `update-check`, `install`, `hooks`, `init`, `emit-context` and advanced `recon` / `proof` / `calibrate` | `src/websec_validator/cli.py` | `tests/test_recon.py`, `tests/test_hardening.py`, `tests/test_workbench_cli.py` |
 | Recon driver | Thin wrapper that runs the extractor registry over one repo walk | `src/websec_validator/recon.py` | `tests/test_recon.py` |
-| Extractors (22) | One focused question each → the merged `FACTS.json`; `extractors.REGISTRY` is the ordered authority (including policy consistency and offline dependencies) | `src/websec_validator/extractors/` | `tests/test_recon.py`, `tests/test_pentest_regressions.py`, `tests/test_entitlement_webext.py` |
+| Extractors (31) | One focused question each → the merged `FACTS.json`; `extractors.REGISTRY` is the ordered authority (including policy consistency and offline dependencies) | `src/websec_validator/extractors/` | `tests/test_recon.py`, `tests/test_pentest_regressions.py`, `tests/test_entitlement_webext.py` |
 | Static scanners | Detect + (with `--scan`) shell out to Trivy/Gitleaks/Semgrep/Checkov/Prowler and de-duplicate across tools | `src/websec_validator/scanners.py` | `tests/test_recon.py` |
 | Findings ledger | Correlate recon + static + dynamic into one ranked, standards-cited, calibrated record set | `src/websec_validator/findings.py` | `tests/test_pentest_regressions.py` |
 | Analysis scope | Narrow what is READ AND MATCHED to named files while inventorying the eligible tree and reporting exclusions | `src/websec_validator/extractors/base.py` | `tests/test_analysis_scope.py`, `tests/test_gate_policy_and_scope.py` |
@@ -197,7 +197,7 @@ all artifacts of a completed execution are written does an atomic symlink replac
 
 ```mermaid
 graph LR
-    R[your repo] --> A[1. Recon<br/>22 extractors]
+    R[your repo] --> A[1. Recon<br/>31 extractors]
     A --> B[2. Static scanners<br/>de-duplicated]
     B --> C[3. Findings ledger<br/>evidence + standards + calibrated P-real]
     A --> D[3. Stage tailored probes]
