@@ -278,6 +278,9 @@ GUARD = re.compile(
     r"withAuth|getServerSession|getToken\s*\(|verifyToken|authMiddleware|@UseGuards|"
     r"@Roles\b|Depends\s*\(\s*(?:get_current_user|oauth2_scheme|require_)|Security\s*\(|"
     r"PermissionRequired|LoginRequired|passport\.authenticate|"
+    # Clerk's self-rejecting guard: v5 `auth().protect()`, v6 `await auth.protect()` (#188, hardened).
+    # The bare imported `auth` binding only — `session.auth.protect(` / `protectOther(` do not credit.
+    r"(?<![\w$.])auth\s*(?:\(\s*\))?\s*\.\s*protect\s*\(|"
     # `.use(authMw)` OR `.use('/prefix', authMw)` — the path-first form (Express-5 `router.use('/Users',
     # scimAuth)`) was uncredited, a real-repo FP on SCIM routes.
     r"\.use\s*\(\s*(?:['\"][^'\"]*['\"]\s*,\s*)?[\w.]*(?:[Aa]uth|[Vv]erifyToken|[Rr]equire|[Gg]uard|jwt)\w*", re.I)
@@ -288,6 +291,9 @@ GUARD = re.compile(
 INLINE_AUTHN = re.compile(
     r"await\s+auth\s*\(\s*\)|getServerSession\s*\(|getToken\s*\(|\bauth\s*\(\)\s*;|"
     r"currentUser\s*\(|requireSession\s*\(|await\s+getSession\s*\(|"
+    # Supabase `supabase.auth.getUser()` (#188, hardened). Scoped to the `.auth.` namespace: a bare
+    # `getUser(` would credit `db.getUser(id); if (!user) return 403` — a record lookup — as authn.
+    r"\.auth\.getUser\s*\(|"
     # A *validator* call naming a credential — `token_validator(request.headers.get(...))` is how
     # a connexion/Flask app authenticates without a decorator. Still only credited alongside an
     # AUTHN_REJECT, so calling a validator and ignoring its verdict does NOT count as a guard.

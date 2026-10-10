@@ -272,6 +272,56 @@ _PY_CLI = re.compile(r"if\s+__name__\s*==\s*['\"]__main__['\"]|\bargparse\.|clic
 _PY_WEB_FW = re.compile(r"\bfrom\s+flask|\bimport\s+flask|\bfrom\s+fastapi|\bimport\s+fastapi|\bfrom\s+django|"
                         r"\bfrom\s+aiohttp|\bfrom\s+starlette|\bfrom\s+sanic|\bfrom\s+tornado|Flask\s*\(|FastAPI\s*\(", re.I)
 
+# Static catastrophic-backtracking regex LITERAL (#184, hardened) — `/([0-9]+)+#/`, `/(a*)*b/`. Unlike
+# the other signatures there is no user-input marker: the hazard is the pattern itself, so it stays a
+# server-file lead (redos is a _SERVER_REQUEST_CLASSES member). Two bounded steps, never one regex:
+#   1. a literal only where a regex literal can START — line start, after `= ( , : ! & | ? { ; [ > ~` or
+#      `return`. Division always follows an operand (`width / (a+b)*s / 2`), so arithmetic, URL
+#      strings and `// (a+b)*` comments (already masked) never open a literal. Every repetition is
+#      capped and its alternatives start on distinct characters, so the scan is linear per start.
+#   2. a single left-to-right walk of that literal for a group holding an unbounded quantifier that is
+#      itself unboundedly quantified. Escapes and character classes are skipped, so `\(a+\)+` and
+#      `([+*])+` are not nested quantifiers. Alternation-overlap ReDoS (`(a|aa)+`) is out of scope.
+_REGEX_LITERAL_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts", ".vue", ".svelte", ".rb"}
+_REGEX_LITERAL = re.compile(
+    r"(?:^|(?<=[=(,:!&|?{;\[>~])|(?<=\breturn))[ \t]*"
+    r"(?P<literal>/(?![/*])(?P<body>(?:\\[^\n]|\[(?:\\[^\n]|[^\]\\\n]){0,200}\]|[^/\\\n\[]){1,400})/[dgimsuyv]{0,8})",
+    re.M)
+_UNBOUNDED_QUANTIFIER = re.compile(r"[+*]|\{\d+,\}")
+
+
+def _nested_quantifier(body: str) -> bool:
+    groups: list = []          # per open group: does it already contain an unbounded quantifier?
+    in_class = False
+    i = 0
+    while i < len(body):
+        char = body[i]
+        if char == "\\":
+            i += 2
+            continue
+        if in_class:
+            in_class = char != "]"
+        elif char == "[":
+            in_class = True
+        elif char == "(":
+            groups.append(False)
+        elif char == ")":
+            inner = groups.pop() if groups else False
+            quantified = bool(_UNBOUNDED_QUANTIFIER.match(body, i + 1))
+            if inner and quantified:
+                return True
+            if groups and (inner or quantified):
+                groups[-1] = True
+        elif groups and _UNBOUNDED_QUANTIFIER.match(body, i):
+            groups[-1] = True
+        i += 1
+    return False
+
+
+def _redos_literal_candidates(text: str) -> list:
+    return [(m.start("literal"), m["literal"], "") for m in _REGEX_LITERAL.finditer(text)
+            if _nested_quantifier(m["body"])]
+
 
 class SurfaceExtractor(Extractor):
     name = "surface"
@@ -351,6 +401,8 @@ class SurfaceExtractor(Extractor):
                                   if rx.search(call_expression(text, m.start()))]
                 else:
                     candidates = [(m.start(), call_expression(text, m.start()), "") for m in rx.finditer(text)]
+                    if cls == "redos" and _p.suffix.lower() in _REGEX_LITERAL_SUFFIXES:
+                        candidates += _redos_literal_candidates(text)
                 seen = {}
                 for start, expression, rhs in candidates:
                     control = "none observed"

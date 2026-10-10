@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — seven Jules detector PRs, hardened so no true positive is lost
+
+- Tenant-key candidates no longer count `organizationIdentifier` / `projectIdentity` /
+  `tenant_identifier` as `organizationId` / `projectId` / `tenant_id` (#191, hardened). Substring
+  counting is kept, so snake/camel composites (`current_tenant_id`, `user_org_id`) and plurals
+  (`groupIds`) still count; only an `Identifier`/`Identity` continuation is excluded.
+- Weak-password-hash treats complete metadata suffixes (`_url`, `_id`, `_reset_code`/`_link`,
+  `_secret_arn`/`_id`/`_name`, `_file_name`/`_id`, `_updated_date`, `passwordless_token`,
+  `_prompt_msg`) as non-credentials (#189, hardened). A bare `password_secret`/`passwordSecret` and
+  `passwordFile` stay flagged.
+- Inside a password-named helper, a digest whose whole argument is `Math.random()`, `uuid.v4()`,
+  `uuidv4()`, `randomUUID()` or `crypto.randomBytes(n)` is a nonce, not a password hash (#182,
+  hardened). `JSON.stringify(x)` is exempt only for an outer-scope, non-credential `x`. Renamed
+  passwords wrapped in `.toString()`, `String()`, `JSON.stringify(param)` or concatenated with a
+  random value still report.
+- Clerk `auth().protect()` (v5) and `await auth.protect()` (v6) credit as guards, and Supabase
+  `.auth.getUser()` credits when paired with a 401/403 rejection (#188, hardened). Record lookups
+  such as `db.getUser(id)` are not authentication, and `protectOther()` / `session.auth.protect()` do
+  not credit.
+- Entitlement-revocation detection ignores inbound request/form validation flags (`req.body.valid`,
+  `request.query.valid`, `form.valid`, `schema.valid`, `input.valid`) (#186, hardened). Provider
+  replies (`data.valid`, `res.valid`, `response.valid`, `payload.success`, `body.valid`, Keygen
+  `meta.valid`) still fire. The per-license usage-cap lead keeps firing without a truthy-grant tell.
+  Redundant-secret-fetch ignores explicit local paths (`./`, `../`, `~/`, `file:`), but not file
+  extensions: AWS, SSM and Vault names legally contain `.json`/`.pem`.
+- The ReDoS sink now also reports static nested-quantifier regex literals in JS/TS/Vue/Svelte/Ruby
+  server files (`/([0-9]+)+#/`, `/(a*)*b/`) (#184, hardened). A literal must start where a regex
+  literal can start, so arithmetic division, URL strings and comments do not match. Escaped parens and
+  character classes are not quantifiers, and the scan is linear on adversarial lines.
+- GraphQL detection reads Python kwargs (`graphiql=True`, `introspection=False`) (#181, hardened).
+  `disable_introspection=…` does not flip the state. DVGA's mode-conditional
+  `IntrospectionMiddleware` / `DepthProtectionMiddleware` / `CostProtectionMiddleware` are not
+  controls (no-ops unless the server is hardened), so DVGA's reviewed truth is preserved.
+- Twenty-five additive tests pair each PR's false-positive regression with the true positives
+  the PR as written would have lost.
+
 ## [0.21.1] — 2026-10-01
 
 ### Performance

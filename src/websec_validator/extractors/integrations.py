@@ -74,7 +74,15 @@ ENTITLEMENT_VERIFY = re.compile(
     r"|activate_?licen[sc]e|licen[sc]e_?key|\bentitlement|subscriptions?/|/customers?/"
     r"|checkout/sessions|has_?active_?subscription|is_?subscribed|verify_?subscription", re.I)
 # The grant keys on a truthy success/valid/activated flag …
-GRANT_ON_SUCCESS = re.compile(r"\.success\b|\.valid\b|\.activated\b|\.meta\.valid\b|['\"]valid['\"]\s*:", re.I)
+# … except an INBOUND request/form-validation flag (`req.body.valid`, `form.valid`, `schema.valid`),
+# which is not a provider verdict (#186, hardened). Only request-side objects are excluded: `data`,
+# `res`, `response`, `result`, `payload`, `body` (a parsed provider reply) and `meta` carry the
+# canonical Lemon Squeezy / Keygen / Gumroad verdict and must still fire.
+GRANT_ON_SUCCESS = re.compile(
+    r"(?<!\bform)(?<!\bschema)(?<!\binput)(?<!\breq)"
+    r"(?<!\breq\.body)(?<!\brequest\.body)(?<!\breq\.query)(?<!\brequest\.query)"
+    r"(?<!\breq\.params)(?<!\brequest\.params)(?<!\breq\.headers)(?<!\brequest\.headers)"
+    r"(?:\.success\b|\.valid\b|\.activated\b|\.meta\.valid\b|['\"]valid['\"]\s*:)", re.I)
 # … but a SOUND check ALSO inspects revocation/validity state. PROVIDER-AGNOSTIC concept vocabulary
 # (refund / chargeback / dispute / cancel / expire / revoke / suspend / a status compared to
 # active|paid), matched as CODE — a property access, a quoted key/value, or a *_at/status field —
@@ -156,6 +164,10 @@ RATE_PER_PRINCIPAL = re.compile(r"keyGenerator[\s\S]{0,70}?(?:user|sub|principal
 SECRET_FETCH = re.compile(
     r"(?:getSecretValue|getSecret|accessSecretVersion|GetSecretValueCommand|getParameter|GetParameterCommand"
     r"|read_secret|kv\.get|getSecretString)\s*\(\s*\{?[^)]*?['\"]([^'\"]+)['\"]", re.I)
+# A key spelled as an explicit RELATIVE/HOME/file-URL path is a local file read, not a secret-manager
+# key (#186, hardened). File EXTENSIONS alone are not evidence: AWS Secrets Manager / SSM and Vault
+# names legally contain `.json`/`.pem` (`prod/firebase-adminsdk.json`), so those stay counted.
+_LOCAL_FILE_KEY = re.compile(r"^(?:\.{1,2}[/\\]|~[/\\]|file:)")
 
 
 def _webhook_scope(source: str, endpoint: dict) -> dict | None:
@@ -317,7 +329,8 @@ class IntegrationsExtractor(Extractor):
                                      "detail": f"{rel} sends outbound messages behind a rate-limiter with no visible "
                                                "per-principal key — if keyed on IP only it's bypassed via proxy pools / "
                                                "IPv6 rotation. Add a per-authenticated-principal limit dimension."})
-            dup = sorted({k for k, n in Counter(i.strip() for i in SECRET_FETCH.findall(text)).items() if n >= 2})
+            keys = (i.strip() for i in SECRET_FETCH.findall(text))
+            dup = sorted({k for k, n in Counter(k for k in keys if not _LOCAL_FILE_KEY.match(k)).items() if n >= 2})
             if dup:
                 findings.append({"severity": "LOW", "confidence": "LOW", "kind": "redundant-secret-fetch",
                                  "attack_class": "redundant-secret-fetch", "file": rel,
