@@ -6,6 +6,8 @@ tool reports candidates by frequency; the agent confirms THE one with the human.
 
 from __future__ import annotations
 
+import re
+
 from .base import Extractor, RepoContext, is_test_file
 
 TENANT_KEYS = ["groupId", "group_id", "orgId", "org_id", "organizationId",
@@ -18,6 +20,14 @@ TENANT_KEYS = ["groupId", "group_id", "orgId", "org_id", "organizationId",
                "licenseHash", "license_hash", "licenseKey", "license_key",
                "visitorId", "visitor_id", "deviceId", "device_id",
                "subscriptionId", "subscription_id", "customerId", "customer_id"]
+
+# Substring counting is deliberate: composites such as `current_tenant_id`, `session_org_id` and
+# plurals such as `groupIds` (a membership list compared against the tenant key) ARE the boundary,
+# and a `\b...\b` match would silently drop them. The only suppressed continuation is an
+# `Id`/`_id` key running on into "identifier"/"identity" (`organizationIdentifier`,
+# `tenant_identity`) — a different word that merely shares the prefix (#191).
+_NOT_IDENTITY_WORD = r"(?!entif|entit)"
+_TENANT_PATTERNS = {key: re.compile(re.escape(key) + _NOT_IDENTITY_WORD) for key in TENANT_KEYS}
 
 
 class TenantExtractor(Extractor):
@@ -33,8 +43,8 @@ class TenantExtractor(Extractor):
             # (DocGuard field report: fixture Express apps produced a phantom tenant key)
             if not getattr(ctx, "include_fixtures", False) and is_test_file(rel):
                 continue
-            for key in TENANT_KEYS:
-                c = text.count(key)
+            for key, pattern in _TENANT_PATTERNS.items():
+                c = len(pattern.findall(text)) if key in text else 0
                 if c:
                     hits[key] = hits.get(key, 0) + c
                     bucket = files.setdefault(key, [])

@@ -26,7 +26,12 @@ from .syntax import (call_expression, expression_end, in_literal, js_functions,
 
 # Exact metadata suffixes are not password bytes. Hashes/tokens in general remain
 # credential-shaped; a broad suffix exemption would hide double-hashed passwords.
-_PW_METADATA = r"_?(?:reset_?(?:token|url)|attempt_?count|file_?path|salt|updated_?(?:at|timestamp))"
+# Every alternative names a COMPLETE metadata suffix (#189, hardened): a bare `password_secret` /
+# `passwordSecret` or `passwordFile` (possibly the password bytes read from a file) stays flagged;
+# only `_secret_arn|_id|_name`, `_file_path|_name|_id`, `_url`, `_id`, … are exempt.
+_PW_METADATA = (r"_?(?:reset_?(?:token|url|code|link)|attempt_?count|file_?(?:path|name|id)|salt"
+                r"|updated_?(?:at|timestamp|date)|url|secret_?(?:arn|id|name)|prompt_?msg"
+                r"|less_?(?:token|auth)|id)")
 _PW = r"(?:password|passwd|passphrase|\bpwd\b|userPassword|plainPassword)(?!" + _PW_METADATA + r"\b)"
 # a fast digest fed a password-shaped value (either arg order, within a small window)
 WEAK_PW_HASH = re.compile(
@@ -294,6 +299,36 @@ def _unparenthesized(value: str) -> str:
 _NON_CREDENTIAL_ARGUMENT = re.compile(
     r"(?:^|\.)(?:id|email|userId|user_id|tenantId|tenant_id|password" + _PW_METADATA + r")$", re.I)
 
+# A digest whose WHOLE argument is a fresh random value is a nonce/etag, not a password hash (#182,
+# hardened). Anchored with fullmatch: `md5(password.toString())`, `md5(Math.random() + pw)` and
+# `md5(JSON.stringify({password}))` are NOT exempt — only an argument that IS the random source.
+_NONCE_ARGUMENT = re.compile(
+    r"Math\.random\(\s*\)(?:\.toString\(\s*\d*\s*\))?(?:\.(?:slice|substring|substr)\(\s*\d+\s*(?:,\s*\d+\s*)?\))?"
+    r"|(?:uuid\.v4|uuidv4|(?:crypto\.)?randomUUID)\(\s*\)"
+    r"|crypto\.randomBytes\(\s*\d+\s*\)(?:\.toString\(\s*['\"]\w+['\"]\s*\))?")
+_STRINGIFY_ARGUMENT = re.compile(r"JSON\.stringify\(\s*([A-Za-z_$][\w$]*)((?:\s*\.\s*[A-Za-z_$][\w$]*)*)\s*\)")
+_PASSWORDISH = re.compile(r"pass|pwd|\bpw\b|\bpw_|credential|secret|token", re.I)
+
+
+def _nonce_argument(argument: str, scope: dict) -> bool:
+    """Whole-argument random source, or JSON of an outer-scope non-credential value.
+
+    `JSON.stringify(x)` is exempt only when `x` is not credential-named, not a parameter of the
+    password-named function, and not bound inside it — a renamed password (`hashPassword(pw)` →
+    `JSON.stringify(pw)`, or `const pw = req.body.p`) stays flagged. Unknown params never exempt.
+    """
+    if _NONCE_ARGUMENT.fullmatch(argument):
+        return True
+    match = _STRINGIFY_ARGUMENT.fullmatch(argument)
+    if not match or not scope.get("simple_params") or _PASSWORDISH.search(argument):
+        return False
+    root = match[1]
+    if root in scope.get("params", []):
+        return False
+    bound = re.compile(r"(?<![\w$.])" + re.escape(root) + r"\s*=(?!=)"
+                       r"|\b(?:const|let|var)\s+[^;=]*?(?<![\w$])" + re.escape(root) + r"(?![\w$])")
+    return not bound.search(scope.get("body", ""))
+
 
 _METADATA_SUFFIXES = {"name", "type", "id", "method", "algorithm", "class", "url", "uri",
                       "path", "count", "salt", "format", "state", "required", "status", "date", "time"}
@@ -489,7 +524,8 @@ class CryptoUsageExtractor(Extractor):
                         # test_pkce_exception_belongs_only_to_its_own_hash_argument catches exactly
                         # that, and the exception belongs to its own argument, not to the function.
                         if argument not in {"codeVerifier", "code_verifier"} \
-                                and not _NON_CREDENTIAL_ARGUMENT.search(argument):
+                                and not _NON_CREDENTIAL_ARGUMENT.search(argument) \
+                                and not _nonce_argument(argument, scope):
                             weak = True
             if weak:
                 add("HIGH", "weak-password-hash", "weak-password-hash", rel,

@@ -16,9 +16,18 @@ SCHEMA_CODE = re.compile(
     r"makeExecutableSchema|buildSchema|new ApolloServer|createYoga|type-graphql|"
     r"@Resolver|@ObjectType|gql`|type\s+Query\b|type\s+Mutation\b|strawberry\.|"
     r"graphene\.|ariadne|mercurius", re.I)
-INTROSPECTION_ON = re.compile(r"introspection\s*:\s*true")
-INTROSPECTION_OFF = re.compile(r"introspection\s*:\s*false|NoSchemaIntrospection|NoIntrospection")
-PLAYGROUND = re.compile(r"playground\s*:\s*true|graphiql\s*:\s*true|LandingPageGraphQLPlayground|LandingPageLocalDefault")
+# Python kwargs (`GraphQLView.as_view(..., graphiql=True, introspection=False)`) as well as JS object
+# keys (#181, hardened). The `=` (kwarg) forms need a word start: `disable_introspection=False` means
+# introspection is ON and must not read as disabled (nor `=True` as enabled). App-specific class names are deliberately
+# NOT markers: DVGA's IntrospectionMiddleware / DepthProtectionMiddleware / CostProtectionMiddleware
+# all `return next(...)` when the server is not hardened (its seeded default), and the introspection
+# one only blocks `__schema` — crediting them erased DVGA's reviewed corpus truth (introspection on,
+# no depth limit).
+INTROSPECTION_ON = re.compile(r"introspection\s*:\s*(?:true|True)|(?<![\w$])introspection\s*=\s*(?:true|True)")
+INTROSPECTION_OFF = re.compile(r"introspection\s*:\s*(?:false|False)\b|(?<![\w$])introspection\s*=\s*(?:false|False)\b"
+                               r"|NoSchemaIntrospection|NoIntrospection")
+PLAYGROUND = re.compile(r"playground\s*[:=]\s*(?:true|True)|graphiql\s*[:=]\s*(?:true|True)"
+                        r"|LandingPageGraphQLPlayground|LandingPageLocalDefault")
 LIMITING = re.compile(r"graphql-depth-limit|depthLimit|costAnalysis|graphql-cost-analysis|"
                       r"createComplexityLimitRule|query-complexity|graphql-armor")
 
