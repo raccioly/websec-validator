@@ -128,7 +128,9 @@ drop one, or add one. They can sharpen triage; they cannot introduce a false pos
 An optional third input, blast radius, comes from a [graphify](https://github.com/Graphify-Labs/graphify)
 knowledge graph if one is present (`graphify-out/graph.json` or `--graph`). It tags each mapped
 finding with how much of the app transitively depends on the vulnerable code. It is read as plain
-JSON and is also additive.
+JSON under its own 64 MiB cap, separate from the per-source-file cap, and is also additive. An
+explicit `--graph` that is missing or unusable makes the run incomplete; an auto-detected one only
+records a visible gap. See [configuration](../reference/configuration.md#graphify-graph-input).
 
 ## Aim the pentest instead of competing with it
 
@@ -146,8 +148,9 @@ source. websec knows it statically, so it aims them. Both sections below are in
 - **§5b: a phased, pre-aimed runbook.** Phase 1 safe recon, Phase 2 authorization (two identities,
   the scanner-blind class), Phase 3 injection, fired only at sink-backed endpoints and gated behind
   an explicit authorization warning. Every item names a real target and a confirm/disconfirm oracle.
-- **Close the loop.** Feed a real scan back to confirm or refute each prediction, so `P(real)`
-  personalizes to your app over time:
+- **Close the loop.** Feed a real ZAP JSON report back to confirm predictions (an alert confirms
+  only at the exact context; refuting needs an explicit `checks[]` row, never scanner silence), so
+  `P(real)` personalizes to your app over time. Nuclei reports are not parsed:
 
   ```bash
   websec calibrate --ingest-dast zap.json --ledger findings-ledger.json

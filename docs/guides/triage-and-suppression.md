@@ -147,7 +147,7 @@ fingerprint:b9c7f23e49bdab85 expires:2026-12-31  # confirmed FP: the scanner's o
 | Line | Effect | Reason kept? |
 |---|---|---|
 | `<pattern>` | Matching findings are removed from the ledger. The number removed is reported as `suppressed`. | No. The comment is discarded. |
-| `category:<name>` | Every finding whose `category` equals `<name>` is removed. Copy the name from the ledger's `category` field (for example `secret`, `sca`, `supply-chain`). | No |
+| `category:<name>` | Every finding whose `category` equals `<name>` exactly is removed. Copy the name from the ledger's `category` field: scanner findings are `static-secret`, `static-sca`, `static-sast` or `static-iac`; recon findings use names such as `supply-chain` or `graphql`. `category:secret` matches nothing. | No |
 | `fingerprint:<fp> [expires:YYYY-MM-DD]  # reason` | The finding stays in the ledger under `acknowledged`, in REPORT.md §1b *Acknowledged (shown, not gating)*, and in SARIF as a suppressed result. It is excluded from the gating total. | Yes, and required |
 
 This repository's own [.websec-ignore](../../.websec-ignore) is a worked example of path and
@@ -155,22 +155,57 @@ category scoping for a security tool whose source contains the patterns it detec
 
 ### How path patterns match
 
-Path patterns match more broadly than `.gitignore` patterns. Read this before writing one. A
-pattern suppresses a finding when, compared case-insensitively, **either**:
+Since 0.22.0, path patterns match on whole path components, close to `.gitignore`. Matching is
+case-insensitive. A line is a **path pattern** when it contains `/`, a glob character (`*`, `?`,
+`[`) or ends in a file extension such as `.js`. It is compared against every path the finding
+names: its file, any `(path)` inside its location (recon findings write `VITE_KEY  (src/app.ts)`),
+and the location itself with `:line[:col]` and a leading `./` removed.
 
-- the pattern is a **substring** of the finding's category, location or title, **or**
-- the pattern is an `fnmatch` glob that matches the finding's location.
+- A leading `/` anchors the pattern at the scanned target's root.
+- Without a leading `/`, the pattern matches at any depth, **even when it has a slash in the
+  middle**. This is a deliberate difference from `.gitignore`. A leading `**/` means the same.
+- A trailing `/` matches directories only. A matched directory hides everything beneath it.
+- Globs use `fnmatch` on component-aligned sub-paths, so `*` can still cross `/`.
 
-Consequences, all verified against the parser:
+Any other line is a **bare word**, which keeps the old behaviour: a substring of the finding's
+category, location or title.
+
+The table shows what the new rule matches. Where it is narrower than the old rule, the difference
+is still suppressed in this release, with a warning (see below).
 
 | Pattern | Behaviour |
 |---|---|
-| `services/api/` | matches everything under that directory (substring) |
-| `services/api/**` | same, as a glob (`*` also crosses `/`) |
-| `services/api/*.js` | does **not** match `services/api/src/routes.js:13`. Recon locations can carry a `:line` suffix, so prefer directory prefixes or a trailing `**` |
-| `tests/` | also matches `contests/…`, because it is a substring match |
-| `ssrf` | matches any finding with "ssrf" in its title. Bare words are dangerous. |
-| `!tests/fixtures/` | no negation. The line matches nothing. |
+| `services/api/` | everything under that directory, at any depth |
+| `services/api/**` | same, as a glob |
+| `services/api/*.js` | matches `services/api/src/routes.js:13` (`*` crosses `/`; the `:13` is stripped first) |
+| `/tests/` | only the top-level `tests/`, not `a/tests/` |
+| `api/routes.js` | matches `services/api/routes.js`; a middle slash does not anchor |
+| `tests/` | `tests/x.py` and `a/tests/x.py`, but not `contests/x.py`. In this release `contests/…` is **still suppressed** by the legacy rule, with a warning |
+| `ssrf` | a bare word: any finding with "ssrf" in its category, location or title. Bare words are dangerous. |
+| `!tests/fixtures/` | no negation. The line does not un-suppress anything. |
+
+**Legacy matching during the transition.** So that upgrading never silently
+un-suppresses a finding, a finding is still hidden when either the new rule or the old one (a
+substring of category, location or title, or an `fnmatch` glob of the raw location) matches. A
+finding hidden **only** by the old rule is surfaced:
+
+- stderr prints one warning per `.websec-ignore` line, with how many findings it hid that way, up to
+  three examples, and the exact replacement line, for example:
+
+  ```text
+  websec: .websec-ignore line 'tests/' hid 1 finding(s) only by legacy substring matching (path patterns now match whole path components, not substrings; e.g. contests/x.py:3). They stay suppressed in this release; to keep hiding exactly these, use: /contests/x.py
+  ```
+
+- the ledger counts them in `suppressed_legacy_substring`, lists them in `suppressed_legacy[]`
+  (each with `suppression.legacy_substring: true`, at most 200 records), and groups them per line in
+  `suppression_warnings[]` (`pattern`, `pattern_kind`, `hidden`, `replacement`, `examples`).
+
+```bash
+jq '.suppression_warnings[] | {pattern, hidden, replacement}' websec-out/latest/findings-ledger.json
+```
+
+If the warning names something you did mean to hide, add the replacement line. If not, the warning
+has just shown you a finding your policy was hiding by accident.
 
 Path and category suppressions apply to findings, not to recon. Routes and other facts in suppressed
 paths still appear in `FACTS.json`. Use `--exclude` to stop a path being read at all.
@@ -266,8 +301,9 @@ websec feedback --verdict false-negative --attack-class ssrf \
   --file-extension user_controller.ex --reason "Req.get on a request param in an Elixir controller"
 ```
 
-`--file-extension` keeps only the suffix of the name you pass. Pass a file name such as
-`user_controller.ex`. A bare `.ex` or `ex` has no suffix in that sense and is recorded as empty.
+`--file-extension` accepts an extension (`.ex` or `ex`) or a file name such as
+`user_controller.ex`, and keeps only the extension. A value from which no extension can be derived
+is refused with exit `2` rather than recorded empty.
 
 - **Offline.** Nothing is sent. The command appends a record to `feedback.jsonl` in the output
   directory (`websec-out/` by default, or `--out`) and prints a prefilled GitHub issue URL that you

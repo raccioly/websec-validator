@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed — exit codes follow the documented contract everywhere ([migration notes](docs/MIGRATING-0.22.0.md))
+
+- Every usage/configuration error exits `2` with the message on stderr. A target that is not a
+  directory, and `dynamic`/`calibrate` argument errors, used to exit `1` — the "findings" code.
+  Malformed JSON given to `--ingest`, `--ingest-dast`, `--ledger`, `dynamic --config` or `FACTS.json`
+  is a `2` with a message instead of a traceback. `dynamic` validates its inputs before reserving a
+  run directory, so a usage error leaves no empty attempt behind.
+- `dynamic` gates on dynamic evidence only: a confirmed CRITICAL leak exits `1` even when other rows
+  are inconclusive (stderr note, `gate.failure_kind = findings+incomplete`), and static findings
+  carried in `FACTS.json` no longer set its exit code (`gate.static_findings_not_gated`).
+- `calibrate` that measured nothing (corpus unavailable) exits `3`, not `1`.
+- `attest` projects `<out>/latest`; with only unpublished attempts it exits `3` instead of silently
+  projecting the lexically last, possibly partial, attempt.
+- `gate` outside a Git repository without `--only` exits `3` ("no VCS to derive changed files from")
+  instead of passing having checked nothing.
+
+### Fixed — reported success that had not been earned
+
+- **`run <subdir> --diff <base>` and `gate <subdir>` passed every finding.** Git reported
+  repository-root paths, findings were target-relative, so every finding read as untouched. Both now
+  scope from any subdirectory (`git diff --relative`; `rev-parse --show-prefix` for status). A rename
+  in porcelain `-z` output no longer produces a phantom path.
+- **`security/` directories were never scanned** while the run reported complete. Only websec's own
+  output directories are skipped now, recognised by content (skip reason `websec_output`). Source
+  inside still-skipped build-output directories (`build`, `dist`, `out`, `target`, `vendor`,
+  `coverage`) is counted and reported as a `skipped_directory_code` gap.
+- **`--only <directory>` matched nothing.** Directories select every analysable file below them on
+  component boundaries; an entry that selects nothing is a `scope_missed` gap, and a run that analysed
+  nothing in its requested scope says **REQUESTED SCOPE NOT ANALYZED**. `gate --only <dir>` blocks on
+  findings under that directory.
+- **An explicit `--graph` that does not exist was ignored.** It is now an execution gap. Graphs have
+  their own 64 MiB read cap instead of the 2 MB source cap, so multi-megabyte graphify graphs enrich
+  findings; unavailability reasons are specific (oversized, unreadable, excluded, invalid).
+- **`.websec-ignore` path patterns matched as substrings.** Path patterns now match whole path
+  components with `:line` suffixes stripped (`*.js` matches `src/file.js:13`; `/build/` anchors at
+  the root); `category:` matches exactly. For this release suppression is the union with the old rule,
+  so nothing becomes unsuppressed; findings hidden only by the legacy substring rule are counted
+  (`suppressed_legacy_substring`), listed (`suppressed_legacy[]`, `suppression_warnings[]`) and
+  warned about on stderr with the exact replacement line.
+- **A failing OWASP Noir looked absent.** The run reports `OWASP Noir failed: <reason>`, records
+  `routes.noir` and a `route_engine` gap; `websec doctor` gains a route-engine section.
+- **Brakeman ran on non-Rails Ruby** and recorded an error. It is selected only when the scan root has
+  an `app/` directory; `doctor` lists it as not applicable otherwise.
+- `websec feedback --file-extension .ex` (or `ex`) recorded an empty extension; it now records `.ex`
+  and refuses values with no derivable extension.
+- Recon findings in `gate` text output showed "(no file)"; they show their location.
+- The GitHub Action exposes the `exit-code` output that `run-action.py` already wrote.
+- Help text: `websec --help` lists `emit-context`, `gate` and `attest`; `mcp --allow-root` states that
+  a root is required with `--http`; `--ingest-dast` states ZAP JSON only and that only `checks[]`
+  rows refute; `hooks install --agent` reports the effective threshold; the dynamic login message
+  names the real config fields.
+- Client identifiers removed from shipped code and from one user-visible finding note.
+- The agent instructions (`websec install`, the security-pass skill) list every `gate.failure_kind`
+  value, including `no-analyzable-source`.
+
 ### Documentation
 
 - A full user documentation tree under `docs/`, starting at the [docs hub](docs/README.md):

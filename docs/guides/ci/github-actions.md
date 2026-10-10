@@ -48,6 +48,7 @@ Outputs:
 | `run-directory` | The exact current attempt, including an incomplete attempt |
 | `sarif-file` | SARIF from this attempt; never from an earlier `latest` run |
 | `execution-complete` | `"true"` or `"false"`: whether the requested execution completed |
+| `exit-code` | The exact `websec run` exit code: `0`, `1`, `2` or `3` (see [Exit codes](#exit-codes)). Empty if the run's artifacts could not be selected |
 
 What the Action does, step by step:
 
@@ -212,15 +213,18 @@ share a code:
 A run that is **both** gate-failing and incomplete exits `1`; the definite fact wins. It says so on
 stderr, because the finding count in that case is a floor, not a total. Nothing is lost by the
 collapse: `gate.failure_kind` in `findings-ledger.json` records the exact combination, one of
-`findings`, `incomplete`, `findings+incomplete` or `no-analyzable-source`.
+`findings`, `incomplete`, `findings+incomplete` or `no-analyzable-source` (with
+`--require-analyzed`).
 
 > [!WARNING]
 > **Upgrading from before 0.17.0:** exit `2` used to mean *incomplete execution*. Incomplete is now
 > `3`, and `2` means usage or configuration error. A job that tested for `2` must test for `3`, or
 > read `coverage.execution_complete`, which is unchanged.
 
-Inside the Action, a nonzero exit fails the step. The SARIF upload still runs because of `always()`,
-and `execution-complete` tells a later step which kind of failure happened.
+Inside the Action, a nonzero exit fails the step. The SARIF upload still runs because of `always()`.
+A later step (under `always()` or `failure()`) can read the `exit-code` output to tell findings
+(`1`) from incomplete execution (`3`), and `execution-complete` to see whether the requested checks
+ran.
 
 ## PR mode with `--diff`
 

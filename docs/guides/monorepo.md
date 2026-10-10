@@ -6,7 +6,7 @@ covers how websec draws service boundaries, what changes when you scan a subdire
 the root, and how to split CI per service without losing coverage.
 
 **Short version:** run from the repository root, scope non-product packages with `.websec-ignore`
-or `--exclude`, and use `--diff` only with a root target.
+or `--exclude`, and keep a root run even if you also gate per service.
 
 ## How websec sees a monorepo
 
@@ -101,32 +101,31 @@ Pointing websec at a subdirectory makes that directory the whole world for the r
 | Finding locations | relative to the repository root | relative to `services/api/` |
 | `.websec-ignore` read | `./.websec-ignore` | `services/api/.websec-ignore` only. The root file is **not** applied. |
 | Shared code in sibling packages | read | not read. Evidence in `packages/shared/` is invisible. |
-| `--diff <ref>` | works | **does not work** (see warning) |
-| `websec gate` (working-tree default) | works | requested paths are reported as never analysed |
+| `--diff <ref>` | works | works; changes outside `services/api/` are ignored |
+| `websec gate` (working-tree default) | works | works; only changes under `services/api/` are analysed |
 
-> [!WARNING]
-> `--diff` reads changed paths from Git relative to the repository root, while a subdirectory run
-> reports finding locations relative to the subdirectory. The two never match, so every finding is
-> classed as `untouched` and a `--fail-on` gate scoped by `--diff` passes even when the branch
-> added a CRITICAL in that service. Run `--diff` with the root as the target.
->
-> `websec gate services/api` has the same mismatch with `git status` paths. It does not pass
-> silently: it reports that the requested paths were never analysed and that this is **not** a
-> clean result. It still exits `0` unless you add `--fail-on-missed`. Run `websec gate` from the
-> root, or pass target-relative paths with `--only`.
+Since 0.22.0, `--diff` and the working-tree default of `websec gate` translate Git's
+repository-relative paths into paths relative to the target, and ignore changes outside it, where
+no finding of that run can be. `diff-scope.json` records the target's position in the repository
+as `repo_prefix` (`services/api/` here, empty at the root). Earlier releases compared the two
+unconverted, so a subdirectory `--diff` gate classed every finding as untouched.
 
 ### Narrowing analysis with `--only`
 
 `--only` narrows what is read and matched while the tree is still walked in full, so stack
-detection, ignore policy and fixture classification stay the same. It takes **file** paths relative
-to the target, not directories:
+detection, ignore policy and fixture classification stay the same. It takes file or directory
+paths relative to the target:
 
 ```bash
 websec run . --only services/api/src/routes.js --only services/api/src/auth.js
+websec run . --only services/api
 ```
 
-A requested path that matched no analysable file is listed under `FACTS.json` →
-`analysis_scope.missed`. Passing a directory such as `--only services/api` matches nothing.
+A directory selects every analysable file below it, on whole path components: `services/api`
+does not select `services/api2/`. A requested path that selected no analysable file (absent,
+excluded, empty, or an unsupported language) is listed under `FACTS.json` →
+`analysis_scope.missed` and reported as a `scope_missed` coverage gap. If no entry selected
+anything, the banner reads **REQUESTED SCOPE NOT ANALYZED**.
 
 ### Excluding packages
 
@@ -143,16 +142,16 @@ put the same directories in the root `.websec-ignore` instead (findings are drop
 
 ## CI: one gate or one job per service
 
-**One root job** is the simplest correct setup. It sees cross-service evidence, applies one
-`.websec-ignore`, and supports PR mode:
+**One root job** is the simplest correct setup. It sees cross-service evidence and applies one
+`.websec-ignore`:
 
 ```bash
 websec run . --diff origin/main --fail-on high --require-complete
 ```
 
-**A job per service** gives each team its own report and threshold. Because `--diff` does not work
-with subdirectory targets, gate each service on a stored per-service baseline, and give each its own
-output directory and `.websec-ignore`:
+**A job per service** gives each team its own report and threshold. Give each its own output
+directory and `.websec-ignore`, and gate it on a stored per-service baseline or, in PR mode, with
+`--diff`:
 
 ```bash
 for svc in services/api services/worker apps/web; do

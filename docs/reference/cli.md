@@ -42,10 +42,9 @@ Dispatch rules (from `main()`):
 - `websec <path>` with no subcommand is rewritten to `websec run <path>`, but **only if the path
   exists**. An unknown word that is not an existing path is an error (exit 2) with a "did you mean"
   suggestion, so a typo such as `websec atest .` never silently becomes a scan of `.`.
-- The usage line lists the main user-facing commands. `emit-context`, `gate` and `attest` are
-  listed in the help body but not in the usage line; `recon`, `proof` and `calibrate` are hidden
-  from help entirely (see [Development commands](#development-commands)). All of them work when
-  invoked by name.
+- The usage line lists every user-facing command, including `emit-context`, `gate` and `attest`.
+  `recon`, `proof` and `calibrate` are left out of the help on purpose (see
+  [Development commands](#development-commands)) and work when invoked by name.
 
 ```bash
 websec --version
@@ -94,13 +93,13 @@ a client-side gate is advisory unless it runs as a required status check.
 **Without a gate.** If you pass neither `--fail-on` nor `--require-complete`, an incomplete run
 still exits `0`. It does not advance the `latest` pointer, and `coverage.json` records the gap.
 
-Other commands have their own codes, listed in each section. Two current exceptions to the
-contract are worth knowing:
+Other commands have their own codes, listed in each section, and follow the same meanings: every
+usage or configuration error (a target that is not a directory, a missing or malformed input file,
+an invalid argument combination) exits `2` with the message on stderr.
 
-- A `run`, `recon`, `init`, `doctor` or `emit-context` target that is not a directory exits **`1`**
-  (the error is raised through `sys.exit(message)`), not `2`. Validate the path before relying on
-  `1` meaning "findings".
-- `dynamic` and `calibrate` report several argument errors the same way, also as exit `1`.
+> **Changed in 0.22.0:** before 0.22.0, a target that was not a directory and several `dynamic` and
+> `calibrate` argument errors exited `1` — the "findings" code. They now exit `2`. A `calibrate` fit
+> that measured nothing (corpus unavailable) exits `3`, not `1`.
 
 ## Environment variables
 
@@ -163,10 +162,10 @@ websec run <target> [--scan] [--scanners A,B] [--sarif REPORT ...] [--out DIR]
 | `--sarif REPORT` | none | Import an existing SARIF 2.1.0 report without running its analyzer. Repeatable, at most 8. Source freshness is recorded as unverified. A malformed or missing report makes the run incomplete. |
 | `--exclude PATH` | none | Exclude a path from recon **and** scanners. Repeatable. Matches when the value is a substring of the repo-relative path or an `fnmatch` glob of it, so `--exclude docs` also excludes `src/docsgen/`. Quote globs: `--exclude 'docs/**'`. |
 | `--include-fixtures` | off | Treat test, example and fixture code as product code: fixture routes count as attack surface and fixture secrets keep full severity. By default they are split out and demoted to LOW. |
-| `--only PATH` | whole tree | Narrow **analysis** to these repo-relative files (repeatable). The tree is still walked, so stack detection, ignore policy and fixture classification are unchanged. A requested path the walker never selected is reported as missed, not clean. |
+| `--only PATH` | whole tree | Narrow **analysis** to these repo-relative files or directories (repeatable). A directory selects every analysable file below it, on whole path components: `--only src` selects `src/a.py`, never `src2/a.py`. A directory entry only selects files the walker already kept, so it never reaches into a skipped or excluded tree. The tree is still walked, so stack detection, ignore policy and fixture classification are unchanged. A requested path that selects nothing is listed as missed in `FACTS.json` → `analysis_scope.missed` and as a `scope_missed` coverage gap, not reported clean; when no entry selects anything, the report banner reads **REQUESTED SCOPE NOT ANALYZED**. Directory entries are accepted since 0.22.0. |
 | `--graph GRAPH.json` | `<target>/graphify-out/graph.json` if present | A graphify graph for blast-radius enrichment. See [configuration.md](configuration.md#graphify-graph-input) for failure behaviour. |
 | `--baseline LEDGER.json` | none | A prior `findings-ledger.json`. Findings are classified new, unchanged, changed, reopened or no-longer-observed; only new, changed and reopened findings count toward `--fail-on`. A malformed, missing or oversized (over 16 MiB) baseline makes the run incomplete. |
-| `--diff REF` | none | Scope to what changed versus `REF` (three-dot `REF...HEAD`, committed work only). Tags findings `in-changed-file`, writes hunk ranges to `diff-scope.json`, and narrows `--fail-on` to changed files. If the ref cannot be resolved the run continues **unscoped** and is marked incomplete. |
+| `--diff REF` | none | Scope to what changed versus `REF` (three-dot `REF...HEAD`, committed work only). Tags findings `in-changed-file`, writes hunk ranges to `diff-scope.json`, and narrows `--fail-on` to changed files. Works with a subdirectory target: changed paths are made relative to the target, changes outside it are ignored, and `diff-scope.json` records the target's position in the repository as `repo_prefix`. If the ref cannot be resolved the run continues **unscoped** and is marked incomplete. |
 
 **Output and gating**
 
@@ -265,6 +264,16 @@ languages.
 `doctor` also prints the engine's provenance (which installation is running) and the offline
 release-check advisory. A scanner marked `✗` is too old for websec's argv; one marked `?` has an
 unknown version.
+
+Two more sections (since 0.22.0):
+
+- **not applicable to this target** lists scanners that are relevant to the stack but whose own
+  precondition fails for this target, so they are skipped even when installed. Today that is
+  Brakeman without an `app/` directory at the target root.
+- **route engine** reports OWASP Noir, which is not a scanner: `✓` with its version when
+  `noir --version` works, `?` when it prints no version, `✗` when it crashes or times out (every run
+  then falls back to regex route discovery), or the install hint when it is absent. A broken Noir
+  does not change the exit code.
 
 **Network:** none (the release check reads the local cache only). **Files written:** none.
 **Exit codes:** `0`; `2` when an installed scanner is incompatible, so a CI preflight can stop
@@ -372,7 +381,7 @@ websec gate [target] [--only PATH ...] [--fail-on {critical,high,medium,low}]
 
 | Option | Default | Description |
 |---|---|---|
-| `--only PATH` | working-tree changes | Analyze these files instead of the changed set (repeatable). |
+| `--only PATH` | working-tree changes | Analyze these files or directories instead of the changed set (repeatable). A finding in a file under a requested directory is in scope. |
 | `--fail-on SEV` | `medium` | Block at or above this severity. The default is medium because command injection and SSRF in agent-written code are often rated MEDIUM. |
 | `--min-confidence LEVEL` | `low` | Ignore findings below this calibrated confidence. `low` means no filtering. A finding with an unrecognised confidence is never filtered out. |
 | `--exclude PATH` | none | Exclude a path or glob (repeatable), with the same matching as `run`. |
@@ -381,19 +390,22 @@ websec gate [target] [--only PATH ...] [--fail-on {critical,high,medium,low}]
 
 **Default scope** is the working tree: tracked modifications plus untracked files with an
 analyzable suffix, deletions excluded, at most 200 files (more is recorded as an execution gap).
-It is not `base...HEAD`, which would miss uncommitted agent edits. `.websec-ignore` applies exactly
-as in `run`. A finding attributed to a *different* existing repository file is reported under
-`outside_scope` and does not block; one that names no file still blocks.
+It is not `base...HEAD`, which would miss uncommitted agent edits. When the target is a
+subdirectory of the repository, the changed paths are translated to be relative to it and changes
+outside it are ignored. `.websec-ignore` applies exactly as in `run`. A finding attributed to a
+*different* existing repository file is reported under `outside_scope` and does not block; one that
+names no file still blocks.
 
 > [!NOTE]
-> Outside a git repository, with no `--only`, there is no changed-file set: `gate` prints a JSON
-> pass with `scope_source: "not-a-git-repository"` and exits 0. Pass `--only` explicitly there.
+> Outside a git repository, with no `--only`, there is no changed-file set. Since 0.22.0 `gate`
+> exits `3` with `error: no VCS to derive changed files from; pass paths explicitly with --only`
+> instead of reporting a pass. Pass `--only` explicitly there.
 
 A scoped pass is a fast retry signal, not a review. **Network:** none. **Files written:** none.
 
 **Exit codes:** `0` pass (or nothing changed); `1` blocking findings, or missed paths with
 `--fail-on-missed`; `2` target is not a directory; `3` the changed-file set could not be determined
-(`git status` failed) or analysis was incomplete and nothing blocked.
+(not a git repository, or `git` failed) or analysis was incomplete and nothing blocked.
 
 ```bash
 websec gate
@@ -527,8 +539,7 @@ websec mcp [--http] [--host HOST] [--port PORT] [--allow-root PATH ...]
 | `--port PORT` | `8733` | HTTP port. |
 | `--allow-root PATH` | none | A directory the HTTP tools may scan (repeatable). **At least one is required with `--http`**; the server refuses to start without it. |
 
-The `--allow-root` help text says the default is the startup directory; the code requires an
-explicit root. Tools, limits, and client registration are in [mcp.md](mcp.md). **Network:** the
+Tools, limits, and client registration are in [mcp.md](mcp.md). **Network:** the
 server listens on loopback only; the `websec_check_updates` tool contacts PyPI only when called
 with `online: true`.
 
@@ -556,16 +567,14 @@ websec attest [--run DIR] [--out DIR] [--repo DIR] [--format {text,json,in-toto}
 | `--repo DIR` | `.` | Repository whose `$GIT_DIR/websec-guardrail/bypass.jsonl` supplies honoured `WEBSEC_SKIP_HOOK` bypass records. |
 | `--format` | `text` | `text`, `json`, or `in-toto` (an **unsigned** in-toto Statement for you to sign with your own key; a websec-signed one would attest only that websec ran). |
 
-> [!NOTE]
-> Without `--run`, `attest` looks for `<out>/runs/latest`. `websec run` publishes `latest` at
-> `<out>/latest`, so in practice `attest` falls back to the lexically last directory under
-> `<out>/runs/`, which can be a partial attempt. Pass `--run websec-out/latest` to project the
-> latest **completed** run.
+Without `--run`, `attest` projects `<out>/latest` — the newest **completed** run. It never picks a
+partial attempt silently: if attempts exist under `<out>/runs/` but none was published as `latest`,
+it exits `3` and asks for `--run`.
 
 The bypass record cannot see `--no-verify`, an uninstalled hook or a deleted hook; an empty list is
 not evidence that no bypass occurred. **Network:** none. **Exit codes:** `0` whenever a run is
-found (it reports, it does not judge); `2` when no run directory or no `findings-ledger.json` is
-found.
+found (it reports, it does not judge); `3` when only unpublished (incomplete) attempts exist;
+`2` when no run directory or no `findings-ledger.json` is found.
 
 ```bash
 websec attest --run websec-out/latest
@@ -590,7 +599,7 @@ websec feedback --verdict {false-positive,severity-wrong,false-negative} --reaso
 | `--fingerprint FP` | none | The finding's fingerprint from the ledger. Required for `false-positive` and `severity-wrong`; rejected for `false-negative`. |
 | `--expected-severity SEV` | none | Required with `severity-wrong`. |
 | `--attack-class CLASS` | none | What was missed. Required with `false-negative`. |
-| `--file-extension EXT` | none | Optional language hint for a false negative; only the suffix is kept. |
+| `--file-extension EXT` | none | Optional language hint for a false negative. Accepts `.ex`, `ex` or a file name such as `controller.ex`; only the extension is kept. A value with no derivable extension is refused (exit `2`). |
 | `--ledger PATH` | `<out>/latest/findings-ledger.json` | The ledger to look the fingerprint up in. |
 | `--include-snippet` | off | Also include title, route, file and evidence. Shows the record and asks before writing; fails closed when stdin is not a terminal. |
 | `--yes` | off | Skip the `--include-snippet` prompt (for scripts). |
@@ -761,10 +770,15 @@ and a run where nothing enforced auth is flagged as a suspected fail-open test e
 `dynamic-findings.json`, plus `findings-ledger.json`, `CONSTITUTION.md`, `REPORT.md`, `FACTS.json`
 and `coverage.json`. Confirmed results are folded into the local calibration overlay.
 
-**Exit codes:** `0`; `1` if the merged ledger contains a CRITICAL finding; `3` if the source
-`FACTS.json` records incomplete execution; `2` if the output run cannot be reserved. Missing
-`FACTS.json`, a missing config, `--unauth` without `--target`, or `--probe-writes` against a
-non-localhost target exit `1` with an error message.
+**Exit codes:** `0` when the checks completed and found no CRITICAL with dynamic evidence; `1` when
+a finding with dynamic evidence (a verified cross-tenant leak) is CRITICAL — checked first, so a
+leak plus inconclusive checks still exits `1`, with a stderr note and
+`gate.failure_kind = findings+incomplete`; `3` when checks are incomplete and nothing was confirmed;
+`2` for argument errors (missing or malformed `FACTS.json` or config, a config without `target` or
+`roles`, `--unauth` without `--target`,
+`--probe-writes` against a non-localhost target — no run directory is reserved) or when the output
+run cannot be reserved. Static findings carried from `FACTS.json` are in the ledger but do not set
+the exit code; `run` already gated them (`gate.static_findings_not_gated` counts them).
 
 ```bash
 websec dynamic --unauth --target http://127.0.0.1:3000
@@ -835,7 +849,7 @@ websec calibrate --claimspec PATH
 | `--workdir DIR` | `~/.cache/websec-corpus` | Where corpus applications are cloned. **[network]** on first run. |
 | `--out FILE` | the bundled `calibration.json` next to the package | Where a fit writes its table. |
 | `--ingest FILE` | none | Fold a hand-labeled findings JSON (`attack_class`, `confidence`, `is_real`) into the local overlay. Only evidence-backed rows (`evidence_verified`, `sample_id`, `provenance`) become measured samples. |
-| `--ingest-dast REPORT.json` | none | Match a ZAP or Nuclei report against a ledger's DAST-predictable findings and fold confirmations and explicit refutations into the overlay. Needs `--ledger`. |
+| `--ingest-dast REPORT.json` | none | Match a **ZAP JSON** report (numeric `pluginid` at an exact context) against a ledger's DAST-predictable findings; alerts confirm, only explicit `checks[]` rows refute, and scanner silence leaves findings unjudged. Nuclei reports are not parsed. Needs `--ledger`. Malformed JSON exits `2`. |
 | `--ledger FILE` | none | The ledger `--ingest-dast` matches against. |
 | `--synthetic` | off | Score the authored paired fixtures into a separate `calibration-synthetic.json`. Never merged into `P(real)`. |
 | `--pairs PAIRS.json` | bundled `pairs.json` | Pair manifest for `--synthetic`. |
@@ -848,8 +862,10 @@ websec calibrate --claimspec PATH
 
 Only one mode runs per invocation, checked in this order: review/accept/reject, `--synthetic`,
 `--claimspec`, `--ingest-dast`, `--ingest`, then a corpus fit. The overlay lives in
-`$WEBSEC_CALIBRATION_HOME`. **Exit codes:** `0`; `2` when nothing could be measured, exported or
-reviewed; `1` when a fit produced no labeled findings or an input file is missing.
+`$WEBSEC_CALIBRATION_HOME`. **Exit codes:** `0`; `2` for usage errors (a missing or malformed
+`--ingest`, `--ingest-dast` or `--ledger` file, `--ingest-dast` without `--ledger`, an unwritable
+overlay) and when nothing could be matched, exported or reviewed; `3` when a corpus fit produced
+no labeled findings (usually an uncloned corpus), because nothing was measured.
 
 ```bash
 websec calibrate --review

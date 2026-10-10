@@ -51,8 +51,9 @@ git add .gitignore
 ```
 
 The artifacts describe findings, paths and evidence from your code, so treat them as sensitive and
-keep them out of version control. The walker already skips directories named `websec-out`, so a
-stale output tree is never scanned as source.
+keep them out of version control. The walker already skips directories named `websec-out`, and any
+directory a run wrote whatever its name (recognised by its `FACTS.json` and `coverage.json`, or its
+`runs/` and `latest`), so a stale output tree is never scanned as source.
 
 `websec run` never edits your source. The only commands that write into your repository are the
 ones you invoke for that purpose: `websec init` (`.websec-ignore`), `websec install <host>` (agent
@@ -116,9 +117,12 @@ it.
 Things `init` does not propose:
 
 - Directories the walker already skips entirely, such as `node_modules`, `vendor`, `dist`, `build`,
-  `out`, `target`, `coverage`, `.next` and `security`. If real product code lives in a directory
-  with one of these names, it is **not analysed**. The skip is counted in `coverage.json` under
-  `files.skipped_counts.skip_directory`.
+  `out`, `target`, `coverage` and `.next`. If real product code lives in a directory with one of
+  these names, it is **not analysed**. The skip is counted in `coverage.json` under
+  `files.skipped_counts.skip_directory`. Since 0.22.0, analysable files found inside a skipped
+  `build`, `dist`, `out`, `target`, `vendor` or `coverage` directory are also counted and reported
+  as a `skipped_directory_code` gap that names the directory, so this hole is visible. A directory
+  named `security/` is no longer skipped.
 
 Pick the right scoping tool for each case:
 
@@ -136,8 +140,11 @@ Pick the right scoping tool for each case:
 
 The full `.websec-ignore` grammar, including how patterns match, is in
 [triage and suppression](triage-and-suppression.md#websec-ignore-reference). When you write a
-`category:` line, copy the category name from the `category` field in `findings-ledger.json`
-(for example `secret` or `sca`).
+`category:` line, copy the category name from the `category` field in `findings-ledger.json`. It
+must match exactly: scanner findings are `static-secret`, `static-sca`, `static-sast` or
+`static-iac`, so `category:secret` matches nothing. Path patterns match whole path components
+(`tests/` does not match `contests/`); during the transition, a line that still hides something
+only under the old substring rule prints a warning with its exact replacement.
 
 > **Tell your agent:** "Run `websec init --dry-run` and show me each proposed entry with its file
 > count and the 'covers N of M' total. For each entry, tell me whether the directory contains
@@ -167,13 +174,14 @@ websec run . --scan
 websec run . --scan --scanners trivy,gitleaks   # named scanners become required
 ```
 
-The console ends with one of three banners. Each means something different:
+The console ends with one of these banners. Each means something different:
 
 | Banner | Meaning |
 |---|---|
 | `REQUESTED CHECKS COMPLETED` | Everything you asked for ran. It does **not** mean the code is safe, and some languages may still be unanalysed. |
 | `PARTIAL SCAN — REQUESTED CHECKS INCOMPLETE` | Something you asked for did not run. The attempt is kept in its own run directory and `latest` is not moved. |
 | `NO ANALYZABLE SOURCE` | Source files exist but websec has no analyzer for any of them. An empty findings list means *not checked*. |
+| `REQUESTED SCOPE NOT ANALYZED` | With `--only`: none of the requested paths selected an analysable file. An empty findings list means *not checked*. |
 
 Keep completeness and cleanliness apart. `coverage.json` records `execution_complete` (did the
 requested checks run), and its `limitation` field states that completed execution does not prove the
@@ -285,11 +293,8 @@ recorded as a coverage gap and the run continues unscoped.
 websec run . --diff origin/main --fail-on high --require-complete
 ```
 
-> [!WARNING]
-> Run `--diff` with the **repository root** as the target. When the target is a subdirectory, the
-> changed-file paths from Git (relative to the repository root) do not match finding locations
-> (relative to the target), so every finding is classed as untouched and the scoped gate passes.
-> See [monorepo](monorepo.md#root-run-vs-subdirectory-run).
+`--diff` also works with a subdirectory target: changed paths are made relative to it, and changes
+outside it are ignored. See [monorepo](monorepo.md#root-run-vs-subdirectory-run).
 
 Exit codes keep "vulnerability" and "broken toolchain" apart:
 
@@ -384,8 +389,8 @@ and acknowledge the finding with a dated reason that names where the headers are
 
 ### Monorepo
 
-Run from the root. Services are separated by their nearest manifest, `websec init` finds nested
-directories such as `backend/capacity-test/`, and `--diff` works only with a root target. See
+Run from the root. Services are separated by their nearest manifest, and `websec init` finds nested
+directories such as `backend/capacity-test/`. See
 [monorepo](monorepo.md) for service boundaries, per-service CI and what changes when you point
 websec at a subdirectory.
 

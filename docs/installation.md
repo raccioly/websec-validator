@@ -186,11 +186,13 @@ subprocesses, and de-duplicates their output into one ledger. The source of trut
 ### When each tool runs
 
 - **OWASP Noir** runs on every `run` when installed, because it is the route engine, not a scanner.
-  Without it, websec uses its built-in route heuristics and a regex fallback.
+  Without it, or when it fails, websec uses its built-in route heuristics and a regex fallback.
 - **Static scanners** run only when you pass `--scan`. Without `--scan`, websec lists the ones it
   found and prints `(add --scan to execute them)`.
 - **Language-specific SAST** (Bandit, gosec, Brakeman) is selected automatically, and only when the
-  stack detector finds that language in the target.
+  stack detector finds that language in the target. Brakeman additionally needs an `app/` directory
+  at the scan root, its own Rails precondition; otherwise `websec doctor` lists it under "not
+  applicable to this target".
 - **TruffleHog** never runs implicitly. It needs `--scan --verify-secrets`, because it sends each
   candidate credential to the provider's API.
 - **`--scanners a,b`** turns selection into a requirement. A selected tool that is not installed is
@@ -199,13 +201,13 @@ subprocesses, and de-duplicates their output into one ledger. The source of trut
 
 ### Tool reference
 
-The macOS column repeats the install hints websec itself prints (in `websec doctor`, or for Noir in
-the run output). Where no cross-platform command is listed, use the project's official install
+The macOS column repeats the install hints websec itself prints (in `websec doctor`, and for Noir
+also in the run output). Where no cross-platform command is listed, use the project's official install
 instructions.
 
 | Tool | What it adds | Runs | Minimum version websec checks | macOS (Homebrew) | Linux / WSL | Project |
 |---|---|---|---|---|---|---|
-| OWASP Noir | Endpoint discovery across many frameworks; methods, paths, params | Every `run` | Not version-checked | `brew install noir` | Official releases | [owasp-noir/noir](https://github.com/owasp-noir/noir) |
+| OWASP Noir | Endpoint discovery across many frameworks; methods, paths, params | Every `run` | No minimum; `doctor` reports whether `noir --version` works | `brew install noir` | Official releases | [owasp-noir/noir](https://github.com/owasp-noir/noir) |
 | Trivy | Dependency CVEs, secrets and IaC misconfigurations (`trivy fs`); also the engine behind `--sbom` | `--scan` | 0.38 | `brew install trivy` | Official releases | [aquasecurity/trivy](https://github.com/aquasecurity/trivy) |
 | OSV-Scanner | Dependency CVEs from OSV.dev, recursive lockfile discovery; cross-checks Trivy | `--scan` | 2.0 | `brew install osv-scanner` | Official releases | [google/osv-scanner](https://github.com/google/osv-scanner) |
 | Gitleaks | Secrets in Git history (all refs) and in the working tree, as two passes | `--scan` | 8.0 (8.19+ preferred) | `brew install gitleaks` | Official releases | [gitleaks/gitleaks](https://github.com/gitleaks/gitleaks) |
@@ -213,7 +215,7 @@ instructions.
 | Checkov | IaC misconfiguration | `--scan` | 2.0 | `pipx install checkov` | `pipx install checkov` | [bridgecrewio/checkov](https://github.com/bridgecrewio/checkov) |
 | Bandit | Python SAST (built-in defaults; ignores the target's Bandit config and `nosec`) | `--scan`, Python detected | 1.7 | `pipx install bandit` | `pipx install bandit` | [PyCQA/bandit](https://github.com/PyCQA/bandit) |
 | gosec | Go SAST | `--scan`, Go detected | 2.0 | `brew install gosec` | `go install github.com/securego/gosec/v2/cmd/gosec@latest` | [securego/gosec](https://github.com/securego/gosec) |
-| Brakeman | Rails SAST | `--scan`, Ruby detected | 4.0 | `gem install brakeman` | `gem install brakeman` | [presidentbeef/brakeman](https://github.com/presidentbeef/brakeman) |
+| Brakeman | Rails SAST | `--scan`, Ruby detected and `app/` at the scan root | 4.0 | `gem install brakeman` | `gem install brakeman` | [presidentbeef/brakeman](https://github.com/presidentbeef/brakeman) |
 | TruffleHog | Live verification of discovered secrets (network egress to providers) | `--scan --verify-secrets` only | Not version-checked | `brew install trufflehog` | Official releases | [trufflesecurity/trufflehog](https://github.com/trufflesecurity/trufflehog) |
 | Prowler | Cloud posture | Detected and reported only; the current registry entry has no invocation, so websec does not execute it | Not version-checked | `pipx install prowler` | `pipx install prowler` | [prowler-cloud/prowler](https://github.com/prowler-cloud/prowler) |
 
@@ -225,15 +227,17 @@ Notes:
 - **Version checks.** A scanner older than its minimum is still run (websec reports rather than
   refuses), but `websec doctor` marks it incompatible and exits `2`. See
   [Verify the installation](#verify-the-installation).
-- **Noir is not covered by `doctor`.** To confirm Noir is in use, check the `routes:` line of a
-  `websec run`: `via noir` means Noir produced the routes; `via regex-fallback` means it was not
-  found or did not produce usable output. See [Troubleshooting](troubleshooting.md#routes-come-from-regex-fallback-even-though-noir-is-installed).
+- **Noir in `doctor`.** Since 0.22.0, `websec doctor` has a "route engine" section: `✓` with the
+  version when `noir --version` works, `?` when it prints no version, `✗` when it crashes or times
+  out, or the install hint when it is absent. A run also says which engine produced the routes on
+  its `routes:` line: `via noir`, or `via regex-fallback` with the reason (not installed, or
+  `OWASP Noir failed: …`). See [Troubleshooting](troubleshooting.md#routes-come-from-regex-fallback-even-though-noir-is-installed).
 
 ## Verify the installation
 
 ```bash
 websec --version          # prints: websec-validator <version>
-websec doctor             # engine provenance, release-check advisory, scanners found/missing
+websec doctor             # engine provenance, release-check advisory, scanners, route engine (Noir)
 websec doctor ./my-app    # also scopes language-specific scanners to that repo's stack
 ```
 
@@ -246,7 +250,10 @@ found:
   as a CI preflight before you trust a `--scan` result, because an incompatible scanner can run,
   fail in its own idiom, and look exactly like a clean scan.
 - Without a target, `doctor` does not know the stack, so it omits Bandit, gosec and Brakeman. Pass
-  the repository path to see them.
+  the repository path to see them. With a target, a relevant scanner whose own precondition fails
+  (Brakeman without an `app/` directory) is listed under "not applicable to this target".
+- The "route engine" section reports OWASP Noir. A broken Noir is marked `✗` but does not change the
+  exit code; every run falls back to regex route discovery until it is fixed.
 - `doctor` makes no network call. Its release line reads only cached metadata; see
   [Upgrade](upgrade.md) for the consent-gated online check.
 

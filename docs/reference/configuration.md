@@ -11,7 +11,7 @@ repository's `.websec-ignore`, and by the few environment variables listed under
 | Surface | Where | Read by | Bad input means |
 |---|---|---|---|
 | [`.websec-ignore`](#websec-ignore) | `<target>/.websec-ignore` | `run`, `gate`, agent hook, `emit-context`, `dynamic`, MCP | Unreadable file: run incomplete. Bad lines: visible, never silently honoured. |
-| [`dynamic-config.json`](#dynamic-configjson) | any path, via `dynamic --config` | `dynamic` | Missing file: exit 1. Failed login or controls: result `inconclusive`. |
+| [`dynamic-config.json`](#dynamic-configjson) | any path, via `dynamic --config` | `dynamic` | Missing or malformed file: exit 2. Failed login or controls: result `inconclusive`. |
 | [Graphify graph](#graphify-graph-input) | `<target>/graphify-out/graph.json` or `run --graph` | `run`, MCP | Implicit: visible, non-blocking gap. Explicit: run incomplete. |
 | [SARIF imports](#sarif-imports) | `run --sarif` | `run` | Run incomplete. |
 | [Baseline ledger](#baseline-ledger) | `run --baseline` | `run` | Run incomplete. |
@@ -36,20 +36,50 @@ a pattern cannot contain `#`. Blank lines are ignored. There are three kinds of 
 | Entry | Effect |
 |---|---|
 | `<pattern>` | **Suppress**: matching findings leave the ledger and stop gating. Counted in the ledger's `suppressed` total. |
-| `category:<name>` | **Suppress** every finding whose category equals `<name>` (case-insensitive). Write it without a space after the colon. |
+| `category:<name>` | **Suppress** every finding whose category equals `<name>` exactly (case-insensitive). Copy the name from a finding's `category` field: scanner findings are `static-secret`, `static-sca`, `static-sast` and `static-iac`; recon findings use names such as `supply-chain` or `graphql`. Write it without a space after the colon. |
 | `fingerprint:<id> [expires:YYYY-MM-DD] # <reason>` | **Acknowledge** one finding: it stays visible in the `acknowledged` list, in REPORT.md and in SARIF (as a result with an `external` suppression), but leaves the gating total. |
 
-**How a `<pattern>` matches.** Matching is case-insensitive, and a finding is suppressed when
-either test passes:
+**How a `<pattern>` matches.** Matching is case-insensitive. Since 0.22.0 a pattern line is one of
+two kinds:
 
-1. the pattern is an `fnmatch` glob of the finding's `location` (so `*` also crosses `/`), or
-2. the pattern is a **substring** of the finding's category, location and title joined together.
+- A **path pattern** is any line that contains `/`, a glob character (`*`, `?`, `[`), or ends in a
+  file extension such as `.js`. It is compared on whole path components against every path the
+  finding names: its file, any `(path)` inside its location, and the location itself with a
+  `:line[:col]` suffix and a leading `./` removed.
+  - A leading `/` anchors the pattern at the target root (`/build/` is only the top-level `build/`).
+  - Without a leading `/`, the pattern matches at any depth, including patterns with a slash in the
+    middle: `api/routes.js` matches `services/api/routes.js`. This is a deliberate difference from
+    `.gitignore`, where a middle slash anchors the pattern. A leading `**/` means the same as no
+    slash.
+  - A trailing `/` matches directories only, and a matched directory hides everything beneath it:
+    `tests/` hides `tests/x.py` and `a/tests/x.py`, never `contests/x.py`.
+  - Globs use `fnmatch` over component-aligned sub-paths, so `*` can still cross `/`:
+    `services/api/*.js` matches `services/api/src/routes.js:13`.
+- A **bare word** (anything else, such as `vendor` or `ssrf`) keeps the legacy behaviour: it matches
+  as a substring of the finding's category, location or title.
+
+**Legacy matching in this release.** Before 0.22.0 every pattern was matched as a substring of the
+category, location and title, or as an `fnmatch` glob of the raw location. To avoid silently
+un-suppressing anything, this release still hides a finding when **either** the new rule or the old
+rule matches. A finding hidden only by the old rule is reported, not hidden quietly:
+
+- one stderr warning per `.websec-ignore` line, naming how many findings it hid that way, a few
+  examples, and the exact replacement line (for example `/contests/x.py` for a `tests/` line that
+  hid `contests/x.py`, or `category:static-secret` for a bare `secret`);
+- the ledger's `suppressed_legacy_substring` count, `suppressed_legacy[]` (each with
+  `suppression.legacy_substring: true`, capped at 200 records) and `suppression_warnings[]`
+  (`pattern`, `pattern_kind`, `hidden`, `replacement`, `examples`).
+
+The legacy rule is a transition aid. Replace each flagged line with the suggested one, so your
+policy does not depend on it.
 
 > [!WARNING]
-> This is not gitignore syntax. A short pattern can suppress more than you meant: `test` hides any
-> finding whose location *or title* contains "test". Prefer specific paths such as `tests/` or
-> `examples/**`, and there is no `!` negation. Suppression is scope, not a verdict: a real secret in
-> a suppressed fixture is still committed.
+> This is close to, but not, gitignore syntax: a pattern without a leading `/` matches at any depth
+> even when it contains a slash, and there is no `!` negation. Bare words are the risky kind: `test`
+> hides any finding whose category, location *or title* contains "test", and every finding hidden
+> only by a bare word is reported by the legacy warning. Prefer path patterns such as `tests/` or
+> `examples/**`, or `category:<name>`.
+> Suppression is scope, not a verdict: a real secret in a suppressed fixture is still committed.
 
 **Acknowledgement states.** Each `fingerprint:` line gets a state, kept in the ledger's
 `acknowledgement_history`:
@@ -138,8 +168,8 @@ checks return `200` with the declared markers; the owner reads its own marker; a
 denied (`401`, `403` or `404`); and the attacker's read returns the victim's marker twice. Anything
 less is reported as `blocked`, a `candidate`, or `inconclusive`, never as a confirmed leak.
 
-**Failure behaviour.** A missing file exits 1 with an error. Malformed JSON, or a config without
-`target` or `roles`, is not caught and ends with a Python traceback. A failed login, two identities
+**Failure behaviour.** A missing file, malformed JSON, or a config without `target` or `roles` exits
+`2` with an error before any run directory is reserved. A failed login, two identities
 in the same tenant, or a missing tenant id produces an `inconclusive` result with the reason in
 `dynamic-findings.json`.
 
@@ -161,9 +191,8 @@ and `relation`). Only dependency relations count: `calls`, `indirect_call`, `ref
 `imports`, `imports_from`, `re_exports`, `inherits`, `extends`, `implements`, `uses`, `mixes_in`,
 `embeds`. The reverse walk stops at 20,000 nodes and says so.
 
-> [!IMPORTANT]
-> The graph is read through the bounded source reader, so a file larger than 2,000,000 bytes is
-> treated as unreadable. Large graphify outputs commonly exceed that.
+The graph has its own read cap of 64 MiB (`graph_enrich.MAX_GRAPH_BYTES`), separate from the
+2,000,000-byte per-source-file cap, and it does not draw on the source byte budget.
 
 **Failure behaviour.**
 
@@ -171,8 +200,8 @@ and `relation`). Only dependency relations count: `calls`, `indirect_call`, `ref
 |---|---|
 | No implicit graph | Nothing happens. |
 | Implicit graph unreadable, oversized, excluded or not a JSON object with `nodes` | A visible, non-execution coverage gap; the run still completes and `latest` advances. |
-| Explicit `--graph` unreadable, oversized or invalid | An execution gap: the run is incomplete (exit 3 under a gate) and `latest` does not advance. |
-| Explicit `--graph` path that does not exist | Currently ignored without a gap or message. Check the path yourself. |
+| Explicit `--graph` unreadable, oversized, excluded or invalid | An execution gap whose detail names the specific reason (`oversized: …`, `unreadable: …`, `excluded or out of scope: …`, `invalid: …`): the run is incomplete (exit 3 under a gate) and `latest` does not advance. |
+| Explicit `--graph` path that does not exist | An execution gap (`not found: …`): the run is incomplete and `latest` does not advance. |
 | Any exception during enrichment | Caught; recorded as a gap. Enrichment never crashes a run. |
 
 ## SARIF imports
