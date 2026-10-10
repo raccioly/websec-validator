@@ -187,13 +187,97 @@ entries:
 | Gap | Meaning | Fix |
 |---|---|---|
 | `scanner`: `<name>: unavailable` | You selected it with `--scanners` but it is not installed | Install it, or drop it from `--scanners` |
-| Scanner timeout, error, invalid report, or `scanner_rules` partial | The tool ran but did not produce a usable result | Run the tool by hand; check `websec doctor` for version problems |
+| Scanner timeout, error, invalid report, or `scanner_rules` partial | The tool ran but did not produce a usable result | Run the tool by hand; check `websec doctor` for version problems. For Checkov or Semgrep parse errors, see [Checkov](#checkov-error-from-files-you-excluded) and [Semgrep](#semgrep-error-on-valid-shell-scripts) below |
 | Read loss, oversized files, byte budget | Some source could not be read within limits | Narrow the target or exclude generated files |
+| `extractor`: `surface` with `source_flow_limit` | Bounded source-flow analysis stopped at a budget in the named files | See [below](#source_flow_limit-on-an-ordinary-js-module) |
 | `graph`, `baseline`, SARIF import | An explicitly supplied `--graph`, `--baseline` or `--sarif` input was missing, malformed, unreadable or over a cap. A graph's own cap is 64 MiB, and the gap names the reason (`not found`, `oversized`, `excluded or out of scope`, `invalid`) | Fix or remove the input |
 | `dependency-existence` | `--network` could not resolve some names | Retry; UNKNOWN is never treated as clean |
 
 A run can be **both** gate-failing and incomplete. It then exits `1`, prints both facts, and records
 `gate.failure_kind` as `findings+incomplete`; the finding count is a floor, not a total.
+
+### `checkov: error` from files you excluded
+
+**Symptom.** A `--scan` run is incomplete with a `scanner` gap `checkov: error`, and
+`coverage.json` → `scanners.checkov.report_details.errors` reads `<framework>: N input parsing
+errors`. The files that failed to parse are under a path you passed to `--exclude`, under a
+skipped directory such as `node_modules`, or are ordinary JSON files such as a `tsconfig.app.json`
+with comments.
+
+**Cause.** Before 0.22.0 Checkov received no path exclusion, so it walked excluded and skipped trees,
+and one parse error anywhere marked the whole scanner `error`. Its `terraform_plan` framework also
+tries to parse every `*.json` file as a plan.
+
+**Since 0.22.0:**
+
+- `--exclude` patterns and the skipped directory names reach Checkov as `--skip-path` patterns
+  anchored to the target root. A parse error Checkov still reports for such a file is counted in
+  `report_details.file_limitations_excluded` and otherwise ignored.
+- A parse error on an in-scope file, in a framework that evaluated other resources, is a per-file
+  limitation, not a scanner failure: the file is listed in `scanners.checkov.file_limitations` and in
+  a `scanner_file_limits` gap, which is a scope limit (`execution: false`).
+- Still an error: a framework that evaluated nothing and failed to parse in-scope files (the message
+  names them), parse errors Checkov did not attribute to a file, and an abnormal exit.
+- `terraform_plan` is skipped (`--skip-framework terraform_plan`) only when no in-scope `*.json`
+  looks like a `terraform show -json` plan, meaning its first 64 KiB contain `"terraform_version"`
+  and `"planned_values"` or `"resource_changes"`. When websec cannot decide (an unreadable file, too
+  many JSON files to check), the framework stays on.
+
+**Fix.**
+
+- Scope with `--exclude`, not `.websec-ignore`. `.websec-ignore` filters findings after analysis;
+  it never changes what a scanner reads, so a path listed only there is still parsed.
+- An error that names an in-scope file is a real parse failure. Fix the file, or exclude it if it is
+  not your product. To reproduce, run `checkov -d . --compact -o json` and read each framework's
+  `parsing_errors`.
+- A `scanner_file_limits` entry does not fail the run, but that file's IaC was not checked. Its
+  absence from findings is not a clean result.
+
+### `semgrep: error` on valid shell scripts
+
+**Symptom.** A `scanner` gap `semgrep: error`, with a `PartialParsing` or `Syntax error` diagnostic
+on a file that is valid, for example a bash script using syntax Semgrep's parser does not support.
+
+**Cause.** Semgrep reports per-file parse diagnostics (`PartialParsing`, `Syntax error`,
+`Lexical error`, `Other syntax error`) at level `warn`, still exits `0`, and scans every other file.
+Before 0.22.0 websec counted those diagnostics as a scanner failure.
+
+**Since 0.22.0** such a diagnostic (level `warn`, attributed to a file, no rule id) is a per-file
+limitation: the file is listed in `scanners.semgrep.file_limitations` with `reason`
+`partial_parse` (`PartialParsing`) or `parse_failed` (the others) and named in a
+`scanner_file_limits` gap. A diagnostic for a file under `--exclude` or a skipped directory is
+only counted. Fatal, configuration and rule errors, a parse diagnostic at level `error` or without a
+file, any other diagnostic type, and an exit code other than `0` or `1` still mark Semgrep `error`.
+
+**Fix.** Nothing is required for completeness. Review the listed files by hand if they matter, since
+Semgrep did not fully analyse them, or `--exclude` them if they are not your product. If Semgrep is
+still `error`, read `scanners.semgrep.report_details.errors` and run
+`semgrep scan --config auto --json .` by hand.
+
+### `source_flow_limit` on an ordinary JS module
+
+**Symptom.** The run is incomplete with an `extractor` gap `surface` and, since 0.22.0, a
+`source_flow_limit` gap such as `1 file(s) not fully analysed by source-flow: src/app.js
+(assigned_flow: LimitReached: JS assignment expression budget exceeded)`. The same rows are in
+`FACTS.json` → `surface.assigned_flow.errors`.
+
+**Cause.** The JS assignment-flow lane, which follows request values into sinks, is bounded. Before
+0.22.0 it abandoned ordinary modules: a quote inside a regex literal (`/'/g`, `/["']/`) opened a
+phantom string, a long right-hand side (an `async (event) => {…}` handler, a large object literal)
+exceeded the expression bound, and a module with more than 128 function scopes was rejected. Each
+stopped that file's analysis and made the run incomplete, with a gap that named only `surface`.
+
+**Since 0.22.0** regex literal bodies are blanked before the walk where JS grammar requires an
+operand, a long right-hand side draws on a bounded extension, and the scope budget scales with file
+size up to a cap (the budgets are in `surface.assigned_flow.limits`). A file that still exhausts a
+budget, such as deeply nested or generated code, stops at a visible `LimitReached`, and the run
+stays incomplete: like an oversized file, it was not fully analysed. Other files are unaffected.
+
+**Fix.** Read the gap for the file and reason. Exclude generated, minified or vendored code with
+`--exclude`. If the file is hand-written product code, [report it](#reporting-a-bug-or-a-false-positive)
+with a sanitized description of its shape. Do not treat the gap as noise: request-to-sink flows in
+that file were not checked. A `/` after `)`, `]`, `}` or an identifier is still read as division,
+so a regex literal in that position can still trigger the old behaviour.
 
 ### `latest` points at an older run, or there is no `latest`
 
@@ -276,10 +360,21 @@ pointer.
 **Fix.** Scope at setup rather than after each report:
 
 ```bash
+websec run . --scan         # optional: gives init a ledger to read
 websec init --dry-run       # show proposed .websec-ignore entries with file counts; writes nothing
 websec init                 # write .websec-ignore (refuses to overwrite one without --force)
 websec run . --exclude 'examples/**' --exclude 'tests/**'   # or exclude per run
 ```
+
+A directory line in `.websec-ignore` also hides every **future** finding under it, including a real
+credential committed there later; since 0.22.0 each line `init` proposes says so. With a prior
+run's ledger, `init` proposes dated `fingerprint:` acknowledgements instead of a glob for a
+directory whose only findings are secrets, so a new secret there still gates. See
+[`websec init`](reference/cli.md#websec-init).
+
+The two tools scope different things. `--exclude` stops a path being read by recon **and** the
+scanners. `.websec-ignore` filters findings after analysis; scanners still read and parse those
+paths. If a scanner fails on a file you never meant to scan, use `--exclude`.
 
 For a single confirmed false positive, prefer a `fingerprint:` acknowledgement with a reason in
 `.websec-ignore`: the finding stays visible and auditable but stops gating. Details are in the
@@ -347,6 +442,35 @@ in other existing files under `outside_scope` instead of blocking.
 **Fix.** Upgrade. If the finding is a reviewed false positive, add a `fingerprint:` acknowledgement
 with a reason to `.websec-ignore`; the gate honours it. A finding that names no file at all still
 blocks, because it cannot be shown to be outside the scope.
+
+### `emit-context` says `jwt` but the app does not use JWTs
+
+**Cause.** Before 0.22.0 any name-level match made `jwt (bearer)` the primary auth scheme: a comment
+mentioning `jsonwebtoken`, a `token_required` error code, a person called "Jose" in seed data.
+`emit-context` stated that scheme as fact, and printed the
+route count without a caveat even when route discovery was flagged incomplete. Every agent session
+primed with the block started from the wrong auth model.
+
+**Since 0.22.0** a `jwt (bearer)` reading needs a JWT library imported or called in a file that
+mentions JWT; a bare `Authorization: Bearer` header is not JWT evidence. A name-only mention is
+kept as `jwt? (weak evidence: …)`, ranked after every other
+scheme, with `auth.scheme_confidence` `low`. `emit-context` labels a `low` scheme
+`LOW-CONFIDENCE guess, unverified` with its basis, labels any scheme `inferred, unverified` when
+route discovery is flagged incomplete, and marks the route count as a floor. See
+[`websec emit-context`](reference/cli.md#websec-emit-context).
+
+**Fix.** Read the evidence behind the reading:
+
+```bash
+jq '.auth | {scheme, scheme_confidence, scheme_basis, schemes_detected, signal_counts}' \
+  websec-out/latest/FACTS.json
+```
+
+If it still reads `jwt (bearer)` at `high`, `scheme_basis` gives the number of files where a JWT
+library is imported or called (or a JOSE `alg` or JWKS reference sits beside a JWT mention); find
+them and check whether they serve your app's own requests. If not, report it as a false positive.
+JWT probes can still be staged, because `signal_counts.jwt` stays the permissive name-level count so
+real JWT leads are not dropped. Discard a JWT probe that does not apply.
 
 ### `WEBSEC_SKIP_HOOK=1` does not skip the agent hook
 

@@ -97,16 +97,24 @@ prints a one-line pointer to the suppression mechanism. It never edits your repo
 websec run . --exclude 'tests/**' --exclude 'examples/**'
 ```
 
-`--exclude` (repeatable) removes a path from **both** recon and the static scanners (Gitleaks,
-Trivy, Semgrep, Checkov, OSV-Scanner). Excluded files are never read. They are counted as
-`excluded` in the coverage record, and the patterns are listed in `coverage.json` under
-`files.excludes`. A pattern matches when it is a substring of the repository-relative path or a
-glob that matches it. Use `--exclude` for content you never want read, such as generated code. Use
-`.websec-ignore` for committed, reviewable policy.
+`--exclude` (repeatable) removes a path from **both** recon and the static scanners. Recon never
+reads excluded files. Trivy, Semgrep and gosec get the patterns as their own exclude flags, and
+since 0.22.0 Checkov gets equivalent `--skip-path` patterns anchored to the target root, so its
+parse errors in excluded trees no longer fail a run. Gitleaks and OSV-Scanner have no path flag;
+their findings in excluded paths are dropped afterwards. Excluded files are counted as `excluded`
+in the coverage record, and the patterns are listed in `coverage.json` under `files.excludes`. A
+pattern matches when it is a substring of the repository-relative path or a glob that matches it.
+
+**`--exclude` is scope; `.websec-ignore` is a findings filter.** Use `--exclude` for content you
+never want read or parsed, such as generated code, dumps and vendored trees: it is the only way to
+keep a scanner from parsing a path. Use `.websec-ignore` for committed, reviewable policy about
+findings. A path listed only in `.websec-ignore` is still read by recon and parsed by every
+scanner, so a scanner that fails on a file there still fails.
 
 ### `websec init`
 
 ```bash
+websec run . --scan     # recommended first: init reads this run's ledger
 websec init --dry-run   # print the proposal; write nothing
 websec init             # write .websec-ignore
 websec init --force     # replace an existing file (it may hold reviewed acknowledgements)
@@ -117,6 +125,34 @@ load-test harnesses, `third_party` and similar) that exist in your tree and hold
 its file count. It also reports how much of the analysed surface the proposal covers. It refuses to
 overwrite an existing `.websec-ignore` without `--force` (exit `2`). Directories the walker already
 skips, such as `vendor` and `node_modules`, are not proposed.
+
+A directory glob is blunt: it hides every finding under the directory, including ones that do not
+exist yet, such as a real credential pasted into a fixture next month. Since 0.22.0:
+
+- Every proposed glob line ends with `also suppresses FUTURE findings here, including real
+  secrets; prefer fingerprint: acks`.
+- `init` reads a prior run's findings ledger, never scanning itself: `--ledger PATH`, else
+  `<target>/websec-out/latest/findings-ledger.json`, else the same path under the current
+  directory. A ledger recorded for a different target is ignored, and an explicit `--ledger` that
+  does not match exits `2`.
+- When the only findings that ledger records under a proposed directory are secrets, `init`
+  proposes one acknowledgement per finding and leaves the glob commented out:
+
+  ```text
+  # tests/                                            # NOT applied: … Uncommenting this also suppresses FUTURE findings here, including real secrets; prefer fingerprint: acks
+  fingerprint:9ff8da3937b6b5f4 expires:2027-01-08  # REVIEW: test/fixture credential, confirm it is fake or rotate it (tests/fixtures/users.ts:1)
+  ```
+
+  The expiry is 90 days out and the `REVIEW:` reason is a placeholder. Confirm each value is fake,
+  or rotate it, and rewrite the reason before you commit. The acknowledged findings stop gating; a
+  new secret in the directory still gates.
+- A directory that also holds non-secret findings, or whose findings cannot all be tied to a file in
+  this working tree, keeps the warned glob.
+
+`latest` only moves after a completed run. If your scan was partial, pass its ledger explicitly with
+`--ledger websec-out/runs/<run-id>/findings-ledger.json`. To add acknowledgements to an existing
+`.websec-ignore`, run `websec init --dry-run` and copy the lines you want; `--force` replaces the
+whole file, including acknowledgements you already reviewed for paths outside the proposal.
 
 ## `.websec-ignore` reference
 
@@ -244,7 +280,9 @@ an invented one. The command prints whether the export is the complete policy.
 - **Path and category lines** remove the finding body from the ledger. What survives is the count
   (`suppressed` in the ledger, `N suppressed` in the console) and the policy file's source and
   content digest in `coverage.json` → `review_policy`. Use them for code that is genuinely not your
-  product. A path line also hides findings in that path that do not exist yet.
+  product. A path line also hides findings in that path that do not exist yet, including a real
+  secret committed there later. Path lines never change what the scanners read; that is
+  `--exclude`.
 - **Fingerprint acknowledgements** keep the full finding, its reason and its expiry. This is the
   right home for "this specific finding is a confirmed false positive".
 

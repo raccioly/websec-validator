@@ -99,7 +99,10 @@ Starlette, Sanic, Tornado, aiohttp, Angular) get the generic tier-1 rules only; 
 from Noir or the generic router heuristic.
 
 Even in tier 1 the analysis is bounded: regex and AST passes with byte and node budgets. Aliases,
-wrappers, cross-function flow, dynamic registration and deployment behaviour stay unverified.
+wrappers, cross-function flow, dynamic registration and deployment behaviour stay unverified. Since
+0.22.0 the JS assignment-flow budgets scale with file size and stay capped (`FACTS.json` →
+`surface.assigned_flow.limits`); a file that still exhausts one is named in a `source_flow_limit`
+gap, and the run is incomplete, as it is for an oversized file.
 [METHODOLOGY: scoped framework and adoption evidence](../METHODOLOGY.md#scoped-framework-and-adoption-evidence)
 states each lane's limit.
 
@@ -213,8 +216,8 @@ required.
 | `osv-scanner` | SCA | Always | Runs recursively; the same CVE from Trivy and OSV-Scanner merges into one row |
 | `gitleaks` | Secrets (git history) | Always | `--scanners gitleaks` also selects `gitleaks-dir` |
 | `gitleaks-dir` | Secrets (working tree) | Always | Second pass of the same binary |
-| `semgrep` | SAST | Always | Invoked with `--config auto` plus websec's bundled rules |
-| `checkov` | IaC | Always | |
+| `semgrep` | SAST | Always | Invoked with `--config auto` plus websec's bundled rules. A per-file parse diagnostic (for example `PartialParsing` on valid bash) is a `scanner_file_limits` entry naming the file, not a scanner error |
+| `checkov` | IaC | Always | Receives `--exclude` and the skipped directory names as root-anchored `--skip-path` patterns. Its `terraform_plan` framework is skipped unless an in-scope JSON file looks like a Terraform plan. A parse error on one in-scope file is a `scanner_file_limits` entry when the framework evaluated other resources |
 | `bandit` | SAST | `python` detected | Built-in defaults; target `.bandit`/pyproject settings and inline `nosec` are ignored |
 | `gosec` | SAST | `go` detected | |
 | `brakeman` | SAST (Rails) | `ruby` detected and an `app/` directory at the scan root | Brakeman's own Rails precondition. Without `app/`, `websec doctor` lists it as not applicable to the target and it is not run |
@@ -257,7 +260,7 @@ vulnerabilities or full framework coverage."* Before trusting an empty findings 
    with `"execution": true` mean a requested check did not complete. Gaps with
    `"execution": false` are scope limits: `language_without_analyzer`, `thin_language_coverage`,
    `profile_scope`, `walker_policy`, `excluded_scope`, `skipped_directory_code`, `scope_missed`,
-   `route_engine` and others.
+   `route_engine`, `scanner_file_limits` (files a scanner could not fully parse) and others.
 2. **Check `files.unanalyzed_languages`** for languages that were never read, and `profiles` for
    which named checks ran and with what status.
 3. **Check `files.skipped_counts` and `files.skipped_code_dirs`.** Directories such as `build`,

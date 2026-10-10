@@ -179,6 +179,20 @@ It is recon-only: no scanners run, no LLM is involved and no run directory is wr
 fast enough for session start. The output is the same on every run. For harnesses that don't use
 Claude Code's envelope, `websec emit-context . --markdown` prints the raw block.
 
+Because the block primes every session, it states its own uncertainty instead of presenting a guess
+as fact (since 0.22.0). The caveats are inline on the `Attack surface` line, so the block does not
+grow:
+
+- The route count gets `[⚠ … — count is a floor]` or `[⚠ … — count may be incomplete]` when route
+  discovery is flagged incomplete, an installed OWASP Noir failed, or routes came from the regex
+  fallback. A hand-rolled or dynamic router is the usual reason.
+- The auth scheme reads `LOW-CONFIDENCE guess, unverified: <basis>` when the evidence is weak (a
+  name-only JWT mention, an API key read off variable names, no mapped route), and
+  `inferred, unverified — route discovery incomplete` when route discovery is flagged incomplete.
+
+When the block hedges, have the agent confirm the auth model and routes in the code before relying
+on them. The full rules are in the [CLI reference](../reference/cli.md#websec-emit-context).
+
 ### Agent-loop gate (PostToolUse)
 
 Scanning at the merge request makes a finding a backlog item. Scanning on the edit that caused it

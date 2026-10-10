@@ -67,7 +67,24 @@ new rule and the old substring rule. A finding hidden **only** by the old rule â
 Note that scanner findings are categorised `static-secret`, `static-sca`, `static-sast` and
 `static-iac`; a `category:secret` line matches nothing.
 
+## Fewer false "incomplete" runs
+
+Several field-reported causes of exit `3` on healthy repositories are fixed: Checkov parse errors
+from excluded paths, Semgrep partial parses of valid shell scripts, and the JavaScript source-flow
+lane abandoning ordinary modules. Per-file analysis limits are now reported as named gaps
+(`scanner_file_limits`, `source_flow_limit`) rather than as a failed tool. A `source_flow_limit`
+still makes the run incomplete, because that file was not fully analysed. If you had added
+`--exclude` entries or relaxed `--require-complete` to work around these, you can revert that.
+
+`.websec-ignore` remains a findings filter; it does not change what scanners read. Use `--exclude`
+to keep a directory away from the scanners.
+
 ## Other visible changes
+
+- `websec emit-context` marks the route count as a floor and the auth scheme as an inference when
+  route discovery is likely incomplete, and no longer reports `jwt (bearer)` without JWT evidence.
+- `websec init` warns on directory globs and, given a prior ledger, proposes expiring
+  `fingerprint:` acknowledgements for test-fixture secrets.
 
 - `--only` accepts directories (component boundary: `src` does not select `src2/`). An entry that
   selects nothing becomes a `scope_missed` gap, and a run that analysed nothing in its requested scope

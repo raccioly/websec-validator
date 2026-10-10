@@ -13,7 +13,7 @@ prompt you can give an AI coding agent to do the same step for you.
 |---|---|---|
 | 1. Reviewable baseline | `git switch -c …` | `.gitignore` gains `websec-out/` |
 | 2. Toolchain and language check | `websec doctor .` | nothing |
-| 3. Scope non-product code | `websec init --dry-run`, then `websec init` | adds `.websec-ignore` |
+| 3. Scope non-product code | `websec run . --scan`, `websec init --dry-run`, then `websec init` | adds `.websec-ignore` |
 | 4. First runs | `websec run .`, then `websec run . --scan` | nothing (artifacts go to `websec-out/`) |
 | 5. Triage | `websec explain`, `websec feedback` | `fingerprint:` lines in `.websec-ignore` |
 | 6. Baseline | `websec run . --baseline <ledger>` | a stored prior ledger |
@@ -99,6 +99,7 @@ planted fake credentials. Scope these out *before* the first report, or the firs
 mostly noise.
 
 ```bash
+websec run . --scan      # recommended: gives init a findings ledger to read (skim, don't triage yet)
 websec init --dry-run    # print the proposal; write nothing
 websec init              # write .websec-ignore
 ```
@@ -109,6 +110,17 @@ its name is on a fixed list of conventional non-product names (`tests`, `fixture
 actually holds files. Every proposed line carries its file count, and the summary says how much of
 the analysed surface the proposal would remove (`covers N of M analyzed file(s)`). If that number
 is most of your repository, the proposal is too aggressive. Edit it.
+
+A directory line hides every future finding in that directory too, including a real credential
+someone pastes into a fixture later. Since 0.22.0 every proposed line says so, and `init` uses the
+scan's ledger (`websec-out/latest/findings-ledger.json`, or `--ledger PATH`) to do better where it
+can. When a directory's only findings are secrets, it proposes a dated
+`fingerprint:<fp> expires:<today+90d>  # REVIEW: …` line for each one and leaves the directory line
+commented out, so a new secret there still gates. The `REVIEW:` reason is a placeholder: confirm
+each value is fake, or rotate it, then rewrite the reason. `latest` only advances after a completed
+run, so if the scan was partial, pass its ledger with `--ledger`. Without any ledger, `init` falls
+back to warned directory globs and says so. Details:
+[`websec init`](../reference/cli.md#websec-init).
 
 If a `.websec-ignore` already exists, `init` refuses to overwrite it and exits `2`, because that
 file may hold reviewed `fingerprint:` acknowledgements. Pass `--force` only when you mean to replace
@@ -129,8 +141,8 @@ Pick the right scoping tool for each case:
 | Tool | Effect | Use it for |
 |---|---|---|
 | Fixture auto-scoping (default) | Fixture/example routes move to `fixture_endpoints` and are not probed. Under `--scan`, secrets in test files are demoted to LOW and annotated, never dropped. Fixture manifests do not drive framework detection. | nothing to do; `--include-fixtures` turns it off |
-| `--exclude '<glob>'` (repeatable) | Removes a path from recon **and** the static scanners | generated code or directories you never want read |
-| `.websec-ignore` path line | Drops matching findings from the ledger after analysis; the count stays in `suppressed` | committed, persistent scoping |
+| `--exclude '<glob>'` (repeatable) | Removes a path from recon **and** the static scanners | generated code, dumps or directories you never want read or parsed. The only option that keeps a scanner from parsing a path |
+| `.websec-ignore` path line | Drops matching findings from the ledger after analysis; the count stays in `suppressed`. Scanners still read the path | committed, persistent scoping of findings |
 | `.websec-ignore` `fingerprint:` line | Keeps one finding visible but not gating, with a required reason | a reviewed false positive or accepted risk |
 
 > [!NOTE]
@@ -146,10 +158,11 @@ must match exactly: scanner findings are `static-secret`, `static-sca`, `static-
 (`tests/` does not match `contests/`); during the transition, a line that still hides something
 only under the old substring rule prints a warning with its exact replacement.
 
-> **Tell your agent:** "Run `websec init --dry-run` and show me each proposed entry with its file
-> count and the 'covers N of M' total. For each entry, tell me whether the directory contains
-> anything that ships to production. Write the file with `websec init` only after I approve, and
-> never use `--force`."
+> **Tell your agent:** "Run `websec run . --scan`, then `websec init --dry-run`, and show me each
+> proposed entry with its file count and the 'covers N of M' total. For each entry, tell me whether
+> the directory contains anything that ships to production. For each proposed `fingerprint:` line,
+> show me the secret's file and line and whether it looks fake; do not mark one fake without
+> evidence. Write the file with `websec init` only after I approve, and never use `--force`."
 
 ## 4. First run: recon only, then with scanners
 
@@ -191,6 +204,18 @@ absence of vulnerabilities. A quick look:
 jq '{execution_complete, gaps: [.gaps[].kind], unanalyzed: .files.unanalyzed_languages}' \
   websec-out/latest/coverage.json
 ```
+
+Two gap kinds name individual files (since 0.22.0), and they are easy to confuse:
+
+- `scanner_file_limits` is a scope limit. A scanner ran, but Semgrep or Checkov could not parse, or
+  only partly parsed, the files it lists. The run can still be complete; those files' absence of
+  findings is not a clean result.
+- `source_flow_limit` is an execution gap. websec's own bounded request-to-sink analysis stopped at
+  a budget in the listed files, so the run is incomplete, as it is for an oversized file.
+
+If either one names files under a directory you never meant to analyse, add `--exclude` for it.
+A `.websec-ignore` line only filters findings and does not stop scanners from parsing a path. See
+[troubleshooting](../troubleshooting.md#coverage-and-results).
 
 See [outputs](../reference/outputs.md) for every artifact and field.
 
