@@ -43,6 +43,7 @@ Optional, to exercise the scanner integrations locally: `brew install noir trivy
   CWE/ASVS citations and calibrated confidence like everything else.
 - **Docs**: `docs-canonical/` files are design intent and are validated by DocGuard —
   update them when behavior changes, and note deliberate divergence in `DRIFT-LOG.md`.
+  User-facing docs live under `docs/` — see [Writing documentation](#writing-documentation).
 
 ## PR checklist
 
@@ -51,6 +52,32 @@ Optional, to exercise the scanner integrations locally: `brew install noir trivy
 - [ ] `CHANGELOG.md` gets an entry under `[Unreleased]`
 - [ ] No new runtime dependency, no network access in the core pass
 - [ ] `docs/METHODOLOGY.md` updated if a check's reasoning changed
+- [ ] New subcommand / flag / language profile documented in `docs/reference/` (the docs tests fail otherwise)
+
+## Writing documentation
+
+The user documentation starts at [docs/README.md](docs/README.md) and follows a fixed layout:
+`quickstart.md` and `installation.md` at the top, task-oriented `guides/`, exhaustive `reference/`,
+background in `concepts/`, plus `troubleshooting.md`, `faq.md` and `glossary.md`.
+
+- **Put each fact in one place** and link to it. The reference pages own flags, defaults, file
+  formats and support tiers; guides own *sequences of steps*; METHODOLOGY owns the *why*.
+- **Show real commands only.** `tests/test_docs_reference.py` parses every `websec …` line in a
+  docs code block and fails on an unknown subcommand or option. It also requires a
+  section headed ``## `websec <name>` `` in `docs/reference/cli.md` for every subcommand, every long option
+  named there, every language/profile id in `docs/reference/languages.md`, resolving relative
+  links and anchors, and every page linked from the hub.
+- **No release pins in guides.** Use `<reviewed-commit-sha>`; a pinned version is right for one
+  release and silently wrong after. Dated records (`MIGRATING-*.md`, `CHANGELOG.md`) may name versions.
+- **No moving counts** (test totals, rule counts) outside the dated records and the numbers DocGuard
+  tracks. A count in prose makes every PR that changes it collide with every other one.
+- **Keep the caveats.** Limits, authorization warnings and "this does not prove" sentences are part
+  of the contract, not marketing to trim.
+- **README links are absolute** (`https://github.com/raccioly/websec-validator/blob/main/...`)
+  because PyPI renders the README and does not resolve relative links. Everything under `docs/`
+  uses relative links so it also works in a fork or a local checkout.
+- **Translations** live in `docs/i18n/<lang>/`, cover the README and quickstart only, and open
+  with an English banner naming the release they were translated from; English is authoritative.
 
 ## Reporting security issues
 
@@ -83,5 +110,27 @@ coverage. The separate artifact test closes the forgotten-rebuild gap.
 
 ## Releases
 
-Maintainer-only, via tag-triggered Trusted Publishing (OIDC) to PyPI — see the
-"Releasing" section in the [README](README.md#releasing-maintainer).
+Maintainer-only. The release train is PR-driven. Keep the version in `pyproject.toml` as the single
+source of truth, add the matching dated changelog and migration guidance, and validate the combined
+release branch. In the 0.x series, feature additions or incompatible contracts increment the minor
+version.
+
+After reviewing current main and overlapping PRs, merge the approved release PR only after its
+required CI checks pass. The resulting main commit subject must be `release: v<version>`, where
+`<version>` is whatever `pyproject.toml` currently declares — do not hard-code a number here, it
+drifts. [release-tag.yml](.github/workflows/release-tag.yml) validates that subject against the
+package version, creates the matching tag/GitHub Release, and explicitly dispatches
+[publish.yml](.github/workflows/publish.yml) at that tag. A version edit alone does not publish.
+
+The publish workflow builds and installs the wheel, verifies its version and smoke test, then uses
+PyPI Trusted Publishing (OIDC) through the `pypi` environment. Verify the completed workflow, tag,
+GitHub Release and PyPI artifact before reporting publication success. Do not bypass failed checks
+with manual tags, and do not describe a locally built wheel as published.
+
+The CLI and Claude plugin have separate delivery paths: the CLI uses PyPI semver releases; the
+plugin uses reviewed Git content and explicit marketplace refresh. Plugin manifests deliberately
+omit an independent version field. Check both sources when diagnosing stale instructions.
+
+Translations under `docs/i18n/` state the release they were translated from. A release does not
+need to re-translate them, but a change to the English README's commands or install steps should
+update the translations in the same PR (or open an issue tagged `docs`).

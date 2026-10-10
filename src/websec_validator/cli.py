@@ -105,7 +105,8 @@ def _maybe_nudge_websecignore(target: Path, ledger: dict, unified: dict | None, 
     if fixture and fixture >= 0.5 * len(locs):
         log(f"\n  ⓘ {fixture}/{len(locs)} findings are in test/example/fixture code. If those aren't "
             "your product,\n    add a .websec-ignore (path globs or `category:` / `fingerprint:` acks) "
-            "— see the README\n    \"Scoping & suppression\" section, or narrow with --exclude.")
+            "— see\n    https://github.com/raccioly/websec-validator/blob/main/docs/guides/triage-and-suppression.md"
+            "\n    or narrow with --exclude.")
 
 
 def _default_out(target: Path, out: str | None) -> Path:

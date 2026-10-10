@@ -142,7 +142,7 @@ When present on your machine, the tool shells out to best-of-breed open-source s
 | **Trivy** | vulnerable dependencies (CVEs), with fixed-version info |
 | **Semgrep / OpenGrep** | code-level SAST patterns |
 | **Checkov** | infrastructure-as-code misconfig |
-| **Prowler** | cloud-account posture (when relevant) |
+| **Prowler** | cloud-account posture — detected and reported by `doctor`; websec has no invocation for it, so `--scan` does not execute it |
 
 It **never hard-fails if a tool is absent** — it reports what's missing with install hints and
 carries on. Scanners are detected by default and only *executed* with `--scan`, because execution

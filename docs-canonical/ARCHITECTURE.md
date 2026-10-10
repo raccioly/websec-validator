@@ -39,7 +39,7 @@ scanner runs, a calibrated findings ledger, staged probes, and the briefing/repo
 | CLI entry point | Arg parsing for `run`, `doctor`, `dynamic`, `mcp`, `gate`, `attest`, `capabilities`, `feedback`, `demo`, `explain`, `intel`, `research`, `repair-verify`, `update-check`, `install`, `hooks`, `init`, `emit-context` and advanced `recon` / `proof` / `calibrate` | `src/websec_validator/cli.py` | `tests/test_recon.py`, `tests/test_hardening.py`, `tests/test_workbench_cli.py` |
 | Recon driver | Thin wrapper that runs the extractor registry over one repo walk | `src/websec_validator/recon.py` | `tests/test_recon.py` |
 | Extractors (22) | One focused question each → the merged `FACTS.json`; `extractors.REGISTRY` is the ordered authority (including policy consistency and offline dependencies) | `src/websec_validator/extractors/` | `tests/test_recon.py`, `tests/test_pentest_regressions.py`, `tests/test_entitlement_webext.py` |
-| Static scanners | Detect + (with `--scan`) shell out to Trivy/Gitleaks/Semgrep/Checkov/Prowler and de-duplicate across tools | `src/websec_validator/scanners.py` | `tests/test_recon.py` |
+| Static scanners | Detect + (with `--scan`) shell out to Trivy/Gitleaks/Semgrep/Checkov (Prowler: detected only, no invocation) and de-duplicate across tools | `src/websec_validator/scanners.py` | `tests/test_recon.py` |
 | Findings ledger | Correlate recon + static + dynamic into one ranked, standards-cited, calibrated record set | `src/websec_validator/findings.py` | `tests/test_pentest_regressions.py` |
 | Analysis scope | Narrow what is READ AND MATCHED to named files while inventorying the eligible tree and reporting exclusions | `src/websec_validator/extractors/base.py` | `tests/test_analysis_scope.py`, `tests/test_gate_policy_and_scope.py` |
 | Agent-loop gate | Fast scoped pass/fail on the files just changed; applies `.websec-ignore` exactly as `run` does; gates requested-file and unattributed findings (confirmed outside-scope findings remain reported); requires completed source reads and execution; writes nothing, publishes nothing, never advances a baseline | `src/websec_validator/gate.py` | `tests/test_gate_command.py`, `tests/test_gate_policy_and_scope.py`, `tests/test_security_fix_boundaries.py` |
@@ -118,7 +118,7 @@ Adding a dimension = drop a module in `extractors/` and append it to `REGISTRY` 
 | Runtime deps | **none** (stdlib only) | — | — |
 | Packaging | setuptools (`pyproject.toml`) | ≥68 | MIT |
 | Route engine | OWASP Noir (external, optional) | latest | shelled out, not imported |
-| Static scanners | Trivy, Gitleaks, Semgrep/OpenGrep, Checkov, Prowler | — | shelled out when present |
+| Static scanners | Trivy, Gitleaks, Semgrep, Checkov (Prowler detected only) | — | shelled out when present |
 | Database | none | — | — |
 | Auth | core CLI has no accounts; HTTP MCP requires bearer token and approved roots | — | loopback-only optional transport |
 | Hosting | none — runs locally / in CI / in Docker | — | — |
@@ -137,7 +137,7 @@ completeness gating. None are Python imports — there are zero runtime package 
 | Trivy | dependency CVEs | scanner reported missing |
 | Semgrep / OpenGrep | code-level SAST (ships 2 bundled rules) | scanner reported missing |
 | Checkov | IaC misconfiguration | scanner reported missing |
-| Prowler | cloud-account posture | scanner reported missing |
+| Prowler | cloud-account posture (detected only — never executed) | scanner reported missing |
 | Docker | core-only or selected-scanners-bundled run, checksum-bound archives and native architecture contracts; transitive builds remain variable | run natively with whatever is installed |
 
 Connexion's bounded AST adapter maps literal top-level, import-bound local JSON or supported

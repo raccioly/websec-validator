@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Documentation
+
+- A full user documentation tree under `docs/`, starting at the [docs hub](docs/README.md):
+  quickstart, installation (pipx, pip, uv, Docker, source, offline; optional scanners per OS),
+  upgrading, troubleshooting, FAQ and glossary; guides for adopting websec in an **existing
+  project**, new projects, monorepos, triage and suppression, AI agents (Claude Code, Codex, Cursor,
+  Gemini CLI, Aider, MCP clients), GitHub Actions, other CI, pre-commit/Git hooks and dynamic
+  testing; reference pages for the CLI, language and framework support tiers, configuration,
+  outputs and the MCP server; and a conceptual overview.
+- README and quickstart translations in Portuguese (Brazil), Spanish and Simplified Chinese under
+  `docs/i18n/`. Each states the release it was translated from; English is authoritative.
+- The README is now a front page that links into the docs, with absolute links so it renders on PyPI.
+  The maintainer release process moved to CONTRIBUTING.md, which also gains documentation rules.
+- `tests/test_docs_reference.py` binds the docs to the code. It fails when a subcommand or long
+  option is missing from the CLI reference, when a documented `websec …` command does not parse,
+  when a language or profile id is missing from the support matrix, when a link or anchor breaks,
+  when a docs page is unreachable from the hub, when a guide pins a release, or when a translation
+  lacks its source banner.
+- Corrected: Prowler is detected and reported but never executed (it has no invocation). The
+  README's "Version 0.18.0" status line, its stale `websec-out/AGENT-BRIEFING.md` path, and the
+  run's `.websec-ignore` hint pointing at a moved README section are fixed.
+- AGENTS.md no longer records the test count. Every test-adding PR edited that line, so bot PRs
+  conflicted with each other.
+- Issue templates: a documentation form, and blank issues are routed to the docs hub and Discussions.
+
 ### Fixed — seven Jules detector PRs, hardened so no true positive is lost
 
 - Tenant-key candidates no longer count `organizationIdentifier` / `projectIdentity` /

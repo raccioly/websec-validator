@@ -16,12 +16,16 @@
 attack surface, de-duplicates the static scanners it finds, stages a tailored probe library, and emits
 an `AGENT-BRIEFING.md` — **code in, artifacts out; no LLM, no server, no running app** for the core
 pass. Pure-Python, **stdlib only, zero runtime dependencies**; it shells out to external scanners
-(Trivy/Gitleaks/Semgrep/Checkov/Prowler) and OWASP Noir when present. The package lives in
+(Trivy/Gitleaks/Semgrep/Checkov; Prowler is detected but not executed) and OWASP Noir when present. The package lives in
 `src/websec_validator/`; the architecture is in [`docs-canonical/ARCHITECTURE.md`](docs-canonical/ARCHITECTURE.md).
 
 ## Project Documentation (CDD)
 
 - **Canonical docs** (design intent, review-gated): `docs-canonical/` — `ARCHITECTURE.md`, `SECURITY.md`, `TEST-SPEC.md`, `ENVIRONMENT.md`
+- **User documentation** (install, guides, reference — start at the hub): `docs/README.md`. The
+  reference pages are bound to the code by `tests/test_docs_reference.py`: a new subcommand, flag,
+  language profile or doc page fails CI until `docs/reference/cli.md`, `docs/reference/languages.md`
+  and the hub are updated. Guides show `<reviewed-commit-sha>` placeholders, never release pins.
 - **Long-form methodology** (the why behind every check): `docs/METHODOLOGY.md`
 - **Proof protocol**: `corpus/PROOF-PROTOCOL.md`
 - **Drift tracking**: `DRIFT-LOG.md` · **Change tracking**: `CHANGELOG.md`
@@ -32,7 +36,7 @@ pass. Pure-Python, **stdlib only, zero runtime dependencies**; it shells out to 
 | Command | Purpose |
 |---------|---------|
 | `pipx install --editable .` | Install the CLI from source (or `pip install -e .` in a 3.11+ venv) |
-| `python3 -m unittest discover -s tests` | Run the suite (1855 tests, stdlib only, no public network; one opt-in lifecycle skipped) |
+| `python3 -m unittest discover -s tests` | Run the suite (stdlib only, no public network; one opt-in lifecycle skipped) |
 | `python3 scripts/build-brief.py --check` | Verify the committed HTML/PDF/renderer binding offline; rebuild and review all eight pages after source edits |
 | `websec run ./target` | Full pipeline → `FACTS.json` + `AGENT-BRIEFING.md` + `probes/` |
 | `websec doctor ./target` | Show which optional scanners are installed |
@@ -77,7 +81,7 @@ content instead of overwriting the name-guard.
 
 1. **Before any work**: read `docs-canonical/` and run `docguard guard` to see the compliance state.
 2. **After changing code or docs**: re-run `docguard guard`; keep the numbers (22 extractors, 17 sink
-   classes, 11 scanner entries, 1855 tests, dated 10/10 proof (not vulnerability recall)) consistent across every doc — DocGuard's metrics-consistency
+   classes, 11 scanner entries, dated 10/10 proof (not vulnerability recall)) consistent across every doc — DocGuard's metrics-consistency
    validator checks only configured matching statements; historical snapshots stay dated. A
    `no-matches` result is not evidence these numbers were checked.
 3. **Update `CHANGELOG.md`** for any user-visible change.
@@ -94,7 +98,7 @@ and hash manifest with the source. Selected fact tests and matching hashes do no
 - Python 3.11+, stdlib only — **do not add runtime dependencies**. Integrate external tools by shelling
   out (see `src/websec_validator/scanners.py`), never by importing.
 - Add a recon dimension by dropping a module in `src/websec_validator/extractors/` and appending it to
-  `REGISTRY` in `extractors/__init__.py`. One extractor must never crash the whole run (wrap in the
+  `REGISTRY` in `src/websec_validator/extractors/__init__.py`. One extractor must never crash the whole run (wrap in the
   registry driver's try/except, as existing extractors do).
 - Keep recon **read-only and offline**; keep dynamic write probes **localhost-only**. These are
   security invariants, not preferences — see `docs-canonical/SECURITY.md`.
@@ -138,6 +142,11 @@ not — so CI could never reproduce or confirm the fix. That defect is fixed (bu
 
 **What never merges automatically:** anything under `src/`, `.github/`, packaging files, instruction
 files (`AGENTS.md`, `CLAUDE.md`), binaries, or any major version bump.
+
+**Do not record the test count in documentation.** The suite size is not a documented fact: it
+changes with every test-adding PR, so a count in a doc makes every such PR edit the same line and
+conflict with every other one. Here that produced three open PRs that did nothing but re-sync it.
+CI derives the floor itself (below).
 
 **Never make a PR pass by removing coverage.** A deleted or gutted test makes this suite greener
 *and* faster, so nothing else catches it. The floor is derived at CI time by counting the base
