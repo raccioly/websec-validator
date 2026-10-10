@@ -125,7 +125,7 @@ def tool_websec_sarif(a: dict) -> str:
 def tool_websec_briefing(a: dict) -> str:
     root = _resolve(a.get("path", ""))
     facts = recon.build_facts(root, __version__, expected_root=_HTTP_ROOT.get())
-    det = scanners.detect(facts["stack"]["languages"])
+    det = scanners.detect(facts["stack"]["languages"], target=root)
     chosen = probes.applicable(facts)
     with tempfile.TemporaryDirectory() as td:
         manifest = probes.stage(chosen, Path(td), facts)

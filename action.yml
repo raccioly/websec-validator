@@ -47,6 +47,9 @@ outputs:
   execution-complete:
     description: "Whether requested execution completed."
     value: ${{ steps.scan.outputs.execution_complete }}
+  exit-code:
+    description: "Exact `websec run` exit code: 0 clean, 1 gating findings (fail-on/baseline), 2 usage or configuration error, 3 incomplete execution. Empty if the run's artifacts could not be selected."
+    value: ${{ steps.scan.outputs.exit_code }}
 
 runs:
   using: "composite"

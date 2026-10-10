@@ -49,6 +49,34 @@ EXIT_FINDINGS = 1
 EXIT_USAGE = 2
 EXIT_INCOMPLETE = 3
 
+
+class _UsageExit(SystemExit):
+    """Exit EXIT_USAGE; `str()` keeps the message for in-process callers.
+
+    `sys.exit("error: ...")` exits 1, which is EXIT_FINDINGS: a mistyped path or a missing config
+    read to CI exactly like a vulnerability. Every argument/configuration error goes through
+    `_usage_exit` instead, so 2 means "nothing was scanned", as the contract above says."""
+
+    def __init__(self, message: str):
+        super().__init__(EXIT_USAGE)
+        self.message = message
+
+    def __str__(self) -> str:
+        return self.message
+
+
+def _usage_exit(message: str):
+    print(message, file=sys.stderr)
+    raise _UsageExit(message)
+
+
+def _json_input(path: Path, label: str):
+    """Parse an operator-supplied JSON file; malformed input is a usage error (exit 2), not a traceback."""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        _usage_exit(f"error: {label} is not readable JSON: {path} ({exc.__class__.__name__})")
+
 _FEEDBACK_VERDICTS = feedback.VERDICTS
 _FEEDBACK_SEVERITIES = feedback.SEVERITIES
 
@@ -85,7 +113,7 @@ def _sarif_imports(paths, target, *, excludes=(), include_fixtures=False):
 def _resolve_target(raw: str) -> Path:
     p = Path(raw).expanduser().resolve()
     if not p.is_dir():
-        sys.exit(f"error: target is not a directory: {p}")
+        _usage_exit(f"error: target is not a directory: {p}")
     return p
 
 
@@ -193,7 +221,7 @@ def cmd_update_check(args) -> int:
 def cmd_doctor(args) -> int:
     target = _resolve_target(args.target) if args.target else None
     langs = recon.detect_stack(target)["languages"] if target else None
-    det = scanners.detect(langs)
+    det = scanners.detect(langs, target=target)
     print(f"websec-validator v{__version__} — scanner check"
           + (f"  (stack: {', '.join(langs) or 'unknown'})" if langs else ""))
     # A version string alone does not identify the engine: a stale wheel from /tmp, an
@@ -219,6 +247,21 @@ def cmd_doctor(args) -> int:
     print("\n  missing (optional — install for fuller coverage):")
     for s in det["missing"]:
         print(f"    · {s['name']:20} {s['category']:8} {s.get('install','')}")
+    if det.get("not_applicable"):
+        print("\n  not applicable to this target (skipped even when installed):")
+        for s in det["not_applicable"]:
+            print(f"    · {s['name']:20} {s['category']:8} {s.get('reason', '')}")
+    engine = det.get("route_engine") or {}
+    if engine:
+        mark = {"ok": "✓", "unknown": "?", "broken": "✗"}.get(engine.get("status"), "·")
+        ver = f"v{engine['version']}" if engine.get("version") else engine.get("status", "")
+        print(f"\n  route engine:\n    {mark} {engine.get('name', 'OWASP Noir'):20} routes   {ver}")
+        if engine.get("note"):
+            print(f"        ↳ {engine['note']}")
+        if engine.get("status") == "not_installed":
+            print(f"        ↳ regex fallback in use — {engine.get('install', '')}")
+        if engine.get("status") == "broken":
+            print("        ↳ every run falls back to regex route discovery until this is fixed")
     if det.get("incompatible"):
         print("\n  ⚠ INCOMPATIBLE — installed, but websec's invocation does not match this build.")
         print("    These are SELECTED and RUN, and their failure looks exactly like a clean scan.")
@@ -450,7 +493,7 @@ def cmd_run(args) -> int:
     # compatible with the adapter's argv" — a question that only arises when the scanner is about to
     # RUN. Without --scan none of them execute, so the probe buys nothing and is skipped; `doctor`,
     # whose entire job is answering whether the toolchain is usable, still probes every time.
-    det = scanners.detect(langs, check_versions=bool(args.scan))
+    det = scanners.detect(langs, check_versions=bool(args.scan), target=target)
     scan_results = []
     unified = None
     if args.scan:
@@ -561,6 +604,9 @@ def cmd_run(args) -> int:
                     f"max blast-radius {ge['max_blast_radius']} (source: {ge['graph']})")
             if ge and not ge.get("available", True):
                 coverage.add_gap(facts, "graph", ge.get("reason", "unavailable"), execution=bool(graph_path))
+                log(f"\n  ⚠ graph: enrichment unavailable — {ge.get('reason', 'unavailable')}"
+                    + (" (explicit --graph: requested execution is INCOMPLETE)" if graph_path
+                       else " (auto-detected graph: optional, run unaffected)"))
         except Exception as e:  # enrichment is best-effort — never fail the run over it
             coverage.add_gap(facts, "graph", type(e).__name__, execution=bool(graph_path))
             log(f"\n  graph: enrichment skipped ({type(e).__name__}: {e})")
@@ -580,6 +626,7 @@ def cmd_run(args) -> int:
         diff_counts = diffscope.annotate(ledger, diff_scope)
         (out / "diff-scope.json").write_text(json.dumps(
             {"base": diff_scope.get("base"), "error": diff_scope.get("error"),
+             "repo_prefix": diff_scope.get("repo_prefix"),
              "files": {f: [list(r) for r in rs] for f, rs in (diff_scope.get("files") or {}).items()},
              "counts": diff_counts}, indent=2))
         if diff_scope.get("error"):
@@ -796,7 +843,28 @@ def cmd_dynamic(args) -> int:
     # Resolve the previous complete run before reserving the dynamic run directory.
     facts_path = (Path(args.facts).expanduser() if args.facts else base / "latest" / "FACTS.json").resolve()
     if not facts_path.is_file():
-        sys.exit(f"error: FACTS.json not found at {facts_path} — run `websec run <repo>` first (or pass --facts)")
+        _usage_exit(f"error: FACTS.json not found at {facts_path} — run `websec run <repo>` first (or pass --facts)")
+    # Validate every argument BEFORE reserving a run directory: a usage error scans nothing, so it
+    # must leave nothing behind — an empty attempt under runs/ would read as a failed scan.
+    cfg = None
+    if args.unauth:
+        if not args.target:
+            _usage_exit("error: --unauth requires --target")
+        if args.probe_writes and not dynamic.is_localhost(args.target):
+            _usage_exit("error: --probe-writes is localhost-only (it sends write verbs) — point --target at your sandbox")
+    elif args.config:
+        cfg = Path(args.config).expanduser().resolve()
+        if not cfg.is_file():
+            _usage_exit(f"error: config not found: {cfg}")
+        config = _json_input(cfg, "--config")
+        missing = [k for k in ("target", "roles") if not (isinstance(config, dict) and config.get(k))]
+        if missing:
+            _usage_exit(f"error: --config {cfg} is missing required field(s): {', '.join(missing)} "
+                        "(see dynamic-config.example.json)")
+    else:
+        _usage_exit("error: provide --config (authenticated cross-tenant) OR --unauth --target (read-only)")
+    if not isinstance(_json_input(facts_path, "FACTS.json"), dict):
+        _usage_exit(f"error: {facts_path} is not a FACTS.json object")
     try:
         out, ts = _new_run_dir(args.out)
     except (OSError, ValueError) as error:
@@ -805,10 +873,6 @@ def cmd_dynamic(args) -> int:
     dyn: dict = {}
 
     if args.unauth:
-        if not args.target:
-            sys.exit("error: --unauth requires --target")
-        if args.probe_writes and not dynamic.is_localhost(args.target):
-            sys.exit("error: --probe-writes is localhost-only (it sends write verbs) — point --target at your sandbox")
         print(f"websec dynamic — STRICT read-only · UNAUTHENTICATED · GET-only  ·  run {ts}\n")
         dyn = dynamic.run_unauth(args.target, facts_path, out, probe_writes=args.probe_writes)
         u = dyn["unauth_reachability"]
@@ -831,10 +895,7 @@ def cmd_dynamic(args) -> int:
                 print(f"\n  {w['warning']}\n")
             for r in w["results"]:
                 print(f"     · {str(r['status']):>4}  {r['verdict']:42} {r['method']} {r['path']}")
-    elif args.config:
-        cfg = Path(args.config).expanduser().resolve()
-        if not cfg.is_file():
-            sys.exit(f"error: config not found: {cfg}")
+    else:
         print(f"websec dynamic — authenticated cross-tenant BOLA (read-only)  ·  run {ts}\n")
         dyn = dynamic.run_dynamic(cfg, facts_path, out)
         ct = dyn.get("cross_tenant_bola", {})
@@ -846,8 +907,6 @@ def cmd_dynamic(args) -> int:
             print(f"  → {ct['summary']}")
         for lk in ct.get("leaks", []):
             print(f"     🚨 LEAK {lk['direction']} {lk['path']} → HTTP {lk['status']}")
-    else:
-        sys.exit("error: provide --config (authenticated cross-tenant) OR --unauth --target (read-only)")
 
     # merge dynamic evidence into the traceable ledger + write the immutable run report
     facts_dict = json.loads(facts_path.read_text())
@@ -864,6 +923,29 @@ def cmd_dynamic(args) -> int:
         "build_id": facts_dict["coverage"].get("analyzed_input_digest", ""),
         "source_digest": facts_dict["coverage"].get("analyzed_input_digest", ""),
     }
+    # The dynamic verdict, recorded BEFORE any artifact is written (as `run` does). Its exit status
+    # answers what the LIVE checks established. The merged ledger also carries every static finding
+    # from FACTS.json, which `websec run` already gated; counting those here made a fully passing
+    # dynamic run exit 1 on a static CRITICAL, so the code said "leak" when the probes said "none".
+    # Ordering matches `run`: a definite finding outranks "some checks did not complete".
+    _dynamic_rows = [f for f in ledger.get("findings", [])
+                     if any(isinstance(e, dict) and e.get("layer") == "dynamic"
+                            for e in f.get("evidence") or [])]
+    _n = baseline.gate_count({"findings": _dynamic_rows}, "critical")
+    _incomplete = not (facts_dict.get("coverage") or {}).get("execution_complete")
+    _gate = {"command": "dynamic", "threshold": "critical", "scope": "dynamic-evidence",
+             "count_at_or_above": _n, "incomplete": _incomplete,
+             "static_findings_not_gated": baseline.gate_count(ledger, "critical") - _n,
+             "note": ("only findings with dynamic evidence gate here; static findings are gated by "
+                      "`websec run --fail-on`")}
+    if _n:
+        _gate.update(verdict="fail", exit_code=EXIT_FINDINGS,
+                     failure_kind="findings+incomplete" if _incomplete else "findings")
+    elif _incomplete:
+        _gate.update(verdict="incomplete", exit_code=EXIT_INCOMPLETE, failure_kind="incomplete")
+    else:
+        _gate.update(verdict="pass", exit_code=EXIT_OK, failure_kind=None)
+    ledger["gate"] = _gate
     (out / "findings-ledger.json").write_text(json.dumps(ledger, indent=2))
     (out / "CONSTITUTION.md").write_text(constitution.render(constitution.build(facts_dict, ledger)))
     (out / "REPORT.md").write_text(
@@ -884,11 +966,21 @@ def cmd_dynamic(args) -> int:
     if (facts_dict.get("coverage") or {}).get("execution_complete"):
         _publish_run(out)
     print(f"  ✓ run {ts} saved (immutable): {out}")
-    if not (facts_dict.get("coverage") or {}).get("execution_complete"):
+    if _gate["static_findings_not_gated"]:
+        print(f"  ⓘ {_gate['static_findings_not_gated']} static CRITICAL finding(s) are in the merged "
+              "ledger but do not set this exit code; `websec run --fail-on critical` gates them.")
+    if _gate["verdict"] == "fail":
+        print(f"  ✗ {_n} CRITICAL finding(s) with dynamic evidence (exit {EXIT_FINDINGS}).")
+        if _incomplete:
+            print("  ⚠ ALSO incomplete: some requested checks did not complete, so this count is a "
+                  "FLOOR, not a total; latest completed scan unchanged. See coverage.gaps.",
+                  file=sys.stderr)
+        return EXIT_FINDINGS
+    if _incomplete:
         print(f"  Requested checks incomplete; latest completed scan unchanged "
               f"(exit {EXIT_INCOMPLETE} — toolchain/coverage, NOT a finding).")
         return EXIT_INCOMPLETE
-    return EXIT_FINDINGS if ledger["by_severity"].get("CRITICAL") else EXIT_OK
+    return EXIT_OK
 
 
 def cmd_mcp(args) -> int:
@@ -971,7 +1063,7 @@ def cmd_gate(args) -> int:
         discovered = _gate.working_tree_paths(target)
         paths, scope_source = discovered["paths"], discovered["source"]
         scope_truncated = discovered.get("truncated", False)
-        if scope_source == "working-tree-unavailable":
+        if _gate.scope_undetermined(discovered):
             # Not a pass: the gate could not determine what to analyse, so it never answered the
             # question. This is the INCOMPLETE class (the check did not run), not the usage class
             # (the invocation was fine) — so it is 3 under the split contract, where it used to
@@ -1017,13 +1109,19 @@ def cmd_attest(args) -> int:
     from . import attest as _attest, hooks as _hooks
     run_dir = Path(args.run).expanduser().resolve() if getattr(args, "run", None) else None
     if run_dir is None:
+        # `_publish_run` points <out>/latest at the newest COMPLETED run; nothing else is a default.
+        # This used to look for <out>/runs/latest (which never exists) and fall back to the
+        # alphabetically-last run directory — possibly a partial attempt that `latest` exists
+        # precisely to keep out of view. An explicit --run still attests any run, partial included.
         out_root = Path(getattr(args, "out", None) or "./websec-out").expanduser().resolve()
-        latest = out_root / "runs" / "latest"
-        if latest.exists():
+        latest = out_root / "latest"
+        if latest.is_dir():
             run_dir = latest.resolve()
-        else:
-            candidates = sorted((out_root / "runs").glob("*")) if (out_root / "runs").is_dir() else []
-            run_dir = candidates[-1] if candidates else None
+        elif (out_root / "runs").is_dir() and any((out_root / "runs").iterdir()):
+            print(f"error: no completed run is published under {out_root} (no `latest` pointer); "
+                  f"{out_root / 'runs'} holds only unpublished, possibly partial attempts. "
+                  "Pass --run <dir> to attest one deliberately.", file=sys.stderr)
+            return EXIT_INCOMPLETE
     if run_dir is None or not run_dir.is_dir():
         print("error: no run directory found; pass --run <dir> or run `websec run` first",
               file=sys.stderr)
@@ -1264,9 +1362,13 @@ def cmd_hooks(args) -> int:
                 if not result.get("ok"):
                     print(f"error: {result.get('error')}", file=sys.stderr)
                     return 2
+                from . import agenthook as _agenthook
                 print(f"{result['action']} PostToolUse gate ({result['matcher']}) in {result['path']}")
                 print("  runs `websec gate` on each file the agent writes; blocks the loop on a "
-                      "finding at or above MEDIUM so the agent can fix it immediately.")
+                      f"finding at or above {_agenthook.effective_fail_on().upper()} so the agent "
+                      "can fix it immediately.")
+                print("  threshold: WEBSEC_GATE_FAIL_ON as seen by the AGENT's environment at each "
+                      f"run (default {_agenthook.DEFAULT_FAIL_ON}); the value above is this shell's.")
                 print("  NOTE: this is developer ergonomics, not a compliance control. Settings "
                       "files are editable, so only managed policy settings are unbypassable.")
             elif args.action == "uninstall":
@@ -1448,7 +1550,7 @@ def cmd_calibrate(args) -> int:
         try:
             doc = calibration.to_claimspec(table)
         except ValueError as e:
-            sys.exit(f"error: --claimspec refused to export a non-reproducible table: {e}")
+            _usage_exit(f"error: --claimspec refused to export a non-reproducible table: {e}")
         text = json.dumps(doc, indent=2) + "\n"
         if args.claimspec == "-":
             sys.stdout.write(text)
@@ -1462,18 +1564,18 @@ def cmd_calibrate(args) -> int:
               f"minN={doc['minN']}.")
         return 0
 
-    # --ingest-dast: close the loop with a REAL scan — a ZAP/Nuclei report confirms/refutes websec's
-    # DAST-predictable findings (§4b) and folds the verdicts into your local overlay. Needs the ledger.
+    # --ingest-dast: close the loop with a REAL scan — ZAP alerts (numeric pluginid) confirm websec's
+    # DAST-predictable findings (§4b); only explicit `checks[]` rows refute. Folds the verdicts into
+    # your local overlay. Needs the ledger.
     if getattr(args, "ingest_dast", None):
         from . import dast_ingest
         rpt = Path(args.ingest_dast).expanduser().resolve()
         led_path = Path(args.ledger).expanduser().resolve() if getattr(args, "ledger", None) else None
         if not rpt.is_file():
-            sys.exit(f"error: --ingest-dast report not found: {rpt}")
+            _usage_exit(f"error: --ingest-dast report not found: {rpt}")
         if not led_path or not led_path.is_file():
-            sys.exit("error: --ingest-dast needs --ledger <findings-ledger.json> to match against")
-        report = json.loads(rpt.read_text())
-        ledger = json.loads(led_path.read_text())
+            _usage_exit("error: --ingest-dast needs --ledger <findings-ledger.json> to match against")
+        report, ledger = _json_input(rpt, "--ingest-dast report"), _json_input(led_path, "--ledger")
         res = dast_ingest.derive_labels(ledger, report)
         if not res["labels"]:
             print("websec calibrate --ingest-dast: no DAST-predictable findings in the ledger matched "
@@ -1481,7 +1583,7 @@ def cmd_calibrate(args) -> int:
             return 2
         rec = calibration.record_samples(res["labels"])
         if not rec:
-            sys.exit("error: nothing ingested (local overlay not writable)")
+            _usage_exit("error: nothing ingested (local overlay not writable)")
         nc, nr, nu = len(res["confirmed"]), len(res["refuted"]), len(res.get("unjudged", []))
         print(f"websec calibrate --ingest-dast: the scan CONFIRMED {nc} finding(s) and REFUTED {nr} "
               f"(explicit location-scoped negative evidence); {nu} left UNJUDGED (this scan shows no "
@@ -1498,15 +1600,15 @@ def cmd_calibrate(args) -> int:
     if getattr(args, "ingest", None):
         src = Path(args.ingest).expanduser().resolve()
         if not src.is_file():
-            sys.exit(f"error: --ingest file not found: {src}")
-        data = json.loads(src.read_text())
+            _usage_exit(f"error: --ingest file not found: {src}")
+        data = _json_input(src, "--ingest file")
         rows = data.get("findings", data) if isinstance(data, dict) else data
         labeled = [{**r, "attack_class": r.get("attack_class", ""), "confidence": r.get("confidence", "MEDIUM"),
                     "is_real": r.get("is_real") if isinstance(r.get("is_real"), bool) else None}
                    for r in rows if isinstance(r, dict)]
         rec = calibration.record_samples(labeled)
         if not rec:
-            sys.exit("error: nothing ingested (empty file, or local overlay not writable)")
+            _usage_exit("error: nothing ingested (empty file, or local overlay not writable)")
         verified = [s for s in labeled if s.get("evidence_verified") is True and s.get("sample_id")
                     and isinstance(s.get("provenance"), dict) and isinstance(s.get("is_real"), bool)]
         if not verified:
@@ -1557,8 +1659,10 @@ def cmd_calibrate(args) -> int:
         print(f"  {entry['name']:12} {len(ledger['findings'])} findings · {n_real} matched a documented vuln")
 
     if not labeled:
+        # Nothing was measured: the requested check did not complete. That is exit 3, not the
+        # "findings" code 1 — a CI step must not read an uncloned corpus as a gate failure.
         print("\n  no labeled findings produced — is the corpus cloned? (needs network on first run)")
-        return 1
+        return 3
 
     # A class is RESEARCHED only when EVERY truth entry has an explicit reviewed label. Appearing in
     # corpus.json is not research: the historical entries are class-level wildcards
@@ -1612,6 +1716,10 @@ def _print_facts_summary(facts: dict, log=print) -> None:
     log(f"  tenant?:  {', '.join(t['key'] for t in tc) or 'none detected'}"
         + ("   ← confirm THE boundary" if tc else ""))
     log(f"  routes:   {rt.get('count', 0)} endpoints via {rt.get('engine', '?').split(' ')[0]}")
+    noir = rt.get("noir") or {}
+    if noir.get("state") == "failed":
+        log(f"            ⚠ OWASP Noir failed: {noir.get('reason', 'unknown')} — routes came from the "
+            "regex fallback (run `websec doctor`)")
     if rt.get("fixture_excluded"):
         log(f"            {rt['fixture_excluded']} fixture/example endpoint(s) excluded "
             "(test/example code ≠ attack surface; --include-fixtures to analyze)")
@@ -1627,10 +1735,10 @@ def build_parser() -> argparse.ArgumentParser:
                     "read-only by default: it reads your own repo and writes a briefing, and never "
                     "touches a live app. Active probes are opt-in against a TEST instance you own.")
     p.add_argument("--version", action="version", version=f"websec-validator {__version__}")
-    # metavar lists only the user-facing commands; recon/proof/calibrate still work but are
-    # omitted (they get no `help=`, so argparse leaves them out of the listing entirely).
+    # metavar lists every user-facing command (every subparser registered with `help=`). recon,
+    # proof and calibrate are left out of it on purpose and still work when invoked explicitly.
     sub = p.add_subparsers(dest="cmd", required=True,
-                          metavar="{run,init,doctor,update-check,dynamic,mcp,capabilities,demo,explain,feedback,intel,research,repair-verify,install,hooks}")
+                          metavar="{run,init,doctor,update-check,emit-context,dynamic,mcp,capabilities,demo,explain,feedback,intel,research,repair-verify,gate,attest,install,hooks}")
 
     uc = sub.add_parser("update-check", help="advisory release metadata; offline unless --online")
     uc.add_argument("--online", action="store_true",
@@ -1688,7 +1796,8 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--network-dry-run", dest="network_dry_run", action="store_true",
                    help="print the exact names --network WOULD send and make zero requests")
     r.add_argument("--only", action="append", metavar="PATH",
-                   help="narrow ANALYSIS to these files, repo-relative (repeatable). Unlike --diff, "
+                   help="narrow ANALYSIS to these files or directories, repo-relative (repeatable); a "
+                        "directory selects every analysable file below it. Unlike --diff, "
                         "which filters the report, this changes what is read and matched: ~13x faster "
                         "on a 320-file repo. The tree is still walked in full, so stack detection, "
                         "ignore policy and fixture classification are unchanged, and files are "
@@ -1711,9 +1820,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "(auto-detected at <target>/graphify-out/graph.json if present)")
     r.set_defaults(func=cmd_run)
 
-    # recon/proof/calibrate are hidden from the main --help (argparse.SUPPRESS): recon is a
-    # subset of `run`, and proof/calibrate are for developing the tool itself. They still work
-    # if invoked explicitly — the user-facing surface is just `run` (+ the advanced `dynamic`).
+    # recon/proof/calibrate are hidden from the main --help by OMISSION: they are registered
+    # without `help=` (so argparse lists no row for them) and are absent from the metavar above.
+    # recon is a subset of `run`, and proof/calibrate are for developing the tool itself. They
+    # still work if invoked explicitly.
     rc = sub.add_parser("recon")
     rc.add_argument("target")
     rc.add_argument("--out", help="output dir (default: ./websec-out)")
@@ -1753,9 +1863,12 @@ def build_parser() -> argparse.ArgumentParser:
     cal.add_argument("--out", help="where to write calibration.json (default: bundled, next to the package)")
     cal.add_argument("--ingest", help="fold a hand-labeled findings JSON ({attack_class,confidence,is_real}) into your LOCAL overlay")
     cal.add_argument("--ingest-dast", dest="ingest_dast", metavar="REPORT.json",
-                     help="close the loop with a real scan: a ZAP/Nuclei report confirms/refutes this "
-                          "repo's DAST-predictable findings and folds the verdicts into calibration "
-                          "(needs --ledger)")
+                     help="fold a ZAP JSON report into calibration (needs --ledger). An alert CONFIRMS "
+                          "a DAST-predictable finding only when its numeric ZAP pluginid maps to the "
+                          "finding's class at the exact application/build/identity/endpoint/method/"
+                          "parameter; a finding is REFUTED only by an explicit `checks[]` row asserting "
+                          "a completed, coverage-complete, auth-verified not-vulnerable result. Scanner "
+                          "silence leaves findings unjudged. Nuclei output is not supported")
     cal.add_argument("--ledger", metavar="findings-ledger.json",
                      help="the websec ledger the --ingest-dast report is matched against")
     cal.add_argument("--claimspec", metavar="PATH",
@@ -1795,7 +1908,9 @@ def build_parser() -> argparse.ArgumentParser:
     mc.add_argument("--host", default="127.0.0.1",
                     help="HTTP bind host (default 127.0.0.1; loopback only; WEBSEC_MCP_TOKEN required)")
     mc.add_argument("--port", type=int, default=8733, help="HTTP port (default 8733)")
-    mc.add_argument("--allow-root", action="append", metavar="PATH", help="allowed HTTP scan root (repeatable; default: startup directory)")
+    mc.add_argument("--allow-root", action="append", metavar="PATH",
+                    help="allowed HTTP scan root (repeatable). REQUIRED with --http: there is no "
+                         "default root, and the server refuses to start (exit 2) without one")
     mc.set_defaults(func=cmd_mcp)
 
     verify = sub.add_parser("repair-verify", help="validate offline repair evidence without executing tests")
@@ -1812,7 +1927,7 @@ def build_parser() -> argparse.ArgumentParser:
     g = sub.add_parser("gate", help="fast scoped pass/fail on the files you just changed (agent-loop check)")
     g.add_argument("target", nargs="?", default=".")
     g.add_argument("--only", action="append", metavar="PATH",
-                   help="analyze these files instead of the working-tree changes (repeatable)")
+                   help="analyze these files or directories instead of the working-tree changes (repeatable)")
     g.add_argument("--fail-on-missed", action="store_true", dest="fail_on_missed",
                    help="exit 1 when a requested path was never analyzed (unsupported language, "
                         "excluded or absent). OFF by default: in the agent loop a pass over an "

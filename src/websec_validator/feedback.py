@@ -56,6 +56,29 @@ def _extension(name) -> str:
     return suffix if 0 < len(suffix) <= 12 else ""
 
 
+_EXTENSION_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_+-]{0,10}")
+
+
+def _extension_hint(value) -> str:
+    """An operator-supplied `--file-extension`: `.ex`, `ex` or a filename like `controller.ex`.
+
+    `_extension` alone reads `.ex` as a dotfile and `ex` as a suffix-less name, so both were
+    recorded as "" — the hint was silently lost. A bare token is the extension itself; anything
+    with a path separator or an inner dot is a filename and only its suffix is kept. A value that
+    yields no extension is refused rather than recorded empty."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    bare = text[1:] if text.startswith(".") else text
+    if "/" not in text and "\\" not in text and _EXTENSION_TOKEN.fullmatch(bare):
+        return "." + bare
+    suffix = _extension(text.replace("\\", "/"))
+    if suffix and _EXTENSION_TOKEN.fullmatch(suffix[1:]):
+        return suffix
+    raise FeedbackError(f"--file-extension {text!r} names no file extension; "
+                        "pass an extension like '.ex' or 'ex', or a filename like 'controller.ex'")
+
+
 def redact(finding: dict, *, include_snippet: bool = False) -> dict:
     """Project a ledger finding onto the shareable record body."""
     body: dict = {}
@@ -137,7 +160,7 @@ def build_missed_record(*, attack_class: str, reason: str, envelope: dict | None
         "run_id": run_id or "",
         "tool_version": (envelope or {}).get("tool_version", ""),
         "missed": {"attack_class": attack_class,
-                   "file_extension": _extension(file_extension) if file_extension else ""},
+                   "file_extension": _extension_hint(file_extension)},
     }
 
 

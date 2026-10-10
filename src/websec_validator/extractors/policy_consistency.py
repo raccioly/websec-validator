@@ -9,11 +9,11 @@ So we fingerprint the {min, upper, lower, digit, special} requirement set of eve
 validating block and flag any block whose set is a STRICT SUBSET of the strongest block found.
 That subset comparison is the load-bearing logic a per-file linter structurally cannot express.
 
-Honest scope (matches the case study caveat): this targets the WU drift shape — co-locatable
+Honest scope (matches the case study caveat): this targets the field-report drift shape — co-locatable
 Zod/Joi/yup/express-validator/class-validator blocks on a `password`-named field with lookahead-
 required classes (`(?=.*[A-Z])`) or explicit min*/isStrongPassword options. A policy centralized
 behind a helper, or expressed as an allowed-char set rather than a requirement, degrades it. It
-catches the WU regression well; it is NOT a general "is this policy strong" oracle.
+catches that field-report regression well; it is NOT a general "is this policy strong" oracle.
 """
 
 from __future__ import annotations
@@ -163,7 +163,7 @@ class PolicyConsistencyExtractor(Extractor):
             "password_reuse": password_reuse,  # MEDIUM — no reuse/history control on set-password (#6)
             "consistent": not drift,
             "note": ("Password-policy DRIFT: a sibling route enforces fewer character classes than the "
-                     "strongest one found — align them (the WU #6 regression). " if drift else
+                     "strongest one found — align them (a field-report regression). " if drift else
                      "" if not blocks else
                      "Single/uniform password policy detected; no cross-route drift. ")
                     + "Heuristic over Zod/Joi/express-validator lookahead-required classes — verify against "

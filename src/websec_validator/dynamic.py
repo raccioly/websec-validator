@@ -132,9 +132,14 @@ def mint(cfg: dict, role: str) -> dict:
         d = json.load(resp)
     except urllib.error.HTTPError as e:
         if e.code in (301, 302, 303, 307, 308):
+            # Only say what the config can actually do: there is no field that accepts a
+            # pre-issued token — every role is minted by POSTing its credentials to login_path.
             return {"error": f"login returned {e.code} instead of a JSON "
-                             "token (cookie-session login?). Point --config login_path at the JSON "
-                             "auth endpoint, or supply tokens directly.", "error_kind": "login_redirect", "status": e.code}
+                             "token (cookie-session login?). Set `login_path` in the --config JSON "
+                             "to an endpoint that returns the token in a JSON body (and "
+                             "`token_json_path` to where it sits). Cookie-session and redirect "
+                             "logins are not supported by --config.",
+                    "error_kind": "login_redirect", "status": e.code}
         return {"error": f"HTTP {e.code} from the login endpoint", "error_kind": "login_http", "status": e.code}
     except Exception as e:
         return {"error": "login failed", "error_kind": type(e).__name__}

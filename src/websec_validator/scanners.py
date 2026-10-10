@@ -46,6 +46,11 @@ class Scanner:
     # the operator's business, and we would rather run and report a gap than refuse to run.
     min_version: tuple = ()
     version_note: str = ""
+    # Target precondition beyond language: (target) -> True when the tool can analyse it. A tool
+    # selected for a target it refuses exits non-zero, which reads as an execution gap on every run
+    # of an otherwise healthy repo. None = any target in the scanner's languages.
+    applies: object = None
+    not_applicable_reason: str = ""
 
 
 # ONE source of truth for "don't scan here": the walker's SKIP_DIRS (extractors/base.py).
@@ -264,10 +269,21 @@ def _gosec(target: Path, out: Path, excludes=()) -> list:
     return cmd + [f"{target}/..."]
 
 
+def _rails_app(target) -> bool:
+    """Brakeman's own precondition: an `app/` directory at the scan root. Without it Brakeman
+    refuses with "Please supply the path to a Rails application" and exits non-zero. Keyed on the
+    exact condition Brakeman enforces, so every target it used to scan successfully still runs."""
+    try:
+        return (Path(target) / "app").is_dir()
+    except OSError:
+        return False
+
+
 def _brakeman(target: Path, out: Path, excludes=()) -> list:
     # Rails SAST (presidentbeef/brakeman) — deeply Rails-aware (knows ActiveRecord queries are
     # parameterized, so far fewer FPs than generic SAST on Rails). Native JSON; `--no-exit-on-*` so
-    # findings don't fail the process. Only runs for Ruby repos with a Rails layout.
+    # findings don't fail the process. Selected only for Ruby targets with a Rails `app/` directory
+    # at the root (`Scanner.applies` = _rails_app); plain Ruby gems/scripts are not Rails apps.
     return ["brakeman", "-f", "json", "-o", str(out), "-q",
             "--no-exit-on-warn", "--no-exit-on-error", str(target)]
 
@@ -313,7 +329,9 @@ REGISTRY: tuple = (
             min_version=(2, 0, 0), version_note="`-no-fail` and JSON `Issues[]` are 2.x"),
     Scanner("brakeman", "Brakeman", "sast", "brakeman", languages=("ruby",),
             install="gem install brakeman  # Rails SAST", argv=_brakeman,
-            min_version=(4, 0, 0), version_note="`--no-exit-on-warn/--no-exit-on-error` need 4.x"),
+            min_version=(4, 0, 0), version_note="`--no-exit-on-warn/--no-exit-on-error` need 4.x",
+            applies=_rails_app,
+            not_applicable_reason="no Rails `app/` directory at the scan root (Brakeman scans Rails apps only)"),
     Scanner("osv-scanner", "OSV-Scanner", "sca", "osv-scanner",
             install="brew install osv-scanner", argv=_osv,
             min_version=(2, 0, 0),
@@ -389,17 +407,62 @@ def check_version(scanner: Scanner) -> dict:
     return {"version": version, "ok": True, "status": "ok", "note": ""}
 
 
-def detect(stack_languages: list | None = None, check_versions: bool = True) -> dict:
+def applicable(scanner: Scanner, target) -> bool:
+    """Does the scanner's target precondition hold? No target known → assume it does (legacy)."""
+    return target is None or scanner.applies is None or bool(scanner.applies(target))
+
+
+NOIR_INSTALL = "brew install noir  # OWASP Noir, the route engine"
+
+
+def check_route_engine(probe: bool = True, timeout: int = 15) -> dict:
+    """OWASP Noir is the route engine, not a scanner, so it is absent from REGISTRY — and `doctor`
+    never looked at it. A broken Noir (crashing, timing out) was then indistinguishable from an
+    absent one. Returns {key, name, installed, version, status, note, install}; status is one of
+    ok | unknown | broken | not_installed | not_checked. NEVER raises."""
+    row = {"key": "noir", "name": "OWASP Noir", "category": "routes", "installed": False,
+           "version": None, "status": "not_installed", "note": "", "install": NOIR_INSTALL}
+    if not shutil.which("noir"):
+        return row
+    row["installed"] = True
+    if not probe:
+        row["status"] = "not_checked"
+        return row
+    try:
+        proc = subprocess.run(["noir", "--version"], capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return {**row, "status": "broken", "note": f"`noir --version` timed out after {timeout}s"}
+    except Exception as error:   # OSError, permission, a broken shim
+        return {**row, "status": "broken", "note": f"`noir --version` could not run: {error}"}
+    text = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    if proc.returncode != 0:
+        detail = next((line.strip() for line in text.splitlines() if line.strip()), "no output")
+        return {**row, "status": "broken",
+                "note": f"`noir --version` exited {proc.returncode}: {detail[:200]}"}
+    match = _VERSION_RE.search(text)
+    if not match:
+        return {**row, "status": "unknown", "note": "`noir --version` printed no version"}
+    return {**row, "status": "ok", "version": ".".join(g for g in match.groups() if g is not None)}
+
+
+def detect(stack_languages: list | None = None, check_versions: bool = True, target=None) -> dict:
     """Return {'available': [...], 'missing': [...]} for the relevant scanners.
 
     A language-specific scanner (e.g. Bandit/python) is only considered relevant
-    when that language is present in the stack.
+    when that language is present in the stack. With a `target`, a scanner whose target
+    precondition fails (Brakeman without a Rails `app/`) is listed under `not_applicable`
+    instead. `route_engine` reports OWASP Noir (probed only when `check_versions`).
     """
     langs = set(stack_languages or [])
-    available, missing = [], []
+    available, missing, not_applicable = [], [], []
     for s in REGISTRY:
         if s.languages and not (set(s.languages) & langs):
             continue  # not relevant to this repo's stack
+        if not applicable(s, target):
+            not_applicable.append({"key": s.key, "name": s.name, "category": s.category,
+                                   "installed": bool(shutil.which(s.binary)),
+                                   "reason": s.not_applicable_reason})
+            continue
         # Same binary as `gitleaks`, run as a second pass. Listing it again would imply a separate
         # tool the operator has to install. Presence/absence is already covered by the entry above.
         if s.key == "gitleaks-dir":
@@ -415,7 +478,8 @@ def detect(stack_languages: list | None = None, check_versions: bool = True) -> 
     # A present-but-incompatible scanner is NOT the same as a missing one and must not hide in the
     # green ✓ list — it is the failure mode that reads as "scanned clean" (field report #2).
     incompatible = [e for e in available if e.get("status") == "too_old"]
-    return {"available": available, "missing": missing, "incompatible": incompatible}
+    return {"available": available, "missing": missing, "incompatible": incompatible,
+            "not_applicable": not_applicable, "route_engine": check_route_engine(probe=check_versions)}
 
 
 def run_available(target: Path, outdir: Path, stack_languages: list | None = None,
@@ -444,6 +508,8 @@ def run_available(target: Path, outdir: Path, stack_languages: list | None = Non
             continue
         if s.languages and not (set(s.languages) & langs):
             continue
+        if not applicable(s, target):
+            continue  # the tool would refuse this target (e.g. Brakeman without a Rails app/)
         # OPT-IN scanners stay off unless explicitly enabled — trufflehog's verification egresses the
         # discovered credential to a third party, which must never happen implicitly.
         if s.key in _OPT_IN_SCANNERS and not (verify_secrets and s.key == "trufflehog"):

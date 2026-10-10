@@ -190,9 +190,24 @@ def _is_noise(path: str) -> bool:
     return bool(ASSET_GLOB.search(path))   # static-asset glob route (/*.png)
 
 
-def _noir_scan(root: Path, extra_excludes: list | None = None) -> list | None:
-    """Run Noir → list of endpoint dicts, or None if Noir unavailable/failed."""
+NOIR_TIMEOUT = 300
+
+
+def _first_line(text: str) -> str:
+    return next((line.strip() for line in (text or "").splitlines() if line.strip()), "")[:200]
+
+
+def _noir_scan(root: Path, extra_excludes: list | None = None, status: dict | None = None) -> list | None:
+    """Run Noir → list of endpoint dicts, or None if Noir is absent or failed.
+
+    `status`, when given, is filled with {"state": "ok" | "absent" | "failed", "reason": str}. An
+    absent Noir and a broken one (crash, timeout, unreadable output) both fall back to the regex
+    pass, but only the first should tell the operator to install Noir; the second must say WHY the
+    installed engine produced nothing. Note the temp file always exists (it is created before Noir
+    runs), so an EMPTY file is how a crashed Noir used to read as "noir (0 routes)"."""
+    status = status if status is not None else {}
     if not shutil.which("noir"):
+        status.update(state="absent", reason="")
         return None
     excl = ",".join([EXCLUDE_GLOBS, _NOIR_SKIP_GLOBS] + (list(extra_excludes) if extra_excludes else []))
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
@@ -201,12 +216,27 @@ def _noir_scan(root: Path, extra_excludes: list | None = None) -> list | None:
         proc = subprocess.run(
             ["noir", "scan", str(root), "-f", "json", "-o", str(out),
              "--exclude-path", excl, "--no-log", "--no-color"],
-            capture_output=True, text=True, timeout=300)
-        if not out.exists():
+            capture_output=True, text=True, timeout=NOIR_TIMEOUT)
+        raw = out.read_text() if out.exists() else ""
+        if not raw.strip():
+            if proc.returncode != 0:
+                detail = _first_line(proc.stderr) or _first_line(proc.stdout) or "no output"
+                status.update(state="failed", reason=f"exit {proc.returncode}: {detail}")
+                return None
+            status.update(state="ok", reason="")
+            return []
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            status.update(state="failed", reason=f"exit {proc.returncode}: output was not valid JSON")
             return None
-        data = json.loads(out.read_text() or "{}")
+        status.update(state="ok", reason="")
         return data.get("endpoints", []) if isinstance(data, dict) else (data or [])
-    except Exception:
+    except subprocess.TimeoutExpired:
+        status.update(state="failed", reason=f"timed out after {NOIR_TIMEOUT}s")
+        return None
+    except Exception as error:
+        status.update(state="failed", reason=f"could not run: {error}"[:200])
         return None
     finally:
         try:
@@ -548,7 +578,11 @@ class RoutesExtractor(Extractor):
     category = "surface"
 
     def extract(self, ctx: RepoContext, facts: dict) -> dict:
-        eps = _noir_scan(ctx.root, getattr(ctx, "excludes", None))
+        noir_status: dict = {}
+        eps = _noir_scan(ctx.root, getattr(ctx, "excludes", None), noir_status)
+        # A stub/mock that ignores `status` leaves it empty: infer the legacy reading from `eps`.
+        noir_status.setdefault("state", "ok" if eps is not None else "absent")
+        noir_status.setdefault("reason", "")
         if eps:                                    # noir ran AND found routes
             routes, spec_derived = _normalize_noir(eps)
             for row in routes + spec_derived:
@@ -568,6 +602,10 @@ class RoutesExtractor(Extractor):
             fb = _fallback(ctx)                     # pass so a framework noir can't parse doesn't become a
             routes, spec_derived = fb, []           # silent blind spot (0 routes → no authz, no probes)
             engine = "noir (0 routes) → regex-fallback backstop" if fb else "noir (0 routes)"
+        elif noir_status["state"] == "failed":     # noir INSTALLED but broken — not "absent"
+            routes, spec_derived = _fallback(ctx), []
+            engine = (f"regex-fallback (OWASP Noir failed: {noir_status['reason']} — "
+                      "run `websec doctor` to check the installed Noir)")
         else:                                      # noir absent
             routes, spec_derived = _fallback(ctx), []
             engine = "regex-fallback (install OWASP Noir for full coverage: brew install noir)"
@@ -720,6 +758,9 @@ class RoutesExtractor(Extractor):
             coverage_warning = 'tRPC composition has unresolved evidence; review routes.trpc gaps/errors.'
         out = {
             "engine": engine,
+            # Machine-readable engine outcome: `failed` + reason distinguishes a broken Noir from
+            # an absent one (both fall back to the regex pass).
+            "noir": {"state": noir_status["state"], "reason": noir_status["reason"]},
             "count": len(routes),
             "by_method": by_method,
             "by_technology": by_tech,

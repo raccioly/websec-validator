@@ -548,15 +548,182 @@ def to_claimspec_ignore(repo_root: Path, *, include_cwd: bool = False, context=N
     return {"schemaVersion": CLAIMSPEC_IGNORE_SCHEMA_VERSION, "entries": entries}, report
 
 
-def _suppressed(f, pats):
-    hay = f"{f.get('category','')} {f.get('location','')} {f.get('title','')}".lower()
-    for p in pats:
-        pl = p.lower()
-        if pl.startswith("category:") and f.get("category", "").lower() == pl.split(":", 1)[1]:
-            return True
-        if fnmatch.fnmatch(f.get("location", "").lower(), pl) or pl in hay:
-            return True
+# ---- `.websec-ignore` pattern semantics ----
+# A line is one of three kinds:
+#   category:<name>  exact (case-insensitive) category match.
+#   path pattern     any line containing `/`, a glob character (`*?[`) or ending in a `.ext`.
+#                    Matched against the finding's PATH — its location with any `:line[:col]`
+#                    suffix removed — on whole path-component boundaries, gitignore-style:
+#                      * a leading `/` anchors the pattern at the repository root;
+#                      * without one it may match at any depth (`tests/` hides `tests/x.py` and
+#                        `a/tests/x.py`, never `contests/x.py`); a leading `**/` means the same;
+#                      * a trailing `/` matches directories only (something must follow it);
+#                      * a pattern matching a directory hides everything beneath it;
+#                      * globs use fnmatch over each component-aligned sub-path, so `*.js`
+#                        matches `src/file.js:13`.
+#   bare word        anything else. It has no exact meaning, so it keeps the LEGACY behaviour:
+#                    a case-insensitive substring of the category, location or title.
+# The legacy rule (substring, or fnmatch over the raw location) still applies to every line in
+# this release, so nothing suppressed before is silently un-suppressed. A finding hidden ONLY by
+# the legacy rule is counted, recorded in the ledger and named in a stderr warning that gives the
+# exact replacement line — the ambiguity is surfaced instead of silently changing what gates.
+_LOCATION_LINE_SUFFIX = re.compile(r":L?\d+(?::\d+)?$")
+_PATTERN_EXT = re.compile(r"\.[A-Za-z0-9_-]{1,10}$")
+_LEGACY_RECORD_LIMIT = 200
+
+
+def _pattern_kind(pattern: str) -> str:
+    text = pattern.strip()
+    if text.lower().startswith("category:"):
+        return "category"
+    if "/" in text or any(c in text for c in "*?[") or _PATTERN_EXT.search(text):
+        return "path"
+    return "word"
+
+
+# Recon findings name their file inside the location text: `VITE_KEY  (src/app.ts)`,
+# `POST /hooks  (api/hooks.py)`. The parenthesised token is the file the finding lives in.
+_LOCATION_EMBEDDED_PATH = re.compile(r"\(([^()\s]+)\)")
+
+
+def _clean_path(value) -> str:
+    path = _LOCATION_LINE_SUFFIX.sub("", str(value or "").replace("\\", "/").strip())
+    while path.startswith("./"):
+        path = path[2:]
+    return path
+
+
+def _finding_paths(f) -> list:
+    """Every repository path a finding names: its `file`, any `(path)` embedded in its location,
+    and the location itself — each with the `:line[:col]` suffix and a leading `./` removed."""
+    location = str(f.get("location") or "")
+    candidates = [f.get("file"), *_LOCATION_EMBEDDED_PATH.findall(location), location]
+    paths = []
+    for value in candidates:
+        path = _clean_path(value)
+        if path and path not in paths:
+            paths.append(path)
+    return paths
+
+
+def _finding_path(f) -> str:
+    """The single most specific file path of a finding (for replacement suggestions)."""
+    paths = _finding_paths(f)
+    return next((p for p in paths if " " not in p), paths[0] if paths else "")
+
+
+def _path_match(pattern: str, path: str) -> bool:
+    pat = pattern.strip().replace("\\", "/").lower()
+    anchored = pat.startswith("/")
+    pat = pat.lstrip("/")
+    while pat.startswith("**/"):
+        pat, anchored = pat[3:], False
+    dir_only = pat.endswith("/")
+    pat = pat.rstrip("/")
+    parts = [part for part in path.lower().split("/") if part]
+    if not pat or not parts:
+        return False
+    for start in ([0] if anchored else range(len(parts))):
+        for end in range(start + 1, len(parts) + 1):
+            if dir_only and end == len(parts):
+                continue
+            if fnmatch.fnmatchcase("/".join(parts[start:end]), pat):
+                return True
     return False
+
+
+def _strict_match(f, pattern: str, kind: str) -> bool:
+    if kind == "category":
+        return (f.get("category") or "").lower() == pattern.split(":", 1)[1].strip().lower()
+    if kind == "path":
+        return any(_path_match(pattern, path) for path in _finding_paths(f))
+    return False   # a bare word has no exact meaning; only the legacy rule applies
+
+
+def _legacy_match(f, pattern: str) -> bool:
+    """The original rule, kept verbatim so no existing suppression silently disappears."""
+    hay = f"{f.get('category','')} {f.get('location','')} {f.get('title','')}".lower()
+    pl = pattern.lower()
+    if pl.startswith("category:") and f.get("category", "").lower() == pl.split(":", 1)[1]:
+        return True
+    return fnmatch.fnmatch(f.get("location", "").lower(), pl) or pl in hay
+
+
+def _suppression_match(f, pats):
+    """→ (suppressed, legacy_only_patterns). Suppression is the union of the exact and the legacy
+    rule; `legacy_only_patterns` is non-empty only when NO line matches exactly, i.e. exactly when
+    retiring the legacy rule would bring this finding back."""
+    if any(_strict_match(f, p, _pattern_kind(p)) for p in pats):
+        return True, []
+    legacy = [p for p in pats if _legacy_match(f, p)]
+    return bool(legacy), legacy
+
+
+def _suppressed(f, pats):
+    return _suppression_match(f, pats)[0]
+
+
+def _replacement_for(pattern: str, kind: str, f) -> str:
+    """The exact line that would hide this finding without the legacy substring rule."""
+    category = f.get("category") or ""
+    path = _finding_path(f)
+    is_file_path = bool(path) and " " not in path
+    if kind == "word":
+        word = pattern.strip().lower()
+        parts = [part for part in path.split("/") if part] if is_file_path else []
+        lowered = [part.lower() for part in parts]
+        if category and word == category.lower():
+            return f"category:{category}"
+        if word in lowered[:-1]:
+            return f"{parts[lowered.index(word)]}/"
+        if lowered and word == lowered[-1]:
+            return f"**/{parts[-1]}"
+        if category and word in category.lower():
+            return f"category:{category}"
+    if is_file_path:
+        return "/" + path
+    return f"category:{category}" if category else ""
+
+
+def _legacy_suppression_report(legacy_hits: list) -> tuple:
+    """legacy_hits: [(finding, [patterns])] → (ledger records, one warning per ignore line)."""
+    records, by_pattern = [], {}
+    for finding, patterns in legacy_hits:
+        if len(records) < _LEGACY_RECORD_LIMIT:
+            records.append({"title": finding.get("title", ""), "category": finding.get("category", ""),
+                            "location": finding.get("location", ""),
+                            "suppression": {"patterns": list(patterns), "legacy_substring": True}})
+        for pattern in patterns:
+            by_pattern.setdefault(pattern, []).append(finding)
+    warnings = []
+    for pattern, hidden in by_pattern.items():
+        kind = _pattern_kind(pattern)
+        replacements, examples = [], []
+        for finding in hidden:
+            line = _replacement_for(pattern, kind, finding)
+            if line and line not in replacements:
+                replacements.append(line)
+            example = finding.get("location") or finding.get("title") or ""
+            if example and example not in examples and len(examples) < 3:
+                examples.append(example)
+        warnings.append({"pattern": pattern, "pattern_kind": kind, "hidden": len(hidden),
+                         "replacement": replacements, "examples": examples})
+    return records, warnings
+
+
+def _print_suppression_warnings(warnings: list) -> None:
+    import sys
+    for row in warnings:
+        shown = row["replacement"][:5]
+        more = f" (+{len(row['replacement']) - 5} more)" if len(row["replacement"]) > 5 else ""
+        replace = ", ".join(shown) + more if shown else "a category:<name> or path pattern"
+        why = {"word": "a bare word matches as a substring of any category, location or title",
+               "path": "path patterns now match whole path components, not substrings",
+               "category": "category: lines match the category exactly"}[row["pattern_kind"]]
+        print(f"websec: .websec-ignore line {row['pattern']!r} hid {row['hidden']} finding(s) only by "
+              f"legacy substring matching ({why}; e.g. {', '.join(row['examples']) or 'n/a'}). "
+              f"They stay suppressed in this release; to keep hiding exactly these, use: {replace}",
+              file=sys.stderr)
 
 
 def _f(title, category, attack_class, severity, confidence, location, evidence):
@@ -1200,8 +1367,16 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
 
     # ---- suppress + acknowledge + rank ----
     # (1) path/category suppressions DROP the finding (noise that isn't the product).
-    kept = [f for f in out if not _suppressed(f, suppressions)]
+    kept, legacy_hits = [], []
+    for f in out:
+        hidden, legacy_only = _suppression_match(f, suppressions)
+        if not hidden:
+            kept.append(f)
+        elif legacy_only:
+            legacy_hits.append((f, legacy_only))
     suppressed_n = len(out) - len(kept)
+    legacy_records, suppression_warnings = _legacy_suppression_report(legacy_hits)
+    _print_suppression_warnings(suppression_warnings)
     # (2) fingerprint acknowledgements KEEP the finding but move it off the gating list — a
     # human-reviewed known result (e.g. a confirmed FP) stays visible + attributable with its
     # reason, and is excluded from `findings`/total/gating so every downstream consumer
@@ -1265,6 +1440,9 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
             from . import coverage
             coverage.add_gap(facts, "review_policy", "ignore policy was unreadable or out of scope")
     return {"schema_version": "2.0", "fingerprint_version": 2, "findings": kept, "total": len(kept), "suppressed": suppressed_n,
+            "suppressed_legacy_substring": len(legacy_hits),
+            "suppressed_legacy": legacy_records,
+            "suppression_warnings": suppression_warnings,
             "acknowledged": acknowledged, "acknowledged_n": len(acknowledged),
             "acknowledgement_sources": getattr(acknowledgements, "sources", []),
             "suppression_sources": getattr(suppressions, "sources", []),
