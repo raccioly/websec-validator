@@ -52,7 +52,9 @@ tenant candidates, unguarded writes, sinks, top findings, coverage) inside Claud
 }
 ```
 
-For other harnesses, `websec emit-context . --markdown` prints the raw block.
+For other harnesses, `websec emit-context . --markdown` prints the raw block. When the evidence is
+thin, which is common early in a project, the block marks the route count as a floor and the auth
+scheme as an unverified guess rather than stating them as fact.
 
 ## 4. Gate the agent loop
 
@@ -77,7 +79,11 @@ git add .websec-ignore
 On a fresh repository `init` usually finds nothing to scope and writes a commented template. Commit
 it anyway. Once the file exists, `init` refuses to overwrite it without `--force`, and every later
 `fingerprint:` acknowledgement arrives as a reviewable diff with its reason and `expires:` date. Add
-paths as test and fixture directories appear. Grammar and matching rules:
+paths as test and fixture directories appear, knowing that a directory line also hides future
+findings there, including a real secret committed later. When a test directory starts holding
+fixture credentials, prefer acknowledging them: run `websec run . --scan`, then
+`websec init --dry-run`, which proposes dated `fingerprint:` lines for a directory whose only
+findings are secrets, and copy the lines you accept into the file. Grammar and matching rules:
 [triage and suppression](triage-and-suppression.md#websec-ignore-reference).
 
 ## 6. Gate CI from the first pull request

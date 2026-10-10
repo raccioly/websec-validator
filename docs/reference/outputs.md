@@ -133,6 +133,25 @@ Fields worth knowing:
   missed entry selected no analysable file and was never analysed.
 - `routes.fixture_endpoints`: test/example/fixture routes split out of the attack surface, kept
   visible rather than dropped. `--include-fixtures` treats them as product code.
+- `auth.scheme` (the primary scheme), `auth.schemes_detected` and, since 0.22.0,
+  `auth.scheme_confidence` (`high`, `medium` or `low`) with `auth.scheme_basis`, the evidence in
+  words. A `jwt (bearer)` reading needs a JWT library imported or called in the same file as a JWT
+  mention; a JOSE `alg` value or a JWKS reference can confirm a mention but never creates a reading
+  on its own, and a bare `Authorization: Bearer` header is not JWT evidence. A name-only mention (a
+  comment, an identifier, a `token_required` error code) is kept as `jwt? (weak evidence: …)`,
+  ranked after every other scheme, and is `low`. NextAuth and confirmed JWT are `high`;
+  HMAC-signed cookies, session libraries and Passport are `medium` (grep-level); `api-key` (read
+  off header and variable names) and `unknown` are `low`; with no HTTP route mapped and no NextAuth,
+  every scheme is `low`, because the repository may not serve HTTP at all. `auth.signal_counts.jwt` is the permissive name-level count that still stages JWT
+  probes; `auth.signal_counts.jwt_strong` counts the files whose mention is backed by real
+  evidence.
+- `surface.assigned_flow`: the bounded JS/Python assignment-flow lane. `errors[]` (`file`, `kind`,
+  `detail`, at most 50) names each file where analysis stopped, usually `LimitReached` at a
+  budget; `limits` holds the budgets and `work` what was spent. Since 0.22.0 the per-file scope
+  budget scales with file size, `min(max(scopes_per_file, bytes / scope_bytes),
+  scopes_per_file_cap)`, and a right-hand side longer than `expression_chars` draws on a bounded
+  extension (`extended_chars_per_source_char`, capped by `extended_chars_per_file` and
+  `total_extended_chars` per run) instead of ending the file's walk.
 
 ### `coverage.json`
 
@@ -143,9 +162,9 @@ The execution and scope manifest. It is also embedded in `FACTS.json`, the ledge
 | `execution_complete` | `true` when every requested check ran. Drives `latest` and exit code `3` |
 | `protection_complete` | Always `false`. Completed execution is not protection |
 | `limitation` | The statement above, in words |
-| `gaps[]` | `{kind, detail, execution}`. `execution: true` means a requested check did not complete; `false` is a scope limit (`language_without_analyzer`, `thin_language_coverage`, `walker_policy`, `excluded_scope`, `profile_scope`, `skipped_directory_code`, `scope_missed`, `route_engine` and others). `skipped_directory_code`: a skipped `build`, `dist`, `out`, `target`, `vendor` or `coverage` directory, or a websec output directory under another name, holds files with an analysable suffix. `scope_missed`: a `--only` path selected nothing. `route_engine`: an installed Noir failed and routes came from the regex fallback. A `graph` gap is an execution gap only for an explicit `--graph` |
+| `gaps[]` | `{kind, detail, execution}`. `execution: true` means a requested check did not complete; `false` is a scope limit (`language_without_analyzer`, `thin_language_coverage`, `walker_policy`, `excluded_scope`, `profile_scope`, `skipped_directory_code`, `scope_missed`, `route_engine` and others). `skipped_directory_code`: a skipped `build`, `dist`, `out`, `target`, `vendor` or `coverage` directory, or a websec output directory under another name, holds files with an analysable suffix. `scope_missed`: a `--only` path selected nothing. `route_engine`: an installed Noir failed and routes came from the regex fallback. `scanner_file_limits` (since 0.22.0): a scanner completed but could not parse, or only partly parsed, the named in-scope files; every other file was analysed, and those files' absence of findings is not a clean result. Execution gaps include `scanner` (a scanner did not complete), `scanner_rules` (named rules did not complete), `extractor`, and `source_flow_limit` (since 0.22.0): the files, lane and reason where bounded source-flow analysis stopped at a budget. Like an oversized file, that leaves the file not fully analysed, so the run is incomplete. A `graph` gap is an execution gap only for an explicit `--graph` |
 | `extractors` | Outcome per extractor |
-| `scanners` | Per scanner: `installed`, `runnable`, `selected`, `ran`, `outcome`, `reported_version`, `version_verified` |
+| `scanners` | Per scanner: `installed`, `runnable`, `selected`, `ran`, `outcome`, `reported_version`, `version_verified`, `report_details` (the native diagnostics websec parsed) and, when present, `rules_incomplete` and `file_limitations`. A `file_limitations` row is `{path, reason, native_type, framework?, message}`: `reason` is `parse_failed` (the file was not analysed) or `partial_parse` (it was partly analysed). `report_details.file_limitations_excluded` counts diagnostics for files under `--exclude` or a skipped directory, which are otherwise ignored |
 | `files` | `seen`, `scanned`, `read`, `unsupported`, `unanalyzed_languages`, `no_analyzable_source`, `skipped_counts` (reasons include `skip_directory` and `websec_output`, a directory this tool wrote), caps and read losses. `skipped_code_files` (total analysable-suffix files under skipped build, dependency and output directories) and `skipped_code_dirs[]` (`path`, `code_files`, `count_truncated`; at most 50 listed). With `--only`, `analysis_scope`: `requested` and `matched` counts and the `missed` entries |
 | `profiles`, `service_inventory` | Named-check status per service |
 | `route_discovery` | Django, Connexion and tRPC route-parser candidates and gaps |

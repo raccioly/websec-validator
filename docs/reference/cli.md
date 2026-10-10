@@ -160,7 +160,7 @@ websec run <target> [--scan] [--scanners A,B] [--sarif REPORT ...] [--out DIR]
 | `--scan` | off | Also execute the static scanners found on `PATH` (see Network below). |
 | `--scanners A,B` | all available | Comma-separated scanners to **require** and run. Needs `--scan`. A selected scanner that is not installed is recorded as unavailable and makes the run incomplete (exit 3 under `--fail-on` or `--require-complete`). Selecting `gitleaks` selects both of its passes. Keys are those shown by `websec doctor`, for example `trivy`, `gitleaks`, `semgrep`, `checkov`, `osv-scanner`, `bandit`, `gosec`, `brakeman`. |
 | `--sarif REPORT` | none | Import an existing SARIF 2.1.0 report without running its analyzer. Repeatable, at most 8. Source freshness is recorded as unverified. A malformed or missing report makes the run incomplete. |
-| `--exclude PATH` | none | Exclude a path from recon **and** scanners. Repeatable. Matches when the value is a substring of the repo-relative path or an `fnmatch` glob of it, so `--exclude docs` also excludes `src/docsgen/`. Quote globs: `--exclude 'docs/**'`. |
+| `--exclude PATH` | none | Exclude a path from recon **and** scanners. Repeatable. Matches when the value is a substring of the repo-relative path or an `fnmatch` glob of it, so `--exclude docs` also excludes `src/docsgen/`. Quote globs: `--exclude 'docs/**'`. Trivy, Semgrep and gosec receive the patterns as their own exclude flags; since 0.22.0 Checkov receives equivalent `--skip-path` regexes anchored to the target root, so it no longer walks (or fails on parse errors in) excluded trees. Gitleaks and OSV-Scanner have no such flag; their findings in excluded paths are dropped afterwards. This is scanner **scope**; `.websec-ignore` only filters findings and never changes what scanners read. |
 | `--include-fixtures` | off | Treat test, example and fixture code as product code: fixture routes count as attack surface and fixture secrets keep full severity. By default they are split out and demoted to LOW. |
 | `--only PATH` | whole tree | Narrow **analysis** to these repo-relative files or directories (repeatable). A directory selects every analysable file below it, on whole path components: `--only src` selects `src/a.py`, never `src2/a.py`. A directory entry only selects files the walker already kept, so it never reaches into a skipped or excluded tree. The tree is still walked, so stack detection, ignore policy and fixture classification are unchanged. A requested path that selects nothing is listed as missed in `FACTS.json` → `analysis_scope.missed` and as a `scope_missed` coverage gap, not reported clean; when no entry selects anything, the report banner reads **REQUESTED SCOPE NOT ANALYZED**. Directory entries are accepted since 0.22.0. |
 | `--graph GRAPH.json` | `<target>/graphify-out/graph.json` if present | A graphify graph for blast-radius enrichment. See [configuration.md](configuration.md#graphify-graph-input) for failure behaviour. |
@@ -225,7 +225,7 @@ Scaffold a `.websec-ignore` for this repository from the test, fixture, seed and
 directories that actually exist in it, or export its reviewed acknowledgements.
 
 ```text
-websec init [target] [--dry-run] [--force] [--claimspec PATH]
+websec init [target] [--dry-run] [--force] [--ledger findings-ledger.json] [--claimspec PATH]
 ```
 
 **Positional:** `target`, the repository directory (default `.`).
@@ -234,18 +234,34 @@ websec init [target] [--dry-run] [--force] [--claimspec PATH]
 |---|---|---|
 | `--dry-run` | off | Print the proposed `.websec-ignore` without writing it. |
 | `--force` | off | Replace an existing `.websec-ignore`. Without it an existing file is never overwritten, because it may hold reviewed `fingerprint:` acknowledgements. |
+| `--ledger PATH` | `<target>/websec-out/latest/findings-ledger.json`, then `./websec-out/latest/findings-ledger.json` | A prior run's findings ledger for this target, read only. Secret findings in a proposed directory become fingerprint acknowledgements instead of a glob (see below). A default-location ledger recorded for a different target is ignored; an explicit `--ledger` that is unreadable, not a ledger, or for a different target exits `2`. |
 | `--claimspec PATH` | none | Instead of scaffolding, export the reviewed `fingerprint:` acknowledgements already in `.websec-ignore` as a claimspec v1 `ignore` document. `-` writes to stdout. Path and category patterns and acknowledgements without a usable reason or expiry are omitted and reported on stderr, so the export is never mistaken for the whole policy. |
 
-Every proposal is printed with its file count before anything is written. The file grammar is in
-[configuration.md](configuration.md#websec-ignore).
+Every proposal is printed with its file count before anything is written. Since 0.22.0:
+
+- Every proposed directory glob carries the comment `also suppresses FUTURE findings here,
+  including real secrets; prefer fingerprint: acks`. A glob hides findings that do not exist yet,
+  including a real credential committed to that directory later.
+- When a prior ledger is available and the **only** findings it records under a proposed directory
+  are secrets, `init` does not apply the glob. It writes one
+  `fingerprint:<fp> expires:<today+90d>  # REVIEW: test/fixture credential, confirm it is fake or rotate it (<file>:<line>)`
+  line per finding and leaves the directory line commented out. A new secret in that directory still
+  gates. The `REVIEW:` reason is a placeholder: confirm each value is fake, or rotate it, and
+  rewrite the reason before committing. A directory that also holds non-secret findings, or whose
+  findings cannot all be tied to a file in this working tree, keeps the (warned) glob.
+- Without a ledger, `init` says so and suggests running `websec run . --scan` first. `latest` only
+  advances on a completed run; after a partial one, pass that run's ledger with `--ledger`.
+
+`init` never scans. The file grammar is in [configuration.md](configuration.md#websec-ignore).
 
 **Network:** none. **Files written:** `<target>/.websec-ignore`, or the `--claimspec` file.
-**Exit codes:** `0` written, dry run, or exported; `2` when the file exists without `--force` or
-cannot be written.
+**Exit codes:** `0` written, dry run, or exported; `2` when the file exists without `--force`,
+cannot be written, or an explicit `--ledger` is not a readable findings ledger for this target.
 
 ```bash
 websec init --dry-run
 websec init ./my-app
+websec init --dry-run --ledger websec-out/runs/<run-id>/findings-ledger.json
 websec init --claimspec -
 ```
 
@@ -514,6 +530,18 @@ websec emit-context <target> [--markdown]
 | Option | Default | Description |
 |---|---|---|
 | `--markdown` | off | Print the raw `## SECURITY CONTEXT` block instead of the JSON envelope, for other harnesses. |
+
+The block states its own uncertainty inline (since 0.22.0), on the `Attack surface` line, without
+adding lines:
+
+- The route count is marked as a floor, for example `1 route(s) [⚠ route discovery likely
+  INCOMPLETE (~13 handler-ish functions; hand-rolled/dynamic router) — count is a floor]`, when
+  `routes.coverage_warning` is set (the surface-coverage warning, or unresolved Django URL
+  candidates), when an installed OWASP Noir failed, or when routes came from the regex fallback.
+- The auth scheme reads `<scheme> (LOW-CONFIDENCE guess, unverified: <basis>)` when
+  `FACTS.json` → `auth.scheme_confidence` is `low`, and `<scheme> (inferred, unverified — route
+  discovery incomplete)` when `routes.coverage_warning` is set. A failed Noir or a regex-fallback
+  engine on its own caveats the count, not the scheme. Evidence with no caveat is stated plainly.
 
 **Network:** none. **Files written:** none. **Exit codes:** `0`. Wiring it into a session hook is
 covered in [ai-agents.md](../guides/ai-agents.md).

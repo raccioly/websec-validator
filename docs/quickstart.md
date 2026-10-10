@@ -189,8 +189,11 @@ configuration, for example to download vulnerability databases or rules. See
 
 ## If something looks wrong
 
-- Lots of findings in `tests/`, `examples/` or `fixtures/`? Run `websec init` to scaffold a
-  reviewed `.websec-ignore`. See [Triage and suppression](guides/triage-and-suppression.md).
+- Lots of findings in `tests/`, `examples/` or `fixtures/`? Run `websec init --dry-run`, then
+  `websec init`, to scaffold a reviewed `.websec-ignore`. After a completed `--scan` run, where a
+  directory's only findings are secrets, it proposes dated `fingerprint:` acknowledgements rather
+  than hiding the whole directory. See
+  [Triage and suppression](guides/triage-and-suppression.md).
 - A finding you have checked and believe is wrong? `websec feedback` records it offline and prints a
   pre-filled issue link; nothing is sent.
 - Anything else: [Troubleshooting](troubleshooting.md).

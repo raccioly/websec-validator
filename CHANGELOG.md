@@ -25,6 +25,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed — reported success that had not been earned
 
+- **Field reports #193–#197** (completeness that was over-stated, and one over-confident claim):
+  - `--exclude` now reaches Checkov through root-anchored `--skip-path` patterns, and parse errors
+    under excluded or skip-listed paths no longer fail the run (#193). An in-scope parse error in a
+    framework that otherwise evaluated is a per-file limitation (`scanner_file_limits`, non-execution);
+    a framework that evaluated nothing is still an error that names the files. Checkov's
+    `terraform_plan` framework, which parses every `*.json`, is skipped only when no in-scope JSON
+    looks like a Terraform plan (content sniff; undecidable keeps it).
+  - Semgrep per-file parse errors on valid code (`PartialParsing`, syntax and lexical errors at
+    level `warn`) are per-file limitations, not a failed scanner (#196). Fatal, config and rule
+    errors still fail.
+  - The JS source-flow lane no longer abandons ordinary modules: regex literals containing quotes,
+    long right-hand sides and modules with more than 128 scopes now complete (#194). Budgets scale
+    with file size under hard caps; a file that still hits one produces a `source_flow_limit` gap
+    naming the file, and — like an oversized file — the run stays incomplete. Measured on 39,914
+    local JS/TS files: no detection lost, lane errors 290 → 39 files.
+  - Auth inference requires real JWT evidence; a name-only mention (a comment naming a library, an
+    error code such as `TOKEN_REQUIRED`, the word "Jose" in data) is no longer stated as
+    `jwt (bearer)`, and a bare `Authorization: Bearer` header is not treated as JWT evidence (#195). Weak mentions stay as `jwt? (weak
+    evidence: …)`; FACTS gains `auth.scheme_confidence` and `auth.scheme_basis`. `websec
+    emit-context` marks the route count as a floor and the auth scheme as an inference when route
+    discovery is likely incomplete.
+  - `websec init` warns on every directory glob that it also hides future real secrets, and — from a
+    prior run's ledger (`--ledger`, or `websec-out/latest`) — proposes expiring `fingerprint:`
+    acknowledgements for test-fixture secrets instead of the glob (#197).
+
 - **`run <subdir> --diff <base>` and `gate <subdir>` passed every finding.** Git reported
   repository-root paths, findings were target-relative, so every finding read as untouched. Both now
   scope from any subdirectory (`git diff --relative`; `rev-parse --show-prefix` for status). A rename

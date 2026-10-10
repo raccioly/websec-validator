@@ -144,7 +144,7 @@ Use the narrowest tool that fits:
 
 | Situation | Use |
 |---|---|
-| A whole directory is not your product (tests, fixtures, seed data) | `websec init` to scaffold `.websec-ignore` path entries, or `--exclude '<glob>'` per run |
+| A whole directory is not your product (tests, fixtures, seed data) | `websec init` to scaffold `.websec-ignore` path entries, or `--exclude '<glob>'` per run. A path entry also hides future findings there, including real secrets, so for fixture credentials prefer the `fingerprint:` lines `init` proposes after a `websec run . --scan`. Only `--exclude` stops scanners reading the path |
 | One specific finding is a confirmed false positive | A `fingerprint:<id>` line with a reason in `.websec-ignore`. The finding stays visible (and suppressed, not deleted, in SARIF) but stops gating. A line without a reason is ignored. |
 | You want the detector fixed upstream | `websec feedback --fingerprint <id> --verdict false-positive --reason "…"`, then the false-positive issue template |
 

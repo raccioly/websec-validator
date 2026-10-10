@@ -23,7 +23,10 @@ repository's `.websec-ignore`, and by the few environment variables listed under
 ## `.websec-ignore`
 
 A committed policy file that scopes findings out of the report or acknowledges specific ones.
-`websec init` writes a starting version from the directories that exist in your repository.
+`websec init` writes a starting version from the directories that exist in your repository. Since
+0.22.0 each directory line it proposes warns that it also hides future findings, real secrets
+included, and with a prior run's ledger it proposes `fingerprint:` acknowledgements instead for a
+directory whose only findings are secrets (see [`websec init`](cli.md#websec-init)).
 
 **Location and precedence.** Only `<target>/.websec-ignore` is read, where `<target>` is the
 directory you scan. A `.websec-ignore` in the current working directory is not read when it differs
@@ -110,7 +113,8 @@ fingerprint:b9c7f23e49bdab85 expires:2027-03-31  # confirmed FP: the scanner's o
 ```
 
 **What it does not do.** `.websec-ignore` filters findings; it does not stop files being read or
-passed to scanners. To remove a path from analysis, use `--exclude` (recon and scanners) or `--only`
+passed to scanners. A scanner that fails to parse a file listed only here still reports that
+failure. To remove a path from analysis, use `--exclude` (recon and scanners) or `--only`
 (analysis scope). Test, example and fixture code is already split out and demoted automatically;
 `--include-fixtures` turns that off.
 
