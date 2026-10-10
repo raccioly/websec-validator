@@ -23,7 +23,7 @@ Docker target bundles a selected scanner set; `--target core` builds a scanner-f
 | Python | 3.11+ | Runtime (on stock macOS `python3` is often 3.9 — use `pipx`, Homebrew, or pyenv) |
 | pipx | latest | Recommended install method (isolates the CLI, picks a 3.11+ interpreter) |
 | OWASP Noir | latest | **Optional** route engine (50+ frameworks); regex fallback if absent — `brew install noir` |
-| Trivy / Gitleaks / Semgrep (or OpenGrep) / Checkov / Prowler | latest | **Optional** static scanners, only run with `--scan`; install for fuller coverage |
+| Trivy / Gitleaks / Semgrep / Checkov | latest | **Optional** static scanners, only run with `--scan`; install for fuller coverage. Prowler is detected and reported but has no invocation, so it is never executed |
 | Docker | latest | **Optional** — core/bundled image targets, with native amd64/arm64 contracts |
 
 `websec doctor` reports which of the optional tools are present on your machine.

@@ -1,5 +1,11 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
 contact_links:
   - name: Report a security vulnerability (private)
     url: https://github.com/raccioly/websec-validator/security/advisories/new
     about: Please report vulnerabilities in the tool itself privately — do not open a public issue.
+  - name: Documentation
+    url: https://github.com/raccioly/websec-validator/blob/main/docs/README.md
+    about: Install, guides (existing projects, AI agents, CI), CLI and language reference, troubleshooting and FAQ.
+  - name: Questions and ideas
+    url: https://github.com/raccioly/websec-validator/discussions
+    about: Usage questions and open-ended ideas — issues are for bugs, false positives and concrete proposals.
