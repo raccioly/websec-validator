@@ -311,13 +311,35 @@ def cmd_init(args) -> int:
                 print(f"    acknowledgement {row['fingerprint']} omitted "
                       f"({row['state']}): {row['why']}", file=sys.stderr)
         return EXIT_OK
-    proposal = init_scope.propose(target)
+    # #197: a prior run's ledger (read only — init never scans) lets secrets in test directories be
+    # acknowledged by fingerprint instead of hidden, with everything after them, by a directory glob.
+    explicit = getattr(args, "ledger", None)
+    ledger = init_scope.load_prior_ledger(target, Path(explicit) if explicit else None)
+    if explicit and ledger is None:
+        print(f"error: --ledger {explicit} is not a readable findings ledger for {target}", file=sys.stderr)
+        return EXIT_USAGE
+    proposal = init_scope.propose(target, ledger=ledger)
     print(f"websec-validator v{__version__} — scope setup for {target}\n")
     if proposal["entries"]:
         print("  proposed scope exclusions (detected in this repo):")
         for e in proposal["entries"]:
-            print(f"    {e['path']:<44} {e['files']:>5} file(s)  — {e['reason']}")
+            if e.get("mode") == "acknowledge":
+                print(f"    {e['path']:<44} {e['files']:>5} file(s)  — NOT globbed: only secret findings here; "
+                      f"{len(e['acks'])} fingerprint acknowledgement(s) proposed instead")
+                for a in e["acks"]:
+                    print(f"      fingerprint:{a['fingerprint']} expires:{a['expires']}  ({a['file']})")
+            else:
+                print(f"    {e['path']:<44} {e['files']:>5} file(s)  — {e['reason']}")
         print(f"\n  covers {proposal['covered_files']} of {proposal['analyzed_files']} analyzed file(s).")
+        print(f"  every proposed directory glob {init_scope.GLOB_WARNING}.")
+        if ledger is None:
+            # Not `--force`: an existing .websec-ignore may hold reviewed acknowledgements outside the
+            # proposal, and --force would replace them. --dry-run prints the lines to merge by hand.
+            print("  no prior findings ledger for this target — run `websec run . --scan` first, then\n"
+                  "  `websec init --dry-run` to print fingerprint acknowledgements for test-fixture secrets\n"
+                  "  (merge them into an existing .websec-ignore by hand; --force would replace it).")
+        else:
+            print(f"  prior findings ledger: {ledger['path']}")
     else:
         print("  no test/fixture/seed/vendor directories detected — nothing to scope out.")
     # Never suppress silently: the operator sees the list before the file exists.
@@ -339,7 +361,8 @@ def cmd_init(args) -> int:
               "`fingerprint:`\n    acknowledgements that regenerating would discard. Review it, "
               "or re-run with --force.")
         return EXIT_USAGE
-    print(f"\n  ✓ wrote {result['path']} ({result['entries']} scope entr(ies))")
+    print(f"\n  ✓ wrote {result['path']} ({result['entries']} scope entr(ies), "
+          f"{result.get('acknowledgements', 0)} fingerprint acknowledgement(s) to review)")
     print("    Review it, delete what you disagree with, and commit it.")
     return EXIT_OK
 
@@ -364,6 +387,47 @@ def cmd_recon(args) -> int:
     return 0
 
 
+def _route_discovery_caveat(rt: dict) -> str:
+    """Why the mapped route count is a floor, not a census — or "" when nothing says so (#195).
+
+    The same flags the briefing already prints: the surface-coverage warning (handler-ish functions
+    far outnumber mapped routes: a hand-rolled or dynamic router), a broken Noir, and the regex-only
+    engines (Noir absent, or Noir mapped nothing and the regex backstop took over)."""
+    engine = str(rt.get("engine") or "")
+    if rt.get("coverage_warning"):
+        if str(rt["coverage_warning"]).startswith("⚠ surface-coverage"):
+            return (f"route discovery likely INCOMPLETE (~{rt.get('handler_signals', '?')} handler-ish "
+                    "functions; hand-rolled/dynamic router) — count is a floor")
+        return "route discovery has unresolved evidence — count is a floor"
+    if (rt.get("noir") or {}).get("state") == "failed":
+        return "OWASP Noir failed, regex fallback only — count may be incomplete"
+    if engine.startswith(("regex-fallback", "noir (0 routes)")):
+        return "regex-fallback route engine — count may be incomplete"
+    return ""
+
+
+def _route_count_md(rt: dict) -> str:
+    caveat = _route_discovery_caveat(rt)
+    count = f"{rt.get('count', 0)} route(s)"
+    return f"{count} [⚠ {caveat}]" if caveat else count
+
+
+def _auth_scheme_md(auth: dict, rt: dict) -> str:
+    """The auth scheme as the evidence supports it. A `low`-confidence scheme (a name-only JWT mention,
+    an api-key read off variable names, no mapped route) or one inferred while route discovery is
+    flagged incomplete (`routes.coverage_warning`) is labelled an unverified inference — the block
+    primes every agent session, and a wrong auth model stated as fact misleads every one (#195)."""
+    scheme = auth.get("scheme", "?")
+    others = [s.split(" ", 1)[0] for s in auth.get("schemes_detected", []) if s != scheme][:3]
+    also = f"; also seen: {', '.join(others)}" if others else ""
+    if auth.get("scheme_confidence") == "low" and scheme != "unknown":
+        return (f"{scheme.split(' (', 1)[0]} (LOW-CONFIDENCE guess, unverified: "
+                f"{auth.get('scheme_basis', 'weak evidence')}{also})")
+    if rt.get("coverage_warning") and scheme != "unknown":
+        return f"{scheme} (inferred, unverified — route discovery incomplete{also})"
+    return f"{scheme}{f' ({also[2:]})' if also else ''}"
+
+
 def _security_context_md(facts: dict, ledger: dict) -> str:
     """A compact, deterministic security-context block for injection into an agent's session — the
     attack surface at a glance so the agent (or a downstream LLM reviewer) starts pre-scoped."""
@@ -380,7 +444,7 @@ def _security_context_md(facts: dict, ledger: dict) -> str:
         "## SECURITY CONTEXT (websec-validator — deterministic recon, no LLM)",
         f"- Stack: {', '.join(st.get('languages', [])) or '?'} · "
         f"{', '.join(st.get('frameworks', [])) or '?'} · datastores: {', '.join(st.get('datastores', [])) or '?'}",
-        f"- Attack surface: {rt.get('count', 0)} route(s) · auth: {facts.get('auth', {}).get('scheme', '?')} · "
+        f"- Attack surface: {_route_count_md(rt)} · auth: {_auth_scheme_md(facts.get('auth') or {}, rt)} · "
         f"tenant boundary candidate(s): {', '.join(tc) or 'none detected'}",
         f"- Access control: {gs.get('with_visible_guard', 0)} guarded · "
         f"**{gs.get('no_visible_guard', 0)} write endpoint(s) with NO visible guard**",
@@ -1835,6 +1899,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="print the proposed .websec-ignore without writing it")
     i.add_argument("--force", action="store_true",
                    help="replace an existing .websec-ignore (it may hold reviewed acknowledgements)")
+    i.add_argument("--ledger", metavar="findings-ledger.json",
+                   help="a prior run's ledger for this target (default: websec-out/latest/ under the "
+                        "target, then the cwd); secret findings in test dirs become fingerprint acks")
     i.add_argument("--claimspec", metavar="PATH",
                    help="export the reviewed `fingerprint:` acknowledgements already in "
                         ".websec-ignore as a claimspec v1 `ignore` document; `-` writes to stdout")

@@ -346,6 +346,7 @@ class UploadSecurityExtractor(Extractor):
                                              'events_per_file': assigned_flow.MAX_EVENTS,
                                              'events_total': assigned_flow.MAX_TOTAL_EVENTS,
                                              'scopes_per_file': assigned_flow.MAX_SCOPES,
+                                             'scopes_per_file_cap': assigned_flow.MAX_SCOPES_CAP,
                                              'bindings_per_scope': assigned_flow.MAX_BINDINGS},
                                   'note': 'Local assignments only; aliases, closures and runtime storage require review'},
             'python_analysis': {'handlers': python_handlers[:80], 'errors': python_errors,

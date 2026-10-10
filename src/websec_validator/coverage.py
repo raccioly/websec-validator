@@ -194,6 +194,26 @@ def thin_languages(cov: dict) -> set:
     return seen - with_sinks - FIRST_CLASS
 
 
+def add_source_flow(facts: dict) -> None:
+    """#194: name the files whose bounded source-flow analysis stopped at a budget.
+
+    A budget limit means that file was not fully analysed, so — exactly like an oversized file —
+    it stays an execution gap (the extractor gap already records that). What changes is that the
+    gap names the files and the reason instead of a bare "surface", so an operator can act on it.
+    """
+    surface = facts.get("surface") or {}
+    rows = []
+    for lane in ("sql_flow", "assigned_flow"):
+        for row in (surface.get(lane) or {}).get("errors") or []:
+            if isinstance(row, dict):
+                rows.append(f"{row.get('file', '?')} ({lane}: {row.get('kind', '?')}"
+                            + (f": {row['detail']}" if row.get("detail") else "") + ")")
+    if rows:
+        more = f" (+{len(rows) - 8} more)" if len(rows) > 8 else ""
+        add_gap(facts, "source_flow_limit",
+                f"{len(rows)} file(s) not fully analysed by source-flow: {'; '.join(rows[:8])}{more}")
+
+
 def add_routes(facts: dict) -> None:
     """Preserve route-parser scope uncertainty separately from execution loss."""
     for engine in ('django', 'connexion', 'trpc'):
@@ -290,6 +310,17 @@ def add_scanners(facts: dict, detected: dict, results: list, unified: dict | Non
                         f"{key}: {len(incomplete_rules)} rule(s) did not complete ({kinds}) — "
                         f"{shown}{more}. The scanner ran; these specific rules produced no result, "
                         f"so their finding classes are UNMEASURED, not clean.")
+            # #193/#196: a per-file parse limitation (Semgrep PartialParsing on valid bash, a
+            # Checkov framework that could not parse one in-scope file) is visible scope loss for
+            # that file, NOT a failed scanner — the run is complete and every other file was
+            # analysed. A real scanner failure is still an `error` outcome above.
+            limited = rule_details.get("file_limitations") or []
+            if chosen and outcome == "completed" and limited:
+                paths = [row.get("path", "?") for row in limited]
+                more = f" (+{len(paths) - 8} more)" if len(paths) > 8 else ""
+                add_gap(facts, "scanner_file_limits",
+                        f"{key}: {len(paths)} file(s) not fully analysed — {', '.join(paths[:8])}{more}",
+                        execution=False)
         cov["scanners"][key] = {"installed": key in installed, "runnable": runnable,
                                  "selected": chosen, "ran": result is not None, "outcome": outcome,
                                  "reported_version": (unified or {}).get("report_versions", {}).get(key),
@@ -298,6 +329,8 @@ def add_scanners(facts: dict, detected: dict, results: list, unified: dict | Non
         cov["scanners"][key]["report_details"] = details
         if details.get("rules_incomplete"):
             cov["scanners"][key]["rules_incomplete"] = details["rules_incomplete"]
+        if details.get("file_limitations"):
+            cov["scanners"][key]["file_limitations"] = details["file_limitations"]
         for policy in ("configuration_policy", "suppression_policy"):
             if result and policy in result:
                 cov["scanners"][key][policy] = result[policy]

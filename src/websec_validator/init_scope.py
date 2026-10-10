@@ -18,15 +18,40 @@ Two deliberate restraints:
   * **An existing `.websec-ignore` is never clobbered** without `--force`. It is a policy document —
     possibly with `fingerprint:` acknowledgements someone justified in a review — and regenerating
     it from heuristics would silently discard that reasoning.
+
+And one preference (#197): a directory glob also hides every FUTURE finding under it, including a
+real credential committed to a test later — which is why the generated header recommends
+`fingerprint:` acknowledgements. So every proposed glob says so on its own line, and when a prior
+run's ledger is available (read only — init never scans) and the only findings it holds under a
+directory are secrets, the proposal acknowledges exactly those findings by fingerprint, with a
+to-be-reviewed reason and an expiry, and leaves the glob commented out. A new secret in that
+directory still gates.
 """
 
 from __future__ import annotations
 
+import json
+import re
+from datetime import date, timedelta
 from pathlib import Path
 
 from .extractors.base import RepoContext, SKIP_DIRS, is_script_file, is_test_file
 
 IGNORE_NAME = ".websec-ignore"
+
+# Said on every ACTIVE proposed glob: the header's advice is easy to skim past, the line is not.
+GLOB_WARNING = ("also suppresses FUTURE findings here, including real secrets; "
+                "prefer fingerprint: acks")
+# Placeholder reason for a proposed acknowledgement. It must satisfy the parser (a non-empty reason;
+# claimspec export needs >= 8 chars) while reading unmistakably as not-yet-reviewed.
+ACK_REASON = "REVIEW: test/fixture credential, confirm it is fake or rotate it"
+ACK_DAYS = 90
+LEDGER_REL = Path("websec-out") / "latest" / "findings-ledger.json"
+_LEDGER_MAX_BYTES = 32 * 1024 * 1024
+# A fingerprint is written into the policy file verbatim, so a hostile or corrupt ledger must not be
+# able to smuggle a second line (a glob, a category) through it: hex/alnum only.
+_FP_SHAPE = re.compile(r"[A-Za-z0-9]{6,64}")
+_COMMENT_SAFE = re.compile(r"[^A-Za-z0-9_./:@+=-]")
 
 # Directory names that are, by near-universal convention, not the product. Each becomes a candidate
 # scope ONLY if it actually exists in this repo AND holds files — a proposal for a directory the
@@ -107,10 +132,87 @@ def _count_files(root: Path, rel_dir: str, limit: int = 5000) -> int:
         return 0
 
 
-def propose(target: Path, ctx: RepoContext | None = None) -> dict:
+def _is_secret(finding: dict) -> bool:
+    return finding.get("category") == "static-secret" or finding.get("attack_class") == "secret"
+
+
+def load_prior_ledger(target: Path, explicit: Path | None = None) -> dict | None:
+    """A previous run's findings ledger FOR THIS TARGET, or None. Read-only — init never scans.
+
+    Looks at `--ledger` when given, else `<target>/websec-out/latest/`, then `<cwd>/websec-out/latest/`
+    (where `websec run` writes by default). A ledger whose recorded target is a different repository
+    is ignored: its fingerprints would acknowledge nothing here, or the wrong thing."""
+    root = Path(target).resolve()
+    candidates = [Path(explicit).expanduser()] if explicit else [root / LEDGER_REL, Path.cwd() / LEDGER_REL]
+    for path in candidates:
+        try:
+            if not path.is_file() or path.stat().st_size > _LEDGER_MAX_BYTES:
+                continue
+            ledger = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(ledger, dict) or not isinstance(ledger.get("findings"), list):
+            continue
+        recorded = ledger.get("target") or (ledger.get("verification_context") or {}).get("application_id")
+        try:
+            same = bool(recorded) and Path(str(recorded)).expanduser().resolve() == root
+        except (OSError, ValueError):
+            same = False
+        if not same:
+            continue
+        # Already-acknowledged findings count too: re-running `init --force` after a reviewed run must
+        # propose their acknowledgements again, not fall back to the glob.
+        rows = ledger["findings"] + (ledger.get("acknowledged") if isinstance(ledger.get("acknowledged"), list) else [])
+        return {"path": str(path), "findings": [f for f in rows if isinstance(f, dict)]}
+    return None
+
+
+def _repo_rel(root: Path, finding: dict) -> str:
+    """The finding's file relative to the repo root ("" when it has none or lies outside the repo).
+    Working-tree scanners record ABSOLUTE paths; matching those against `tests/` would also match a
+    `tests` directory ABOVE the repository and claim src/ findings were under it."""
+    from . import findings as _findings
+    raw = _findings._finding_path(finding)
+    if not raw:
+        return ""
+    candidate = Path(raw)
+    if candidate.is_absolute():
+        try:
+            return candidate.resolve().relative_to(root).as_posix()
+        except (OSError, ValueError):
+            return ""
+    return raw
+
+
+def _ack_for(root: Path, rel: str, finding: dict, expires: str) -> dict | None:
+    """A proposed acknowledgement for one ledger finding, or None when it cannot be written safely:
+    a malformed fingerprint, or a file that is not in this working tree (the claim that the finding
+    sits under a test directory is then unverifiable)."""
+    fp = str(finding.get("fingerprint") or "")
+    if not _FP_SHAPE.fullmatch(fp):
+        return None
+    try:
+        path = (root / rel).resolve()
+        if not rel or not path.is_file() or root not in path.parents:
+            return None
+    except (OSError, ValueError):
+        return None
+    where = _COMMENT_SAFE.sub("_", rel)[:120]
+    if isinstance(finding.get("line"), int) and finding["line"] > 0:
+        where += f":{finding['line']}"
+    return {"fingerprint": fp, "expires": expires, "reason": f"{ACK_REASON} ({where})", "file": rel}
+
+
+def propose(target: Path, ctx: RepoContext | None = None, *, ledger: dict | None = None,
+            today: date | None = None) -> dict:
     """Scoping proposals for this repo. Pure analysis — writes nothing.
 
-    Returns {"entries": [{path, reason, files}], "already_exists": bool, "analyzed_files": int}."""
+    With a prior run's `ledger` (see `load_prior_ledger`), a directory whose only findings are
+    secrets is proposed as fingerprint acknowledgements (`mode: "acknowledge"`, `acks`) instead of
+    an active glob; every other directory stays `mode: "glob"`.
+
+    Returns {"entries": [{path, reason, files, mode, acks?, findings?}], "already_exists": bool,
+    "analyzed_files": int, "ledger": path|None, ...}."""
     root = Path(target)
     ctx = ctx or RepoContext(root)
     rels = [ctx.rel(p) for p in (ctx.all_code_files or ctx.code_files)]
@@ -143,13 +245,35 @@ def propose(target: Path, ctx: RepoContext | None = None) -> dict:
         pass
 
     entries = sorted(seen.values(), key=lambda e: (-e["files"], e["path"]))
+    expires = ((today or date.today()) + timedelta(days=ACK_DAYS)).isoformat()
+    resolved = root.resolve()
+    located = [(_repo_rel(resolved, f), f) for f in (ledger or {}).get("findings", [])]
+    for e in entries:
+        e["mode"] = "glob"
+        if ledger is None:
+            continue
+        from . import findings as _findings
+        # The path matcher the glob would be applied with — so "under this directory" means what the
+        # policy line would mean, not a prefix guess — over repo-relative paths.
+        under = [(rel, f) for rel, f in located if rel and _findings._path_match(e["path"], rel)]
+        e["findings"] = len(under)
+        if not under or not all(_is_secret(f) for _rel, f in under):
+            continue        # nothing to acknowledge, or non-secret findings the glob is FOR
+        acks = [a for a in (_ack_for(resolved, rel, f, expires) for rel, f in under) if a]
+        if len(acks) != len(under):
+            continue        # cannot acknowledge every one of them safely — keep the (warned) glob
+        seen_fp: set = set()
+        e["acks"] = [a for a in acks if not (a["fingerprint"] in seen_fp or seen_fp.add(a["fingerprint"]))]
+        e["mode"] = "acknowledge"
     # How much of the analyzed surface this would take out — the number that tells the operator
-    # whether this scoping is reasonable or far too aggressive.
-    covered = sum(1 for r in rels if any(r.startswith(e["path"]) for e in entries))
+    # whether this scoping is reasonable or far too aggressive. Acknowledged directories hide nothing.
+    globs = [e for e in entries if e["mode"] == "glob"]
+    covered = sum(1 for r in rels if any(r.startswith(e["path"]) for e in globs))
     heuristic = sum(1 for r in rels if is_test_file(r) or is_script_file(r))
     return {"entries": entries, "already_exists": (root / IGNORE_NAME).is_file(),
             "analyzed_files": len(rels), "covered_files": covered,
-            "heuristic_nonproduct_files": heuristic}
+            "heuristic_nonproduct_files": heuristic,
+            "ledger": (ledger or {}).get("path")}
 
 
 def render(proposal: dict) -> str:
@@ -157,7 +281,14 @@ def render(proposal: dict) -> str:
     if proposal["entries"]:
         lines.append("\n# --- detected in this repository ---------------------------------------------------------\n")
         for e in proposal["entries"]:
-            lines.append(f"{e['path']:<52}# {e['reason']} ({e['files']} file(s))\n")
+            if e.get("mode") == "acknowledge":
+                lines.append(f"# {e['path']:<50}# NOT applied: {e['reason']} ({e['files']} file(s)). The last "
+                             f"run found only {len(e['acks'])} secret finding(s) here, acknowledged below by "
+                             f"fingerprint. Uncommenting this {GLOB_WARNING}\n")
+                for a in e["acks"]:
+                    lines.append(f"fingerprint:{a['fingerprint']} expires:{a['expires']}  # {a['reason']}\n")
+            else:
+                lines.append(f"{e['path']:<52}# {e['reason']} ({e['files']} file(s)) — {GLOB_WARNING}\n")
     else:
         lines.append("\n# No test/fixture/seed/vendor directories were detected in this repository, so nothing\n"
                      "# is scoped out by default. Add paths here if a first run reports findings in code that\n"
@@ -174,4 +305,5 @@ def write(target: Path, proposal: dict, *, force: bool = False) -> dict:
     if path.is_file() and not force:
         return {"written": False, "path": str(path), "reason": "already exists (use --force to replace)"}
     write_text(Path(target), IGNORE_NAME, render(proposal))
-    return {"written": True, "path": str(path), "entries": len(proposal["entries"])}
+    return {"written": True, "path": str(path), "entries": len(proposal["entries"]),
+            "acknowledgements": sum(len(e.get("acks", [])) for e in proposal["entries"])}

@@ -3,6 +3,7 @@
 @req specs/001-continuous-security-improvement/spec.md#FR-002
 """
 from pathlib import Path
+from unittest.mock import patch
 import sys
 import tempfile
 import unittest
@@ -157,10 +158,23 @@ class RetainedPrecisionTests(unittest.TestCase):
                 self.assertEqual('raw-entity-pii-response' in self.kinds(PiiExposureExtractor, source), unsafe)
 
     def test_filename_assignment_expression_budget_is_an_execution_gap(self):
+        # #194: a long right-hand side no longer exhausts the lane on its own — it draws on a
+        # bounded per-file allowance. With that allowance exhausted the original contract holds:
+        # the budget overrun is still an execution gap, never a silent pass.
+        from websec_validator.extractors import assigned_flow
         source = 'const chosen=' + ' '*9000 + 'req.file.originalname;store({Key:chosen});'
-        result = self.scan(UploadSecurityExtractor, source)
+        with patch.object(assigned_flow, 'MAX_EXTENDED_PER_FILE', 0):
+            result = self.scan(UploadSecurityExtractor, source)
         self.assertTrue(result.get('error'))
         self.assertTrue(result['filename_analysis']['errors'])
+
+    def test_long_filename_assignment_is_now_analysed_not_abandoned(self):
+        # The same 9 KB right-hand side within the allowance: the upload-key flow the old budget
+        # silently abandoned is found.
+        source = 'const chosen=' + ' '*9000 + 'req.file.originalname;store({Key:chosen});'
+        result = self.scan(UploadSecurityExtractor, source)
+        self.assertFalse(result.get('error'))
+        self.assertTrue(result['filename_analysis']['occurrences'])
 
     def test_static_fstring_and_dynamic_interpolation_are_distinct(self):
         for argument, count in (('f"self"', 0), ('rf"self"', 0), ('f"request.args"', 0),

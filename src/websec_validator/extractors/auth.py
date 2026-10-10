@@ -14,6 +14,28 @@ from .syntax import direct_call, guarded_body, in_literal, js_functions, split_a
 
 JWT_LIBS = re.compile(r"jsonwebtoken|\bjose\b|\bPyJWT\b|import\s+jwt\b|get_jwt_identity|"
                       r"jwt\.(?:sign|verify|encode|decode)|jwtVerify|flask_jwt|@?jwt_required|token_required", re.I)
+# JWT_LIBS above is the legacy, permissive signal (it still feeds `signal_counts.jwt`, which stages the
+# JWT probes and escalates forgeable-secret findings — narrowing it would drop real JWT leads). It also
+# matches things that are NOT evidence an app uses JWTs: a comment that says "no jsonwebtoken here", an
+# error code 'token_required' / TOKEN_REQUIRED, a person called "Jose" in seed data. On a hand-rolled
+# router with HMAC signatures, cookie sessions and a Bearer API key that made the PRIMARY scheme read
+# "jwt (bearer)" (#195). So a file's JWT_LIBS match is only promoted to JWT evidence when its
+# comment-stripped source also shows a JWT library imported or called (JWT_CORE) or a JOSE `alg` / JWKS
+# endpoint (JWT_CORROBORATION). Corroboration never creates a JWT reading on its own — an App Store
+# Connect script signing an outbound ES256 token is not the app's auth scheme — it can only confirm a
+# mention. A bare `Authorization: Bearer` header is never JWT evidence.
+JWT_CORE = re.compile(
+    r"jsonwebtoken|\bPyJWT\b|\bimport\s+jwt\b|get_jwt_identity|flask_jwt|@?jwt_required"
+    r"|jwt\.(?:sign|verify|encode|decode)|jwtVerify"
+    # `jose` only as a module: an import/require source, a Python import, a namespace call, or the
+    # Go/Java JOSE packages — never the bare word (a person's name in seed data matched it).
+    r"""|(?:\bfrom|\bimport|\brequire\s*\(|\bimport\s*\()\s*['"]jose['"]|\b(?:from|import)\s+jose\b"""
+    r"""|(?-i:\bjose)\.\w+\s*\(|go-jose|jose4j|nimbus-jose""", re.I)
+JWT_CORROBORATION = re.compile(
+    r"""SignJWT|createRemoteJWKSet|jwks_?uri|jwksUri|\.well-known/jwks"""
+    r"""|['"](?:express-jwt|@fastify/jwt|fastify-jwt|hono/jwt|jwt-decode|jwks-rsa|passport-jwt)['"]"""
+    r"""|\balg\s*['"]?\s*[:=]\s*['"](?:HS|RS|ES|PS)(?:256|384|512)['"]"""
+    r"""|\balgorithms\s*[:=]\s*\[\s*['"](?:HS|RS|ES|PS)(?:256|384|512)['"]""", re.I)
 PASSPORT = re.compile(r"\bpassport\b|passport-jwt|passport-local")
 SESSION = re.compile(r"express-session|cookie-session|iron-session|flask\.session|request\.session|getServerSession|getToken", re.I)
 APIKEY = re.compile(r"x-api-key|api[_-]?key|apikey", re.I)
@@ -210,6 +232,36 @@ def _length_only_logins(text: str, suffix: str) -> list[tuple[int, str]]:
     return hits
 
 
+JWT_WEAK_LABEL = "jwt? (weak evidence: name-only mention, no JWT library/call)"
+
+
+def _scheme_confidence(primary: str, *, jwt_strong: int, jwt: int, reliable: bool) -> tuple[str, str]:
+    """(confidence, basis) for the PRIMARY scheme. `high` needs evidence that names the mechanism
+    (NextAuth, a JWT library/call/alg/JWKS); grep-level signals are `medium`; a name-only JWT mention, an
+    `api-key` read off variable names (an outbound client's OPENAI_API_KEY matches too) and `unknown` are
+    `low`. With no mapped route the whole inference is `low` — the repo may not serve HTTP at all."""
+    if primary.startswith("nextauth"):
+        level, basis = "high", "NextAuth framework/route"
+    elif primary == "jwt (bearer)":
+        level, basis = "high", f"JWT library import/call in {jwt_strong} file(s)"
+    elif primary.startswith("jwt?"):
+        level, basis = "low", (f"{jwt} name-only JWT mention(s) (comment/identifier/error code); "
+                               "no JWT library, call, alg or JWKS")
+    elif primary == "hmac-signed-cookie":
+        level, basis = "medium", "HMAC sign/verify + cookie use (grep-level)"
+    elif primary == "session-cookie":
+        level, basis = "medium", "session library/API reference (grep-level)"
+    elif primary.startswith("passport"):
+        level, basis = "medium", "passport reference (grep-level)"
+    elif primary == "api-key":
+        level, basis = "low", "api-key header/variable name only"
+    else:
+        level, basis = "low", "no auth mechanism recognised"
+    if not reliable and level != "low":
+        level, basis = "low", basis + "; no HTTP route mapped"
+    return level, basis
+
+
 class AuthExtractor(Extractor):
     name = "auth"
     category = "authn"
@@ -221,6 +273,7 @@ class AuthExtractor(Extractor):
 
         # scheme: framework/route signals first, then grep
         jwt = passport = session = apikey = hmac = 0
+        jwt_strong = 0                      # files whose JWT mention is backed by JWT_CORE/JWT_CORROBORATION (<= jwt)
         guard_files = []
         cookie_names: list[str] = []
         secret_defaults: list = []          # (file, literal, matched-expression) fallback signing secrets
@@ -272,6 +325,10 @@ class AuthExtractor(Extractor):
                         "Fail CLOSED: if the secret is required and absent, reject (500/401), never bypass the check."})
             if JWT_LIBS.search(text):
                 jwt += 1
+                # Promotion to JWT evidence is judged on comment-stripped source (see JWT_CORE).
+                code = without_comments(text, _p.suffix)
+                if JWT_CORE.search(code) or JWT_CORROBORATION.search(code):
+                    jwt_strong += 1
             if PASSPORT.search(text):
                 passport += 1
             if SESSION.search(text):
@@ -341,7 +398,7 @@ class AuthExtractor(Extractor):
         detected = []
         if nextauth:
             detected.append("nextauth (session JWT in cookie)")
-        if jwt:
+        if jwt_strong:
             detected.append("jwt (bearer)")
         if hmac_cookie:
             detected.append("hmac-signed-cookie")
@@ -351,7 +408,13 @@ class AuthExtractor(Extractor):
             detected.append("passport (often SSO/OAuth strategies)")
         if apikey:
             detected.append("api-key")
+        if jwt and not jwt_strong:
+            # Kept (never silently dropped), but ranked LAST: a name-only mention must not outrank real
+            # evidence of another scheme, and on its own it is a guess, not a finding (#195).
+            detected.append(JWT_WEAK_LABEL)
         primary = detected[0] if detected else "unknown"
+        scheme_confidence, scheme_basis = _scheme_confidence(
+            primary, jwt_strong=jwt_strong, jwt=jwt, reliable=route_count > 0 or bool(nextauth))
         token_location = ("cookie" if primary.startswith(("nextauth", "session", "hmac"))
                           else "bearer" if primary.startswith("jwt")
                           else "header" if primary.startswith("api-key")
@@ -359,12 +422,17 @@ class AuthExtractor(Extractor):
 
         return {
             "scheme": primary,
+            # How much the PRIMARY scheme can be trusted, and why (#195): consumers that state the scheme
+            # to a reader (emit-context, briefing) must not present a `low` one as fact.
+            "scheme_confidence": scheme_confidence,
+            "scheme_basis": scheme_basis,
             "schemes_detected": detected,
             "token_location": token_location,
             "login_endpoints": auth_eps,
             "cookie_names": cookie_names[:15],
             "guard_files": guard_files,
-            "signal_counts": {"jwt": jwt, "passport": passport, "session": session, "api_key": apikey, "hmac": hmac},
+            "signal_counts": {"jwt": jwt, "passport": passport, "session": session, "api_key": apikey, "hmac": hmac,
+                              "jwt_strong": jwt_strong},
             "insecure_secret_defaults": insecure_secret_defaults,   # CRITICAL-class (forgeable JWT #8)
             "broken_auth": broken_auth[:30],                        # total auth-bypass backdoors (CRITICAL/HIGH)
             "jwt_sign_verify_present": jwt_sign_verify,

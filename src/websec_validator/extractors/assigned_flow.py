@@ -9,14 +9,24 @@ from dataclasses import replace
 import re
 
 from . import sql_flow
-from .syntax import MAX_EXPRESSION, call_expression, expression_end, js_functions, split_arguments, without_comments
+from .syntax import MAX_EXPRESSION, call_expression, js_functions, split_arguments, without_comments
 
 MAX_SOURCE_BYTES = 512 * 1024
 MAX_EVENTS = 2048
-MAX_SCOPES = 128
+MAX_SCOPES = 128            # per-file floor; the limit scales with file size up to MAX_SCOPES_CAP
+SCOPE_BYTES = 64            # one scope per 64 source bytes is denser than ordinary callback-heavy code
+MAX_SCOPES_CAP = 8192
 MAX_BINDINGS = 512
 MAX_TOTAL_SOURCE_BYTES = 8 * 1024 * 1024
 MAX_TOTAL_EVENTS = 20_000
+# The walk used to stop at the first right-hand side longer than MAX_EXPRESSION (an
+# `async (event) => {...}` handler or a large object literal). Everything up to that point is
+# unchanged; the overflowing expression and all work after it are charged to this allowance:
+# EXTENDED_FACTOR characters per source character, hard-capped per file and per run. A file that
+# exhausts it stops at the same visible LimitReached as before, never earlier.
+EXTENDED_FACTOR = 8
+MAX_EXTENDED_PER_FILE = 1024 * 1024
+MAX_TOTAL_EXTENDED = 8 * 1024 * 1024
 INERT_ARGV_EXECUTABLES = {'echo', '/bin/echo', '/usr/bin/echo'}
 REQUEST = re.compile(r'\b(?:req|request|ctx)\.(?:query|params|body|args|form|headers|json|get_json|GET|POST)\b')
 LITERAL = re.compile(r'''"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`''')
@@ -116,6 +126,141 @@ def _masked(source):
     return LITERAL.sub(mask, source)
 
 
+def scope_limit(size):
+    """Per-file scope budget: a floor for small files, proportional to size, hard-capped."""
+    return min(max(MAX_SCOPES, size // SCOPE_BYTES), MAX_SCOPES_CAP)
+
+
+# Same string/comment boundaries as syntax.without_comments (backslash escapes any character,
+# including a newline); a regex literal is recognised only where JS grammar requires an operand.
+_LEXEME = re.compile(r'''["'`]|<!--|//|/\*|/''')
+_STRING = {quote: re.compile(quote + r'(?:\\.|[^' + quote + r'\\])*' + quote, re.S) for quote in '"\'`'}
+_REGEX_LITERAL = re.compile(r'/(?![*/])((?:\\[^\n]|\[(?:\\[^\n]|[^\]\\\n]){0,256}\]|[^/\\\[\n]){1,1024})/')
+_REGEX_PRECEDERS = frozenset('(,=:[!&|?{};+-~^')
+_REGEX_KEYWORDS = frozenset({'return', 'typeof', 'case', 'do', 'else', 'in', 'of', 'new', 'delete',
+                             'void', 'throw', 'yield', 'await', 'instanceof'})
+_TRAILING_WORD = re.compile(r'[\w$]+$')
+
+
+def _regex_operand(source, slash):
+    """True only where a `/` cannot be division: after an operator/opener or an operand keyword.
+
+    `)`, `]`, `}`, identifiers, numbers, `<`/`>` (JSX tags) and postfix `++`/`--` stay division, so
+    an ambiguous slash keeps the previous lexical treatment.
+    """
+    before = source[max(0, slash - 256):slash].rstrip()
+    if not before:
+        return slash < 256
+    last = before[-1]
+    if last in '+-' and before.endswith(('++', '--')):
+        return False
+    if last in _REGEX_PRECEDERS:
+        return True
+    word = _TRAILING_WORD.search(before)
+    # `obj.in / 2` is a property access followed by division, not a keyword.
+    return bool(word) and word[0] in _REGEX_KEYWORDS and before[word.start() - 1:word.start()] != '.'
+
+
+def _without_regex_bodies(source):
+    """Blank JS regex literal bodies, preserving offsets.
+
+    A quote or bracket inside `/'/g` or `/["']/` otherwise opens a phantom string that swallows
+    the rest of the file: every later assignment and sink is mis-scanned and the lane stops at the
+    expression bound. A literal regex body carries no data flow, so blanking it removes nothing.
+    """
+    if '/' not in source:
+        return source
+    chars, i = None, 0
+    while True:
+        match = _LEXEME.search(source, i)
+        if match is None:
+            break
+        i, token = match.start(), match[0]
+        if token in _STRING:
+            literal = _STRING[token].match(source, i)
+            if literal is None:
+                break  # unterminated: without_comments treats the remainder as the literal too
+            i = literal.end()
+        elif token in ('//', '/*', '<!--'):
+            closing = {'//': '\n', '/*': '*/', '<!--': '-->'}[token]
+            end = source.find(closing, i + len(token))
+            if end < 0:
+                break
+            i = end if token == '//' else end + len(closing)
+        else:
+            literal = _REGEX_LITERAL.match(source, i) if _regex_operand(source, i) else None
+            if literal is None:
+                i += 1
+                continue
+            chars = chars or list(source)
+            chars[literal.start(1):literal.end(1)] = ' ' * (literal.end(1) - literal.start(1))
+            i = literal.end()
+    return source if chars is None else ''.join(chars)
+
+
+def _scope_owner(scopes):
+    """owner(position) -> body_start of the innermost scope body containing it, else 0.
+
+    Positions must be queried in ascending order. js_functions derives every body from one
+    balanced bracket matching, so bodies nest or are disjoint and the innermost containing body
+    (the shortest, as before) is the top of a stack swept in position order: amortised O(1) per
+    query instead of O(scopes), which lets the scope budget scale with file size.
+    """
+    ordered = sorted(scopes, key=lambda row: row['body_start'])
+    active, cursor = [], 0
+    def owner(position):
+        nonlocal cursor
+        while cursor < len(ordered) and ordered[cursor]['body_start'] <= position:
+            while active and active[-1]['end'] <= ordered[cursor]['body_start']:
+                active.pop()
+            active.append(ordered[cursor])
+            cursor += 1
+        while active and active[-1]['end'] <= position:
+            active.pop()
+        return active[-1]['body_start'] if active else 0
+    return owner
+
+
+_NONSPACE = re.compile(r'\S')
+_CLOSERS = {'(': ')', '[': ']', '{': '}'}
+
+
+def _expression_end(text, start, bound):
+    """syntax.expression_end with an explicit bound; returns (end, closed).
+
+    Identical result for every end below MAX_EXPRESSION. The continuation lookahead jumps to the
+    next non-space character instead of copying the remaining text at every newline (which made
+    method chains cost O(lines x file size)). `closed` is False when the scan ran out of bound, or
+    reached end of input inside a literal or an open bracket.
+    """
+    stack, quote, i = [], None, start
+    stop = min(len(text), bound)
+    while i < stop:
+        char = text[i]
+        if quote:
+            if char == '\\':
+                i += 2
+                continue
+            if char == quote:
+                quote = None
+        elif char in '"\'`':
+            quote = char
+        elif char in '([{':
+            stack.append(_CLOSERS[char])
+        elif char in ')]}':
+            if not stack or stack.pop() != char:
+                return i, True
+        elif not stack and char in ';\n':
+            if char == '\n':
+                following = _NONSPACE.search(text, i + 1)
+                if following is not None and text[following.start()] in '+?.[(':
+                    i = min(following.start(), stop)
+                    continue
+            return i, True
+        i += 1
+    return i, i >= len(text) and quote is None and not stack
+
+
 def _value(expression, environment, line, source_pattern=REQUEST):
     # Ordinary literal examples are opaque; supported template interpolation is code.
     interpolations = []
@@ -150,35 +295,48 @@ def javascript(source, budget, *, source_pattern=REQUEST, sink_pattern=JS_CALL,
         result['errors'].append({'kind': 'LimitReached', 'detail': 'JS assignment source budget exceeded'})
         return result
     budget['bytes'] += size
-    code = without_comments(source)
+    code = without_comments(_without_regex_bodies(source))
     masked = _masked(code)
     scopes = js_functions(code)
-    if len(scopes) > MAX_SCOPES:
+    if len(scopes) > scope_limit(size):
         result['errors'].append({'kind': 'LimitReached', 'detail': 'JS assignment scope budget exceeded'})
         return result
     depth, depths = 0, []
     for char in masked:
         depths.append(depth)
         depth += int(char == '{') - int(char == '}')
-    def owner(position):
-        matches = [scope for scope in scopes if scope['body_start'] <= position < scope['end']]
-        return min(matches, key=lambda row: row['end'] - row['start'])['body_start'] if matches else 0
-    events = [(match.start(), 'assign', match) for match in ASSIGNMENT.finditer(masked)]
+    owner = _scope_owner(scopes)
+    events =[(match.start(), 'assign', match) for match in ASSIGNMENT.finditer(masked)]
     events += [(match.start(), 'sink', match) for match in sink_pattern.finditer(masked)]
     if len(events) > MAX_EVENTS or budget['events'] + len(events) > MAX_TOTAL_EVENTS:
         result['errors'].append({'kind': 'LimitReached', 'detail': 'JS assignment event budget exceeded'})
         return result
     budget['events'] += len(events)
+    budget.setdefault('extended', 0)
+    allowance = max(0, min(EXTENDED_FACTOR * len(code), MAX_EXTENDED_PER_FILE,
+                           MAX_TOTAL_EXTENDED - budget['extended']))
+    extended = None  # None until the first long right-hand side; then the remaining allowance
     environments = {}
+    line, counted = 1, 0
     for position, kind, match in sorted(events, key=lambda row: row[0]):
         env = environments.setdefault(owner(position), {})
-        line = source.count('\n', 0, position) + 1
+        line += source.count('\n', counted, position)  # incremental: events ascend
+        counted = position
         if kind == 'assign':
-            end = expression_end(code, match.end())
-            if end - match.end() >= MAX_EXPRESSION:
-                result['errors'].append({'kind': 'LimitReached', 'detail': 'JS assignment expression budget exceeded'})
-                break
-            value = _value(code[match.end():end], env, line, source_pattern)
+            start = match.end()
+            bound = start + (MAX_EXPRESSION + allowance if extended is None else extended)
+            end, closed = _expression_end(code, start, bound)
+            if extended is None and end - start >= MAX_EXPRESSION:
+                extended = allowance
+            if extended is not None:
+                # Analysed in full only if it ends structurally within the remaining allowance;
+                # otherwise the file's walk stops here, visibly, as it always did.
+                if not closed or end - start > extended:
+                    result['errors'].append({'kind': 'LimitReached', 'detail': 'JS assignment expression budget exceeded'})
+                    break
+                extended -= end - start
+                budget['extended'] += end - start
+            value = _value(code[start:end], env, line, source_pattern)
             prior = env.get(match[1])
             prefix = masked[max(0, position - 128):position].rstrip()
             conditional = not prefix or prefix[-1] not in ';{}'
@@ -192,6 +350,12 @@ def javascript(source, budget, *, source_pattern=REQUEST, sink_pattern=JS_CALL,
             env[match[1]] = (*value, depths[position])
             continue
         expression = call_expression(code, position)
+        if extended is not None:
+            if len(expression) > extended:
+                result['errors'].append({'kind': 'LimitReached', 'detail': 'JS assignment expression budget exceeded'})
+                break
+            extended -= len(expression)
+            budget['extended'] += len(expression)
         if not expression.endswith(')'):
             result['errors'].append({'kind': 'LimitReached', 'detail': 'JS call expression incomplete or budget exceeded'})
             continue
@@ -219,7 +383,7 @@ def http_methods(source, budget):
     code, rows = without_comments(source), []
     masked = _masked(code)
     scopes = js_functions(code)
-    if len(scopes) > MAX_SCOPES:
+    if len(scopes) > scope_limit(size):
         raise sql_flow.LimitReached('bound HTTP-method scope budget exceeded')
     imports = re.compile(r'''\bimport\s+([\w$]+)\s+from\s+(['"])needle\2\s*;?|\bconst\s+([\w$]+)\s*=\s*require\(\s*(['"])needle\4\s*\)\s*;?''')
     bindings = list(imports.finditer(code))
