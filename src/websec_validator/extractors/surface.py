@@ -346,11 +346,19 @@ class SurfaceExtractor(Extractor):
         controls = []
         sql_budget = sql_flow.Budget()
         command_budget = sql_flow.Budget()
-        assigned_budget = {'bytes': 0, 'events': 0}
+        assigned_budget = {'bytes': 0, 'events': 0, 'extended': 0}
         assigned_analysis = {'candidate_files': 0, 'errors': [], 'limitations': assigned_flow.LIMITATIONS,
                              'limits': {'source_bytes_per_file': assigned_flow.MAX_SOURCE_BYTES,
                                         'events_per_file': assigned_flow.MAX_EVENTS,
+                                        # Floor: the per-file scope limit is
+                                        # min(max(floor, source_bytes // scope_bytes), cap).
                                         'scopes_per_file': assigned_flow.MAX_SCOPES,
+                                        'scope_bytes': assigned_flow.SCOPE_BYTES,
+                                        'scopes_per_file_cap': assigned_flow.MAX_SCOPES_CAP,
+                                        'expression_chars': assigned_flow.MAX_EXPRESSION,
+                                        'extended_chars_per_source_char': assigned_flow.EXTENDED_FACTOR,
+                                        'extended_chars_per_file': assigned_flow.MAX_EXTENDED_PER_FILE,
+                                        'total_extended_chars': assigned_flow.MAX_TOTAL_EXTENDED,
                                         'bindings_per_scope': assigned_flow.MAX_BINDINGS,
                                         'total_source_bytes': assigned_flow.MAX_TOTAL_SOURCE_BYTES,
                                         'total_events': assigned_flow.MAX_TOTAL_EVENTS}}

@@ -95,10 +95,11 @@ def _matches_excludes(path: str, excludes, root=None) -> bool:
     """True if `path` matches a user --exclude path/glob, measured RELATIVE to the scan root.
 
     Same match semantics as RepoContext._excluded (substring OR fnmatch) so recon and the
-    scanner post-filter agree on what an exclude means. Gitleaks and checkov have no usable
-    path-exclude argv flag, so this post-filter — not the best-effort per-scanner flags —
-    is what makes the `--exclude` help-text contract ("recon + scanners") hold for every
-    scanner. Fail OPEN (keep the finding) when an absolute path can't be made root-relative."""
+    scanner post-filter agree on what an exclude means. Gitleaks has no usable path-exclude
+    argv flag (Checkov's regex `--skip-path` is fed by `_checkov_skip_paths`), so this
+    post-filter — not the best-effort per-scanner flags — is what makes the `--exclude`
+    help-text contract ("recon + scanners") hold for every scanner. Fail OPEN (keep the
+    finding) when an absolute path can't be made root-relative."""
     if not excludes:
         return False
     p = _rel_to(path, root)
@@ -236,9 +237,76 @@ def _semgrep(target: Path, out: Path, excludes=()) -> list:
     return cmd + [str(target)]
 
 
+def _checkov_skip_paths(target: Path, excludes=()) -> list:
+    """Checkov `--skip-path` values equivalent to websec's own scope predicates.
+
+    #193: Checkov got no path exclusion at all, so it walked excluded and SKIP_DIR trees and their
+    parsing errors failed the run. A raw exclude cannot be passed through: Checkov (3.3.19,
+    common/runners/base_runner.py::filter_ignored_paths) `re.search`es each pattern against the
+    ABSOLUTE walk path and also tests it as a raw substring, so `out` would match a target that
+    merely lives under `/home/x/layout/` and silently skip the WHOLE repo. Every pattern is therefore
+    anchored to the target root (as given, absolute and symlink-resolved, since runners differ in
+    which spelling they walk) and reproduces `_matches_excludes` / `path_in_skip_dir` exactly, via
+    `fnmatch.translate` rather than a hand-rolled glob converter. A pattern Checkov's Python cannot
+    compile is dropped by Checkov itself, which degrades to "not skipped" — never to over-skipping.
+    The leading `^` also keeps Checkov from re.escape()-ing patterns that start with a dot."""
+    anchors = sorted({str(p).rstrip("/") for p in (target, os.path.abspath(target), os.path.realpath(target))})
+    root = "^(?:" + "|".join(re.escape(a) for a in anchors) + ")/"
+    names = "|".join(re.escape(d) for d in EXCLUDE_DIRS)
+    patterns = [f"{root}(?:.*/)?(?:{names})(?:/|$)"]
+    for ex in excludes or ():
+        if ex:
+            # `ex in rel` OR `fnmatch(rel, ex)` — the same predicate recon and the finding filter use.
+            patterns.append(f"{root}(?:(?s:.*){re.escape(ex)}|{fnmatch.translate(ex)})")
+    return patterns
+
+
+_PLAN_SNIFF_BYTES = 64 * 1024
+_PLAN_SNIFF_MAX_FILES = 5000
+
+
+def _has_terraform_plan_json(target: Path, excludes=()) -> bool:
+    """Does any in-scope JSON file look like a `terraform show -json` plan?
+
+    Checkov's `terraform_plan` framework parses EVERY `*.json` (only a literal `tsconfig.json` is
+    exempt), so an ordinary JSON file it cannot parse — `tsconfig.app.json` with comments, an API
+    dump, NDJSON — became a parse error that made every gated run incomplete. Skipping the framework
+    is only safe when there is nothing for it to find, so this sniffs content, not names: a plan is
+    a JSON object carrying `"terraform_version"` and `"planned_values"`/`"resource_changes"`.
+    Conservative by construction — anything it cannot decide (the file cap is reached, a file is
+    unreadable) answers True and keeps the framework, so plan coverage is never lost."""
+    examined = 0
+    root = Path(target)
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIRS]
+        for name in filenames:
+            if not name.endswith(".json"):
+                continue
+            path = Path(dirpath) / name
+            rel = path.relative_to(root).as_posix()
+            if excludes and _matches_excludes(rel, excludes, root):
+                continue
+            examined += 1
+            if examined > _PLAN_SNIFF_MAX_FILES:
+                return True
+            try:
+                with open(path, "rb") as stream:
+                    head = stream.read(_PLAN_SNIFF_BYTES)
+            except OSError:
+                return True
+            if b'"terraform_version"' in head and (b'"planned_values"' in head or b'"resource_changes"' in head):
+                return True
+    return False
+
+
 def _checkov(target: Path, out: Path, excludes=()) -> list:
-    return ["checkov", "-d", str(target), "--compact", "-o", "json",
-            "--output-file-path", str(out.parent)]
+    cmd = ["checkov", "-d", str(target), "--compact", "-o", "json",
+           "--output-file-path", str(out.parent)]
+    for pattern in _checkov_skip_paths(target, excludes):
+        cmd += ["--skip-path", pattern]
+    if not _has_terraform_plan_json(target, excludes):
+        cmd += ["--skip-framework", "terraform_plan"]
+    return cmd
 
 
 def _osv(target: Path, out: Path, excludes=()) -> list:
@@ -1078,8 +1146,80 @@ def _semgrep_rule_errors(doc: dict) -> list:
     return rows
 
 
-def _report_details(key: str, doc) -> dict:
-    """Native diagnostics are execution evidence even with a successful exit."""
+# Semgrep's per-TARGET parse diagnostics (semgrep_output_v1 `error_type`). Semgrep exits 0 for these
+# unless `--strict` (which websec never passes): the file is skipped or partially analysed and every
+# other file is scanned normally. Deliberately narrow — "AST builder error", "Internal matching
+# error" and anything unrecognised stay scanner-level errors.
+_SEMGREP_FILE_PARSE = {"PartialParsing": "partial_parse", "Syntax error": "parse_failed",
+                       "Lexical error": "parse_failed", "Other syntax error": "parse_failed"}
+
+
+def _out_of_scope(path: str, target=None, excludes=None) -> bool:
+    """Is a scanner-reported INPUT path outside this run's scope (SKIP_DIRS or --exclude)?
+
+    Same predicates as the finding post-filters in normalize_findings, so a file whose findings
+    would be dropped cannot fail the run through its diagnostics either (#193). Fails OPEN: an
+    absolute path that can't be made root-relative stays in scope and therefore stays visible."""
+    if not path or (target is None and Path(path).is_absolute()):
+        return False
+    return _in_skip_dir(path, target) or _matches_excludes(path, excludes, target)
+
+
+def _file_limitation(details: dict, path: str, reason: str, native_type: str, target=None,
+                     framework: str = "", message: str = "") -> None:
+    """Record ONE in-scope input the scanner did not (fully) analyse while the scanner itself ran.
+
+    This is a per-file coverage limitation, not a scanner failure: the scanner's results for every
+    other file are valid, and this file's own analysis is missing (parse_failed) or partial
+    (partial_parse). Kept out of `errors` so a single unparseable file no longer marks the whole
+    scanner `error` (#193/#196); kept named so its absence of findings is never read as clean."""
+    row = {"path": _rel_to(path, target) or path if target is not None else path,
+           "reason": reason, "native_type": native_type,
+           **({"framework": framework} if framework else {}), "message": message[:200]}
+    rows = details.setdefault("file_limitations", [])
+    if row not in rows:
+        rows.append(row)
+
+
+def _checkov_parse_outcome(details: dict, row: dict, results: dict, summary: dict, parse_errors: list,
+                           count: int, target=None, excludes=None) -> None:
+    """Classify one Checkov framework row's `parsing_errors` (#193).
+
+    * under a SKIP_DIR / --exclude            → ignored, counted in `file_limitations_excluded`
+    * in scope, framework evaluated something → a named per-file limitation
+    * in scope, framework evaluated NOTHING   → scanner error: that framework produced no result
+    * a count Checkov did not attribute to a file → scanner error: it cannot be listed per file
+    The last two keep a genuinely failed Checkov an execution error."""
+    framework = str(row.get("check_type") or "checkov")
+    named = [p for p in parse_errors if isinstance(p, str) and p]
+    unattributed = max(count, len(parse_errors)) - len(named)
+    in_scope = []
+    for path in named:
+        if _out_of_scope(path, target, excludes):
+            details["file_limitations_excluded"] = details.get("file_limitations_excluded", 0) + 1
+        else:
+            in_scope.append(path)
+    evaluated = (any(isinstance(results.get(k), list) and results[k]
+                     for k in ("passed_checks", "failed_checks", "skipped_checks"))
+                 or any(type(summary.get(k)) is int and summary[k] > 0
+                        for k in ("passed", "failed", "skipped", "resource_count")))
+    if in_scope and evaluated:
+        for path in in_scope:
+            _file_limitation(details, path, "parse_failed", "parsing_error", target, framework=framework)
+        in_scope = []
+    if in_scope or unattributed:
+        shown = [_rel_to(p, target) or p if target is not None else p for p in in_scope[:5]]
+        more = f" +{len(in_scope) - 5} more" if len(in_scope) > 5 else ""
+        reason = "no evaluated resources" if in_scope else "not attributed to a file"
+        details["errors"].append(f"{framework}: {len(in_scope) + unattributed} input parsing errors "
+                                 f"({reason}" + (f": {', '.join(shown)}{more}" if shown else "") + ")")
+
+
+def _report_details(key: str, doc, target=None, excludes=None) -> dict:
+    """Native diagnostics are execution evidence even with a successful exit.
+
+    `target`/`excludes` scope per-file diagnostics: one under a SKIP_DIR or a user --exclude is
+    counted in `file_limitations_excluded` and otherwise ignored, exactly like a finding there."""
     details = {"errors": [], "skipped_checks": 0}
     rows = doc if key == "checkov" and isinstance(doc, list) else [doc]
     for row in rows:
@@ -1087,6 +1227,21 @@ def _report_details(key: str, doc) -> dict:
             continue
         if key == "semgrep":
             rule_errors = _semgrep_rule_errors(row)
+            # #196: a per-file parse diagnostic (no rule, a named file, level warn) means THAT file
+            # was skipped or partially parsed — Semgrep's own docs call it "partially analyzed" —
+            # not that the scanner failed. A level:error, a fileless row or any other type still
+            # falls through to the scanner-level bucket below, and a non-0/1 exit is caught
+            # independently in normalize_findings, so a genuinely failed Semgrep stays `error`.
+            for r in rule_errors:
+                r["file_scoped"] = (not r["rule_scoped"] and r["kind"] in _SEMGREP_FILE_PARSE
+                                    and r["level"] == "warn" and bool(r["path"]))
+                if not r["file_scoped"]:
+                    continue
+                if _out_of_scope(r["path"], target, excludes):
+                    details["file_limitations_excluded"] = details.get("file_limitations_excluded", 0) + 1
+                else:
+                    _file_limitation(details, r["path"], _SEMGREP_FILE_PARSE[r["kind"]], r["kind"],
+                                     target, message=r["message"])
             scoped = [r for r in rule_errors if r["rule_scoped"]]
             if rule_errors:
                 details["rule_errors"] = rule_errors
@@ -1096,8 +1251,9 @@ def _report_details(key: str, doc) -> dict:
                 details["rules_incomplete"] = sorted({r["rule_id"] for r in scoped})
                 details["rules_incomplete_kinds"] = sorted({r["kind"] for r in scoped})
             # Rules that failed WHOLESALE stay in `errors` (the scanner-level bucket); per-rule
-            # timeouts do NOT, because they are a partial result, not a broken scanner.
-            whole = [r for r in rule_errors if not r["rule_scoped"]]
+            # timeouts and per-file parse limitations do NOT, because they are a partial result,
+            # not a broken scanner.
+            whole = [r for r in rule_errors if not r["rule_scoped"] and not r["file_scoped"]]
             if whole:
                 details["errors"].append(
                     f"semgrep: {len(whole)} scanner-level error(s): "
@@ -1122,7 +1278,8 @@ def _report_details(key: str, doc) -> dict:
             if any(type(n) is not int or n < 0 for n in (count, skipped)):
                 raise ValueError("invalid Checkov diagnostic counts")
             if parse_errors or count:
-                details["errors"].append(f"{row.get('check_type', 'checkov')}: {max(len(parse_errors), count)} input parsing errors")
+                _checkov_parse_outcome(details, row, results, summary, parse_errors, count,
+                                       target, excludes)
             for count_key, rows_key in (("failed", "failed_checks"), ("passed", "passed_checks"), ("skipped", "skipped_checks")):
                 if count_key not in summary or rows_key not in results:
                     continue
@@ -1407,8 +1564,9 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
     that live in gitignored (never-committed) files.
 
     `excludes` (user --exclude paths/globs) is enforced HERE, not only in the per-scanner
-    argv flags: gitleaks/checkov ignore those flags entirely, so without this post-filter a
-    `--exclude 'tests/**'` still surfaced fixture secrets as HIGH (DocGuard field report)."""
+    argv flags: gitleaks has no such flag (and checkov had none before #193), so without this
+    post-filter a `--exclude 'tests/**'` still surfaced fixture secrets as HIGH (DocGuard field
+    report). The same scope applies to per-file parse diagnostics in `_report_details`."""
     raw = []
     parse_failed: list = []
     _parse_attempted: list = []
@@ -1444,7 +1602,7 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
                 doc = json.loads(text)
             if key != "trufflehog" and not _valid_report(key, doc):
                 raise ValueError("scanner report has an unexpected shape")
-            details = _report_details(key, doc)
+            details = _report_details(key, doc, target=target, excludes=excludes)
             report_details[key] = details
             if details["errors"]:
                 crashed.append(key)
@@ -1499,7 +1657,7 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
     contamination_dropped = before - len(raw)
 
     # user --exclude contract: recon honors it via RepoContext, scanners must too. The argv
-    # flags above are best-effort (gitleaks/checkov have none) — this is the guarantee.
+    # flags above are best-effort (gitleaks has none) — this is the guarantee.
     before = len(raw)
     raw = [f for f in raw if not _matches_excludes(f.get("file", ""), excludes, target)]
     user_excluded_dropped = before - len(raw)

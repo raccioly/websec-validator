@@ -90,5 +90,28 @@ class DiffScopeArtifactTests(unittest.TestCase):
         self.assertIn("repo_prefix", scope)
 
 
+class LimitationGapTests(unittest.TestCase):
+    def test_source_flow_limit_names_the_file(self):
+        facts = {"surface": {"assigned_flow": {"errors": [
+            {"file": "lib/huge.mjs", "kind": "LimitReached", "detail": "JS assignment expression budget exceeded"}]}}}
+        coverage.add_source_flow(facts)
+        gap = next(g for g in facts["coverage"]["gaps"] if g["kind"] == "source_flow_limit")
+        self.assertIn("lib/huge.mjs", gap["detail"])
+        self.assertTrue(gap["execution"])          # not fully analysed stays incomplete, like oversized
+
+    def test_scanner_file_limitations_are_visible_but_not_execution_loss(self):
+        facts = {}
+        detected = {"available": [{"key": "semgrep"}], "missing": []}
+        results = [{"key": "semgrep", "name": "Semgrep", "output": "x", "exit_code": 0}]
+        unified = {"parse_attempted": ["semgrep"], "report_details": {"semgrep": {"file_limitations": [
+            {"path": "scripts/send.sh", "reason": "partial_parse", "native_type": "PartialParsing"}]}}}
+        coverage.add_scanners(facts, detected, results, unified, scan=True)
+        gaps = facts["coverage"]["gaps"]
+        limit = [g for g in gaps if g["kind"] == "scanner_file_limits"]
+        self.assertTrue(limit and "scripts/send.sh" in limit[0]["detail"])
+        self.assertFalse(limit[0]["execution"])
+        self.assertFalse(any(g["kind"] == "scanner" for g in gaps))
+
+
 if __name__ == "__main__":
     unittest.main()

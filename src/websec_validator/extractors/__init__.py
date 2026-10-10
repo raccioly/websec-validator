@@ -111,4 +111,5 @@ def run_all(root: Path, version: str, excludes: list | None = None,
     facts["coverage"] = coverage.from_context(ctx, outcomes)
     coverage.add_profiles(facts)
     coverage.add_routes(facts)
+    coverage.add_source_flow(facts)
     return facts
