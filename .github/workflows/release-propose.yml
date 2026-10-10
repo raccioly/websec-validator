@@ -120,20 +120,35 @@ jobs:
         # approved.
         run: |
           set -euo pipefail
-          RID=""
+          # EVERY pull_request workflow parks, not just CI: v0.22.0's train approved only the first
+          # parked run (`[0]` — Container contracts) and the required CI run stayed in
+          # action_required, holding the PR at BLOCKED. Approve all of them, and wait until the
+          # number of parked runs stops growing, since the workflows register a few seconds apart.
+          RIDS=""
+          LAST=-1
           for _ in $(seq 12); do
-            RID=$(gh api "repos/$REPO/actions/runs?branch=$BRANCH&event=pull_request" \
-                    --jq '[.workflow_runs[] | select(.status=="action_required" or .conclusion=="action_required")][0].id // empty')
-            [ -n "$RID" ] && break
+            RIDS=$(gh api "repos/$REPO/actions/runs?branch=$BRANCH&event=pull_request" \
+                     --jq '[.workflow_runs[] | select(.status=="action_required" or .conclusion=="action_required") | .id] | join(" ")')
+            COUNT=$(echo "$RIDS" | wc -w | tr -d ' ')
+            [ "$COUNT" -gt 0 ] && [ "$COUNT" -eq "$LAST" ] && break
+            LAST=$COUNT
             sleep 10
           done
-          if [ -z "$RID" ]; then
+          if [ -z "$RIDS" ]; then
             echo "::notice::no parked CI run found for $BRANCH — it may have started on its own."
             exit 0
           fi
-          if gh api -X POST "repos/$REPO/actions/runs/$RID/approve"; then
-            echo "approved run $RID — required checks will now report against the PR"
-          else
-            echo "::warning::GITHUB_TOKEN could not approve run $RID."
+          FAILED=0
+          for RID in $RIDS; do
+            if gh api -X POST "repos/$REPO/actions/runs/$RID/approve" >/dev/null; then
+              echo "approved run $RID"
+            else
+              FAILED=1
+              echo "::warning::GITHUB_TOKEN could not approve run $RID."
+            fi
+          done
+          if [ "$FAILED" -ne 0 ]; then
             echo "::warning::Click 'Approve and run' on the PR, or store a PAT and open the release PR with it."
+          else
+            echo "approved every parked run — required checks will now report against the PR"
           fi
