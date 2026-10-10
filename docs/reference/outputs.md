@@ -99,7 +99,8 @@ The full human-readable record of the run: executive summary, the findings ledge
 chain, standards and confidence (§1), the clustered view (§1a), acknowledged findings shown but not
 gating (§1b), access control, attack surface, config/CI/client-side risks, staged probes and the
 endpoint inventory. It leads with the coverage status: **REQUESTED CHECKS COMPLETED**, **PARTIAL
-SCAN — REQUESTED CHECKS INCOMPLETE** or **NO ANALYZABLE SOURCE**.
+SCAN — REQUESTED CHECKS INCOMPLETE**, **NO ANALYZABLE SOURCE**, or **REQUESTED SCOPE NOT
+ANALYZED** when `--only` was given and none of its paths selected an analysable file.
 
 ### `CONSTITUTION.md`
 
@@ -125,6 +126,11 @@ Fields worth knowing:
   stack and the named-profile results. See [Languages](languages.md).
 - `routes.endpoints`, `routes.engine`, `routes.targeting` (write endpoints, IDOR, SSRF,
   open-redirect, upload and auth-endpoint candidates).
+- `routes.noir`: `{state, reason}`, where `state` is `ok`, `absent` or `failed`. `failed` means an
+  installed OWASP Noir crashed, timed out or wrote unusable output, and the routes came from the
+  regex fallback; `reason` says why.
+- `analysis_scope` (with `--only`): `requested` entries, `matched` files and `missed` entries. A
+  missed entry selected no analysable file and was never analysed.
 - `routes.fixture_endpoints`: test/example/fixture routes split out of the attack surface, kept
   visible rather than dropped. `--include-fixtures` treats them as product code.
 
@@ -137,10 +143,10 @@ The execution and scope manifest. It is also embedded in `FACTS.json`, the ledge
 | `execution_complete` | `true` when every requested check ran. Drives `latest` and exit code `3` |
 | `protection_complete` | Always `false`. Completed execution is not protection |
 | `limitation` | The statement above, in words |
-| `gaps[]` | `{kind, detail, execution}`. `execution: true` means a requested check did not complete; `false` is a scope limit (`language_without_analyzer`, `thin_language_coverage`, `walker_policy`, `excluded_scope`, `profile_scope` and others) |
+| `gaps[]` | `{kind, detail, execution}`. `execution: true` means a requested check did not complete; `false` is a scope limit (`language_without_analyzer`, `thin_language_coverage`, `walker_policy`, `excluded_scope`, `profile_scope`, `skipped_directory_code`, `scope_missed`, `route_engine` and others). `skipped_directory_code`: a skipped `build`, `dist`, `out`, `target`, `vendor` or `coverage` directory, or a websec output directory under another name, holds files with an analysable suffix. `scope_missed`: a `--only` path selected nothing. `route_engine`: an installed Noir failed and routes came from the regex fallback. A `graph` gap is an execution gap only for an explicit `--graph` |
 | `extractors` | Outcome per extractor |
 | `scanners` | Per scanner: `installed`, `runnable`, `selected`, `ran`, `outcome`, `reported_version`, `version_verified` |
-| `files` | `seen`, `scanned`, `read`, `unsupported`, `unanalyzed_languages`, `no_analyzable_source`, `skipped_counts`, caps and read losses |
+| `files` | `seen`, `scanned`, `read`, `unsupported`, `unanalyzed_languages`, `no_analyzable_source`, `skipped_counts` (reasons include `skip_directory` and `websec_output`, a directory this tool wrote), caps and read losses. `skipped_code_files` (total analysable-suffix files under skipped build, dependency and output directories) and `skipped_code_dirs[]` (`path`, `code_files`, `count_truncated`; at most 50 listed). With `--only`, `analysis_scope`: `requested` and `matched` counts and the `missed` entries |
 | `profiles`, `service_inventory` | Named-check status per service |
 | `route_discovery` | Django, Connexion and tRPC route-parser candidates and gaps |
 | `detector_revision`, `analyzed_input_digest`, `scope_digest` | Hashes that bind the run to the detector code, the bytes read and the scope |
@@ -177,11 +183,29 @@ Top-level blocks: `total`, `by_severity`, `by_confidence`, `suppressed`, `acknow
 `calibration`, `coverage`, `verification_context`, `attribution`, `clusters` and `cluster_summary`
 (a presentation view; `total`, gate counts and per-site fingerprints are unchanged), and `gate`.
 
+Suppression transparency (since 0.22.0, see
+[how path patterns match](../guides/triage-and-suppression.md#how-path-patterns-match)):
+
+- `suppressed_legacy_substring`: how many of the `suppressed` findings were hidden only by the
+  legacy substring rule, not by the component-aware path rule.
+- `suppressed_legacy[]`: those findings (`title`, `category`, `location`, and `suppression` with
+  `patterns` and `legacy_substring: true`), at most 200 records.
+- `suppression_warnings[]`: one entry per `.websec-ignore` line involved: `pattern`,
+  `pattern_kind` (`path`, `word` or `category`), `hidden`, `replacement` (the exact lines that
+  would hide the same findings without the legacy rule) and up to three `examples`. The same
+  warnings are printed to stderr.
+
 `gate` records the verdict that produced the exit code: `threshold`, `verdict` (`pass`, `fail`,
 `incomplete`, `no-analyzable-source` or `not-evaluated`), `exit_code`, `failure_kind`
 (`findings`, `incomplete`, `findings+incomplete` or `no-analyzable-source`), `count_at_or_above`,
 `exit_code_contract` and an `enforcement` note that a client-side gate is advisory unless run as a
 required status check.
+
+A `websec dynamic` ledger carries its own `gate` with `command: "dynamic"`, `threshold:
+"critical"` and `scope: "dynamic-evidence"`: only findings with dynamic evidence count toward
+`count_at_or_above`, `verdict` is `fail`, `incomplete` or `pass`, and `static_findings_not_gated`
+counts the CRITICAL static findings from `FACTS.json` that are in the ledger but do not set the
+exit code (`websec run` gates those).
 
 ### `findings.envelope.json`
 
@@ -236,8 +260,10 @@ evidence against a plan; it never executes commands. See the
 
 ### `diff-scope.json`
 
-With `--diff REF`: `base`, `error`, `files` (changed files mapped to added or modified line ranges)
-and `counts` (findings in changed files and hunks versus pre-existing ones). If the diff cannot be
+With `--diff REF`: `base`, `error`, `repo_prefix` (where the target sits in the repository, for
+example `services/api/`, or empty at the root), `files` (changed files, relative to the target,
+mapped to added or modified line ranges) and `counts` (findings in changed files and hunks versus
+pre-existing ones). If the diff cannot be
 computed, `error` is set and the run continues unscoped over the whole repository. That records a
 `diff` execution gap, so the run is incomplete and `latest` does not advance.
 
@@ -268,7 +294,8 @@ the run is incomplete and `latest` does not advance.
 
 ### `manifest.json`
 
-The run index: artifact names, detected scanners and scan results, SBOM status, attack-surface
+The run index: artifact names, detected scanners (including `not_applicable` scanners whose target
+precondition failed and the `route_engine` status) and scan results, SBOM status, attack-surface
 summary, staged probes, the run timestamp, and `artifact_digests`: SHA-256 of `FACTS.json`,
 `coverage.json`, the ledger, envelope, SARIF, `findings.json`, `repair-plans.json`,
 `attack-surface.json`, `REPORT.md`, `AGENT-BRIEFING.md`, `diff-scope.json` and
@@ -291,7 +318,7 @@ policy; an unrelated working directory does not contribute implicit suppressions
 
 - [CLI reference](cli.md): `--out`, `--format`, `--scan`, `--sbom`, `--diff`, `--sarif`, `--baseline`, exit codes
 - [Languages and frameworks](languages.md): reading `coverage.json` for your stack
-- [GitHub Actions](../guides/ci/github-actions.md): uploading `results.sarif` and the `run-directory` output
+- [GitHub Actions](../guides/ci/github-actions.md): uploading `results.sarif` and the `run-directory` and `exit-code` outputs
 - [Other CI systems](../guides/ci/other-ci.md): SARIF and the envelope outside GitHub
 - [Triage and suppression](../guides/triage-and-suppression.md): fingerprints, acknowledgements, clusters, baselines
 - [docs-canonical/ARCHITECTURE.md](../../docs-canonical/ARCHITECTURE.md#output-artifacts-websec-out): design intent for the output tree

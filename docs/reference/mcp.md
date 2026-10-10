@@ -51,7 +51,7 @@ OAuth. Startup requirements, each refused with exit `2` if unmet:
 | Requirement | Rule |
 |---|---|
 | `WEBSEC_MCP_TOKEN` | Set, non-empty, visible ASCII only (no spaces or control characters). |
-| `--allow-root PATH` | At least one, each an existing directory. Repeat for more projects. The option's help text mentions a startup-directory default; the code has none and refuses to start without an explicit root. |
+| `--allow-root PATH` | At least one, each an existing directory. Repeat for more projects. There is no default root; the server refuses to start without one. |
 | `--host` | A loopback IP or `localhost` (default `127.0.0.1`). `localhost` is bound as `127.0.0.1` without a DNS lookup. Any non-loopback address is refused. |
 | `--port` | Default `8733`. |
 

@@ -129,8 +129,11 @@ or complete reproducibility. See the [installer](../../scripts/install-container
 `HEALTHCHECK NONE` is deliberate for the default one-shot CLI: no recurring self-scan, network
 check or health assurance is implied. For an explicitly selected long-lived `websec mcp --http`
 service, an operator may add an in-container loopback `GET /health` liveness check with a short
-timeout. That endpoint reports transport liveness only, not successful recon or authorization;
-MCP POST dispatch still requires its bearer token and allowed root. HTTP remains loopback-only,
+timeout. `/health` is not open: like every request it must carry the bearer token
+(`Authorization: Bearer $WEBSEC_MCP_TOKEN`; `401` without it) and an allowed loopback `Host`
+(`403` otherwise), so the check command needs the token. That endpoint reports transport liveness
+only, not successful recon or authorization; MCP tool calls are additionally confined to the
+allowed roots. HTTP remains loopback-only,
 so publishing a container port does not expose its loopback listener. Do not weaken the bind or
 install an automatic target scan to obtain a green health indicator.
 [Docker healthcheck reference](https://docs.docker.com/reference/dockerfile/#healthcheck)

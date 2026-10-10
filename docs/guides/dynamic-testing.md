@@ -189,19 +189,20 @@ Each dynamic run gets its own directory under `websec-out/runs/`, containing:
 
 | Exit | Meaning |
 |---|---|
-| `3` | Some requested checks were inconclusive or not tested; `latest` is not advanced. Checked first |
-| `1` | Checks completed and the merged ledger contains a CRITICAL finding |
-| `0` | Checks completed and the merged ledger has no CRITICAL finding |
+| `1` | A finding with dynamic evidence (a verified cross-tenant leak) is CRITICAL. Checked first |
+| `3` | Some requested checks were inconclusive or not tested, and nothing was confirmed; `latest` is not advanced |
+| `0` | Checks completed and no dynamic check confirmed a CRITICAL finding |
+| `2` | Argument or configuration error; no run directory is reserved |
 
-Read these exit codes differently from `websec run`:
+Read these exit codes with two points in mind:
 
-- **`3` takes precedence here.** A run with a confirmed leak *and* any inconclusive row exits `3`,
-  not `1`. In practice `3` is common, because any inconclusive row, cap overflow or error marks the
-  run incomplete. Read the per-row results instead of treating `3` as a tool failure.
-- **The merged ledger includes the static recon findings** from the `FACTS.json` you supplied, so a
-  CRITICAL static finding can produce exit `1` even when every dynamic check passed.
-- **Argument errors exit `1`.** A missing `FACTS.json`, `--unauth` without `--target` or a missing
-  config file prints `error: ...` and currently exits `1`, not `2`.
+- **A confirmed leak wins.** A run with a confirmed leak *and* inconclusive rows exits `1`, prints a
+  stderr note that the checks were also incomplete, and records `gate.failure_kind =
+  findings+incomplete`. `3` is common on its own, because any inconclusive row, cap overflow or
+  error marks the run incomplete; read the per-row results instead of treating `3` as a tool failure.
+- **Static findings do not set the exit code.** The merged ledger includes the static recon
+  findings from the `FACTS.json` you supplied, but `websec run` already gated those; `dynamic`
+  gates only what it confirmed (`gate.static_findings_not_gated` counts the rest).
 
 Confirmed dynamic results are folded into your **local** calibration overlay
 (`~/.cache/websec-validator/`, or `$WEBSEC_CALIBRATION_HOME`), so `P(real)` adapts to your apps over
@@ -271,7 +272,9 @@ This matches a real scan report against the ledger's DAST-predictable findings, 
   `identity`, `endpoint`, `method` and `parameter`. Authenticated identities also need
   `auth_verified: true`. Attach this as a `dast_context` envelope to your report and ledger.
 - **Report shapes read:** ZAP-style JSON (`site[].alerts[]` with numeric `pluginid` and `instances`),
-  or a generic `alerts[]` list. Matching uses numeric plugin ids from the prediction table.
+  or a generic `alerts[]` list carrying ZAP plugin ids. Matching uses numeric ZAP plugin ids from
+  the prediction table. Nuclei output is not parsed, even though §4b names Nuclei as the expected
+  scanner for some predictions. A report or ledger that is not valid JSON is a usage error (exit `2`).
 - **Silence is not refutation.** A finding the scan didn't flag stays **unjudged**. A passive-only
   baseline can't test SQLi, so its silence proves nothing. Refuting a finding needs an explicit
   `checks[]` row for that exact context, with `completed: true`, `coverage_complete: true`,

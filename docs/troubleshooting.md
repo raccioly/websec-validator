@@ -80,11 +80,9 @@ For an editable clone, re-run `pipx install --force --editable .` after pulling.
 **Symptom.** The run prints `routes: N endpoints via regex-fallback (install OWASP Noir for full
 coverage: brew install noir)` although you installed Noir.
 
-**Cause.** websec reports the same thing whether Noir is absent or present but failed. It looks for
-an executable named `noir` on the `PATH` of the websec process, and runs
-`noir scan <target> -f json -o <tmpfile> --exclude-path … --no-log --no-color` with a 300-second
-timeout. If Noir is not found, exits without writing output, times out or writes invalid JSON,
-websec silently falls back to its built-in route heuristics. `websec doctor` does not check Noir.
+**Cause.** That message means websec did not find an executable named `noir` on the `PATH` of the
+websec process. A shell where `noir` works can still differ from the environment of your CI job,
+agent or hook.
 
 If the line reads `via noir (0 routes) → regex-fallback backstop`, Noir did run but found nothing,
 and the fallback supplemented it.
@@ -93,12 +91,29 @@ and the fallback supplemented it.
 
 ```bash
 command -v noir        # is it on PATH for this shell (and for your CI job / agent)?
+websec doctor .        # the "route engine" section shows what websec itself finds
+```
+
+### `⚠ OWASP Noir failed: … — routes came from the regex fallback`
+
+**Cause.** Noir is installed but did not produce usable output. websec runs
+`noir scan <target> -f json -o <tmpfile> --exclude-path … --no-log --no-color` with a 300-second
+timeout; a non-zero exit with no output, a timeout, invalid JSON or a launch error is a failure.
+Since 0.22.0 this is reported instead of looking like an absent Noir: the run prints the reason,
+`FACTS.json` → `routes.noir` records `{"state": "failed", "reason": …}`, and `coverage.json` gets a
+`route_engine` gap. The gap is a scope limit (`execution: false`), so it does not make the run
+incomplete or change the exit code, but the route inventory is the narrower regex result.
+
+**Fix.**
+
+```bash
+websec doctor .        # route engine: ✓ version, ? no version printed, ✗ crashed or timed out
 noir --version
 noir scan . -f json -o /tmp/noir-check.json   # does this build accept websec's invocation?
 ```
 
-If the manual command fails, upgrade Noir. The bundled Docker image pins a Noir version in the
-[`Dockerfile`](../Dockerfile) that its CI checks.
+If the manual command fails, upgrade or reinstall Noir. The bundled Docker image pins a Noir
+version in the [`Dockerfile`](../Dockerfile) that its CI checks.
 
 ### Scanners are listed but never run
 
@@ -117,6 +132,7 @@ and exits `2`.
 | Scanner | Why |
 |---|---|
 | Bandit, gosec, Brakeman | Selected only when the stack detector finds Python, Go or Ruby respectively. Check the `stack:` line. |
+| Brakeman, on a Ruby target | Also needs an `app/` directory at the scan root, Brakeman's own Rails precondition. Without one it is listed by `websec doctor .` under "not applicable to this target" and is not run. Scan the Rails application's root directory. |
 | TruffleHog | Never runs implicitly. It needs `--scan --verify-secrets` because it sends candidate credentials to provider APIs. |
 | Prowler | Detected and reported only. The current registry entry has no invocation, so websec does not execute it. |
 | OpenGrep | websec looks for an executable named `semgrep`. An `opengrep` binary is not detected under that name. |
@@ -139,13 +155,12 @@ suggestion rather than being scanned as a directory.
 
 **Fix.** Check the spelling against `websec --help`, or pass an existing path.
 
-### `error: target is not a directory: …` (exit 1)
+### `error: target is not a directory: …` (exit 2)
 
 **Cause.** The target path does not exist or is a file.
 
-**Fix.** Pass the repository directory. Note that this error currently exits `1`, the same code as
-"findings at or above `--fail-on`", rather than the documented `2` for usage errors. In CI, check
-stderr before treating an exit `1` as a security result.
+**Fix.** Pass the repository directory. Since 0.22.0 this is a usage error (exit `2`); earlier
+releases exited `1`, the same code as findings.
 
 ### `⚠ PARTIAL SCAN — hit the …-file cap`
 
@@ -174,7 +189,7 @@ entries:
 | `scanner`: `<name>: unavailable` | You selected it with `--scanners` but it is not installed | Install it, or drop it from `--scanners` |
 | Scanner timeout, error, invalid report, or `scanner_rules` partial | The tool ran but did not produce a usable result | Run the tool by hand; check `websec doctor` for version problems |
 | Read loss, oversized files, byte budget | Some source could not be read within limits | Narrow the target or exclude generated files |
-| `graph`, `baseline`, SARIF import | An explicitly supplied `--graph`, `--baseline` or `--sarif` input was malformed, unreadable or over a cap | Fix or remove the input |
+| `graph`, `baseline`, SARIF import | An explicitly supplied `--graph`, `--baseline` or `--sarif` input was missing, malformed, unreadable or over a cap. A graph's own cap is 64 MiB, and the gap names the reason (`not found`, `oversized`, `excluded or out of scope`, `invalid`) | Fix or remove the input |
 | `dependency-existence` | `--network` could not resolve some names | Retry; UNKNOWN is never treated as clean |
 
 A run can be **both** gate-failing and incomplete. It then exits `1`, prints both facts, and records
@@ -216,23 +231,35 @@ are counted and reported, never read. Their absence from findings is not a clean
 
 - See the [languages reference](reference/languages.md) for what is analyzed.
 
-### Code under a directory named `security/`, `build/`, `out/` or `vendor/` was not analyzed
+### Code under a directory named `build/`, `out/` or `vendor/` was not analyzed
 
 **Symptom.** Findings you expected are missing; `coverage.json` shows a `walker_policy` gap and
-`files.skipped_samples` lists your directory with reason `skip_directory`.
+`files.skipped_samples` lists your directory with reason `skip_directory`. Since 0.22.0 there is
+usually also a `skipped_directory_code` gap naming the directory and how many analysable files it
+holds.
 
 **Cause.** The walker skips any directory whose **name** is on a fixed list, at any depth below the
 target. The list is meant for dependencies, build output, caches and agent tooling, but it includes
-names that real projects use for source, such as `security`, `build`, `dist`, `out`, `target`,
-`vendor` and `coverage`. The full list is `SKIP_DIRS` in
-[`src/websec_validator/extractors/base.py`](../src/websec_validator/extractors/base.py). The banner can
-still read `REQUESTED CHECKS COMPLETED`, and `--require-analyzed` does not catch this case.
+names that real projects use for source, such as `build`, `dist`, `out`, `target`, `vendor` and
+`coverage`. The full list is `SKIP_DIRS` in
+[`src/websec_validator/extractors/base.py`](../src/websec_validator/extractors/base.py). For those
+six names, websec counts (never reads) the files with an analysable suffix inside a skipped
+directory and reports them as a `skipped_directory_code` gap, with the directories in
+`files.skipped_code_dirs` (at most 50 listed; `files.skipped_code_files` is the total). The gap is a
+scope limit, not an execution failure, so the banner can still read `REQUESTED CHECKS COMPLETED`,
+and neither `--require-complete` nor `--require-analyzed` fails on it.
+
+A directory named `security/` is no longer skipped. The walker now skips only this tool's own output
+by content, whatever its name: a run directory (`FACTS.json` next to `coverage.json`) or an output
+root (`runs/` with a `latest` link into it), with skip reason `websec_output`. Unless it is named
+`websec-out`, such a directory is also counted in the `skipped_directory_code` gap when it holds
+analysable files, such as staged probe scripts.
 
 **Fix.** There is no flag to re-include a skipped directory name. Skip matching is relative to the
 target, so scan the affected directory directly as its own target:
 
 ```bash
-websec run ./app/security --out ./websec-out
+websec run ./app/build --out ./websec-out
 ```
 
 If this affects your project, please [report it](#reporting-a-bug-or-a-false-positive) with the

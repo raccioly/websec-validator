@@ -150,10 +150,10 @@ case "$status" in
 esac
 ```
 
-> [!WARNING]
-> Some early argument errors still exit `1`, not `2`. In particular, a target path that is not a
-> directory prints `error: target is not a directory: …` and exits `1`, the same code as findings.
-> If a gate fails with `1`, check stderr before treating it as a security result.
+> [!NOTE]
+> Before 0.22.0, some early argument errors (a target that is not a directory, several `dynamic`
+> and `calibrate` errors) exited `1`, the same code as findings. From 0.22.0 every usage error exits
+> `2`. See the [0.22.0 migration notes](MIGRATING-0.22.0.md).
 
 ## Migration guides and notable changes
 
@@ -166,6 +166,7 @@ esac
 | 0.18.0 | Opt-in `--require-analyzed` (exit `3` when no source could be analyzed). `run` no longer version-probes scanners unless `--scan` is given. Measured `P(real)` from a relabelled corpus. | [CHANGELOG](../CHANGELOG.md) |
 | 0.19.1 | Husky users: re-run `websec hooks install` (and `--pre-push`) to move the guardrail into the durable `.husky/<hook>` script. | [CHANGELOG](../CHANGELOG.md) |
 | 0.21.0 | Changed findings from bounded source analysis; budget overruns now persist as incomplete execution. Consent and exit contracts unchanged. | [MIGRATING-0.21.0.md](MIGRATING-0.21.0.md) |
+| 0.22.0 | Exit codes follow the contract everywhere (usage errors `2`; `dynamic` gates only dynamic evidence; `attest` never picks a partial run). Subdirectory `--diff`/`gate` now gate what changed. `security/` is scanned. `.websec-ignore` path patterns match on path components, with warnings for lines that relied on substring matching. | [MIGRATING-0.22.0.md](MIGRATING-0.22.0.md) |
 
 > [!NOTE]
 > The "Interpret exit codes" section of [MIGRATING-0.14.0.md](MIGRATING-0.14.0.md) describes the

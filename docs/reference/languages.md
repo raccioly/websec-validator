@@ -185,9 +185,12 @@ coverage.
   [the Noir project](https://github.com/owasp-noir/noir), not a claim websec makes. websec drops
   Noir routes under skipped directories, `--exclude` paths, frontend API-client code and
   fixture/example directories.
-- **Without Noir, or when Noir finds zero routes**, websec falls back to its regex pass: Next.js App
-  Router files, FastAPI and Flask decorators, and the generic router-call heuristic. The
-  `routes.engine` field in `FACTS.json` records which engine produced the list.
+- **Without Noir, when an installed Noir fails, or when Noir finds zero routes**, websec falls back
+  to its regex pass: Next.js App Router files, FastAPI and Flask decorators, and the generic
+  router-call heuristic. The `routes.engine` field in `FACTS.json` records which engine produced
+  the list, and `routes.noir` records Noir's outcome (`state` `ok`, `absent` or `failed`, with a
+  `reason`). A failed Noir is reported on the console and as a `route_engine` coverage gap, and
+  `websec doctor` shows whether the installed Noir works.
 - **Always added, whichever engine ran:** the router-call heuristic, Supabase Edge Functions, AWS
   SAM, raw HTTP servers, Connexion and tRPC registration, Django URLconf discovery, and the literal
   Spring and ASP.NET routes from the `java-spring` and `dotnet` profiles.
@@ -214,7 +217,7 @@ required.
 | `checkov` | IaC | Always | |
 | `bandit` | SAST | `python` detected | Built-in defaults; target `.bandit`/pyproject settings and inline `nosec` are ignored |
 | `gosec` | SAST | `go` detected | |
-| `brakeman` | SAST (Rails) | `ruby` detected | Selected on the Ruby language, not on a Rails layout check |
+| `brakeman` | SAST (Rails) | `ruby` detected and an `app/` directory at the scan root | Brakeman's own Rails precondition. Without `app/`, `websec doctor` lists it as not applicable to the target and it is not run |
 | `trufflehog` | Secret verification | Only with `--verify-secrets` | Sends discovered credentials to their providers; off by default |
 | `prowler` | Cloud posture | Never executed | Detected and reported only; the registry has no invocation for it |
 
@@ -253,12 +256,15 @@ vulnerabilities or full framework coverage."* Before trusting an empty findings 
 1. **Open `coverage.json`** (in the run directory; see [Outputs](outputs.md)) and read `gaps`. Gaps
    with `"execution": true` mean a requested check did not complete. Gaps with
    `"execution": false` are scope limits: `language_without_analyzer`, `thin_language_coverage`,
-   `profile_scope`, `walker_policy`, `excluded_scope` and others.
+   `profile_scope`, `walker_policy`, `excluded_scope`, `skipped_directory_code`, `scope_missed`,
+   `route_engine` and others.
 2. **Check `files.unanalyzed_languages`** for languages that were never read, and `profiles` for
    which named checks ran and with what status.
-3. **Check `files.skipped_counts`.** Directories such as `build`, `dist`, `out`, `target`, `vendor`
-   and `security` are skipped by policy, as are vendored and minified bundles. They are counted and
-   disclosed, not analysed.
+3. **Check `files.skipped_counts` and `files.skipped_code_dirs`.** Directories such as `build`,
+   `dist`, `out`, `target`, `vendor` and `coverage` are skipped by policy, as are vendored and
+   minified bundles. They are counted and disclosed, not analysed. When one of those six
+   directories holds files with an analysable suffix, they are counted and listed in
+   `files.skipped_code_dirs` with a `skipped_directory_code` gap.
 4. **Check `routes.engine` in `FACTS.json`.** A regex fallback on a non-tier-1 stack usually means
    most endpoints were not discovered.
 

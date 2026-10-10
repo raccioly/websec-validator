@@ -86,9 +86,11 @@ scope for this tool.
 No. A run with no findings means websec did not find anything **in what it could analyze, with the
 checks it has**. Known limits:
 
-- **Coverage.** Some languages are recognised but not analyzed (for example Elixir or Scala); some
-  directory names are skipped entirely; very large repositories can hit a file cap. All of these are
-  recorded in `coverage.json`, which you should read before trusting a quiet result.
+- **Coverage.** Some languages are recognised but not analyzed (for example Elixir or Scala);
+  build, dependency and cache directories (`build`, `dist`, `vendor`, `node_modules` and similar) are
+  skipped entirely, and code found inside some of them is counted as a `skipped_directory_code` gap;
+  very large repositories can hit a file cap. All of these are recorded in `coverage.json`, which
+  you should read before trusting a quiet result.
 - **Depth.** Detectors are pattern- and syntax-based with bounded data flow. There is no
   whole-program call graph, and route discovery does not import settings or execute code, so unknown
   route mounts stay *candidates*.

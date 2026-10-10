@@ -139,8 +139,9 @@ scanners are language-agnostic. A completed no-match check is not proof that a s
 
 The [changelog](https://github.com/raccioly/websec-validator/blob/main/CHANGELOG.md) records what each
 release changed; [Upgrading](https://github.com/raccioly/websec-validator/blob/main/docs/upgrade.md)
-indexes the migration notes — 0.14.0 (schema 2.0) and the 0.17.0 exit-code split
-(`2` = usage error, `3` = incomplete run). Unresolved gaps and their acceptance tests live in the
+indexes the migration notes — 0.14.0 (schema 2.0), the 0.17.0 exit-code split
+(`2` = usage error, `3` = incomplete run) and 0.22.0 (exit codes enforced everywhere, subdirectory
+`--diff`/`gate` scoping, `.websec-ignore` path matching). Unresolved gaps and their acceptance tests live in the
 [remaining-work specification](https://github.com/raccioly/websec-validator/blob/main/specs/001-continuous-security-improvement/spec.md).
 
 These are scoped review tools: manual profiles, unknown routes, dynamic behavior and unsupported
