@@ -22,7 +22,7 @@ from pathlib import Path
 SKIP_DIRS = {".git", "node_modules", "dist", "build", ".next", ".nuxt", "venv",
              ".venv", "__pycache__", ".mypy_cache", ".pytest_cache", "coverage",
              ".turbo", "out", "target", ".gradle", "vendor", "site-packages",
-             ".terraform", "security", ".websec-out", "websec-out", ".cache",
+             ".terraform", ".websec-out", "websec-out", ".cache",
              ".svelte-kit", "storybook-static", ".serverless", ".aws-sam", "cdk.out", ".sst", ".amplify",
              ".wrangler", ".vercel",   # Cloudflare / Vercel dev-build caches (bundled output → phantom routes)
              # agent tooling + editor dirs + worktree copies — not the target app
@@ -38,6 +38,25 @@ CODE_EXT = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".py", ".go", ".rb",
             # iter_code()-based extractor. routes.py SPEC_PATH still splits .graphql/.gql out
             # of the route list so SDL doesn't generate phantom endpoints.
             ".graphql", ".gql", ".vtl"}
+# `security` USED to be in SKIP_DIRS. It arrived in the very first commit next to `websec-out/`, the
+# author's own gitignored engagement-output directory ("hold findings + tokens once probes run").
+# As a NAME rule it pruned every `security/` directory in every scanned project — commonly where
+# auth middleware, CSRF and permission code lives — while the run still reported complete. The
+# specific thing it guarded against (this tool's own output, including staged probe scripts that
+# would match detectors as if they were application code) is now recognised by CONTENT, whatever
+# the directory is called: see `is_websec_output_dir`.
+#
+# Plain-word SKIP_DIRS names that real projects also use for their OWN source. They stay skipped
+# (they are overwhelmingly build output or third-party trees), but a skipped one that holds files
+# with an analysable suffix is counted and disclosed as a coverage gap — never a silent hole.
+# Dot-directories and dependency trees (node_modules, site-packages, venv) are unambiguous and are
+# not probed; `.local` is private and is never enumerated at all.
+PROBED_SKIP_DIRS = {"build", "dist", "out", "target", "vendor", "coverage"}
+# Bounds on that disclosure probe: it counts names, never reads content, and must stay cheap on a
+# Rust `target/` or a Go `vendor/` with tens of thousands of entries.
+SKIPPED_CODE_PROBE_ENTRIES = 5000        # per skipped directory
+SKIPPED_CODE_PROBE_BUDGET = 50000        # per walk
+MAX_SKIPPED_CODE_DIRS = 50               # directories listed (the total count is always exact)
 MAX_FILES = 12000
 MAX_BYTES = 2_000_000
 MAX_SOURCE_BYTES = 64 * 1024 * 1024
@@ -155,6 +174,26 @@ def is_vendored_asset(path: Path) -> bool:
             dense = sum(1 for char in line if not char.isspace()) / len(line)
             if dense > MINIFIED_DENSITY:
                 return True
+    return False
+
+
+def is_websec_output_dir(path: Path) -> bool:
+    """True for a directory this tool wrote: a run store (`latest` -> `runs/<id>`) or one run.
+
+    The narrow replacement for the old `security` name rule. Recognised by what `websec run` itself
+    writes, so `--out security`, `--out reports` and the default `websec-out` are all covered, while
+    a project's own `security/` package is not. A run directory holds `FACTS.json` and
+    `coverage.json` side by side; a run store holds a `runs/` directory and the `latest` symlink
+    `_publish_run` points into it. Any error answers False: when in doubt, analyse.
+    """
+    try:
+        if (path / "FACTS.json").is_file() and (path / "coverage.json").is_file():
+            return True
+        latest = path / "latest"
+        if latest.is_symlink() and (path / "runs").is_dir():
+            return Path(os.readlink(latest)).parts[:1] == ("runs",)
+    except OSError:
+        return False
     return False
 
 
@@ -278,6 +317,12 @@ class RepoContext:
         self.glob_truncated: list[dict] = []
         self.skipped_files: list[dict] = []
         self.skip_counts: dict[str, int] = {}
+        # Analysable-suffix files under directories the walker pruned (see PROBED_SKIP_DIRS).
+        self.skipped_code_dirs: list[dict] = []
+        self.skipped_code_files = 0
+        self.skipped_code_dir_count = 0
+        self.skipped_code_probe_exhausted = False
+        self._skipped_code_budget = SKIPPED_CODE_PROBE_BUDGET
         self._skip_seen: set[tuple[str, str]] = set()
         self.files_seen = 0
         self.file_types: dict[str, int] = {}
@@ -300,6 +345,9 @@ class RepoContext:
         # literals read as application code once the path changes). Never copy, reroot or stage.
         self.all_code_files: list[Path] = []
         self.scope: set[str] | None = None
+        # Scope entries SPELLED as a directory (trailing `/`). Path() drops the slash, so it is
+        # remembered here; an entry naming an existing directory is recognised in _apply_scope.
+        self._scope_dirs_spelled: set[str] = set()
         if only:
             # Path() already drops a leading "./". `.lstrip("./")` used to follow it, and lstrip
             # removes CHARACTERS, not a prefix: `.github/scripts/triage.py` became
@@ -307,6 +355,8 @@ class RepoContext:
             # dot-directory or named as a dotfile (.husky/*.js, .eslintrc.js) was reported missed
             # — never analyzed by the gate. It also turned `../app.py` into `app.py`.
             self.scope = {Path(str(p)).as_posix() for p in only if str(p).strip()}
+            self._scope_dirs_spelled = {Path(str(p)).as_posix() for p in only
+                                        if str(p).strip() and str(p).replace("\\", "/").rstrip().endswith("/")}
         self.scope_requested: list[str] = sorted(self.scope) if self.scope else []
         self.scope_matched: list[str] = []
         self.scope_missed: list[str] = []
@@ -407,8 +457,21 @@ class RepoContext:
         for directory, dirs, files in os.walk(self.root, topdown=True,
                                               followlinks=False, onerror=self._walk_error):
             parent = Path(directory)
-            dirs[:] = [name for name in sorted(dirs)
-                       if self._allowed(parent / name, traversal=True, directory=True)]
+            kept = []
+            for name in sorted(dirs):
+                child = parent / name
+                if not self._allowed(child, traversal=True, directory=True):
+                    if name in PROBED_SKIP_DIRS:
+                        self._probe_skipped_code(child)
+                    continue
+                if is_websec_output_dir(child):
+                    # This tool's own output (FACTS, staged probe scripts): not the application.
+                    # Disclosed as a walker-policy skip and counted like any other pruned tree.
+                    self._skip(child, "websec_output")
+                    self._probe_skipped_code(child)
+                    continue
+                kept.append(name)
+            dirs[:] = kept
             for name in sorted(files):
                 self.files_seen += 1
                 if self.files_seen > MAX_WALK_FILES:
@@ -436,17 +499,96 @@ class RepoContext:
                 elif suffix in SOURCE_EXT:
                     self.unsupported_files.append(self.rel(path))
 
+    def _probe_skipped_code(self, directory: Path) -> None:
+        """Count (never read) analysable-suffix files under a directory the walker pruned.
+
+        A skipped `build/` or `vendor/` is usually exactly what its name says, but when it holds
+        source the skip is a coverage hole, and the run must say so rather than read complete.
+        Bounded per directory and per walk; does not follow symlinks, honours operator exclusions,
+        prunes nested SKIP_DIRS (a `dist/node_modules` is third-party either way) and never enters
+        `.local`. Names are counted, contents are never opened.
+        """
+        try:
+            rel = directory.relative_to(self.root).as_posix()
+        except ValueError:
+            return
+        if self._excluded(rel) or directory.is_symlink():
+            return
+        if self._skipped_code_budget <= 0:
+            self.skipped_code_probe_exhausted = True
+            return
+        limit = min(SKIPPED_CODE_PROBE_ENTRIES, self._skipped_code_budget)
+        count = visited = 0
+        truncated = False
+        for current, subdirs, files in os.walk(directory, topdown=True, followlinks=False,
+                                               onerror=lambda _error: None):
+            here = Path(current)
+            subdirs[:] = [name for name in sorted(subdirs)
+                          if name.casefold() != ".local" and name not in SKIP_DIRS
+                          and not (here / name).is_symlink()
+                          and not self._excluded((here / name).relative_to(self.root).as_posix())]
+            for name in files:
+                if visited >= limit:
+                    truncated = True
+                    break
+                visited += 1
+                if Path(name).suffix.lower() in CODE_EXT:
+                    count += 1
+            if truncated:
+                break
+        self._skipped_code_budget -= visited
+        if count:
+            self.skipped_code_files += count
+            self.skipped_code_dir_count += 1
+            if len(self.skipped_code_dirs) < MAX_SKIPPED_CODE_DIRS:
+                self.skipped_code_dirs.append({"path": rel + "/", "code_files": count,
+                                               "count_truncated": truncated})
+
+    def _scope_dirs(self) -> set[str]:
+        """Scope entries that select a DIRECTORY: spelled with a trailing `/`, or naming one."""
+        dirs = set(self._scope_dirs_spelled)
+        for entry in self.scope or ():
+            if entry in dirs:
+                continue
+            try:
+                if (self.root / entry).is_dir():
+                    dirs.add(entry)
+            except OSError:
+                continue
+        return dirs
+
     def _apply_scope(self) -> None:
-        """Keep the full inventory, then narrow what will actually be analyzed."""
+        """Keep the full inventory, then narrow what will actually be analyzed.
+
+        An entry is a file path (exact match) or a DIRECTORY, which selects every walked code file
+        below it. Directory matching is on whole path components — `src` selects `src/a.py`, never
+        `src2/a.py` — and only over files the walker already selected, so a directory entry can
+        never reach into a skipped, excluded, private or out-of-root tree. `--only src` used to be
+        compared as a file name, matched nothing, and the run analysed nothing.
+        """
         self.all_code_files = list(self.code_files)
         if self.scope is None:
             return
-        kept = [p for p in self.code_files if self.rel(p) in self.scope]
+        dirs = self._scope_dirs()
+        whole_tree = "." in dirs
+        kept, hit = [], set()
+        for path in self.code_files:
+            rel = self.rel(path)
+            selected_by = [rel] if rel in self.scope else []
+            if whole_tree:
+                selected_by.append(".")
+            parts = rel.split("/")
+            selected_by += [ancestor for ancestor in ("/".join(parts[:i]) for i in range(1, len(parts)))
+                            if ancestor in dirs]
+            if selected_by:
+                kept.append(path)
+                hit.update(selected_by)
         self.scope_matched = sorted(self.rel(p) for p in kept)
-        # A requested path that the walker never selected (excluded, generated, unsupported suffix,
-        # nonexistent, or outside the root) is a SCOPE MISS, not an empty clean result. The caller
-        # must be able to tell "analyzed and found nothing" from "never looked".
-        self.scope_missed = sorted(self.scope - set(self.scope_matched))
+        # A requested path that selected nothing the walker kept (excluded, generated, unsupported
+        # suffix, empty directory, nonexistent, or outside the root) is a SCOPE MISS, not an empty
+        # clean result. The caller must be able to tell "analyzed and found nothing" from "never
+        # looked". Per entry: a directory that selected one file is not missed.
+        self.scope_missed = sorted(self.scope - hit)
         self.code_files = kept
 
     def rel(self, path: Path) -> str:

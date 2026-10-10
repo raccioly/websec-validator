@@ -81,6 +81,34 @@ def from_context(ctx, outcomes: dict) -> dict:
         gaps.append({"kind": "excluded_scope", "detail": "operator exclusions applied", "execution": False})
     if ctx.skip_counts:
         gaps.append({"kind": "walker_policy", "detail": "private, generated or disallowed files excluded from traversal", "execution": False})
+    # A pruned build/vendor/output directory that holds source is a hole in what was analysed. The
+    # walker_policy line above says THAT something was skipped; this says WHAT, so a project whose
+    # own code lives in `build/` or `out/` is never told "complete" in silence.
+    skipped_code = list(getattr(ctx, "skipped_code_dirs", []) or [])
+    if skipped_code:
+        shown = ", ".join(f"{row['path']} ({row['code_files']}{'+' if row.get('count_truncated') else ''})"
+                          for row in skipped_code[:10])
+        more = ctx.skipped_code_dir_count - min(len(skipped_code), 10)
+        gaps.append({"kind": "skipped_directory_code",
+                     "detail": f"{ctx.skipped_code_files} file(s) with an analysable suffix under "
+                               f"{ctx.skipped_code_dir_count} skipped build/dependency/output "
+                               f"director(ies) were never read: {shown}"
+                               + (f" (+{more} more)" if more > 0 else "")
+                               + (" (count budget exhausted; further directories not counted)"
+                                  if getattr(ctx, "skipped_code_probe_exhausted", False) else "")
+                               + ". If one holds your own source, scan it as its own target",
+                     "execution": False})
+    # `--only` entries that selected nothing. FACTS `analysis_scope.missed` already lists them, but
+    # coverage is what consumers gate and render on; a requested path never analysed must show
+    # there too. A scope LIMIT, not an execution failure: nothing failed to run.
+    missed = list(getattr(ctx, "scope_missed", []) or [])
+    if missed:
+        shown = ", ".join(missed[:10]) + (f" (+{len(missed) - 10} more)" if len(missed) > 10 else "")
+        gaps.append({"kind": "scope_missed",
+                     "detail": f"{len(missed)} requested --only path(s) selected no analysable file and "
+                               f"were never analyzed: {shown}. Their absence from the findings is "
+                               "NOT a clean result",
+                     "execution": False})
     result = {
         "profile": "heuristic-static-recon", "execution_complete": not any(g["execution"] for g in gaps),
         "protection_complete": False,
@@ -101,8 +129,14 @@ def from_context(ctx, outcomes: dict) -> dict:
                   # Machine-readable so a consumer never has to parse the rendered banner.
                   "no_analyzable_source": bool(ctx.files_seen and not len(ctx.code_files)
                                                and (unanalyzed or ctx.unsupported_files)),
-                  "skipped_counts": dict(ctx.skip_counts), "skipped_samples": list(ctx.skipped_files)},
+                  "skipped_counts": dict(ctx.skip_counts), "skipped_samples": list(ctx.skipped_files),
+                  "skipped_code_files": getattr(ctx, "skipped_code_files", 0),
+                  "skipped_code_dirs": list(getattr(ctx, "skipped_code_dirs", []) or [])},
     }
+    if getattr(ctx, "scope", None) is not None:
+        result["files"]["analysis_scope"] = {"requested": len(ctx.scope_requested),
+                                             "matched": len(ctx.scope_matched),
+                                             "missed": list(ctx.scope_missed)}
     result["scope_digest"] = _digest({"profile": result["profile"], "excludes": ctx.excludes,
                                       "read_policy": result["files"]["read_policy"],
                                       "include_fixtures": ctx.include_fixtures,
@@ -164,6 +198,15 @@ def add_routes(facts: dict) -> None:
     """Preserve route-parser scope uncertainty separately from execution loss."""
     for engine in ('django', 'connexion', 'trpc'):
         _add_route_analysis(facts, engine)
+    # An installed-but-failing OWASP Noir used to read exactly like an absent one. Routes still come
+    # from the regex fallback, so this is a visible scope limit, not lost execution: Noir is never an
+    # explicitly requested check, and failing --require-complete on it would gate shipping on a tool
+    # the operator did not ask for.
+    noir = (facts.get("routes") or {}).get("noir") or {}
+    if isinstance(noir, dict) and noir.get("state") == "failed":
+        add_gap(facts, "route_engine",
+                f"OWASP Noir failed: {noir.get('reason', 'unknown')} — routes came from the regex fallback",
+                execution=False)
 
 
 def _add_route_analysis(facts: dict, engine: str) -> None:
@@ -301,8 +344,14 @@ def render_md(facts: dict) -> str:
     counts = cov.get("files", {})
     # "REQUESTED CHECKS COMPLETED" over an unanalysable tree is the dangerous reading: nothing
     # failed, so execution IS complete — but the operator hears "clean". Lead with the limit.
+    scope = counts.get("analysis_scope") or {}
+    scope_empty = bool(scope.get("requested")) and not scope.get("matched")
     if counts.get("no_analyzable_source"):
         status = "NO ANALYZABLE SOURCE"
+    elif scope_empty:
+        # `--only` selected nothing: every extractor "completed" over zero files. Reading that as
+        # REQUESTED CHECKS COMPLETED is the same dangerous reading as an unanalysable tree.
+        status = "REQUESTED SCOPE NOT ANALYZED"
     elif cov.get("execution_complete"):
         status = "REQUESTED CHECKS COMPLETED"
     else:
@@ -314,6 +363,10 @@ def render_md(facts: dict) -> str:
         named = ", ".join(f"{lang} ({n})" for lang, n in langs.items()) or "the detected file types"
         lines.append(f"> **This scan analyzed nothing.** Source files are present but websec has no analyzer for "
                      f"{named}. An empty findings list here means NOT CHECKED, not secure.")
+    elif scope_empty:
+        lines.append(f"> **This scan analyzed nothing.** None of the {scope['requested']} `--only` path(s) "
+                     "selected an analysable file (see the `scope_missed` gap). An empty findings list "
+                     "here means NOT CHECKED, not secure.")
     elif counts.get("unanalyzed_languages"):
         langs = counts["unanalyzed_languages"]
         named = ", ".join(f"{lang} ({n})" for lang, n in langs.items())

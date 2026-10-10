@@ -55,13 +55,26 @@ def compute(target: Path, ref: str) -> dict:
     if ref_err is not None:
         return {"base": base, "files": {}, "error": f"unknown git ref: {base}"}
 
+    # Where the target sits inside the work tree ("" at the top level, "svc/" for a subdirectory).
+    # Recorded so a reader of the scope can see which tree the paths were made relative to.
+    prefix, err = _git(target, "rev-parse", "--show-prefix")
+    if err is not None:
+        return {"base": base, "files": {}, "error": err}
+
     # Pin the diff format: diff.noprefix / diff.mnemonicPrefix / core.quotePath / diff.external are
     # common global settings that change or replace this output. Any of them would yield zero parsed
     # files → "nothing changed" → the scoped --fail-on gate silently passes. Never let a developer's
     # git config turn the CI gate off.
+    #
+    # `--relative`: findings are relative to the TARGET, git's paths to the REPOSITORY ROOT. Scanning
+    # a subdirectory (`websec run svc --diff main`) compared `svc/src/app.py` with `src/app.py`, so
+    # every finding read as "untouched" and the scoped --fail-on gate passed a new finding in a
+    # changed file (fail-open). `--relative` (git runs with `-C target`) makes git itself rewrite the
+    # paths relative to the target and drop changes outside it, where no finding of this run can
+    # sit. Hunk line numbers are per file and need no translation. At the top level it is a no-op.
     diff, err = _git(target, "-c", "diff.noprefix=false", "-c", "diff.mnemonicPrefix=false",
-                     "-c", "core.quotePath=false", "diff", "--no-ext-diff", "--no-textconv", "-U0", "--no-color",
-                     f"{base}...HEAD")
+                     "-c", "core.quotePath=false", "diff", "--relative", "--no-ext-diff", "--no-textconv",
+                     "-U0", "--no-color", f"{base}...HEAD")
     if err is not None:
         return {"base": base, "files": {}, "error": err}
 
@@ -81,7 +94,7 @@ def compute(target: Path, ref: str) -> dict:
                 count = int(m.group(2)) if m.group(2) is not None else 1
                 if count > 0:                                 # count==0 ⇒ pure deletion, no new lines
                     files[current].append((start, start + count - 1))
-    return {"base": base, "files": files, "error": None}
+    return {"base": base, "files": files, "error": None, "repo_prefix": (prefix or "").strip()}
 
 
 def _norm(p: str) -> str:

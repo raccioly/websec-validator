@@ -460,8 +460,8 @@ CUSTOM_GUARD = re.compile(
 _IMPORT_EXTS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
 NEXT_ROUTE = re.compile(r"(?:^|/)route\.[cm]?[jt]sx?$|(?:^|/)api/.*\.[cm]?[jt]sx?$", re.I)
 
-# --- Path-scoped STANDALONE guard mount (the other dominant Express pattern, real-repo FP: the WU
-# real backends flagged 116 + 36 guarded routes as missing-auth). Auth is applied to a PREFIX on
+# --- Path-scoped STANDALONE guard mount (the other dominant Express pattern, real-repo FP: two
+# field-report backends flagged 116 + 36 guarded routes as missing-auth). Auth is applied to a PREFIX on
 # its OWN statement, and routers are mounted on that prefix in LATER statements:
 #     app.use('/api', requireAuth);          // guard mount — no router factory
 #     app.use('/api', conversationRoutes);   // router INSTANCE — no auth arg

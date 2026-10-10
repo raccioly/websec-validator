@@ -111,7 +111,8 @@ Exit status distinguishes a SECURITY result from a TOOLCHAIN one, and they need 
           report which check did not run — do not treat the silence as clean.
 
 When a run is both gate-failing and incomplete it exits `1` and says so on stderr; the finding count
-in that case is a FLOOR, not a total. `gate.failure_kind` in the ledger records the exact combination.
+in that case is a FLOOR, not a total. `gate.failure_kind` in the ledger records the exact combination:
+`findings`, `findings+incomplete`, `incomplete`, or `no-analyzable-source` (with `--require-analyzed`).
 
 `--scan` selects available runnable adapters, not every optional analyzer; inspect
 selected/unavailable tools and profile limitations. Explicit required scanners use `--scanners`.

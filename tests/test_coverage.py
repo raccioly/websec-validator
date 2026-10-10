@@ -14,6 +14,14 @@ from websec_validator import cli, coverage, formats, recon, scanners
 from websec_validator.extractors.base import RepoContext
 
 
+
+def _oversized_graph(graph):
+    """A graph one byte over the graph read cap, written sparse so the test stays fast."""
+    from websec_validator.graph_enrich import MAX_GRAPH_BYTES
+    graph.write_text('{"nodes": []}')
+    with open(graph, 'r+b') as handle:
+        handle.truncate(MAX_GRAPH_BYTES + 1)
+
 class CoverageTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -145,7 +153,7 @@ class CoverageTests(unittest.TestCase):
     def test_oversized_implicit_graph_is_disclosed_without_failing_execution(self):
         graph = self.repo / 'graphify-out' / 'graph.json'
         graph.parent.mkdir()
-        graph.write_text(json.dumps({'nodes': [], 'padding': 'x' * 2_000_001}))
+        _oversized_graph(graph)
         self.assertEqual(self.run_cli('--require-complete', '--fail-on', 'low'), 0)
         cov = self.latest('coverage.json')
         self.assertTrue(cov['execution_complete'])
@@ -158,13 +166,24 @@ class CoverageTests(unittest.TestCase):
 
     def test_oversized_explicit_graph_still_fails_requested_execution(self):
         graph = self.base / 'graph.json'
-        graph.write_text(json.dumps({'nodes': [], 'padding': 'x' * 2_000_001}))
+        _oversized_graph(graph)
         self.assertEqual(self.run_cli('--graph', str(graph), '--require-complete'), 3)
         cov = self.latest('coverage.json')
         self.assertFalse(cov['execution_complete'])
         self.assertTrue(coverage.execution_errors(cov))
         self.assertTrue(cov['files']['oversized'])
         self.assertFalse((self.out / 'latest').exists())
+
+    def test_multi_megabyte_graph_is_used_not_rejected(self):
+        # Real graphify graphs are several MB; the old 2 MB per-source cap made enrichment
+        # unavailable on mid-size repos. A 3 MB graph must load under the graph's own cap.
+        graph = self.repo / 'graphify-out' / 'graph.json'
+        graph.parent.mkdir()
+        graph.write_text(json.dumps({'nodes': [], 'padding': 'x' * 3_000_000}))
+        self.assertEqual(self.run_cli('--require-complete'), 0)
+        cov = self.latest('coverage.json')
+        self.assertFalse(any('graph.json' in g.get('detail', '') for g in cov['gaps']))
+        self.assertTrue(self.latest('findings-ledger.json')['graph_enrichment']['available'])
 
     def test_invalid_graph_is_optional_only_when_implicitly_selected(self):
         graph = self.repo / 'graphify-out' / 'graph.json'
@@ -178,15 +197,13 @@ class CoverageTests(unittest.TestCase):
         graph = self.repo / 'graphify-out' / 'graph.json'
         graph.parent.mkdir()
         graph.write_text('{"nodes": []}')
-        original = RepoContext.text
+        from websec_validator import graph_enrich
 
-        def unreadable(ctx, path, *args, **kwargs):
-            if Path(path).name == 'graph.json':
-                ctx.unreadable.append('graphify-out/graph.json')
-                return ''
-            return original(ctx, path, *args, **kwargs)
+        def unreadable(ctx, path):
+            ctx.unreadable.append('graphify-out/graph.json')
+            return ''
 
-        with patch.object(RepoContext, 'text', unreadable):
+        with patch.object(graph_enrich, '_read_graph', unreadable):
             self.assertEqual(self.run_cli('--require-complete'), 0)
             self.assertEqual(coverage.execution_errors(self.latest('coverage.json')), [])
             (self.repo / 'app.py').write_text('x' * 2_000_001)
@@ -204,7 +221,7 @@ class CoverageTests(unittest.TestCase):
                 subprocess.run(['git', '-C', str(self.repo), *args], check=True, capture_output=True)
             graph = self.repo / 'graphify-out' / 'graph.json'
             graph.parent.mkdir()
-            graph.write_text(json.dumps({'nodes': [], 'padding': 'x' * 2_000_001}))
+            _oversized_graph(graph)
             self.assertEqual(self.run_cli('--diff', 'HEAD', '--fail-on', 'low'), 0)
             self.assertEqual(coverage.execution_errors(self.latest('coverage.json')), [])
 

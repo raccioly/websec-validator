@@ -58,16 +58,77 @@ def _location_file(location: str) -> str:
 
 
 def load_graph(graph_path: Path, *, context=None) -> dict | None:
+    return _load_graph(graph_path, context=context)[0]
+
+
+# A graphify graph is metadata about the repository, not source: real ones are several MB (this
+# repository's own is ~7 MB), so the 2 MB per-source-file cap made enrichment unavailable on any
+# mid-size repo. It gets its own bounded cap and does not draw on the source byte budget.
+MAX_GRAPH_BYTES = 64 * 1024 * 1024
+
+
+def _read_graph(ctx, graph_path: Path) -> str:
+    """Bounded read of the graph through the context's contained read policy.
+
+    Mirrors RepoContext.text's bookkeeping — a successful read records its digest in
+    `input_hashes`; an oversized or unreadable one is recorded in `oversized`/`unreadable` — so
+    coverage reporting is unchanged; only the cap differs and the source byte budget is not charged.
+    """
+    import hashlib
+    import os
+    allowed = ctx._allowed(graph_path)
+    if allowed is None:
+        return ""
+    path, resolved, info = allowed
+    rel = ctx.rel(path)
+    reason = None
+    try:
+        if info.st_size > MAX_GRAPH_BYTES:
+            reason = "oversized"
+        else:
+            with os.fdopen(ctx._open_file(resolved, info), "rb") as stream:
+                content = stream.read(MAX_GRAPH_BYTES + 1)
+            if len(content) > MAX_GRAPH_BYTES:
+                reason = "oversized"
+    except (OSError, ValueError):
+        reason = "unreadable"
+    if reason:
+        failures = getattr(ctx, reason)
+        if rel not in failures:
+            failures.append(rel)
+        return ""
+    ctx.input_hashes[rel] = hashlib.sha256(content).hexdigest()
+    return content.decode("utf-8", errors="ignore")
+
+
+def _load_graph(graph_path: Path, *, context=None) -> tuple[dict | None, str | None]:
+    """Return (graph, None) or (None, the specific reason it is unavailable).
+
+    The reason is what an operator acts on: "oversized" needs a smaller graph or a narrower build,
+    "excluded" needs a different --exclude, "invalid" needs a regenerated graph. One generic string
+    for all of them told nobody what to fix."""
     from .extractors.base import RepoContext
     graph_path = Path(graph_path).absolute()
     ctx = context or RepoContext(graph_path.parent, walk=False)
+    text = _read_graph(ctx, graph_path)
+    rel = ctx.rel(graph_path)
+    if rel in ctx.oversized:
+        try:
+            size = f"{graph_path.stat().st_size} bytes"
+        except OSError:
+            size = "size unknown"
+        return None, f"oversized: {rel} ({size}) exceeds the {MAX_GRAPH_BYTES}-byte graph read cap"
+    if rel in ctx.unreadable or rel in ctx.byte_budget_exceeded:
+        return None, f"unreadable: {rel} could not be read completely"
+    if not text and rel not in ctx.input_hashes:
+        return None, f"excluded or out of scope: {rel} is not readable under the active read policy"
     try:
-        data = json.loads(ctx.text(graph_path))
-    except (OSError, ValueError):
-        return None
+        data = json.loads(text)
+    except ValueError:
+        return None, f"invalid: {rel} is not valid JSON"
     if not isinstance(data, dict) or "nodes" not in data:
-        return None
-    return data
+        return None, f"invalid: {rel} is not a graphify graph (no top-level `nodes`)"
+    return data, None
 
 
 def _build_index(graph: dict):
@@ -144,9 +205,14 @@ def enrich_ledger(ledger: dict, target: Path, graph_path: Path | None = None, *,
     from .extractors.base import RepoContext
     gp = Path(graph_path).absolute() if graph_path else Path(target) / "graphify-out" / "graph.json"
     if not gp.exists():
+        if graph_path is not None:
+            # An EXPLICIT --graph that does not exist is a requested input that was never read. It
+            # used to return here silently, so a typo in the path produced a clean, unenriched run.
+            ledger["graph_enrichment"] = {"available": False, "input": str(gp), "explicit_input": True,
+                                          "reason": f"not found: explicitly requested graph {gp} does not exist"}
         return ledger
     ctx = RepoContext(gp.parent if graph_path else target, excludes, walk=False)
-    graph = load_graph(gp, context=ctx)
+    graph, reason = _load_graph(gp, context=ctx)
     if ledger.get("coverage") is not None:
         from . import coverage
         prefix = f"external-graph:{gp.parent}:" if graph_path is not None else ""
@@ -155,7 +221,7 @@ def enrich_ledger(ledger: dict, target: Path, graph_path: Path | None = None, *,
     if graph is None:
         ledger["graph_enrichment"] = {"available": False, "input": str(gp),
                                       "explicit_input": graph_path is not None,
-                                      "reason": "unreadable, excluded, out of scope or invalid graph"}
+                                      "reason": reason}
         return ledger
 
     file_to_nodes, reverse, node_by_id = _build_index(graph)

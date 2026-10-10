@@ -49,6 +49,23 @@ ANALYZABLE = {".py", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts
               ".env", ".yml", ".yaml"}
 
 
+# Mirrors gate.SEV_ORDER (a test pins the equality). Kept local so importing this module stays free:
+# the gate import happens inside run()'s fail-open block.
+_THRESHOLDS = ("low", "medium", "high", "critical")
+DEFAULT_FAIL_ON = "medium"
+
+
+def effective_fail_on(env=None) -> str:
+    """The threshold the hook actually enforces: WEBSEC_GATE_FAIL_ON, else medium.
+
+    An unrecognised value falls back to medium (as gate.verdict always did); returning the
+    normalised value lets the install message and the gate output name the threshold in force
+    instead of echoing a value that was ignored."""
+    env = os.environ if env is None else env
+    value = str(env.get("WEBSEC_GATE_FAIL_ON") or DEFAULT_FAIL_ON).lower()
+    return value if value in _THRESHOLDS else DEFAULT_FAIL_ON
+
+
 def _payload() -> dict:
     """PostToolUse sends its event as JSON on stdin. Malformed input is not our problem to fix."""
     try:
@@ -116,7 +133,7 @@ def run(event: dict | None = None, *, env: dict | None = None) -> int:
     try:
         from . import gate as _gate
         from . import __version__ as _version
-        result = _gate.evaluate(Path(root), relative, env.get("WEBSEC_GATE_FAIL_ON", "medium"),
+        result = _gate.evaluate(Path(root), relative, effective_fail_on(env),
                                 version=_version, scope_source="agent-hook",
                                 min_confidence=env.get("WEBSEC_GATE_MIN_CONFIDENCE", "low"))
     except Exception as error:

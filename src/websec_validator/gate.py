@@ -73,29 +73,53 @@ def working_tree_paths(repo: Path) -> dict:
     work, which is the entire case an in-loop gate exists to catch.
     """
     if _git(repo, "rev-parse", "--is-inside-work-tree") is None:
-        return {"paths": [], "source": "not-a-git-repository",
-                "note": "no VCS to derive changed files from; pass paths explicitly"}
+        # No VCS means no changed-file set. That is NOT "nothing changed": `scope_determined`
+        # False tells the caller the question was never answered (see UNDETERMINED_SOURCES).
+        return {"paths": [], "source": "not-a-git-repository", "scope_determined": False,
+                "note": "no VCS to derive changed files from; pass paths explicitly with --only"}
+    # Porcelain paths are ALWAYS relative to the repository root (status.relativePaths is ignored
+    # in porcelain mode), while the gate analyses relative to the TARGET. Gating a subdirectory
+    # (`websec gate svc`) therefore asked for `svc/src/app.py` under `svc/`, matched nothing, and
+    # passed an uncommitted vulnerability as "missed". Translate through the target's prefix.
+    prefix = _git(repo, "rev-parse", "--show-prefix")
+    if prefix is None:
+        return {"paths": [], "source": "working-tree-unavailable", "scope_determined": False,
+                "note": "`git rev-parse --show-prefix` did not complete, so the changed-file set "
+                        "is unknown; pass paths explicitly with --only"}
+    prefix = prefix.strip()
     out: list[str] = []
     # -z keeps paths with spaces/newlines intact; porcelain v1 is stable across git versions.
-    raw = _git(repo, "status", "--porcelain", "-z", "--untracked-files=all")
+    # The `.` pathspec (relative to `-C repo`) keeps status from walking siblings of a subdirectory
+    # target; the prefix filter below is what guarantees containment.
+    raw = _git(repo, "status", "--porcelain", "-z", "--untracked-files=all", "--", ".")
     if raw is None:
         # `git status` failed (timeout, index.lock contention, non-zero exit). An empty
         # path list here is NOT an empty working tree, and reporting source="working-tree"
         # would make the two indistinguishable — the gate would then pass having analysed
         # nothing. The rev-parse check above already draws this distinction; so does this.
-        return {"paths": [], "source": "working-tree-unavailable",
+        return {"paths": [], "source": "working-tree-unavailable", "scope_determined": False,
                 "note": "`git status` did not complete, so the changed-file set is unknown; "
                         "pass paths explicitly with --only"}
-    if raw:
-        for entry in raw.split("\0"):
-            if len(entry) < 4:
-                continue
-            status, path = entry[:2], entry[3:]
-            if "D" in status:            # deleted: nothing left to analyze
-                continue
-            if status.startswith("R"):   # rename records "new\0old"; the new name is this entry
-                path = path.split("\0")[0]
-            out.append(path)
+    entries = raw.split("\0") if raw else []
+    index = 0
+    while index < len(entries):
+        entry = entries[index]
+        index += 1
+        if len(entry) < 4:
+            continue
+        status, path = entry[:2], entry[3:]
+        if status[0] in "RC":
+            # With -z a rename/copy is "XY new\0old": the ORIGINAL name is the NEXT token, not a
+            # record of its own. Parsing it as one read its first two characters as a status and
+            # the rest as a path, so `src/old.py` became the phantom path `/old.py`.
+            index += 1
+        if "D" in status:                # deleted: nothing left to analyze
+            continue
+        if prefix:
+            if not path.startswith(prefix):
+                continue                 # outside the target: no finding of this run can be there
+            path = path[len(prefix):]
+        out.append(path)
     seen, paths = set(), []
     for path in out:
         if path in seen:
@@ -103,9 +127,22 @@ def working_tree_paths(repo: Path) -> dict:
         seen.add(path)
         if Path(path).suffix.lower() in _CODE_SUFFIXES:
             paths.append(path)
-    return {"paths": sorted(paths)[:_MAX_FILES], "source": "working-tree",
+    return {"paths": sorted(paths)[:_MAX_FILES], "source": "working-tree", "scope_determined": True,
             "truncated": len(paths) > _MAX_FILES,
             "note": "tracked modifications plus untracked files; deletions excluded"}
+
+
+# Scope sources under which the changed-file set is UNKNOWN. An empty path list from one of these
+# is not "nothing changed": the gate never learned what to analyse, which is the INCOMPLETE class
+# (exit 3), not a pass. `not-a-git-repository` used to fall through to the "no changed files" pass
+# and exit 0 having checked nothing.
+UNDETERMINED_SOURCES = frozenset({"working-tree-unavailable", "not-a-git-repository"})
+
+
+def scope_undetermined(discovered: dict) -> bool:
+    """True when `working_tree_paths` could not establish the changed-file set at all."""
+    return (discovered.get("scope_determined") is False
+            or discovered.get("source") in UNDETERMINED_SOURCES)
 
 
 CONF_ORDER = ["low", "medium", "high"]
@@ -161,6 +198,20 @@ def _named_paths(finding: dict, root: Path | None) -> list[str]:
     return out
 
 
+def _covered(path: str, wanted: set) -> bool:
+    """`path` was requested itself, or lies under a requested DIRECTORY (component boundary).
+
+    `--only` accepts directories (RepoContext selects every file below one). A finding in
+    `src/app.py` under a requested `src` must therefore gate; matching only exact file names would
+    classify it `outside-scope` and let it through. A requested FILE can never be a parent of
+    another path, so walking the parents is safe for both kinds of entry. `.` is the target itself.
+    """
+    if path in wanted or "." in wanted:
+        return True
+    parts = path.split("/")
+    return any("/".join(parts[:i]) in wanted for i in range(1, len(parts)))
+
+
 def _is_repo_file(root: Path, rel: str) -> bool:
     try:
         resolved = (root / rel).resolve()
@@ -181,7 +232,7 @@ def scope_state(finding: dict, requested: list, root: Path | None) -> str:
         return "in-scope"
     wanted = {_scope_key(p) for p in requested}
     named = _named_paths(finding, root)
-    if any(_scope_key(p) in wanted for p in named):
+    if any(_covered(_scope_key(p), wanted) for p in named):
         return "in-scope"
     if root is not None and any(_is_repo_file(root, p) for p in named):
         return "outside-scope"
@@ -245,7 +296,8 @@ def verdict(ledger: dict, facts: dict, threshold: str, *, scope_source: str = "e
         "missed": scope.get("missed", []),
         "scope_source": scope_source,
         "findings": [{"severity": f.get("severity"), "confidence": f.get("confidence"),
-                      "title": f.get("title"), "file": f.get("file"), "line": f.get("line"),
+                      "title": f.get("title"), "file": f.get("file"),
+                      "location": f.get("location"), "line": f.get("line"),
                       "attack_class": f.get("attack_class"), "rule_id": f.get("rule_id"),
                       "remediation": f.get("remediation"), "fingerprint": f.get("fingerprint"),
                       "scope": state,
@@ -316,8 +368,14 @@ def render_text(result: dict) -> str:
     lines = [f"websec gate: FAILED — {result['blocking_count']} finding(s) at or above "
              f"{result['threshold']} in this scoped analysis.", ""]
     for f in result["findings"][:10]:
-        where = f.get("file") or "(no file)"
-        if f.get("line"):
+        # Recon findings carry `location` (`src/auth.ts:12`, a route, `(response headers)`) and no
+        # `file`; rendering only `file` printed "(no file)" for every one of them, leaving the model
+        # nothing to act on.
+        where = f.get("file") or f.get("location") or "(no file)"
+        location = str(f.get("location") or "")
+        if f.get("file") and not f.get("line") and location.startswith(f"{f['file']}:"):
+            where = location             # same file, and the location also carries the line
+        if f.get("line") and not str(where).endswith(f":{f['line']}"):
             where += f":{f['line']}"
         lines.append(f"  [{f.get('severity')}] {where} — {f.get('title')}")
         if f.get("scope") == "unattributed":

@@ -65,10 +65,13 @@ _HEADER = """\
 #
 # Three kinds of line:
 #
-#   path/glob            a path substring or glob. Findings whose location matches are SUPPRESSED
-#                        (they leave the ledger and stop gating). Use for code that is not your
-#                        product: tests, fixtures, seed data, vendored copies.
-#   category:<name>      suppress a whole finding category, e.g. `category:static-secret`.
+#   path/glob            a path or glob, matched on whole path components like .gitignore:
+#                        `tests/` hides tests/ at any depth (never contests/), `/build/` only the
+#                        root build/, `*.js` any .js file. Findings whose file matches are
+#                        SUPPRESSED (they leave the ledger and stop gating). Use for code that is
+#                        not your product: tests, fixtures, seed data, vendored copies.
+#   category:<name>      suppress a whole finding category — the `category` field of a finding
+#                        in findings-ledger.json, e.g. `category:static-secret` (scanner secrets).
 #   fingerprint:<id> expires:YYYY-MM-DD  # why
 #                        ACKNOWLEDGE one specific finding. It stays VISIBLE in the report and stops
 #                        gating until the expiry date. A reason is required. This is the honest
