@@ -30,6 +30,9 @@ PLAYGROUND = re.compile(r"playground\s*[:=]\s*(?:true|True)|graphiql\s*[:=]\s*(?
                         r"|LandingPageGraphQLPlayground|LandingPageLocalDefault")
 LIMITING = re.compile(r"graphql-depth-limit|depthLimit|costAnalysis|graphql-cost-analysis|"
                       r"createComplexityLimitRule|query-complexity|graphql-armor")
+FIELD_SUGGESTIONS_OFF = re.compile(
+    r"hide_field_suggestions|disable_field_suggestions|max_errors|no_field_suggestions|disableSuggestions", re.I
+)
 
 # --- AppSync / managed GraphQL (REF-PENTEST #2 introspection-via-WAF-bypass, #5 sub-authz) ---
 APPSYNC_MARK = re.compile(r"appsync\.GraphqlApi|CfnGraphQLApi|Definition\.fromSchema|aws-appsync|aws_appsync", re.I)
@@ -60,6 +63,7 @@ class GraphQLExtractor(Extractor):
                      if "graphql" in e.get("path", "").lower()]
 
         introspection, playground, limiting, code_hit = "unknown", False, False, False
+        field_suggestions_disabled = False
         appsync, aws_directives = False, False
         appsync_introspection_off = appsync_limiting = False
         schema_texts = []          # (rel, text) for SDL files — parsed for Subscription authz
@@ -84,6 +88,8 @@ class GraphQLExtractor(Extractor):
                     playground = True
                 if LIMITING.search(text):
                     limiting = True
+                if FIELD_SUGGESTIONS_OFF.search(text):
+                    field_suggestions_disabled = True
 
         managed = appsync or aws_directives
         if not ({"graphql", "apollo-graphql"} & frameworks) and not schema_files and not endpoints \
@@ -126,6 +132,10 @@ class GraphQLExtractor(Extractor):
                 findings.append({"severity": "MEDIUM", "issue": "no query depth/complexity limiting detected",
                                  "attack_class": "graphql",
                                  "detail": "alias/deep-query DoS — add depth+cost limits (e.g. graphql-armor)"})
+            if not field_suggestions_disabled:
+                findings.append({"severity": "LOW", "issue": "GraphQL field suggestions not explicitly disabled",
+                                 "attack_class": "graphql",
+                                 "detail": "information disclosure — attackers can bypass disabled introspection by brute-forcing nearby fields; disable in production"})
 
         return {"present": True,
                 "appsync": managed,
