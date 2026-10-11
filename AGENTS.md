@@ -80,10 +80,13 @@ content instead of overwriting the name-guard.
 ### AI Agent Workflow
 
 1. **Before any work**: read `docs-canonical/` and run `docguard guard` to see the compliance state.
-2. **After changing code or docs**: re-run `docguard guard`; keep the numbers (22 extractors, 17 sink
-   classes, 11 scanner entries, dated 10/10 proof (not vulnerability recall)) consistent across every doc — DocGuard's metrics-consistency
-   validator checks only configured matching statements; historical snapshots stay dated. A
-   `no-matches` result is not evidence these numbers were checked.
+2. **After changing code or docs**: re-run `docguard guard`. If your change itself alters one of the
+   DocGuard-tracked figures (22 extractors, 17 sink classes, 11 scanner entries, dated 10/10 proof
+   (not vulnerability recall)), update every doc that states it **in the same PR**. Never open a PR
+   whose only purpose is to sync a number: those are closed as noise, and a figure that drifted is
+   fixed by whoever changes it. DocGuard's metrics-consistency validator checks only configured
+   matching statements; historical snapshots stay dated. A `no-matches` result is not evidence
+   these numbers were checked.
 3. **Update `CHANGELOG.md`** for any user-visible change.
 4. **Document drift**: if code must deviate from a canonical doc, add a `// DRIFT: reason` (or
    `# DRIFT: reason`) comment and a matching `DRIFT-LOG.md` entry.
@@ -114,14 +117,23 @@ and hash manifest with the source. Selected fact tests and matching hashes do no
 - Documentation changes must pass `docguard guard` before commit.
 - Never commit without explicit approval.
 
+**Scheduled agents.** The plan-first and approval rules above are for interactive sessions with a
+maintainer present. A scheduled agent (Jules) has nobody to ask, so `.jules/RULES.md` replaces them:
+one preflight-assigned target per run, at most one pull request (the pull request *is* the approval
+request), and never a question — decide pessimistically or stop and summarise.
+
 ## Automated agents (Jules, Dependabot, and any other bot opening PRs)
 
 This repo receives agent-authored PRs continuously. Follow these rules or the PR will be closed
-automatically by `.github/workflows/bot-triage.yml`.
+automatically by `.github/workflows/bot-triage.yml`. For Jules the policy is
+`.github/scripts/jules_policy.py` and the routines it runs are in `.jules/` (start at
+`.jules/RULES.md`).
 
 **Before opening a PR, search open AND closed PRs for the same change.** One failing test produced
 79 open PRs here across two months, ~27 of them the same one-line edit worded differently each time.
-Duplicates are detected by changed-file overlap, not by title, so rewording does not help.
+Duplicates are detected by routine tag (`[jules:<routine>] <target>`) or by the identifying set of
+changed files, not by title, so rewording does not help. Work closed unmerged in the last 60 days is
+not re-proposed, and at most five Jules PRs wait for review at once.
 
 **Only open a PR for a genuinely new finding, backed by evidence:**
 - a defect → a failing test that demonstrates it
@@ -135,13 +147,17 @@ not — so CI could never reproduce or confirm the fix. That defect is fixed (bu
 `hermeticity` job that manufactures the hostile config, so a real regression fails there.
 
 **What merges without a human** (`.github/scripts/triage.py` is the authority):
-- docs-only changes
+- user docs: `README.md` and `docs/**/*.md`, except `docs/security-review/` (design intent in
+  `docs-canonical/`, the contracts in `specs/` and evidence records always get a human)
 - test changes that are **purely additive** — a diff that deletes or rewrites an existing assertion
   is a change to the detection contract and always gets a human
 - dependabot patch/minor bumps confined to its own ecosystems' paths
 
-**What never merges automatically:** anything under `src/`, `.github/`, packaging files, instruction
-files (`AGENTS.md`, `CLAUDE.md`), binaries, or any major version bump.
+**What never merges automatically:** anything under `src/`, `.github/`, `.jules/`, packaging files,
+instruction files (`AGENTS.md`, `CLAUDE.md`), binaries, or any major version bump.
+
+**Automation never mentions an agent by handle.** With Jules' Reactive Mode on, a mention is an
+instruction; a closed PR is not one to act on.
 
 **Do not record the test count in documentation.** The suite size is not a documented fact: it
 changes with every test-adding PR, so a count in a doc makes every such PR edit the same line and

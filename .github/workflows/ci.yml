@@ -69,6 +69,9 @@ jobs:
           git config --file "$cfg" core.hooksPath "$RUNNER_TEMP/globalhooks"
           git config --file "$cfg" core.autocrlf true
           git config --file "$cfg" commit.gpgsign true
+          # …with a signer that always fails, so a test that commits without disabling signing fails
+          # here deterministically instead of depending on whether the runner has a usable gpg key.
+          git config --file "$cfg" gpg.program false
           # A global gitignore hides untracked paths from `git status --porcelain`. A fixture
           # that inherits it can pass locally and fail here — or worse, pass in both while
           # asserting on a status that silently omits files. Developers commonly ignore
