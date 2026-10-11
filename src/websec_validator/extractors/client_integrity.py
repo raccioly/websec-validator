@@ -112,7 +112,10 @@ OVERCLAIM = re.compile(
 WS_USAGE = re.compile(r"new\s+WebSocket\(|socket\.io|graphql-ws|subscriptions-transport-ws|appsync-realtime"
                       r"|\bwss?://", re.I)
 WS_COOKIE_AUTH = re.compile(r"withCredentials\s*:\s*true|credentials\s*:\s*['\"]include['\"]"
-                            r"|document\.cookie[\s\S]{0,80}?(?:socket|ws\b|websocket)", re.I)
+                            # `ws` needs a non-letter before it: `ws\b` alone matched the end of "Windows"
+                            # in a nearby comment (#202, hardened). `socket` keeps substring matching so
+                            # `socketUrl` / `createSocket` near the cookie read still count.
+                            r"|document\.cookie[\s\S]{0,80}?(?:socket|(?<![a-z])ws\b|websocket)", re.I)
 
 
 class ClientIntegrityExtractor(Extractor):
