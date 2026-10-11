@@ -49,7 +49,3 @@ base-research/**
 # comments are not project TODOs, so exclude them from TODO/surface validation.
 src/websec_validator/templates/probes/**
 .claude/**
-
-# Jules routines and rules: agent instructions (like .claude/), not project documentation. They are
-# pinned by .github/scripts/test_jules_policy.py instead.
-.jules/**
