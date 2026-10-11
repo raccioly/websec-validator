@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Automation
+
+- **Jules policy ported from TestGuard** (`.github/scripts/jules_policy.py`, unit-tested). Jules
+  PRs are closed when they are noise (count syncs, personas, no-ops, empty, `.jules/`-only), the
+  same work as an open PR (routine tag or identifying file set — shared files such as `AGENTS.md`
+  no longer make a real fix a "duplicate" of a count sync), work declined in the last 60 days, or
+  over a review queue of five. Close comments never mention the agent by handle.
+- The merge gate's docs allowlist is narrowed to `README.md` and `docs/**/*.md` outside
+  `docs/security-review/`; `docs-canonical/`, `specs/` and evidence records always get a human.
+  `.jules/` is a protected path.
+- `.jules/`: a fail-closed `setup.sh`, `RULES.md` (including "never ask a question: decide
+  pessimistically or stop"), a preflight that assigns one target per run from the repository or
+  answers STOP, and three weekly routines — `fp-hunt`, `fn-hunt`, `docs-drift` — replacing nine
+  prompts that forced a PR every run.
+- `AGENTS.md`: no sync-only PRs for tracked figures; a scheduled-agent carve-out for the
+  interactive plan-first and approval rules.
+- CI's hostile-git-config job also sets `gpg.program=false`.
+
 ### Fixed — Jules #201 and #202, hardened
 
 - GraphQL: a server that disables introspection but still returns "Did you mean …?" field

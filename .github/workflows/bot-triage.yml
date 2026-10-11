@@ -1,5 +1,6 @@
 name: Bot PR triage
 
+# Jules PRs: .github/scripts/jules_policy.py (pure, unit-tested in test_jules_policy.py).
 # pull_request_target runs with write scope against the BASE repo. Nothing here checks out or
 # executes PR code — the PR is inspected through the API only, and the scripts come from the
 # default branch.
@@ -11,6 +12,12 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
+
+# Serialised: the queue cap and the duplicate check read the other open PRs, so two triages racing
+# would each see the queue one short and both keep their PR.
+concurrency:
+  group: bot-triage
+  cancel-in-progress: false
 
 jobs:
   triage:

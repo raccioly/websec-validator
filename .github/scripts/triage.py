@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import re
 
+from jules_policy import is_doc_path
+
 # Files that carry no semantic weight for duplicate detection — a bot rewriting the changelog does
 # not make two PRs different.
 NOISE_FILES = frozenset({"CHANGELOG.md", ".websec-ignore", ".docguardignore"})
@@ -25,6 +27,7 @@ NOISE_FILES = frozenset({"CHANGELOG.md", ".websec-ignore", ".docguardignore"})
 HELD_PREFIXES = (
     "src/",            # the product
     ".github/",        # CI, release, and this automation itself
+    ".jules/",         # the routines and rules that steer Jules
     ".claude-plugin/", # plugin manifests consumers install from
     "skills/",         # shipped skill text
     ".wolf/",          # assistant memory
@@ -36,8 +39,6 @@ HELD_EXACT = frozenset({
     # Instruction files: they steer coding agents, so they are config, not prose.
     "AGENTS.md", "CLAUDE.md", "GEMINI.md", "CONVENTIONS.md",
 })
-
-DOC_PREFIXES = ("docs/", "docs-canonical/", "docs-implementation/")
 
 # Binary or vendored payloads have no business in a bot PR (PR #73 carried a 30MB .deb).
 BINARY_RE = re.compile(
@@ -85,7 +86,10 @@ def is_known_noise(filenames) -> str | None:
 
 
 def _is_doc(f: str) -> bool:
-    return f.endswith(".md") or f.startswith(DOC_PREFIXES)
+    # User docs only: README.md and docs/**/*.md outside docs/security-review/. Any *.md used to
+    # count, which let a bot merge docs-canonical/ (design intent), specs/ (the contract) and the
+    # evidence-bound validation record without a human.
+    return is_doc_path(f)
 
 
 def _is_test(f: str) -> bool:
