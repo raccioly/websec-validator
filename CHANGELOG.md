@@ -25,6 +25,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   interactive plan-first and approval rules.
 - CI's hostile-git-config job also sets `gpg.program=false`.
 
+### Fixed — Jules #201 and #202, hardened
+
+- GraphQL: a server that disables introspection but still returns "Did you mean …?" field
+  suggestions is reported (LOW), since the schema can be rebuilt by brute force (#201, hardened).
+  Only real controls silence it — graphql-armor, `blockFieldSuggestions`, an explicit
+  `…field_suggestions=True` — not `max_errors` or a `=False` flag; and it is not reported when
+  introspection is on, where the schema is already public.
+- client_integrity: a cookie read near the word "Windows" no longer reads as a cookie-authenticated
+  WebSocket (#202, hardened). `socketUrl`-style names still count, and "100% secure" claims about a
+  client-side control remain an over-claimed control — #202 removed that true positive.
+
+
 ## [0.22.0] — 2026-10-10
 
 ### Changed — exit codes follow the documented contract everywhere ([migration notes](docs/MIGRATING-0.22.0.md))

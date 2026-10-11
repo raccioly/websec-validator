@@ -28,6 +28,14 @@ INTROSPECTION_OFF = re.compile(r"introspection\s*:\s*(?:false|False)\b|(?<![\w$]
                                r"|NoSchemaIntrospection|NoIntrospection")
 PLAYGROUND = re.compile(r"playground\s*[:=]\s*(?:true|True)|graphiql\s*[:=]\s*(?:true|True)"
                         r"|LandingPageGraphQLPlayground|LandingPageLocalDefault")
+# Field suggestions ("Did you mean …?") leak field names even with introspection disabled, so a
+# schema can be rebuilt by brute force (#201, hardened). Only anchored, real controls count:
+# graphql-armor blocks suggestions by default (its umbrella package or the dedicated plugin), and an
+# explicit `…suggestions…=True|true` flag. `max_errors` and a bare option NAME are not evidence — a
+# `disable_field_suggestions=False` would otherwise read as disabled.
+FIELD_SUGGESTIONS_OFF = re.compile(
+    r"graphql-armor|blockFieldSuggestions?\b"
+    r"|(?:disable|hide|block|no)_?field_?suggestions?\s*[:=]\s*(?:true|True)\b", re.I)
 LIMITING = re.compile(r"graphql-depth-limit|depthLimit|costAnalysis|graphql-cost-analysis|"
                       r"createComplexityLimitRule|query-complexity|graphql-armor")
 
@@ -60,6 +68,7 @@ class GraphQLExtractor(Extractor):
                      if "graphql" in e.get("path", "").lower()]
 
         introspection, playground, limiting, code_hit = "unknown", False, False, False
+        field_suggestions_disabled = False
         appsync, aws_directives = False, False
         appsync_introspection_off = appsync_limiting = False
         schema_texts = []          # (rel, text) for SDL files — parsed for Subscription authz
@@ -84,6 +93,8 @@ class GraphQLExtractor(Extractor):
                     playground = True
                 if LIMITING.search(text):
                     limiting = True
+            if FIELD_SUGGESTIONS_OFF.search(text):
+                field_suggestions_disabled = True
 
         managed = appsync or aws_directives
         if not ({"graphql", "apollo-graphql"} & frameworks) and not schema_files and not endpoints \
@@ -126,6 +137,14 @@ class GraphQLExtractor(Extractor):
                 findings.append({"severity": "MEDIUM", "issue": "no query depth/complexity limiting detected",
                                  "attack_class": "graphql",
                                  "detail": "alias/deep-query DoS — add depth+cost limits (e.g. graphql-armor)"})
+            # Only when introspection is DISABLED: that is the bypass the finding is about. With
+            # introspection on the schema is already public and this would be noise on every app.
+            if introspection == "disabled" and not field_suggestions_disabled:
+                findings.append({"severity": "LOW", "issue": "field suggestions not disabled (introspection bypass)",
+                                 "attack_class": "graphql",
+                                 "detail": "with introspection off, 'Did you mean …?' errors still leak field names, "
+                                           "so the schema can be brute-forced — block suggestions in production "
+                                           "(e.g. graphql-armor's blockFieldSuggestions)"})
 
         return {"present": True,
                 "appsync": managed,
