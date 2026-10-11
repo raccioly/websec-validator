@@ -9,6 +9,8 @@ assumed.
 Citation accuracy is also pinned: a misattributed clause is the fastest way for an assessor to
 discount the whole artifact, and the obvious citations are wrong.
 """
+import contextlib
+import io
 import os
 import json
 from pathlib import Path
@@ -41,7 +43,8 @@ class AttestOutputTests(unittest.TestCase):
         subprocess.run(["git", "add", "-A"], cwd=self.repo, check=True)
         subprocess.run(["git", "commit", "-qm", "init"], cwd=self.repo, check=True)
         self.out = base / "out"
-        cli.main(["run", str(self.repo), "--out", str(self.out)])
+        with contextlib.redirect_stdout(io.StringIO()):   # keep the run report off the console
+            cli.main(["run", str(self.repo), "--out", str(self.out)])
         self.run_dir = sorted(self.out.glob("runs/2*"))[-1]
         self.result = attest.build(self.run_dir)
 
@@ -134,7 +137,8 @@ class AttestOutputTests(unittest.TestCase):
             self.assertEqual(cli.main(["attest", "--run", td]), 2)
 
     def test_attest_always_exits_zero_because_it_does_not_judge(self):
-        self.assertEqual(cli.main(["attest", "--run", str(self.run_dir), "--format", "json"]), 0)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(["attest", "--run", str(self.run_dir), "--format", "json"]), 0)
 
 
 class InTotoTests(unittest.TestCase):

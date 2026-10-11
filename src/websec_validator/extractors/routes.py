@@ -216,7 +216,7 @@ def _noir_scan(root: Path, extra_excludes: list | None = None, status: dict | No
         proc = subprocess.run(
             ["noir", "scan", str(root), "-f", "json", "-o", str(out),
              "--exclude-path", excl, "--no-log", "--no-color"],
-            capture_output=True, text=True, timeout=NOIR_TIMEOUT)
+            capture_output=True, text=True, timeout=NOIR_TIMEOUT, stdin=subprocess.DEVNULL)
         raw = out.read_text() if out.exists() else ""
         if not raw.strip():
             if proc.returncode != 0:

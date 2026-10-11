@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Every child process websec spawns (route engine, scanner and version probes, git) now gets
+  `stdin=DEVNULL`. A child that inherited a console's or a never-closing stdin could block a run
+  until its timeout (300 s for the route engine) — the likely cause of the Jules VM killing the
+  suite mid-run. A test enforces it for every spawn in the package.
 - `python -m websec_validator …` runs the CLI, so an interpreter can always reach the package it
   installed even when the `websec` console script is not on `PATH`.
 - Jules setup: the first snapshot failed on `websec --version` because, in the Jules VM, `python3`

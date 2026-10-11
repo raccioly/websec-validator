@@ -175,7 +175,7 @@ def _gitleaks_has_subcommands(binary: str = "gitleaks") -> bool:
     per process; a probe failure means "assume legacy", never "skip the scan"."""
     if binary not in _GITLEAKS_DIR_SUPPORT:
         try:
-            probe = subprocess.run([binary, "dir", "--help"], capture_output=True, timeout=20)
+            probe = subprocess.run([binary, "dir", "--help"], capture_output=True, timeout=20, stdin=subprocess.DEVNULL)
             _GITLEAKS_DIR_SUPPORT[binary] = probe.returncode == 0
         except Exception:
             _GITLEAKS_DIR_SUPPORT[binary] = False
@@ -429,7 +429,7 @@ def probe_version(binary: str, timeout: int = 15) -> str | None:
         return _VERSION_CACHE[binary]
     version = None
     try:
-        proc = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
         m = _VERSION_RE.search((proc.stdout or "") + "\n" + (proc.stderr or ""))
         if m:
             version = ".".join(part for part in m.groups() if part is not None)
@@ -497,7 +497,7 @@ def check_route_engine(probe: bool = True, timeout: int = 15) -> dict:
         row["status"] = "not_checked"
         return row
     try:
-        proc = subprocess.run(["noir", "--version"], capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(["noir", "--version"], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         return {**row, "status": "broken", "note": f"`noir --version` timed out after {timeout}s"}
     except Exception as error:   # OSError, permission, a broken shim
@@ -587,7 +587,7 @@ def run_available(target: Path, outdir: Path, stack_languages: list | None = Non
         out_file = scan_dir / f"{s.key}.json"
         try:
             proc = subprocess.run(s.argv(target, out_file, excludes), capture_output=True,
-                                  text=True, timeout=timeout)
+                                  text=True, timeout=timeout, stdin=subprocess.DEVNULL)
             # Checkov ignores the filename and writes `results_json.json` into the dir passed to
             # `--output-file-path` — so the recorded <key>.json never existed and 100% of its findings
             # were silently dropped. Normalize the produced file to the expected path.
@@ -631,7 +631,7 @@ def write_sbom(target: Path, outdir: Path, fmt: str = "cyclonedx",
         cmd += ["--skip-dirs", d]
     cmd.append(str(target))
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
         if out_file.exists() and out_file.stat().st_size > 0:
             comps = 0
             try:

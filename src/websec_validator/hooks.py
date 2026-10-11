@@ -39,7 +39,7 @@ def _safe_pinned_python() -> str:
 def _git_root(path: Path) -> Path | None:
     try:
         res = subprocess.run(["git", "-C", str(path), "rev-parse", "--show-toplevel"],
-                             capture_output=True, text=True)
+                             capture_output=True, text=True, stdin=subprocess.DEVNULL)
     except (OSError, FileNotFoundError):
         return None
     top = res.stdout.strip()
@@ -50,7 +50,7 @@ def _hooks_dir(root: Path) -> Path:
     """Resolve the git hooks dir (respects worktrees + core.hooksPath); fall back to .git/hooks."""
     try:
         res = subprocess.run(["git", "-C", str(root), "rev-parse", "--git-path", "hooks"],
-                             capture_output=True, text=True)
+                             capture_output=True, text=True, stdin=subprocess.DEVNULL)
         raw = res.stdout.strip()
         if res.returncode == 0 and raw and not any(c in raw for c in ("\n", "\r", "\x00")):
             d = (root / raw).resolve()
@@ -202,7 +202,7 @@ def read_bypasses(repo, limit: int = 50) -> dict:
                                 "an empty list is not evidence that no bypass occurred")}
     try:
         git_dir = subprocess.run(["git", "-C", str(repo), "rev-parse", "--git-dir"],
-                                 capture_output=True, text=True, timeout=10)
+                                 capture_output=True, text=True, timeout=10, stdin=subprocess.DEVNULL)
         if git_dir.returncode != 0:
             return out
         base = (Path(repo) / git_dir.stdout.strip()).resolve()
