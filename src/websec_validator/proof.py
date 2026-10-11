@@ -37,7 +37,7 @@ def _git(args, cwd=None):
     env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull, GIT_TERMINAL_PROMPT="0")
     return subprocess.run(["git", "-c", "core.hooksPath=" + os.devnull,
                            "-c", "protocol.file.allow=never", "-c", "core.fsmonitor=false", "-c", "init.templateDir=", *args], cwd=cwd, env=env,
-                          capture_output=True, text=True, check=True, timeout=240).stdout.strip()
+                          capture_output=True, text=True, check=True, timeout=240, stdin=subprocess.DEVNULL).stdout.strip()
 
 
 def _clean_tree(dest: Path) -> bool:

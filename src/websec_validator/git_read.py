@@ -18,7 +18,7 @@ def run(target, *args: str, timeout: int = 20):
         # Read names (not commands) via a non-executing config query, then override every driver.
         filters = subprocess.run([*command, "config", "--null", "--name-only", "--get-regexp",
                                   r"^filter\..*\.(clean|smudge|process|required)$"],
-                                 env=env, capture_output=True, text=True, timeout=timeout)
+                                 env=env, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
         if filters.returncode not in (0, 1) or len(filters.stdout) > 1_000_000:
             raise OSError("cannot isolate checkout filter configuration")
         for key in filters.stdout.split("\0"):
@@ -27,4 +27,4 @@ def run(target, *args: str, timeout: int = 20):
                     raise OSError("invalid checkout filter configuration")
                 command.extend(("-c", key + ("=false" if key.endswith(".required") else "=")))
     command.extend(args)
-    return subprocess.run(command, env=env, capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(command, env=env, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)

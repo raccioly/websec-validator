@@ -44,11 +44,11 @@ changes nothing, reports that something is up to date, or restates a count is cl
 ## 4. Before you open the pull request, run
 
 ```bash
-PYTHONPATH=src python -m unittest discover -s tests
-npx -y docguard-cli@0.43.0 guard
+PYTHONPATH=src python -m unittest discover -s tests < /dev/null > /tmp/websec-suite.log 2>&1; tail -5 /tmp/websec-suite.log
+npx -y docguard-cli@0.43.0 guard < /dev/null
 ```
 
-Both must pass. For a change under `src/`, also run the CLI on the bundled demo to prove the run
+Both must pass (the suite's last line is `OK`). Run commands with stdin detached (`< /dev/null`) and long output sent to a file: attached to the Jules console, a run can be killed mid-way. For a change under `src/`, also run the CLI on the bundled demo to prove the run
 still completes:
 
 ```bash
