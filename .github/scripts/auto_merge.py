@@ -21,8 +21,9 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-import gh        # noqa: E402
-import triage    # noqa: E402
+import gh            # noqa: E402
+import jules_policy  # noqa: E402
+import triage        # noqa: E402
 
 REPO = os.environ["REPO"]
 HEAD_SHA = os.environ["HEAD_SHA"]
@@ -99,6 +100,11 @@ def main():
         if pr.get("draft"):
             print("  skip: draft")
             continue
+        if jules_policy.is_jules(author) and any(
+                (l.get("name") if isinstance(l, dict) else l) == jules_policy.LABELS["queue_full"]
+                for l in pr.get("labels") or []):
+            print("  skip: closed by triage as queue-full")
+            continue
 
         ok, why = check_state(HEAD_SHA)
         if not ok:
@@ -120,6 +126,9 @@ def main():
         if verdict != "merge":
             marker = "<!-- websec-automation:hold -->"
             ensure_label(n, HOLD_LABEL, "B60205", "Bot PR held for human review by the merge gate")
+            if jules_policy.is_jules(author):
+                ensure_label(n, jules_policy.LABELS["review"], "B60205",
+                             "Set by Jules PR triage (.github/scripts/jules_policy.py)")
             if not already_commented(n, marker):
                 gh.request("POST", f"/repos/{REPO}/issues/{n}/comments", {
                     "body": f"{marker}\n**Held for human review.**\n\n{reason}\n\n"
