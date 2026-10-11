@@ -28,6 +28,10 @@ pipx list              # confirm websec-validator is listed with its commands
 For a pip install, activate the virtualenv you installed into. For uv, `uv tool dir --bin` prints the
 command directory and `uv tool update-shell` adds it to `PATH`.
 
+Since 0.22.2 there is also a PATH-independent form: the interpreter that installed the package can
+always run it, so `python -m websec_validator <command>` works wherever `websec <command>` would. Use
+it in CI images and agent sandboxes where the console script's directory is not on `PATH`.
+
 ### Installation fails because Python is too old
 
 **Symptom.** pip reports that no matching distribution was found, or that the available versions

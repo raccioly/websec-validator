@@ -53,7 +53,7 @@ last 60 days, so a quiet week costs nothing and the same target is not re-propos
 ## Running preflight yourself
 
 ```bash
-python3 .jules/preflight.py fp-hunt     # GO + target, or STOP + reason (exit 3)
+python .jules/preflight.py fp-hunt     # GO + target, or STOP + reason (exit 3)
 ```
 
 It reads the public GitHub API and fails closed: if the queue cannot be read, it answers STOP.

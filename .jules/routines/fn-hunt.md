@@ -8,7 +8,7 @@ Follow `.jules/RULES.md` throughout.
 
 ## Steps
 
-1. Run `python3 .jules/preflight.py fn-hunt`. On STOP, end the task. On GO, the `target:` line is
+1. Run `python .jules/preflight.py fn-hunt`. On STOP, end the task. On GO, the `target:` line is
    the one sink class you hunt (for example `command-injection`).
 2. Read how the class is detected today: its entry in `SINKS` in
    `src/websec_validator/extractors/surface.py`, the user-input gate `_U` it relies on, and the
@@ -24,7 +24,7 @@ Follow `.jules/RULES.md` throughout.
 4. Scan it:
 
    ```bash
-   websec run <tmpdir> --out <tmpdir>/out
+   python -m websec_validator run <tmpdir> --out <tmpdir>/out
    ```
 
    A miss is a variant with no finding of the target class in `<tmpdir>/out/latest/findings-ledger.json`.

@@ -31,6 +31,9 @@ websec [-h] [--version] <command> ...
 websec <path> [run options]
 ```
 
+`python -m websec_validator …` is the same CLI with the same options and exit codes, for
+environments where the `websec` console script is not on `PATH` (since 0.22.2).
+
 | Option | Description |
 |---|---|
 | `--version` | Print `websec-validator <version>` and exit 0. The version comes from the installed package metadata; a source tree that is not installed reports `0.0.0+source`. |

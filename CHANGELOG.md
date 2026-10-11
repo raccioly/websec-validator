@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `python -m websec_validator …` runs the CLI, so an interpreter can always reach the package it
+  installed even when the `websec` console script is not on `PATH`.
+- Jules setup: the first snapshot failed on `websec --version` because, in the Jules VM, `python3`
+  and `python` are different interpreters and the console script landed outside `PATH`.
+  `.jules/setup.sh`, `RULES.md` and the routines now use one interpreter (`python`, or `$PYTHON`)
+  and `python -m websec_validator` throughout; a test rejects a bare `websec` or `python3`
+  invocation under `.jules/`.
+
+
 ## [0.22.1] — 2026-10-11
 
 ### Automation

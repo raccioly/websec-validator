@@ -235,6 +235,25 @@ class PreflightTests(unittest.TestCase):
             self.assertIn(f"Follow .jules/routines/{routine}.md exactly.", readme)
 
 
+class OneInterpreterTests(unittest.TestCase):
+    """The first Jules snapshot failed on `websec --version`: the console script was not on PATH in
+    the VM, where `python3` and `python` are different interpreters. Every .jules/ command must go
+    through `python` and `python -m websec_validator`."""
+
+    def test_no_bare_websec_or_python3_invocation_in_jules_files(self):
+        jules = HERE.parents[1] / ".jules"
+        offenders = []
+        for path in sorted(jules.rglob("*")):
+            if not path.is_file() or path.suffix not in {".md", ".sh"}:
+                continue
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                code = line.split("#", 1)[0] if path.suffix == ".sh" else line
+                if re.search(r"(?:^|[`$(\s])websec\s+(?:run|demo|--version|--help|<)", code) \
+                        or re.search(r"(?:^|[`\s])python3\s+(?:-m|\.jules|-c)", code):
+                    offenders.append(f"{path.relative_to(jules)}:{number}: {line.strip()}")
+        self.assertEqual(offenders, [])
+
+
 class NoMentionTests(unittest.TestCase):
     def test_no_automation_mentions_the_agent_by_handle(self):
         # With Jules' Reactive Mode on, a mention is an instruction. bot_triage.py used to append

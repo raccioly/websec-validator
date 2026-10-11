@@ -7,7 +7,7 @@ Follow `.jules/RULES.md` throughout.
 
 ## Steps
 
-1. Run `python3 .jules/preflight.py fp-hunt`. On STOP, end the task. On GO, the `target:` line is
+1. Run `python .jules/preflight.py fp-hunt`. On STOP, end the task. On GO, the `target:` line is
    the one extractor you hunt (for example `crypto_usage`).
 2. Read the extractor (`src/websec_validator/extractors/<target>.py`) and the tests that already pin
    it (`grep -rn "<ExtractorClass>" tests/`). List the patterns it matches.
@@ -20,7 +20,7 @@ Follow `.jules/RULES.md` throughout.
 5. Scan it:
 
    ```bash
-   websec run <tmpdir> --out <tmpdir>/out
+   python -m websec_validator run <tmpdir> --out <tmpdir>/out
    ```
 
    A false positive is a finding from the target extractor on code that is not vulnerable. Confirm
