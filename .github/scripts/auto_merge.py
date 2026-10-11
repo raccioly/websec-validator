@@ -163,7 +163,19 @@ def main():
             }, accept_status=(403, 404))
             print(f"  MERGED #{n}")
         else:
+            # A refusal must not leave the PR silently open: GITHUB_TOKEN cannot merge a change to a
+            # workflow that needs the `workflows` permission (dependabot bumps to publish.yml), so the
+            # gate said "merge" and nothing happened (#205). Hold it, with the reason, for a human.
             print(f"  merge refused ({status}): {body}")
+            marker = "<!-- websec-automation:merge-refused -->"
+            ensure_label(n, HOLD_LABEL, "B60205", "Bot PR held for human review by the merge gate")
+            if not already_commented(n, marker):
+                detail = body.get("message") if isinstance(body, dict) else body
+                gh.request("POST", f"/repos/{REPO}/issues/{n}/comments", {
+                    "body": f"{marker}\n**The merge gate approved this, but GitHub refused the merge** "
+                            f"(HTTP {status}): {detail}\n\nA maintainer can merge it; the policy verdict "
+                            f"was: {reason}",
+                }, accept_status=(403, 404))
 
 
 if __name__ == "__main__":
