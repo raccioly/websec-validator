@@ -103,7 +103,7 @@ OVERCLAIM = re.compile(
     r"|impossible to (?:tamper|forge|fake|intercept)|cryptographically (?:guaranteed|proven|secure)"
     # 'modified'/'intercepted' dropped — they match benign UI copy ('🔒 System roles cannot be modified',
     # a disabled-field hint that makes no cryptographic tamper-proof claim). Keep genuine over-claim verbs.
-    r"|can(?:'|no)?t be (?:tampered|forged|faked)|unhackable|100% (?:secure|safe)", re.I)
+    r"|can(?:'|no)?t be (?:tampered|forged|faked)|unhackable", re.I)
 
 # WebSocket / realtime auth model — the CSWSH determinant (REF-PENTEST #4). CSWSH is only
 # exploitable when the socket authenticates via an AMBIENT COOKIE the browser auto-attaches
@@ -112,7 +112,7 @@ OVERCLAIM = re.compile(
 WS_USAGE = re.compile(r"new\s+WebSocket\(|socket\.io|graphql-ws|subscriptions-transport-ws|appsync-realtime"
                       r"|\bwss?://", re.I)
 WS_COOKIE_AUTH = re.compile(r"withCredentials\s*:\s*true|credentials\s*:\s*['\"]include['\"]"
-                            r"|document\.cookie[\s\S]{0,80}?(?:socket|ws\b|websocket)", re.I)
+                            r"|document\.cookie[\s\S]{0,80}?(?:\bsocket\b|\bws\b|\bwebsocket\b)", re.I)
 
 
 class ClientIntegrityExtractor(Extractor):
