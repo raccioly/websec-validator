@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Step 0 of every Jules routine: is there work, and which?
 
-    python3 .jules/preflight.py <routine>
+    python .jules/preflight.py <routine>
 
 Prints `GO` and the one target for this run, or `STOP: <reason>`. Exit 0 on GO, 3 on STOP. A
 routine that gets STOP ends without changes and without a pull request.
@@ -74,7 +74,7 @@ def details(routine: str, target: str) -> list:
     if routine == "fp-hunt":
         return [f"extractor: {target}  (REGISTRY in src/websec_validator/extractors/__init__.py)"]
     cmd = target.replace("/", " ")
-    return [f"compare: websec {cmd} --help  against every mention of `websec {cmd}` in README.md and docs/"]
+    return [f"compare: python -m websec_validator {cmd} --help  against every mention of `websec {cmd}` in README.md and docs/"]
 
 
 def api(path: str):

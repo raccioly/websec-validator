@@ -4,9 +4,15 @@ Read this before any routine file. `AGENTS.md` still applies, except where its *
 section says this file takes over. The policy that enforces these rules on GitHub is
 `.github/scripts/jules_policy.py`; a PR that breaks them is closed or held automatically.
 
+## 0. One interpreter
+
+Use `python` — the interpreter `setup.sh` installed the package with — for everything, and run the
+CLI as `python -m websec_validator …`. Never call a bare `websec` or `python3`: in the Jules VM they
+can resolve to a different interpreter, or to nothing at all.
+
 ## 1. Preflight decides whether there is work
 
-Run `python3 .jules/preflight.py <routine>` first. It prints `GO` with the one target for this
+Run `python .jules/preflight.py <routine>` first. It prints `GO` with the one target for this
 run, or `STOP: <reason>`.
 
 - **STOP** means end the task now: no changes, no branch, no pull request. Put the reason in the
@@ -38,7 +44,7 @@ changes nothing, reports that something is up to date, or restates a count is cl
 ## 4. Before you open the pull request, run
 
 ```bash
-PYTHONPATH=src python3 -m unittest discover -s tests
+PYTHONPATH=src python -m unittest discover -s tests
 npx -y docguard-cli@0.43.0 guard
 ```
 
@@ -46,7 +52,7 @@ Both must pass. For a change under `src/`, also run the CLI on the bundled demo 
 still completes:
 
 ```bash
-PYTHONPATH=src python3 -c 'import sys; from websec_validator.cli import main; sys.exit(main(sys.argv[1:]))' demo
+python -m websec_validator demo
 ```
 
 ## 5. Never ask a question: decide, or stop

@@ -7,9 +7,9 @@ Follow `.jules/RULES.md` throughout.
 
 ## Steps
 
-1. Run `python3 .jules/preflight.py docs-drift`. On STOP, end the task. On GO, the `target:` line
+1. Run `python .jules/preflight.py docs-drift`. On STOP, end the task. On GO, the `target:` line
    is the one subcommand you check; a nested one is written `intel/refresh` (`websec intel refresh`).
-2. Read the truth from the CLI: `websec <subcommand> --help`, and its section in
+2. Read the truth from the CLI: `python -m websec_validator <subcommand> --help`, and its section in
    `docs/reference/cli.md`.
 3. Find every mention of that subcommand in `README.md` and `docs/**/*.md`
    (not `docs/security-review/`).
@@ -18,7 +18,7 @@ Follow `.jules/RULES.md` throughout.
    - a flag whose meaning or default the docs state differently from `--help`;
    - an exit code the docs state differently from what the command returns;
    - an example command that fails or behaves differently when you run it. Run it on a copy of
-     the bundled demo (`websec demo` shows the sample) or a small temporary repository.
+     the bundled demo (`python -m websec_validator demo` shows the sample) or a small temporary repository.
 
    These are **not** drift:
    - wording or style;
