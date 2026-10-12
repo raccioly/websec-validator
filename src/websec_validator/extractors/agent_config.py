@@ -80,7 +80,7 @@ BASEURL = re.compile(
     r'"?(ANTHROPIC_BASE_URL|OPENAI_BASE_URL|OPENAI_API_BASE|ANTHROPIC_API_URL|LLM_BASE_URL|OPENROUTER_BASE_URL)"?'
     r'\s*[:=]\s*"?(https?://[^"\s,}]+)', re.I)
 _VENDOR_HOST = re.compile(
-    r"^https?://(?:[a-z0-9-]+\.)*(?:anthropic\.com|openai\.com|openai\.azure\.com|openrouter\.ai)(?:[:/]|$)", re.I)
+    r"^https?://(?:(?:[a-z0-9-]+\.)*(?:anthropic\.com|openai\.com|openai\.azure\.com|openrouter\.ai)|localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[?::1\]?)(?:[:/]|$)", re.I)
 
 # MCP server launched via an unpinned package runner — dependency-confusion / rug-pull surface. Mirrors
 # iac_ci's gha-unpinned-action logic. Only the selected package specs establish pins;
