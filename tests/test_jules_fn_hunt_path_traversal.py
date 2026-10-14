@@ -1,6 +1,10 @@
 import unittest
 from websec_validator.extractors.surface import SurfaceExtractor
-from tests.test_pentest_regressions import repo
+from websec_validator.extractors.base import RepoContext
+
+def repo(files: dict) -> RepoContext:
+    from tests.test_pentest_regressions import repo as original_repo
+    return original_repo(files)
 
 class JulesFnHuntPathTraversalTests(unittest.TestCase):
     def test_sync_methods_detect(self):
