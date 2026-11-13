@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.22.4] — 2026-10-19
+
 ## [0.22.3] — 2026-10-11
 
 ## [0.22.2] — 2026-10-11
@@ -1939,7 +1941,8 @@ The initial public line. Highlights across 0.2.1–0.2.9:
 ### Fixed
 - Scanner-contamination and rate-limit fixes (agent-wallet dogfood).
 
-[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.22.3...HEAD
+[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.22.4...HEAD
+[0.22.4]: https://github.com/raccioly/websec-validator/compare/v0.22.3...v0.22.4
 [0.22.3]: https://github.com/raccioly/websec-validator/compare/v0.22.2...v0.22.3
 [0.22.2]: https://github.com/raccioly/websec-validator/compare/v0.22.1...v0.22.2
 [0.22.1]: https://github.com/raccioly/websec-validator/compare/v0.22.0...v0.22.1
