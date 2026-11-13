@@ -72,7 +72,10 @@ SINKS = {
     "xxe": ("ssrf-probes", None, re.compile(
         r"libxmljs\.parseXml\s*\(|lxml\.etree\.(?:parse|fromstring|XML)\s*\(|xml\.etree\.ElementTree\.(?:parse|fromstring)\s*\(|new\s+DOMParser")),
     "prototype-pollution": ("mass-assignment", None, re.compile(
-        r"(?:_\.merge|_\.mergeWith|_\.defaultsDeep|Object\.assign)\s*\([^)]*(?:req\.|request\.)|\.update\s*\([^)]*request\.(?:json|get_json|form)")),
+        r"(?:_\.merge|_\.mergeWith|_\.defaultsDeep|Object\.assign)\s*\([^)]*(?:"
+        r"req\w*\.|request\.|ctx\.|c\.|(?:(?<=\s)|(?<=,))"
+        r"(?:body|reqBody|requestBody|userInput|updates|patch|payload|data|params|query)\b"
+        r")|\.update\s*\([^)]*(?:req\w*|request|ctx|c)\.(?:json|get_json|form)")),
     # Mass-assignment via object SPREAD — `{...record, ...req.body}` (client overwrites ANY field) or
     # the shorthand `{...record, tier}` (a PRIVILEGED field pulled from a same-named var — the
     # tier-downgrade / role-escalation class). User-input marker is inline; the privileged-field list
