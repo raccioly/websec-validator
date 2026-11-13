@@ -31,8 +31,8 @@ from .base import Extractor, RepoContext
 # `postinstall: "husky install"` / `tsc` / `node-gyp rebuild` / `patch-package` must stay silent).
 _LIFECYCLE_KEYS = ("install", "preinstall", "postinstall", "prepare", "prepublish", "prepublishOnly")
 SUSPICIOUS_LIFECYCLE = re.compile(
-    r"\bcurl\b|\bwget\b|\|\s*(?:ba)?sh\b|node\s+-e\b|python[0-9.]*\s+-c\b"
-    r"|base64\s+(?:-d|--decode)|atob\s*\(|Buffer\.from\([^)]*base64|\beval\s*\("
+    r"\bcurl\b(?=\s+.*?(?:\||>(?!\s*/dev/null)|\.(?:sh|py|js)\b))|\bwget\b(?=\s+.*?(?:\||>(?!\s*/dev/null)|\.(?:sh|py|js)\b))|\|\s*(?:ba)?sh\b|node\s+-e\s*[\"'][^\"']*require\s*\(|python[0-9.]*\s+-c\s*[\"'][^\"']*(?:import|__import__)\b"
+    r"|base64\s+(?:-d|--decode)|atob\s*\(|Buffer\.from\([^)]*base64|\beval\s*\(\s*[\"'][^\"']*require\s*\("
     r"|\bhttps?://[^\s\"']+\.(?:sh|py|js)\b|/dev/tcp/|\bnc\s+-|powershell", re.I)
 
 # npm spec prefixes that are INTENTIONAL (monorepo / alias) — never "unpinned".
