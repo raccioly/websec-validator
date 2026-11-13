@@ -1,6 +1,6 @@
 # Default bundles optional scanners; --target core selects only the stdlib engine.
 # Pins bind reviewed base/archive bytes, not apt or all transitive dependencies.
-FROM python:3.14-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS core
+FROM python:3.15-slim@sha256:94d3426f1def7db4a106a232ac121bfd975393e5dfd40a619b955fae45fe7913 AS core
 
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
