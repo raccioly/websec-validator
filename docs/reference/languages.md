@@ -1,7 +1,7 @@
 # Language and framework support
 
-This page says what `websec` actually analyses in each language, and what it only recognises. Use
-it to decide how much a clean run on your stack is worth. Everything here comes from the code: the
+This page says what `websec` analyzes in each language, and what it only recognizes. Use it to
+decide how much a clean run on your stack is worth. Everything here comes from the code: the
 extractors in `src/websec_validator/extractors/`, the profile catalog in
 [`profiles.py`](../../src/websec_validator/extractors/profiles.py), the walker in
 [`base.py`](../../src/websec_validator/extractors/base.py) and the scanner registry in
@@ -9,7 +9,7 @@ extractors in `src/websec_validator/extractors/`, the profile catalog in
 
 > [!IMPORTANT]
 > A completed run with no findings means the requested checks ran and matched nothing. It does not
-> mean the code is secure, and for most languages below it means much less than that. Read
+> mean the code is secure. For most languages below, it means much less than that. Read
 > [What a clean run means for your stack](#what-a-clean-run-means-for-your-stack) before you rely
 > on one.
 
@@ -20,18 +20,18 @@ extractors in `src/websec_validator/extractors/`, the profile catalog in
 | 1. Deep analysis | All 22 extractors, with rules written for these languages' idioms and frameworks | Python (`python`), JavaScript (`node`), TypeScript (`typescript`) |
 | 2. Named sink checks | A bounded profile of direct-syntax command/query checks (plus literal routes for Java and .NET). The other extractors still read the files, but their rules target tier-1 idioms | Java (`java`), C# (`csharp`), Go (`go`), Ruby (`ruby`), PHP (`php`) |
 | 3. Configuration or manual checks only | One explicit configuration check, or a manual-review placeholder. No injection, secret or authorization rules. Reported as a `thin_language_coverage` gap | Kotlin (`kotlin`), Swift (`swift`), Objective-C (`objective-c`), Rust (`rust`), C (`c`), C++ (`cpp`) |
-| 4. Recognised, not analysed | Counted and named in `coverage.json`; never read or matched | See [tier 4](#tier-4-recognised-but-not-analysed) |
+| 4. Recognized, not analyzed | websec counts and names them in `coverage.json`. It never reads or matches them | See [tier 4](#tier-4-recognised-but-not-analysed) |
 
-The split between tiers 1, 2 and 3 is the code's own: `coverage.thin_languages()` treats `python`,
-`node` and `typescript` as first-class, credits languages that have a profile with a `sink` check,
-and reports every other language it read as thin.
+The split between tiers 1, 2 and 3 comes from the code. `coverage.thin_languages()` treats `python`,
+`node` and `typescript` as first-class. It credits languages that have a profile with a `sink`
+check. It reports every other language it read as thin.
 
 Two capabilities sit across the tiers:
 
 - **Route discovery** uses [OWASP Noir](https://github.com/owasp-noir/noir) when it is installed,
   plus websec's own registration lanes. See [Route discovery](#route-discovery).
-- **Third-party scanners** run only under `--scan`. Most are language-agnostic; three are selected
-  per language. See [Scanners under `--scan`](#scanners-under---scan).
+- **Third-party scanners** run only under `--scan`. Most work with any language. Three are selected
+  for specific languages. See [Scanners under `--scan`](#scanners-under---scan).
 
 ## Language matrix
 
@@ -54,21 +54,19 @@ Two capabilities sit across the tiers:
 
 Notes on the columns:
 
-- **Suffixes** are `profiles._LANG`. `.vue` and `.svelte` files are labelled `node`.
+- **Suffixes** are `profiles._LANG`. websec labels `.vue` and `.svelte` files `node`.
 - **Dependency reachability** applies to CVEs found under `--scan`. websec looks for an import of
-  the vulnerable package in first-party source and tags the CVE `imported` or `declared-only`. It
-  parses JS/TS and Python imports only; CVEs in other ecosystems are tagged `n/a` rather than
-  guessed. See [How it works: prioritization](../concepts/how-it-works.md#prioritization).
-- Other file types the extractors read without a language label: HTML and Jinja templates
+  the vulnerable package in first-party source. It tags the CVE `imported` or `declared-only`. It
+  parses JS/TS and Python imports only. It tags CVEs in other ecosystems `n/a` and does not guess. See [How it works: prioritization](../concepts/how-it-works.md#prioritization).
+- The extractors also read these file types without a language label: HTML and Jinja templates
   (`.html` `.htm` `.jinja` `.jinja2` `.j2`), Prisma schemas (`.prisma`), GraphQL SDL and AppSync
   VTL resolvers (`.graphql` `.gql` `.vtl`).
 
 ## Tier 1: deep analysis
 
-All 22 extractors run over every analysable file. Their patterns are written against JS/TS and
-Python idioms (`req.body`, `request.args`, decorators, `res.json(...)`), and several lanes parse
-Python with the standard-library `ast` module. These are the framework-aware lanes the code
-contains:
+All 22 extractors run over every analysable file. Their patterns target JS/TS and Python idioms
+(`req.body`, `request.args`, decorators, `res.json(...)`). Several lanes parse Python with the
+standard-library `ast` module. The code contains these framework-aware lanes:
 
 | Framework or surface | What websec does | Module |
 |---|---|---|
@@ -94,22 +92,22 @@ contains:
 
 Platform manifests (`wrangler.*`, `vercel.json`, `netlify.toml`, `serverless.yml`) and dependency
 names in `package.json`/Python manifests add framework and datastore labels in `FACTS.json`. A
-label is a hint, not analysis. Detected framework labels with no lane above (for example Koa,
-Starlette, Sanic, Tornado, aiohttp, Angular) get the generic tier-1 rules only; their routes come
+label is a hint, not analysis. A detected framework label with no lane above (for example Koa,
+Starlette, Sanic, Tornado, aiohttp, Angular) gets the generic tier-1 rules only. Its routes come
 from Noir or the generic router heuristic.
 
-Even in tier 1 the analysis is bounded: regex and AST passes with byte and node budgets. Aliases,
-wrappers, cross-function flow, dynamic registration and deployment behaviour stay unverified. Since
-0.22.0 the JS assignment-flow budgets scale with file size and stay capped (`FACTS.json` →
-`surface.assigned_flow.limits`); a file that still exhausts one is named in a `source_flow_limit`
-gap, and the run is incomplete, as it is for an oversized file.
+Even in tier 1 the analysis has limits. It uses regex and AST passes with byte and node budgets.
+Aliases, wrappers, cross-function flow, dynamic registration and deployment behavior stay
+unverified. Since 0.22.0, the JS assignment-flow budgets scale with file size and stay capped
+(`FACTS.json` → `surface.assigned_flow.limits`). If a file still uses up a budget, a
+`source_flow_limit` gap names the file, and the run is incomplete, as it is for an oversized file.
 [METHODOLOGY: scoped framework and adoption evidence](../METHODOLOGY.md#scoped-framework-and-adoption-evidence)
-states each lane's limit.
+states the limit of each lane.
 
 ## Tier 2 and 3: named-check profiles
 
 A named profile is a small, fixed set of checks for direct syntax or explicit configuration. Run
-`websec capabilities` to print the catalog as JSON; it reads no target.
+`websec capabilities` to print the catalog as JSON. The command reads no target.
 
 ```bash
 websec capabilities
@@ -133,28 +131,28 @@ binding resolution, authorization, build variants and cross-function flows requi
 
 How profiles are selected and reported:
 
-- Profiles are applied per **service**. A service is the nearest directory holding a manifest
+- websec applies profiles per **service**. A service is the nearest directory that holds a manifest
   (`package.json`, `pyproject.toml`, `requirements*.txt`, `setup.py`, `Pipfile`, `pom.xml`,
   `build.gradle`, `build.gradle.kts`, `go.mod`, `Gemfile`, `composer.json`, `Cargo.toml`,
   `Package.swift`, `CMakeLists.txt` or a `.csproj`). Manifest boundaries approximate deployment
-  boundaries; they do not prove them.
-- A profile is selected when one of its languages appears in the service. `android` and `ios` are
-  selected only when an `AndroidManifest.xml` or `Info.plist` is found.
-- Each selected check is recorded in `coverage.json` under `profiles[].checks[]` with a `status`:
+  boundaries. They do not prove them.
+- websec selects a profile when one of its languages appears in the service. It selects `android`
+  and `ios` only when it finds an `AndroidManifest.xml` or `Info.plist`.
+- `coverage.json` records each selected check under `profiles[].checks[]` with a `status`:
   `completed` (files were examined), `unknown` (no applicable input) or `manual`. Any check that is
   not `completed` adds a `profile_scope` gap.
-- Tier-2 and tier-3 files are still read by the 22 extractors. Their rules target tier-1 idioms, so
-  an incidental match is possible but is not claimed coverage. For routes in these languages, guard
-  recognition is name-based and tuned on JS/TS and Python frameworks, so treat "no visible guard" as
-  a weaker lead.
-- Tier-3 languages also produce a `thin_language_coverage` gap: *"files were read, but websec has no
+- The 22 extractors still read tier-2 and tier-3 files. Their rules target tier-1 idioms. An
+  incidental match is possible, but websec does not claim it as coverage. For routes in these
+  languages, guard recognition is name-based and tuned on JS/TS and Python frameworks. Treat "no
+  visible guard" as a weaker lead.
+- Tier-3 languages also produce a `thin_language_coverage` gap with this text: *"files were read, but websec has no
   injection, secret or authorization rules for these languages."*
 
 ## Tier 4: recognised but not analysed
 
 These suffixes are program source that no extractor reads (`base.UNANALYZED_SOURCE_EXT`). The walker
-lists them in `coverage.files.unsupported`, counts them per language in
-`coverage.files.unanalyzed_languages`, and adds two gaps: `unsupported_source` and
+lists them in `coverage.files.unsupported` and counts them per language in
+`coverage.files.unanalyzed_languages`. It adds two gaps: `unsupported_source` and
 `language_without_analyzer`. Neither gap makes the run incomplete, because nothing failed to run.
 
 | Family | Languages (id) and suffixes |
@@ -167,27 +165,27 @@ lists them in `coverage.files.unsupported`, counts them per language in
 
 Two special cases:
 
-- **SQL (`sql`).** The language map names `.sql`, but `.sql` is deliberately not in the unanalysed
-  set: `schemas.py` and `stack.py` read committed `.sql` files for `CREATE TABLE` and row-level
+- **SQL (`sql`).** The language map names `.sql`, but `.sql` is not in the unanalyzed set on
+  purpose. `schemas.py` and `stack.py` read committed `.sql` files for `CREATE TABLE` and row-level
   security. SQL files therefore never appear as a `language_without_analyzer` gap.
-- **Gradle (`groovy`).** `build.gradle` is read as a manifest for language and framework labels, but
-  its `.gradle` suffix is also counted as unanalysed Groovy. The gap text says the file was never
-  read; for `build.gradle` that is true of its code, not of its manifest metadata.
+- **Gradle (`groovy`).** websec reads `build.gradle` as a manifest for language and framework
+  labels. It also counts the `.gradle` suffix as unanalyzed Groovy. The gap text says the file was
+  never read. For `build.gradle`, that is true of its code, not of its manifest metadata.
 
-File types outside both sets (YAML, JSON, TOML, Markdown and so on) are not presumed to be source.
-Specific extractors still read named configuration files: see [Configuration and supply-chain
+websec does not presume that file types outside both sets (YAML, JSON, TOML, Markdown and so on)
+are source. Specific extractors still read named configuration files: see [Configuration and supply-chain
 surfaces](#configuration-and-supply-chain-surfaces).
 
 ## Route discovery
 
-The endpoint inventory is the attack surface, so route coverage matters as much as language
+The endpoint inventory is the attack surface. Route coverage matters as much as language
 coverage.
 
 - **OWASP Noir.** When `noir` is on `PATH`, `websec run` invokes it on every run (not only under
-  `--scan`). Noir parses many frameworks across languages; that coverage is Noir's, documented in
-  [the Noir project](https://github.com/owasp-noir/noir), not a claim websec makes. websec drops
-  Noir routes under skipped directories, `--exclude` paths, frontend API-client code and
-  fixture/example directories.
+  `--scan`). Noir parses many frameworks across languages. That coverage belongs to Noir and is
+  documented in [the Noir project](https://github.com/owasp-noir/noir). websec makes no claim about
+  it. websec drops Noir routes under skipped directories, `--exclude` paths, frontend API-client
+  code and fixture/example directories.
 - **Without Noir, when an installed Noir fails, or when Noir finds zero routes**, websec falls back
   to its regex pass: Next.js App Router files, FastAPI and Flask decorators, and the generic
   router-call heuristic. The `routes.engine` field in `FACTS.json` records which engine produced
@@ -198,15 +196,16 @@ coverage.
   SAM, raw HTTP servers, Connexion and tRPC registration, Django URLconf discovery, and the literal
   Spring and ASP.NET routes from the `java-spring` and `dotnet` profiles.
 - The router-call heuristic matches the shape `<object>.<verb>('/path', …)`. Routers in other
-  languages written in that shape can also match; that is incidental, not claimed support.
+  languages written in that shape can also match. That is incidental, and websec does not claim it
+  as support.
 
-Install Noir for anything beyond tier 1; the regex fallback is narrow. Unresolved Django includes
-and similar cases are kept as candidates and listed in `coverage.route_discovery`, never silently
-promoted to routes.
+Install Noir for anything beyond tier 1, because the regex fallback is narrow. websec keeps
+unresolved Django includes and similar cases as candidates. It lists them in
+`coverage.route_discovery` and never promotes them silently to routes.
 
 ## Scanners under `--scan`
 
-The registry holds 11 scanner entries. A plain `websec run` detects them and executes none; `--scan`
+The registry holds 11 scanner entries. A plain `websec run` detects them and executes none. `--scan`
 executes the installed, runnable ones. `--scanners` narrows the set and makes each named scanner
 required.
 
@@ -226,12 +225,12 @@ required.
 
 Scanners are third-party executables with their own network and trust boundaries. For example,
 Semgrep's `--config auto` fetches registry rules, and Trivy and OSV-Scanner consult advisory
-databases. websec's own recon makes no network calls unless you opt in; see the
+databases. websec's own recon makes no network calls unless you opt in. See the
 [CLI reference](cli.md) for `--network` and `--verify-secrets`.
 
 ## Configuration and supply-chain surfaces
 
-These are read regardless of application language:
+websec reads these for any application language:
 
 | Surface | What is checked | Module |
 |---|---|---|
@@ -252,8 +251,8 @@ gems, Composer, Maven, NuGet), rely on Trivy or OSV-Scanner under `--scan`.
 
 ## What a clean run means for your stack
 
-A completed run is a statement about execution, not protection. `coverage.json` always carries
-`"protection_complete": false` and the limitation *"Completed execution does not prove absence of
+A completed run says that checks executed. It does not say that the app is protected.
+`coverage.json` always carries `"protection_complete": false` and the limitation *"Completed execution does not prove absence of
 vulnerabilities or full framework coverage."* Before trusting an empty findings list:
 
 1. **Open `coverage.json`** (in the run directory; see [Outputs](outputs.md)) and read `gaps`. Gaps
@@ -265,23 +264,24 @@ vulnerabilities or full framework coverage."* Before trusting an empty findings 
    which named checks ran and with what status.
 3. **Check `files.skipped_counts` and `files.skipped_code_dirs`.** Directories such as `build`,
    `dist`, `out`, `target`, `vendor` and `coverage` are skipped by policy, as are vendored and
-   minified bundles. They are counted and disclosed, not analysed. When one of those six
-   directories holds files with an analysable suffix, they are counted and listed in
+   minified bundles. websec counts and discloses them. It does not analyze them. When one of those
+   six directories holds files with an analysable suffix, websec counts and lists them in
    `files.skipped_code_dirs` with a `skipped_directory_code` gap.
 4. **Check `routes.engine` in `FACTS.json`.** A regex fallback on a non-tier-1 stack usually means
    most endpoints were not discovered.
 
-When the tree contains source but none of it is analysable, `coverage.files.no_analyzable_source`
-is `true` and the console and report lead with **NO ANALYZABLE SOURCE**. By default the exit code is
-still `0`. To make CI fail instead, pass `--require-analyzed`:
+Sometimes the tree contains source but none of it is analysable. Then
+`coverage.files.no_analyzable_source` is `true`, and the console and report lead with **NO
+ANALYZABLE SOURCE**. By default the exit code is still `0`. To make CI fail instead, pass
+`--require-analyzed`:
 
 ```bash
 websec run . --require-analyzed
 ```
 
-The run then exits `3` with gate verdict `no-analyzable-source`. This only fires when *no* file was
-analysable. A mixed repository, for example an Elixir service beside one JavaScript file, completes
-normally and reports the Elixir files as a gap, so read the gaps rather than relying on the exit
+The run then exits `3` with gate verdict `no-analyzable-source`. This happens only when *no* file
+was analysable. A mixed repository, for example an Elixir service beside one JavaScript file,
+completes normally and reports the Elixir files as a gap. Read the gaps. Do not rely on the exit
 code alone. For execution failures (scanner timeouts, read caps, a missing required scanner), use
 `--require-complete`. Exit codes are listed in the [CLI reference](cli.md).
 
@@ -289,16 +289,16 @@ code alone. For execution failures (scanner timeouts, read caps, a missing requi
 
 - **Open a feature request** with the
   [feature-request template](https://github.com/raccioly/websec-validator/issues/new?template=feature-request.yml).
-  It asks for the gap, the deterministic signal a detector would key on (the tool contains no LLM,
-  so extractors must be deterministic), a sanitized example of the vulnerable pattern, and whether
-  an existing scanner such as a Semgrep rule could cover it instead.
+  The template asks for the gap, the deterministic signal a detector would key on (the tool
+  contains no LLM, so extractors must be deterministic), a sanitized example of the vulnerable
+  pattern, and whether an existing scanner such as a Semgrep rule could cover it instead.
 - **Attach a reproduction** from a real run: the relevant part of `coverage.json` showing the
   `language_without_analyzer` or `thin_language_coverage` gap, and `routes.engine` from
   `FACTS.json`.
 - **Research proposals** (`websec research example`, `websec research evaluate --proposal`) are
-  data-only cases evaluated against an allowlist of already-shipped detectors. They can show that an
-  existing detector misses a concrete pattern, but they cannot add a language. Passing means
-  eligible for human review, not automatic promotion.
+  data-only cases. websec evaluates them against an allowlist of already-shipped detectors. They can
+  show that an existing detector misses a concrete pattern. They cannot add a language. A pass means
+  the proposal is eligible for human review. It does not mean automatic promotion.
 - Contributors adding a profile or extractor follow [CONTRIBUTING.md](../../CONTRIBUTING.md). A new
   language id or profile id must be named on this page; the docs tests fail otherwise.
 

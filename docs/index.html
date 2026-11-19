@@ -86,14 +86,14 @@
   <h2>Try it</h2>
   <pre>pip install websec-validator
 websec run ./your-repo</pre>
-  <p>Artifacts land in <code>websec-out/</code>: a briefing written for your agent, the structured
+  <p>The run writes these artifacts to <code>websec-out/</code>: a briefing for your agent, the structured
   recon, a de-duplicated findings ledger, SARIF 2.1.0, and probe scripts pre-filled with the
-  endpoints it found. Core analysis never edits scanned source; guidance and hook installation are separate opt-in actions.</p>
+  endpoints it found. Core analysis never edits scanned source. Guidance and hook installation are separate opt-in actions.</p>
 
   <h2>What makes it different</h2>
   <ul>
     <li><strong>It says when it could not look.</strong> With completeness gating, incomplete-only exits 3; findings plus incomplete exits 1 and records both. Ungated exit 0 is not a completeness verdict.</li>
-    <li><strong>No model in the tool.</strong> Reproducible analysis with the same inputs and tooling; run metadata and dated advice can vary.</li>
+    <li><strong>No model in the tool.</strong> The same inputs and tooling give the same analysis. Run metadata and dated advice can vary.</li>
     <li><strong>Zero runtime dependencies.</strong> It shells out to the scanners you have installed and never imports them.</li>
     <li><strong>Offline by default.</strong> External scanners and online feeds are separate opt-ins. Review guidance offers a consent-driven release check, never an automatic upgrade.</li>
   </ul>
