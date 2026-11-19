@@ -10,37 +10,38 @@
 
 **English** · [Português (Brasil)](https://github.com/raccioly/websec-validator/blob/main/docs/i18n/pt-BR/README.md) · [Español](https://github.com/raccioly/websec-validator/blob/main/docs/i18n/es/README.md) · [简体中文](https://github.com/raccioly/websec-validator/blob/main/docs/i18n/zh-CN/README.md)
 
-A senior pentester's "here's what to test and how" handoff — auto-generated from your repo, for your AI agent to execute.
+A handoff from a senior pentester that says what to test and how. The tool generates it from your repo, and your AI agent carries it out.
 
 <!-- docguard:quality negation-load off — "no LLM / no server / no running app / not a SaaS / never touches prod" is this tool's core positioning; defining it by contrast with the scanners-and-SaaS it deliberately is NOT is intentional, not a phrasing defect. -->
 
 > Local-first security recon that **briefs your AI coding agent**. It does the deterministic
-> half — read supported source, map the visible attack surface, and stage a probe library tailored to what it
-> found — then hands your agent (Claude Code, Codex, Gemini, Cursor) a marching-orders briefing.
-> `websec run` needs nothing but the code; add `--scan` to also run and de-duplicate whichever
-> static scanners you have installed. **Code in, artifacts out. No LLM in the tool; no server or
+> half of the work. It reads supported source, maps the visible attack surface, and stages a probe
+> library for what it found. Then it gives your agent (Claude Code, Codex, Gemini, Cursor) a briefing
+> with its orders.
+> `websec run` needs only the code. Add `--scan` to also run the static scanners you have installed
+> and remove duplicate findings. **Code in, artifacts out. No LLM in the tool; no server or
 > running app required for the core pass.**
 
 [![websec-validator demo](https://raw.githubusercontent.com/raccioly/websec-validator/main/assets/demo.gif)](https://github.com/raccioly/websec-validator/blob/main/assets/demo.gif)
 
-**New here?** Read the eight-page technical brief — what it reads, how a finding earns its severity,
+**New here?** Read the eight-page technical brief. It covers what the tool reads, how a finding earns its severity,
 what it refuses to say, and the field evidence:
 **[raccioly.github.io/websec-validator](https://raccioly.github.io/websec-validator/websec-explained.html)**
 · [PDF](https://raccioly.github.io/websec-validator/websec-explained.pdf). The reviewed v0.21.0 snapshot
 has selected fact assertions in `tests/test_explained_brief.py` and an HTML/PDF/renderer hash binding
-in `tests/test_brief_artifacts.py`. Prose accuracy and rendered layout still require review;
-see [rebuilding the brief](https://github.com/raccioly/websec-validator/blob/main/CONTRIBUTING.md#publishing-the-technical-brief).
+in `tests/test_brief_artifacts.py`. A person must still review the prose accuracy and the rendered layout.
+See [rebuilding the brief](https://github.com/raccioly/websec-validator/blob/main/CONTRIBUTING.md#publishing-the-technical-brief).
 
-It is *not* an autonomous scanner and *not* a SaaS. It's the missing front-half: the thing that
-turns a repo into a precise, fact-grounded security brief an AI agent (with a human in the loop)
-can act on. How it works and the reasoning behind every check:
+It is *not* an autonomous scanner and *not* a SaaS. It is the front half that was missing. It
+turns a repo into a precise security brief, based on facts, that an AI agent can act on with a human in the loop.
+How it works and the reasoning behind every check:
 [concepts](https://github.com/raccioly/websec-validator/blob/main/docs/concepts/how-it-works.md) ·
 [methodology](https://github.com/raccioly/websec-validator/blob/main/docs/METHODOLOGY.md).
 
-**Part of the Guard family**, three tools that each keep one kind of claim honest:
+**Part of the Guard family.** Three tools each keep one kind of claim honest:
 [**DocGuard**](https://github.com/raccioly/docguard) validates documentation against the code it
-describes, [**TestGuard**](https://github.com/raccioly/testguard) checks that tests actually
-establish what they assert, and websec-validator does the same for security findings — every
+describes. [**TestGuard**](https://github.com/raccioly/testguard) checks that tests actually
+establish what they assert. websec-validator does the same for security findings. Every
 finding carries its evidence, its standard, and a calibrated probability that it is real.
 
 ## Getting Started — just point it at your repo
@@ -51,9 +52,9 @@ finding carries its evidence, its standard, and a calibrated probability that it
 > websec-validator`, or github.com/raccioly/websec-validator). It's local and read-only — read the
 > repo and follow its briefing. I own this code and authorize the review."*
 
-It installs, runs, and walks the findings with you. Phrasing it as a *defensive review of your own
-code* matters: it's the difference between an agent that just gets to work and one that stops to
-confirm you're authorized. Every path ends in the same `AGENT-BRIEFING.md` your agent acts on:
+The agent installs the tool, runs it, and walks through the findings with you. Say *defensive review of your own
+code*. With that phrase, an agent starts work. Without it, an agent can stop to
+ask if you are authorized. Every path ends in the same `AGENT-BRIEFING.md` that your agent acts on:
 
 | Path | One-time setup | Then |
 |---|---|---|
@@ -65,7 +66,7 @@ confirm you're authorized. Every path ends in the same `AGENT-BRIEFING.md` your 
 
 Already have a codebase with history, tests and fixtures? Follow
 **[Adopting websec in an existing project](https://github.com/raccioly/websec-validator/blob/main/docs/guides/existing-projects.md)**:
-scope out non-product code, run, triage, record a baseline, then turn on gating in phases.
+scope out non-product code, run, triage, record a baseline, then turn on the gate in phases.
 
 ## Install
 
@@ -76,10 +77,10 @@ websec --version
 websec doctor                   # which optional scanners are installed, and are they compatible?
 ```
 
-Zero Python runtime dependencies. External scanners (Trivy, OSV-Scanner, Gitleaks, Semgrep,
-Checkov, and per-language Bandit/gosec/Brakeman) are used **when present** and run only with
-`--scan`; Prowler is detected and reported, not executed. Every channel — pip, uv, Docker, source, offline/air-gapped — and per-OS scanner
-setup: **[Installation](https://github.com/raccioly/websec-validator/blob/main/docs/installation.md)**.
+The tool has zero Python runtime dependencies. It uses external scanners (Trivy, OSV-Scanner, Gitleaks, Semgrep,
+Checkov, and per-language Bandit/gosec/Brakeman) **when present**, and they run only with
+`--scan`. It detects and reports Prowler but does not execute it. For every install channel (pip, uv, Docker, source, offline/air-gapped) and per-OS scanner
+setup, see **[Installation](https://github.com/raccioly/websec-validator/blob/main/docs/installation.md)**.
 
 ## Usage
 
@@ -95,21 +96,21 @@ websec mcp                             # typed recon tools for any MCP client, o
 ```
 
 Then point your agent at the output: **"Read `websec-out/latest/AGENT-BRIEFING.md` and follow it."**
-Each attempt gets its own `websec-out/runs/<id>/` directory; `latest` moves only after a completed run.
+Each attempt gets its own `websec-out/runs/<id>/` directory. `latest` moves only after a completed run.
 Every subcommand and option: [CLI reference](https://github.com/raccioly/websec-validator/blob/main/docs/reference/cli.md).
 
 ## What you get (`websec-out/`)
 
 | Artifact | What it is |
 |---|---|
-| `AGENT-BRIEFING.md` | **The product.** Marching orders: detected surface, the access-control map, targeting, findings, the method, and the staged probe list. |
+| `AGENT-BRIEFING.md` | **The product.** The orders for your agent: detected surface, the access-control map, targeting, findings, the method, and the staged probe list. |
 | `FACTS.json` | The full structured recon. |
-| `findings-ledger.json` / `REPORT.md` | The traceable ledger: each finding with an evidence chain, CWE/ASVS/OWASP-API citation, remediation, and a **calibrated `P(real)`** (measured real-vuln rate + 95% CI + sample size). |
-| `results.sarif` | **SARIF 2.1.0** — always written. Drop it into GitHub Code Scanning, GitLab, Azure DevOps, VS Code's SARIF viewer, DefectDojo. |
-| `coverage.json` | What ran, what was skipped and why — a clean result is only as good as its coverage. |
-| `probes/` | The probe scripts selected and staged for *this* app (BOLA, JWT, SSRF, mass-assignment…). |
+| `findings-ledger.json` / `REPORT.md` | The traceable ledger. Each finding has an evidence chain, a CWE/ASVS/OWASP-API citation, remediation, and a **calibrated `P(real)`** (measured real-vuln rate + 95% CI + sample size). |
+| `results.sarif` | **SARIF 2.1.0**, always written. Load it into GitHub Code Scanning, GitLab, Azure DevOps, VS Code's SARIF viewer, DefectDojo. |
+| `coverage.json` | What ran, what was skipped, and why. A clean result is only as good as its coverage. |
+| `probes/` | The probe scripts that the run selected and staged for *this* app (BOLA, JWT, SSRF, mass-assignment…). |
 
-Plus SBOMs, an attack-surface table, diff scope and a versioned envelope:
+The run also writes SBOMs, an attack-surface table, the diff scope and a versioned envelope:
 [all outputs](https://github.com/raccioly/websec-validator/blob/main/docs/reference/outputs.md).
 
 ## Languages
@@ -121,8 +122,8 @@ Plus SBOMs, an attack-surface table, diff scope and a versioned envelope:
 | **Configuration or manual checks only** — reported as a `thin_language_coverage` gap | Kotlin/Android, Swift and Objective-C/iOS, Rust, C/C++ |
 | **Recognized, not analyzed** — reported as a coverage gap, never as clean | Elixir, Scala, Clojure, Erlang, Perl, Lua, Dart, shell, server-side templates and more |
 
-Route discovery across many more frameworks comes from OWASP Noir when it is installed, and the
-scanners are language-agnostic. A completed no-match check is not proof that a service is secure:
+OWASP Noir discovers routes in many more frameworks when it is installed. The
+scanners are language-agnostic. A completed check with no match is not proof that a service is secure:
 **[the full support matrix and what a clean run means for your stack](https://github.com/raccioly/websec-validator/blob/main/docs/reference/languages.md)**.
 
 ## Documentation
@@ -144,24 +145,24 @@ indexes the migration notes — 0.14.0 (schema 2.0), the 0.17.0 exit-code split
 `--diff`/`gate` scoping, `.websec-ignore` path matching). Unresolved gaps and their acceptance tests live in the
 [remaining-work specification](https://github.com/raccioly/websec-validator/blob/main/specs/001-continuous-security-improvement/spec.md).
 
-These are scoped review tools: manual profiles, unknown routes, dynamic behavior and unsupported
-syntax remain limitations. The in-loop gate is developer ergonomics, not a control, and `attest`
-reports evidence without rendering a compliance verdict. Snapshot-bound evidence lives with the
-artifacts it describes — the [validation record](https://github.com/raccioly/websec-validator/blob/main/docs/security-review/validation.md),
+These are scoped review tools. Manual profiles, unknown routes, dynamic behavior and unsupported
+syntax remain limitations. The in-loop gate helps developers and is not a control. `attest`
+reports evidence and gives no compliance verdict. Evidence tied to a snapshot lives with the
+artifacts it describes: the [validation record](https://github.com/raccioly/websec-validator/blob/main/docs/security-review/validation.md),
 the [benchmarks](https://github.com/raccioly/websec-validator/blob/main/BENCHMARKS.md) and the
-[proof protocol](https://github.com/raccioly/websec-validator/blob/main/corpus/PROOF-PROTOCOL.md) —
-so the numbers cannot drift out of date here.
+[proof protocol](https://github.com/raccioly/websec-validator/blob/main/corpus/PROOF-PROTOCOL.md).
+So the numbers cannot become out of date here.
 
 **Validated on** a production Next.js app, a large Express/AWS monorepo, and the VAmPI / NodeGoat /
-DVGA vuln-app corpus — independently reproducing a hand-done pentest's findings (tenant boundary,
+DVGA vuln-app corpus. It independently reproduced the findings of a hand-done pentest (tenant boundary,
 SSRF, file upload, cross-tenant BOLA, role/authz gaps). Route discovery reports what it can parse
-*without importing settings or executing your code*, so unknown mounts stay route **candidates**
-carrying their uncertainty; that is human review evidence, not measured vulnerability recall.
+*without importing settings or executing your code*. Unknown mounts stay route **candidates**
+and carry their uncertainty. That is human review evidence, not measured vulnerability recall.
 
 ## Contributing
 
 Bug reports, false-positive reports and detector proposals are the most valuable input this project
-gets — see [CONTRIBUTING.md](https://github.com/raccioly/websec-validator/blob/main/CONTRIBUTING.md)
+gets. See [CONTRIBUTING.md](https://github.com/raccioly/websec-validator/blob/main/CONTRIBUTING.md)
 (including the maintainer release process) and the
 [issue templates](https://github.com/raccioly/websec-validator/issues/new/choose). Report
 vulnerabilities in websec itself privately: [SECURITY.md](https://github.com/raccioly/websec-validator/blob/main/SECURITY.md).
@@ -172,8 +173,8 @@ python3 -m unittest discover -s tests    # stdlib only; synthetic/local-loopback
 
 ## Credits
 
-Methodology + probe library are distilled from a real authenticated penetration-testing pass.
-This tool productizes that hand-written methodology into something an AI agent can run on any repo.
+The methodology and the probe library come from a real authenticated penetration-testing pass.
+This tool turns that hand-written methodology into something an AI agent can run on any repo.
 
 ## License
 

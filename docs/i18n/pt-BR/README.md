@@ -14,35 +14,36 @@
 [![Docs](https://img.shields.io/badge/docs-guides%20%26%20reference-informational)](../../README.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](../../../LICENSE)
 
-O "eis o que testar e como" que um pentester sênior entregaria — gerado automaticamente a partir do seu repositório, para o seu agente de IA executar.
+Uma entrega de um pentester sênior que diz o que testar e como. A ferramenta a gera a partir do seu repositório, e o seu agente de IA a executa.
 
 > Reconhecimento de segurança local-first que **prepara o briefing do seu agente de IA de programação**. Ele faz a
-> metade determinística — lê o código-fonte suportado, mapeia a superfície de ataque visível e prepara uma biblioteca de
-> probes sob medida para o que encontrou — e depois entrega ao seu agente (Claude Code, Codex, Gemini, Cursor) um
-> briefing com ordens de missão. O `websec run` não precisa de nada além do código; adicione `--scan` para também
-> executar e deduplicar os scanners estáticos que você tiver instalados. **Entra código, saem artefatos. Nenhum LLM na
-> ferramenta; nenhum servidor nem aplicação em execução é necessário para a passagem principal.**
+> metade determinística do trabalho. Lê o código-fonte suportado, mapeia a superfície de ataque visível e prepara uma
+> biblioteca de probes para o que encontrou. Depois entrega ao seu agente (Claude Code, Codex, Gemini, Cursor) um
+> briefing com as ordens dele.
+> O `websec run` precisa apenas do código. Adicione `--scan` para também executar os scanners estáticos que você tiver
+> instalados e remover os achados duplicados. **Entra código, saem artefatos. Nenhum LLM na ferramenta; nenhum servidor
+> nem aplicação em execução é necessário para a passagem principal.**
 
 [![websec-validator demo](https://raw.githubusercontent.com/raccioly/websec-validator/main/assets/demo.gif)](../../../assets/demo.gif)
 
-**Primeira vez aqui?** Leia o resumo técnico de oito páginas — o que a ferramenta lê, como um achado conquista sua
-severidade, o que ela se recusa a afirmar e as evidências de campo:
+**Primeira vez aqui?** Leia o resumo técnico de oito páginas. Ele explica o que a ferramenta lê, como um achado
+conquista sua severidade, o que ela se recusa a afirmar e as evidências de campo:
 **[raccioly.github.io/websec-validator](https://raccioly.github.io/websec-validator/websec-explained.html)**
 · [PDF](https://raccioly.github.io/websec-validator/websec-explained.pdf). O snapshot revisado da v0.21.0
 tem asserções de fatos selecionados em `tests/test_explained_brief.py` e um vínculo de hash entre HTML/PDF/renderizador
-em `tests/test_brief_artifacts.py`. A precisão do texto e o layout renderizado ainda exigem revisão;
-veja [como reconstruir o resumo](../../../CONTRIBUTING.md#publishing-the-technical-brief).
+em `tests/test_brief_artifacts.py`. Uma pessoa ainda precisa revisar a precisão do texto e o layout renderizado.
+Veja [como reconstruir o resumo](../../../CONTRIBUTING.md#publishing-the-technical-brief).
 
-Ele *não* é um scanner autônomo e *não* é um SaaS. É a metade dianteira que faltava: o que transforma um
-repositório em um briefing de segurança preciso e baseado em fatos, sobre o qual um agente de IA (com um humano no
-circuito) pode agir. Como funciona e o raciocínio por trás de cada verificação:
+Ele *não* é um scanner autônomo e *não* é um SaaS. É a metade dianteira que faltava. Ele transforma um
+repositório em um briefing de segurança preciso e baseado em fatos, sobre o qual um agente de IA pode agir, com um humano
+no circuito. Como funciona e o raciocínio por trás de cada verificação:
 [conceitos](../../concepts/how-it-works.md) ·
 [metodologia](../../METHODOLOGY.md).
 
-**Parte da família Guard**, três ferramentas que mantêm, cada uma, um tipo de afirmação honesto:
-[**DocGuard**](https://github.com/raccioly/docguard) valida a documentação contra o código que ela descreve,
-[**TestGuard**](https://github.com/raccioly/testguard) verifica se os testes de fato comprovam o que afirmam, e o
-websec-validator faz o mesmo para achados de segurança — cada achado traz sua evidência, sua norma de referência e uma
+**Parte da família Guard.** Três ferramentas, cada uma mantendo honesto um tipo de afirmação:
+o [**DocGuard**](https://github.com/raccioly/docguard) valida a documentação contra o código que ela descreve.
+O [**TestGuard**](https://github.com/raccioly/testguard) verifica se os testes de fato comprovam o que afirmam. O
+websec-validator faz o mesmo para os achados de segurança. Cada achado traz sua evidência, sua norma de referência e uma
 probabilidade calibrada de ser real.
 
 ## Primeiros passos — basta apontá-lo para o seu repositório
@@ -53,9 +54,9 @@ probabilidade calibrada de ser real.
 >
 > Original em inglês: *"Do a defensive security self-review of **my own** codebase with websec-validator (`pipx install websec-validator`, or github.com/raccioly/websec-validator). It's local and read-only — read the repo and follow its briefing. I own this code and authorize the review."*
 
-Ele instala, executa e percorre os achados com você. Formular o pedido como uma *revisão defensiva do seu próprio
-código* faz diferença: é o que separa um agente que simplesmente começa a trabalhar de um que para para confirmar
-se você tem autorização. Todos os caminhos terminam no mesmo `AGENT-BRIEFING.md` sobre o qual seu agente age:
+O agente instala a ferramenta, a executa e percorre os achados com você. Diga *revisão defensiva do seu próprio
+código*. Com essa frase, o agente começa a trabalhar. Sem ela, o agente pode parar para
+perguntar se você tem autorização. Todos os caminhos terminam no mesmo `AGENT-BRIEFING.md`, sobre o qual seu agente age:
 
 | Caminho | Configuração única | Depois |
 |---|---|---|
@@ -66,8 +67,8 @@ se você tem autorização. Todos os caminhos terminam no mesmo `AGENT-BRIEFING.
 | **Docker** (sem instalação) | `docker build -t websec-validator .` | `docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/scan" websec-validator run /scan --out /scan/websec-out` |
 
 Já tem uma base de código com histórico, testes e fixtures? Siga
-**[Adopting websec in an existing project](../../guides/existing-projects.md)** (adotando o websec em um projeto existente):
-tire do escopo o código que não é de produto, execute, faça a triagem, registre uma baseline e depois ative o gating em fases.
+**[Adopting websec in an existing project](../../guides/existing-projects.md)** (adotando o websec em um projeto existente).
+Tire do escopo o código que não é de produto, execute, faça a triagem, registre uma baseline e depois ative o gate em fases.
 
 ## Instalação
 
@@ -78,10 +79,10 @@ websec --version
 websec doctor                   # quais scanners opcionais estão instalados, e eles são compatíveis?
 ```
 
-Zero dependências Python em tempo de execução. Scanners externos (Trivy, OSV-Scanner, Gitleaks, Semgrep,
-Checkov e, por linguagem, Bandit/gosec/Brakeman) são usados **quando presentes** e só rodam com
-`--scan`; o Prowler é detectado e reportado, não executado. Todos os canais — pip, uv, Docker, código-fonte,
-offline/air-gapped — e a configuração dos scanners por sistema operacional: **[Installation](../../installation.md)**.
+A ferramenta tem zero dependências Python em tempo de execução. Ela usa scanners externos (Trivy, OSV-Scanner, Gitleaks, Semgrep,
+Checkov e, por linguagem, Bandit/gosec/Brakeman) **quando presentes**, e eles só rodam com
+`--scan`. Ela detecta e reporta o Prowler, mas não o executa. Para todos os canais de instalação (pip, uv, Docker, código-fonte,
+offline/air-gapped) e a configuração dos scanners por sistema operacional, veja **[Installation](../../installation.md)**.
 
 ## Uso
 
@@ -98,21 +99,21 @@ websec mcp                             # ferramentas tipadas de reconhecimento p
 
 Depois, aponte seu agente para a saída: **"Leia `websec-out/latest/AGENT-BRIEFING.md` e siga-o."**
 (em inglês: *"Read `websec-out/latest/AGENT-BRIEFING.md` and follow it."*)
-Cada tentativa ganha seu próprio diretório `websec-out/runs/<id>/`; `latest` só avança depois de uma execução concluída.
+Cada tentativa ganha seu próprio diretório `websec-out/runs/<id>/`. O `latest` só avança depois de uma execução concluída.
 Todos os subcomandos e opções: [referência da CLI](../../reference/cli.md).
 
 ## O que você recebe (`websec-out/`)
 
 | Artefato | O que é |
 |---|---|
-| `AGENT-BRIEFING.md` | **O produto.** Ordens de missão: superfície detectada, o mapa de controle de acesso, alvos, achados, o método e a lista de probes preparadas. |
+| `AGENT-BRIEFING.md` | **O produto.** As ordens para o seu agente: superfície detectada, mapa de controle de acesso, alvos, achados, o método e a lista de probes preparadas. |
 | `FACTS.json` | O reconhecimento estruturado completo. |
-| `findings-ledger.json` / `REPORT.md` | O registro rastreável: cada achado com uma cadeia de evidências, citação CWE/ASVS/OWASP-API, remediação e um **`P(real)` calibrado** (taxa medida de vulnerabilidades reais + IC de 95% + tamanho da amostra). |
-| `results.sarif` | **SARIF 2.1.0** — sempre gerado. Use-o no GitHub Code Scanning, GitLab, Azure DevOps, no visualizador SARIF do VS Code, no DefectDojo. |
-| `coverage.json` | O que rodou, o que foi pulado e por quê — um resultado limpo vale tanto quanto a sua cobertura. |
-| `probes/` | Os scripts de probe selecionados e preparados para *esta* aplicação (BOLA, JWT, SSRF, mass-assignment…). |
+| `findings-ledger.json` / `REPORT.md` | O registro rastreável. Cada achado tem uma cadeia de evidências, citação CWE/ASVS/OWASP-API, remediação e um **`P(real)` calibrado** (taxa medida de vulnerabilidades reais + IC de 95% + tamanho da amostra). |
+| `results.sarif` | **SARIF 2.1.0**, sempre gerado. Carregue-o no GitHub Code Scanning, GitLab, Azure DevOps, no visualizador SARIF do VS Code, no DefectDojo. |
+| `coverage.json` | O que rodou, o que foi pulado e por quê. Um resultado limpo vale tanto quanto a sua cobertura. |
+| `probes/` | Os scripts de probe que a execução selecionou e preparou para *esta* aplicação (BOLA, JWT, SSRF, mass-assignment…). |
 
-Além de SBOMs, uma tabela da superfície de ataque, o escopo do diff e um envelope versionado:
+A execução também grava SBOMs, uma tabela da superfície de ataque, o escopo do diff e um envelope versionado:
 [todas as saídas](../../reference/outputs.md).
 
 ## Linguagens
@@ -121,10 +122,10 @@ Além de SBOMs, uma tabela da superfície de ataque, o escopo do diff e um envel
 |---|---|
 | **Análise profunda, ciente do framework** — Django, Flask, FastAPI, Connexion, Express, Fastify, Next.js, tRPC, Supabase Edge, AWS SAM… | Python, JavaScript, TypeScript |
 | **Verificações nomeadas de sinks** — sintaxe direta de comandos/consultas (além de rotas literais de Spring e ASP.NET) | Java, C#, Go, Ruby, PHP |
-| **Apenas verificações de configuração ou manuais** — reportadas como lacuna de cobertura rasa | Kotlin/Android, Swift e Objective-C/iOS, Rust, C/C++ |
+| **Apenas verificações de configuração ou manuais** — reportadas como lacuna `thin_language_coverage` | Kotlin/Android, Swift e Objective-C/iOS, Rust, C/C++ |
 | **Reconhecidas, não analisadas** — reportadas como lacuna de cobertura, nunca como limpas | Elixir, Scala, Clojure, Erlang, Perl, Lua, Dart, shell, templates do lado do servidor e outras |
 
-A descoberta de rotas em muitos outros frameworks vem do OWASP Noir quando ele está instalado, e os
+O OWASP Noir descobre rotas em muitos outros frameworks quando está instalado. Os
 scanners são agnósticos de linguagem. Uma verificação concluída sem correspondências não prova que um serviço é seguro:
 **[a matriz de suporte completa e o que uma execução limpa significa para a sua stack](../../reference/languages.md)**.
 
@@ -142,29 +143,32 @@ As páginas abaixo estão em inglês.
 
 ## Status
 
-O [changelog](../../../CHANGELOG.md) registra o que cada versão mudou;
-[Upgrading](../../upgrade.md) indexa as notas de migração — 0.14.0 (schema 2.0) e a separação de códigos de saída
-da 0.17.0 (`2` = erro de uso, `3` = execução incompleta). As lacunas não resolvidas e seus testes de aceitação ficam na
+O [changelog](../../../CHANGELOG.md) registra o que cada versão mudou.
+O [Upgrading](../../upgrade.md) indexa as notas de migração: 0.14.0 (schema 2.0), a separação de códigos de saída
+da 0.17.0 (`2` = erro de uso, `3` = execução incompleta) e 0.22.0 (códigos de saída aplicados em todo lugar, escopo de
+`--diff`/`gate` em subdiretórios, correspondência de caminhos do `.websec-ignore`). As lacunas não resolvidas e seus
+testes de aceitação ficam na
 [especificação do trabalho restante](../../../specs/001-continuous-security-improvement/spec.md).
 
-Estas são ferramentas de revisão com escopo definido: perfis manuais, rotas desconhecidas, comportamento dinâmico e
-sintaxe não suportada continuam sendo limitações. O gate dentro do loop é ergonomia para o desenvolvedor, não um
-controle, e o `attest` reporta evidências sem emitir um veredito de conformidade. As evidências vinculadas a um
-snapshot ficam junto dos artefatos que descrevem — o [registro de validação](../../security-review/validation.md),
-os [benchmarks](../../../BENCHMARKS.md) e o [protocolo de prova](../../../corpus/PROOF-PROTOCOL.md) —
-para que os números não fiquem desatualizados aqui.
+Estas são ferramentas de revisão com escopo definido. Perfis manuais, rotas desconhecidas, comportamento dinâmico e
+sintaxe não suportada continuam sendo limitações. O gate dentro do loop ajuda o desenvolvedor e não é um
+controle. O `attest` reporta evidências e não emite veredito de conformidade. As evidências vinculadas a um
+snapshot ficam junto dos artefatos que descrevem: o [registro de validação](../../security-review/validation.md),
+os [benchmarks](../../../BENCHMARKS.md) e o [protocolo de prova](../../../corpus/PROOF-PROTOCOL.md).
+Assim, os números não ficam desatualizados aqui.
 
 **Validado em** uma aplicação Next.js de produção, um grande monorepo Express/AWS e o corpus de aplicações
-vulneráveis VAmPI / NodeGoat / DVGA — reproduzindo de forma independente os achados de um pentest feito à mão
+vulneráveis VAmPI / NodeGoat / DVGA. A ferramenta reproduziu de forma independente os achados de um pentest feito à mão
 (fronteira de tenant, SSRF, upload de arquivos, BOLA entre tenants, lacunas de papéis/autorização). A descoberta de
-rotas reporta o que consegue analisar *sem importar configurações nem executar o seu código*, então montagens
-desconhecidas continuam sendo **candidatas** a rota, carregando sua incerteza; isso é evidência para revisão humana,
-não uma medida de recall de vulnerabilidades.
+rotas reporta o que consegue analisar *sem importar configurações nem executar o seu código*.
+Montagens desconhecidas continuam sendo **candidatas** a rota e carregam sua incerteza.
+Isso é evidência para revisão humana, não uma medida de recall de vulnerabilidades.
 
 ## Contribuindo
 
 Relatos de bugs, relatos de falsos positivos e propostas de detectores são a contribuição mais valiosa que este
-projeto recebe — veja [CONTRIBUTING.md](../../../CONTRIBUTING.md) (incluindo o processo de release do mantenedor) e os
+projeto recebe. Veja [CONTRIBUTING.md](../../../CONTRIBUTING.md)
+(incluindo o processo de release do mantenedor) e os
 [modelos de issue](https://github.com/raccioly/websec-validator/issues/new/choose). Reporte vulnerabilidades do
 próprio websec de forma privada: [SECURITY.md](../../../SECURITY.md).
 
@@ -174,7 +178,7 @@ python3 -m unittest discover -s tests    # apenas stdlib; testes sintéticos/em 
 
 ## Créditos
 
-A metodologia e a biblioteca de probes foram destiladas de uma passagem real de teste de intrusão autenticado.
+A metodologia e a biblioteca de probes vêm de uma passagem real de teste de intrusão autenticado.
 Esta ferramenta transforma essa metodologia escrita à mão em algo que um agente de IA pode executar em qualquer repositório.
 
 ## Licença

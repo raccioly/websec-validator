@@ -3,8 +3,8 @@
   "brief_version": "0.21.0",
   "pages": 8,
   "sha256": {
-    "docs/websec-explained.html": "8fd2e933aba76b569bbdbf5a07c6e6b4b294375495b97cb833a32d9ad90f70f6",
-    "docs/websec-explained.pdf": "0cc06d44f339c83a3a997d63a98f8a74154a13874f04aa12d3c30cc100a0236a",
+    "docs/websec-explained.html": "088492bc9bbc7e62080dc785cb2db00e8f16afc3bc573136063ca246d459750d",
+    "docs/websec-explained.pdf": "479a50f6840c875fb09290497aaa8e583a0d25866c9a6368e2a833567fa1988e",
     "scripts/build-brief.py": "b740fd36a9926bd6a5e9ff40526f70f6abd3942aebe599c15dc7c0330d04ed7f"
   }
 }
