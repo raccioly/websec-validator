@@ -59,7 +59,7 @@ SINKS = {
     "nosql-injection": ("bola-write-verbs", "nosql", re.compile(
         r"\.(?:find|findOne|update|updateOne|deleteOne|aggregate)\s*\(\s*(?:req\.|request\.)|\$where")),
     "path-traversal": ("bola-write-verbs", None, re.compile(
-        r"(?:fs\.(?:readFile|writeFile|createReadStream|unlink|readdir)|sendFile|os\.path\.join|\bopen|path\.(?:join|resolve))\s*\([^)]*"
+        r"(?:fs\.(?:readFile(?:Sync)?|writeFile(?:Sync)?|createReadStream|unlink(?:Sync)?|readdir(?:Sync)?|rmdir(?:Sync)?|rm(?:Sync)?)|sendFile|os\.path\.join|\bopen|path\.(?:join|resolve))\s*\([^)]*"
         + _U)),
     "ssti": ("ssrf-probes", None, re.compile(
         r"(?:render_template_string|renderString|nunjucks\.renderString|ejs\.render|pug\.compile|Handlebars\.compile|new\s+Template|Template\s*\()\s*\([^)]*"
