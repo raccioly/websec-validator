@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Path traversal now also covers the synchronous and remove file APIs: `readFileSync`,
+  `writeFileSync`, `unlinkSync`, `readdirSync`, `rm`/`rmSync` and `rmdir`/`rmdirSync`. For `fs.*`,
+  `sendFile` and `open`, the user input must be in the path argument, so content built by string
+  concatenation (`fs.writeFileSync(outPath, '\uFEFF' + lines)`) is no longer flagged. Path builders
+  (`path.join`, `path.resolve`) still match user input in any argument. (#214)
+- An agent config whose base URL points at a loopback host (`localhost`, `127.x.x.x`, `0.0.0.0`,
+  `::1`) is no longer reported as an exfiltration vector. A host that only looks local, such as
+  `localhost.example.com`, still is. (#213)
+
 ## [0.23.0] — 2026-11-24
 
 ### Added
