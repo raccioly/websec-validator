@@ -14,18 +14,18 @@ read [The core idea](#the-core-idea) and [Why confidence is calibrated](#layer-3
 
 ## The core idea
 
-Most security scanners try to *be* the expert: they run, they decide, they hand you a list of
-alerts. The problem is well known — they cry wolf. Engineers drown in false positives, learn to
-ignore the tool, and the one real bug hides in the noise.
+Most security scanners try to *be* the expert. They run, they decide, and they hand you a list of
+findings. The problem is well known: they report many findings that are not real. Engineers drown in
+false positives and learn to ignore the tool. Then the one real bug hides in the noise.
 
-websec-validator takes the opposite stance. **It does the deterministic half a machine is actually
-good at — reading supported source, mapping visible attack surface, citing the standards — and then hands
-an AI coding agent a precise, fact-grounded briefing to do the reasoning half.** The tool itself
+websec-validator takes the opposite stance. **It does the deterministic half that a machine does
+well: it reads supported source, maps the visible attack surface and cites the standards. Then it
+hands an AI coding agent a precise, fact-grounded briefing for the reasoning half.** The tool itself
 contains **no LLM and needs no server or running app** for its core pass. It is code-in,
 artifacts-out.
 
-Think of it as the auto-filled, repo-aware version of the handoff a senior penetration tester
-writes for a junior: *"here's what this app is, here's where it's exposed, here's exactly what to
+It works like the handoff a senior penetration tester writes for a junior, filled in automatically
+from your repo: *"here's what this app is, here's where it's exposed, here's exactly what to
 test and how, and here's how confident I am in each lead."* The agent (with a human in the loop)
 then runs the probes, triages, fixes, and re-verifies.
 
@@ -37,10 +37,10 @@ Three actors, clear seams:
 | 🤖 your AI agent | confirm the auth/tenant model, finalize + run the probes, triage real-vs-noise, propose fixes, re-verify |
 | 🧑 the human | supply the running TEST instance + test accounts, review every diff, authorize any live probing |
 
-The seam that matters most: **static recon + the briefing need only the code; the *probes* need a
-live test instance + credentials.** The default core pass does not contact that app; explicitly
-executed dynamic checks and staged drafts do. Optional external analyzers have their own trust
-and network boundaries, so read-only Python intake is not a sandbox for every executable.
+The most important seam: **static recon + the briefing need only the code; the *probes* need a
+live test instance + credentials.** The default core pass does not contact that app. Dynamic checks
+that you execute explicitly, and staged drafts, do contact it. Optional external analyzers have their
+own trust and network boundaries. Read-only Python intake is not a sandbox for every executable.
 
 ---
 
@@ -57,9 +57,9 @@ and network boundaries, so read-only Python intake is not a sandbox for every ex
                  5. DYNAMIC PHASE  ──▶  scoped observations/evidence  ──▶  evidence-backed calibration only
 ```
 
-Every `run` is written to an **immutable, timestamped directory** (`websec-out/runs/<ts>/`) with a
-`latest` symlink that advances only after completed execution. Each partial attempt keeps its own
-unique directory and coverage manifest; completed checks do not establish complete protection.
+Every `run` writes to an **immutable, timestamped directory** (`websec-out/runs/<ts>/`). A
+`latest` symlink advances only after completed execution. Each partial attempt keeps its own
+unique directory and coverage manifest. Completed checks do not establish complete protection.
 
 ---
 
@@ -93,47 +93,48 @@ extractors over it. Each answers one question a pentester asks first. The output
 | 21 | **agent_config** | Is the repo's OWN agent/MCP wiring poisoned? (OWASP **Agentic Top 10**) | Reads the agent-steering config (`.claude/settings.json`, `.mcp.json`, cursor/copilot rules, `CLAUDE.md`/`AGENTS.md`) as **untrusted data, never executed**. Flags **invisible/bidi Unicode** in a rules file (Rules-File-Backdoor), a pre-consent hook with a **fetch-and-execute command shape** (CVE-2025-59536 class), **blanket MCP auto-approval**, a **non-vendor `*_BASE_URL` override** (key-exfil), and **unpinned/remote MCP servers**. Reads a fixed bounded allow-list off the root; tool-description *poisoning* (prose-grammar) is deferred to keep the FP bar. |
 | 22 | **dependencies** | Offline supply-chain hygiene (the AI slopsquat / malicious-dep class) | What Trivy's known-CVE scan can't see. Ledger classes: a **malicious install/lifecycle script** (`postinstall` whose body fetches-and-executes/evals — the Shai-Hulud shape) and **lockfile drift** (a manifest dep absent from an existing JSON lockfile's installed set). **Unpinned versions** and **dependency-confusion-shaped names** are advisory-only (never routed to the ledger). Registry resolution / hallucinated-name / typosquat-distance are deferred behind an opt-in `--network` step — the default pass makes **zero network calls**. |
 
-> **Why rows 17–19 exist (the self-improvement pass).** Dogfooding the tool on a large real-world
+> **Why rows 17–19 exist (the self-improvement pass).** Running the tool on a large real-world
 > **LLM-agent monorepo** (a 15-agent verification pass that adversarially confirmed every finding)
-> surfaced two whole classes the route/auth/SSRF model couldn't see: the **agentic surface**
+> exposed two whole classes that the route/auth/SSRF model could not see: the **agentic surface**
 > (prompt construction → tool dispatch → output) and **crypto-usage / authz-correctness**. Rows 17–19
-> close them. The same pass also drove the false-positive killers folded into rows 4/7/16 — validated
-> end-to-end (the ledger's HIGH-finding noise dropped ~12× with no loss of the genuine findings).
+> close them. The same pass also drove the false-positive fixes folded into rows 4/7/16. End-to-end
+> validation showed that the ledger's HIGH-finding noise dropped ~12× with no loss of the genuine findings.
 
 > **The managed-cloud boundary (why rows 3, 9, 11, 12 grew).** A real authenticated pen test
-> (`REF-PENTEST`) found that the two Criticals and two Highs lived in file types and constructs the
-> recon never used to parse: the **AWS-CDK** auth config, the **AppSync GraphQL SDL**, and the **VTL**
+> (`REF-PENTEST`) found two Criticals and two Highs. They lived in file types and constructs that
+> recon did not parse before: the **AWS-CDK** auth config, the **AppSync GraphQL SDL**, and the **VTL**
 > resolvers (`base.py` now walks `.graphql`/`.gql`/`.vtl`). Modern serverless apps put their
-> authorization in exactly that managed-cloud boundary — so an AWS-heavy target's most important half
-> was previously invisible. Two honest limits stated up front: regex over CDK TypeScript (not an AST)
-> can be evaded by aliased / helper-extracted constructs (false negatives), and the man-in-the-browser
-> class (row 11) can never be a confident static catch — it is the inherent web-platform ceiling that
-> hardware wallets exist to solve, so it ships as a LOW-confidence "verify these compensating controls"
+> authorization in exactly that managed-cloud boundary. So the most important half of an AWS-heavy
+> target was previously invisible. Two limits, stated up front. First, regex over CDK TypeScript (not an AST)
+> can miss aliased or helper-extracted constructs (false negatives). Second, the man-in-the-browser
+> class (row 11) can never be a confident static catch. It is the inherent web-platform ceiling that
+> hardware wallets exist to solve. So it ships as a LOW-confidence "verify these compensating controls"
 > lead, never a verdict.
 
 > **The retest meta-lessons (what prevents the *next* finding).** A second pen-test pass on the same app
-> taught five things now baked into the rules above: **(1)** a WAF/regex is never the *remediation* for an
-> app-layer flaw, only a compensating control — so a `byteMatchStatement` on `__schema` is flagged as a
-> smell, not a fix; **(2)** read the finding precisely — "set *old* password" is **reuse**, a different
-> control from complexity, and "CSWSH" is only real with **ambient-cookie** auth; **(3)** assert by **value
-> shape, not field name** — a phone embedded in a composed id slips past a field allow-list; **(4)**
-> validate the whole **chain**, not the entry point — every redirect *hop*, the subscription not just the
-> handshake, the byte content and the serve path not the declared type; **(5)** "tests pass" ≠ secure —
-> run an adversarial pass after green. Two of these corrected the tool's *own* prior output (the AppSync
-> introspection over-flag and the CSWSH mislabel) — the same discipline, applied inward.
+> taught five lessons. The rules above now include them. **(1)** A WAF/regex is never the *remediation* for an
+> app-layer flaw. It is only a compensating control. So a `byteMatchStatement` on `__schema` is flagged as a
+> smell, not a fix. **(2)** Read the finding precisely. "Set *old* password" is **reuse**, a different
+> control from complexity. "CSWSH" is only real with **ambient-cookie** auth. **(3)** Assert by **value
+> shape, not field name**. A phone embedded in a composed id slips past a field allow-list. **(4)**
+> Validate the whole **chain**, not the entry point: every redirect *hop*, the subscription and not only the
+> handshake, the byte content and the serve path and not the declared type. **(5)** "Tests pass" ≠ secure.
+> Run an adversarial pass after green. Two of these lessons corrected the tool's *own* prior output (the AppSync
+> introspection over-flag and the CSWSH mislabel). That is the same discipline, applied inward.
 
 **Design note — the authz heuristic is a *hint*, not a verdict.** File-level guard detection
-over-flags on apps that split routing from controllers (common in Express). That's intentional:
-recon produces *leads* with honest confidence, and the dynamic phase (Layer 5) is what turns a
-lead into a confirmed finding. This is also exactly what [calibration](#layer-3b--calibrated-confidence-cje)
-measures — how often a recon lead is actually real.
+over-flags on apps that split routing from controllers (common in Express). That is intentional.
+Recon produces *leads* with honest confidence. The dynamic phase (Layer 5) turns a lead into a
+confirmed finding. [Calibration](#layer-3b--calibrated-confidence-cje) measures exactly this: how
+often a recon lead is actually real.
 
 ---
 
 ## Layer 2 — Static scanners
 
-When present on your machine, the tool shells out to best-of-breed open-source scanners and
+When scanners are present on your machine, the tool runs these best-of-breed open-source scanners and
 **de-duplicates their findings across tools** into one severity-ranked set (`findings.json`, with
+`--scan`):
 `--scan`):
 
 | Scanner | Catches |
@@ -144,22 +145,22 @@ When present on your machine, the tool shells out to best-of-breed open-source s
 | **Checkov** | infrastructure-as-code misconfig |
 | **Prowler** | cloud-account posture — detected and reported by `doctor`; websec has no invocation for it, so `--scan` does not execute it |
 
-It **never hard-fails if a tool is absent** — it reports what's missing with install hints and
-carries on. Scanners are detected by default and only *executed* with `--scan`, because execution
-can be slow and the recon + briefing are valuable on their own.
+It **never hard-fails if a tool is absent**. It reports what is missing, with install hints, and
+carries on. The tool detects scanners by default and *executes* them only with `--scan`. Execution
+can be slow, and the recon + briefing are valuable on their own.
 
-One class no local scanner can reach is whether a declared dependency **exists at all** — the
-AI-hallucinated-package surface. `--network` opts into asking the public registry, sending bare
-package names only, with names this repository publishes and privately-bound scopes removed
-*offline* beforehand. A 200 is not evidence of safety: a squatter who already registered the
+No local scanner can answer one question: does a declared dependency **exist at all**? This is the
+AI-hallucinated-package surface. `--network` opts into asking the public registry. It sends bare
+package names only. Before that, it removes the names this repository publishes and the
+privately-bound scopes, *offline*. A 200 is not evidence of safety: a squatter who already registered the
 hallucinated name also answers 200.
 
 ---
 
 ## Layer 3 — The findings ledger
 
-Recon signals, static-scanner hits, and (when run) dynamic results are correlated into **one ranked
-record set** (`findings-ledger.json` + the human-readable `REPORT.md`). Every finding carries:
+The tool correlates recon signals, static-scanner findings and (when run) dynamic observations into
+**one ranked record set** (`findings-ledger.json` + the human-readable `REPORT.md`). Every finding carries:
 
 - **an evidence chain across layers** — e.g. a recon "no guard found" hypothesis (MEDIUM) and a
   scoped dynamic observation retain a `recon → dynamic` chain. Status-only observations never
@@ -176,8 +177,8 @@ record set** (`findings-ledger.json` + the human-readable `REPORT.md`). Every fi
 **The confidence rule (deterministic, no ML):**
 
 - Confidence is assigned per detector/evidence path, not by one universal severity conversion.
-  A controlled confirmed BOLA result can be HIGH; an HTTP success alone cannot. Native Bandit
-  confidence is retained separately from severity; other adapter mappings are heuristic.
+  A controlled confirmed BOLA result can be HIGH. An HTTP success alone cannot. Native Bandit
+  confidence is retained separately from severity. Other adapter mappings are heuristic.
 - Concrete static evidence often receives MEDIUM and architectural hypotheses often LOW. Neither
   label is verification of exploitability. The exact branch and its evidence remain authoritative.
 
@@ -188,73 +189,72 @@ each `(attack-class, confidence)` bucket is *actually* a real vulnerability**, s
 something you can act on.
 
 - **How.** `websec calibrate` runs the recon ledger against a labeled corpus of deliberately-
-  vulnerable apps (VAmPI, NodeGoat, DVGA), counts how often each bucket matches a documented vuln,
+  vulnerable apps (VAmPI, NodeGoat, DVGA). It counts how often each bucket matches a documented vuln
   and writes `calibration.json` (shipped, and applied at runtime). Each finding then gets a
   `P(real)` with a **95% confidence interval** and the sample size `n`.
 - **Why a confidence interval, not just a number.** With a small corpus the *interval is the
-  headline*. Always quote the measured bucket, reviewed date, `n` and interval together; the old
-  n=51 seed used an invalid unmatched-as-false policy and is not a current estimate.
-  The math is a Wilson score interval (binomial proportion) — deliberately *not*
-  isotonic regression, which would overfit at this sample size. The structure upgrades to isotonic
-  cleanly if a large labeled set ever exists.
+  headline*. Always quote the measured bucket, reviewed date, `n` and interval together. The old
+  n=51 seed used an invalid unmatched-as-false policy. It is not a current estimate.
+  The math is a Wilson score interval (binomial proportion). It is deliberately *not*
+  isotonic regression, which would overfit at this sample size. The structure upgrades
+  cleanly to isotonic if a large labeled set ever exists.
 - **Evidence and uncertainty.** Unmatched corpus findings remain unknown unless explicit negative
   evidence labels them false. HTTP status changes and DAST silence are insufficient truth labels.
-  The deliberately vulnerable corpus skews optimistic for production code; every rate must identify
+  The deliberately vulnerable corpus skews optimistic for production code. Every rate must identify
   its detector revision, reviewed labels, sample size and interval. Historical unmatched-as-false
   measurements are legacy data, not a fresh precision estimate for the current detector.
 - **Operator feedback is a candidate, not a label.** `websec feedback --verdict false-positive`
-  queues a *calibration candidate* — visible in `websec calibrate --review`, counted nowhere. An
-  operator's verdict is evidence, not proof, and a wrong label would lower P(real) for that bucket
+  queues a *calibration candidate*. It is visible in `websec calibrate --review` and counted nowhere.
+  An operator's verdict is evidence, not proof. A wrong label would lower P(real) for that bucket
   on every future run of every project on the machine, permanently. Promotion requires an explicit
-  `websec calibrate --accept <id> --reason "..."` by a human, and is refused when the candidate was
-  reported against a different `detector_revision` — the rule that produced it may no longer exist.
-  Acceptance goes through the same `record_samples` evidence bar as a dynamic-confirmed sample, so
-  there is no second, weaker door into a measured cell. `severity-wrong` and `false-negative`
-  reports queue nothing: one disputes severity rather than existence, the other describes a finding
-  that was never produced, and neither can be scored against a bucket.
+  `websec calibrate --accept <id> --reason "..."` by a human. The command refuses when the candidate
+  was reported against a different `detector_revision`, because the rule that produced it may no
+  longer exist. Acceptance goes through the same `record_samples` evidence bar as a dynamic-confirmed
+  sample, so there is no second, weaker door into a measured cell. `severity-wrong` and
+  `false-negative` reports queue nothing. One disputes severity rather than existence. The other
+  describes a finding that was never produced. Neither can be scored against a bucket.
 - **Authored pairs are measured separately and never merged.** `websec calibrate --synthetic`
   scores the repository's paired fixtures (a vulnerable variant that must fire, a sanitized twin
   that must not) into `calibration-synthetic.json`. Those are reviewed, reproducible labels, but
-  they measure whether a rule still handles what it was *built* to handle — regression precision on
-  anticipated cases, not the rate at which a finding in real code is a real vulnerability. Merging
-  them would launder the author's own coverage into P(real), so `apply()` never reads that table
-  and `websec explain` prints it on its own line with its own caveat. A detector that fails to fire
-  on a vulnerable variant is reported as a recall gap, never silently dropped — a harness that
-  scored nothing would otherwise publish a perfect table.
-- **A class earns a cell only from reviewed labels.** Appearing in `corpus.json` is not research:
-  unreviewed entries and class-level wildcards cannot separate a real vulnerability from a false
-  positive inside the same class. A class is
-  published as a class-specific cell only when it has a truth entry with `review_status: "reviewed"`
-  and an explicit boolean `is_real`; otherwise it falls back to the wider, honest label tier. Every
-  unreviewed entry retains its promotion requirements. The September 22 table contains 21 reviewed
-  labels and 35 unknown findings; those rates describe that dated detector measurement, not an
-  automatically renewed evaluation of subsequent code.
+  they measure whether a rule still handles what it was *built* to handle. That is regression
+  precision on anticipated cases, not the rate at which a finding in real code is a real vulnerability.
+  Merging them would launder the author's own coverage into P(real). So `apply()` never reads that
+  table, and `websec explain` prints it on its own line with its own caveat. A detector that fails to
+  fire on a vulnerable variant is reported as a recall gap and never silently dropped. Otherwise a
+  harness that scored nothing would publish a perfect table.
+- **A class earns a cell only from reviewed labels.** Appearing in `corpus.json` is not research.
+  Unreviewed entries and class-level wildcards cannot separate a real vulnerability from a false
+  positive inside the same class. The tool publishes a class-specific cell only when the class has a
+  truth entry with `review_status: "reviewed"` and an explicit boolean `is_real`. Otherwise it falls
+  back to the wider, honest label tier. Every unreviewed entry retains its promotion requirements.
+  The September 22 table contains 21 reviewed labels and 35 unknown findings. Those rates describe
+  that dated detector measurement. They are not an automatically renewed evaluation of subsequent code.
 - **Learning is gated by evidence.** Only scoped evidence-backed labels enter the local calibration
   overlay (`~/.cache/websec-validator/`). Legacy unproven records are quarantined. Unknown-only input
   reports no successful measurement and leaves fitted calibration unchanged. Evidence may support a
   specific request/property without proving the entire endpoint or attack class safe.
-- **Objective — strictly proper scoring rules only.** Any quantity fitted from labels (a bucket
-  probability, a cut-off, a threshold default) is chosen by a **strictly proper scoring rule** —
-  Brier or log score — never by accuracy, precision, recall or F1. A strictly proper rule is
-  maximized only by reporting honest probabilities; accuracy-shaped objectives are maximized by
-  confident wrongness, which is the exact failure this layer exists to prevent. Those other metrics
-  may be *reported*; they must not be *optimized*. `websec calibrate` prints the table's Brier score
-  whenever it writes a measurable cell, so the honest metric exists before anyone is tempted to tune
-  on a dishonest one. No behavior currently depends on that number.
+- **Objective — strictly proper scoring rules only.** The tool chooses any quantity fitted from
+  labels (a bucket probability, a cut-off, a threshold default) by a **strictly proper scoring rule**
+  (Brier or log score), never by accuracy, precision, recall or F1. Only honest probabilities maximize
+  a strictly proper rule. Accuracy-shaped objectives are maximized by confident wrongness, which is the
+  exact failure this layer exists to prevent. The tool may *report* those other metrics. It must not
+  *optimize* them. `websec calibrate` prints the table's Brier score whenever it writes a measurable
+  cell. So the honest metric exists before anyone is tempted to tune on a dishonest one. No behavior
+  currently depends on that number.
 
 This is the deterministic realization of the **CJE (Calibrated Judge Evaluation)** idea from the
-AITPG/TRACE research: the tool emits the evidence + citation + a calibrated confidence; the agent
-runs the judging.
+AITPG/TRACE research. The tool emits the evidence, the citation and a calibrated confidence. The
+agent runs the judging.
 
 ---
 
 ## Layer 3d — Disposition: the third axis
 
-A finding has always answered two questions — **how bad if real** (`severity`) and **is it real**
-(`calibrated.p`). It never answered the third: **can an agent act on this alone?** That question was
-carried implicitly, and answered "no" for everything: every repair plan requires a human to confirm
-the finding first. Safe, but uninformative — it gives an agent no way to distinguish a missing
-`nosniff` header from a missing authorization decision.
+A finding has always answered two questions: **how bad if real** (`severity`) and **is it real**
+(`calibrated.p`). It never answered the third: **can an agent act on this alone?** The tool carried
+that question implicitly and answered "no" for everything, because every repair plan requires a human
+to confirm the finding first. That is safe, but uninformative. It gives an agent no way to distinguish a
+missing `nosniff` header from a missing authorization decision.
 
 Each finding now carries an additive `triage` block:
 
@@ -263,63 +263,63 @@ Each finding now carries an additive `triage` block:
 ```
 
 - **The rule has two necessary conditions.** A class is `agent-fixable` only when the remediation is
-  a local code/config change **and** the fix prompt names a **mechanical** verification — something
-  that passes or fails without judgement (`curl -I` shows the header, a `none`-algorithm token is
-  rejected, a unit test pins the constant-time comparison). The second condition is load-bearing: if
+  a local code/config change **and** the fix prompt names a **mechanical** verification. A mechanical
+  verification passes or fails without judgement (`curl -I` shows the header, a `none`-algorithm token is
+  rejected, a unit test pins the constant-time comparison). The second condition matters most. If
   a fix cannot be demonstrated, an agent cannot know it worked, so a human must look however local
   the edit was. Today that is 9 classes out of 73.
 - **Everything else, including unknown classes, is `human-required`,** with a reason stated per
-  class rather than one generic sentence — an agent reading "human-required" with no reason learns
-  nothing about what to ask the human for. The asymmetry is deliberate: wrongly calling something
-  human-required costs a review that was going to happen anyway, while wrongly calling something
-  agent-fixable invites an unattended change to a security control. A new detector therefore cannot
+  class, not one generic sentence. An agent that reads "human-required" with no reason learns
+  nothing about what to ask the human for. The asymmetry is deliberate. Wrongly calling something
+  human-required costs a review that was going to happen anyway. Wrongly calling something
+  agent-fixable invites an unattended change to a security control. So a new detector cannot
   silently widen what an agent may touch.
 - **It is derived, not asserted.** The value comes from a static per-attack-class policy published
   by `websec capabilities`, together with the verification that justifies each `agent-fixable`
-  entry — so a reader who disagrees can argue with the rule instead of inferring it from behaviour.
+  entry. A reader who disagrees can argue with the rule and does not need to infer it from behavior.
 - **Nothing gates on it.** `gate.verdict`, `--fail-on`, `fpfilter` and the baseline all ignore it,
   and it is absent from SARIF. A HIGH-severity `agent-fixable` finding blocks a gate exactly as it
-  did before. `agent-fixable` means an agent may **propose** the patch; a human still reviews every
-  diff. The briefing sorts by severity, then P(real), then disposition — disposition is the *last*
-  key on purpose, because ordering by actionability first would put a trivially-fixable header above
-  a critical authorization hole.
+  did before. `agent-fixable` means an agent may **propose** the patch. A human still reviews every
+  diff. The briefing sorts by severity, then P(real), then disposition. Disposition is the *last*
+  key on purpose. Ordering by actionability first would put a trivially-fixable header above a
+  critical authorization hole.
 
 ---
 
 ## Layer 3c — The security constitution
 
-From the same recon facts the tool derives a set of **Given/When/Then invariants** the app *should*
-hold (`CONSTITUTION.md`) — e.g. *"Given a request to a write endpoint, When no session is present,
-Then it must be rejected."* Each starts unchecked (⬜); the agent confirms it (✅ holds) or refutes
-it (🔴 VIOLATED) with a probe. It reframes the findings as testable guarantees rather than a flat list.
+From the same recon facts the tool derives a set of **Given/When/Then invariants** that the app
+*should* hold (`CONSTITUTION.md`). Example: *"Given a request to a write endpoint, When no session is present,
+Then it must be rejected."* Each starts unchecked (⬜). The agent confirms it (✅ holds) or refutes
+it (🔴 VIOLATED) with a probe. The constitution reframes the findings as testable guarantees and not a flat list.
 
 ---
 
 ## Layer 4 — The dynamic phase (optional, live, gated)
 
-When you have a **running TEST instance + test credentials**, `websec dynamic` runs the probes the
-static recon pointed at. This can add evidence to a lead; status changes alone remain candidates. It is deliberately
+When you have a **running TEST instance + test credentials**, `websec dynamic` runs the probes that the
+static recon pointed at. This can add evidence to a lead. Status changes alone remain candidates. It is deliberately
 conservative:
 
 - **Authenticated cross-tenant BOLA** (`--config`) — logs in as two test accounts in different
-  tenants and checks whether account A can read account B's data via the group-scoped GET endpoints
-  recon found. **Read-only.** Response similarity requires content, identity and ownership evidence
-  before concluding that protected cross-tenant data leaked.
-- **Unauthenticated reachability** (`--unauth`) — GETs each data-read endpoint with no auth to see
-  what's reachable. **GET-only**, and trigger-style paths (cron/scrape/generate…) are excluded
+  tenants. It checks whether account A can read account B's data through the group-scoped GET
+  endpoints that recon found. **Read-only.** Response similarity alone is not enough. The conclusion
+  that protected cross-tenant data leaked needs content, identity and ownership evidence.
+- **Unauthenticated reachability** (`--unauth`) — sends a GET to each data-read endpoint with no
+  auth, to see what is reachable. **GET-only.** It excludes trigger-style paths (cron/scrape/generate…)
   because *a GET can still be side-effecting*.
 - **Write-verb auth enforcement** (`--probe-writes`) — **localhost-only**, empty bodies / dummy ids.
   Successful responses are candidates until protected behavior or state change is verified. Redirects
-  leave auth enforcement unverified. Even empty requests may change state; isolate the test target.
+  leave auth enforcement unverified. Even empty requests may change state, so isolate the test instance.
 
-**The safety model is explicit and non-negotiable:** read-only by default; write probes are
-localhost-only; isolated test targets; and **production is out of scope without written
-authorization.** The tool refuses write probes against non-localhost targets, and the human owns
+**The safety model is explicit and non-negotiable.** It is read-only by default. Write probes are
+localhost-only. Test instances are isolated. **Production is out of scope without written
+authorization.** The tool refuses write probes against non-localhost targets. The human owns
 every credential and authorizes every live run.
 
-Configured TEST authentication may POST even when the data probes use GET. Mutating probe
-transports enforce localhost independently, including manually executed shell/httpx drafts;
-staging itself sends no requests. Reflected credentials must not enter persisted response previews
+Configured TEST authentication may send a POST even when the data probes use GET. Mutating probe
+transports enforce localhost independently. This includes shell/httpx drafts that you execute
+manually. Staging a probe sends no requests. Reflected credentials must not enter persisted response previews
 or login-error text. An HTTP status alone does not prove or disprove an authorization defect.
 
 ---
@@ -328,30 +328,30 @@ or login-error text. An HTTP status alone does not prove or disprove an authoriz
 
 Two placements, deliberately different in kind:
 
-**At review time** — `websec run` analyses the whole tree and produces the briefing, ledger, probes
+**At review time** — `websec run` analyzes the whole tree and produces the briefing, ledger, probes
 and SARIF. This is the review.
 
-**Inside the agent loop** — `websec gate` analyses only the files just changed (about 0.3s) and
-returns pass/fail; a `PostToolUse` hook runs it after each write and blocks the loop on a finding,
-so the model fixes it on the next turn. A finding surfaced after forty merges is a backlog item; the
-same finding surfaced on the edit that caused it is a retry.
+**Inside the agent loop** — `websec gate` analyzes only the files just changed (about 0.3s) and
+returns pass/fail. A `PostToolUse` hook runs it after each write. The hook blocks the loop on a
+finding, so the model fixes the finding on the next turn. A finding that appears after forty merges
+is a backlog item. The same finding on the edit that caused it is a retry.
 
-Completed-but-incomplete scoped analysis also blocks the loop: an inventoried path is not a
+Completed-but-incomplete scoped analysis also blocks the loop, because an inventoried path is not a
 successfully read source file. Only unexpected internal crashes fail open, with a loud diagnostic.
 
-The gate is deliberately *not* a smaller review. It scopes the analysis rather than the report, does
-not consult cross-file evidence outside that scope, writes nothing, and never advances an accepted
-baseline. `websec run --only <path>` applies the same idea to a full run: it narrows what is
-*analysed*, not merely what is printed, so the coverage record reports the narrowed scope rather
-than implying the untouched paths were examined and found clean. A clean gate does not mean the repository is clean — keep running the full pass. It is
-also developer ergonomics rather than a control: settings files are editable, so enforcement remains
-a server-side required status check.
+The gate is deliberately *not* a smaller review. It scopes the analysis, not the report. It does not
+consult cross-file evidence outside that scope. It writes nothing and never advances an accepted
+baseline. `websec run --only <path>` applies the same idea to a full run. It narrows what is
+*analyzed*, not only what is printed. So the coverage record reports the narrowed scope and does not
+imply that the untouched paths were examined and found clean. A clean gate does not mean the repository is
+clean, so keep running the full pass. The gate is also developer ergonomics, not a control. Settings
+files are editable, so enforcement remains a server-side required status check.
 
 ---
 
 ## The verification method (how the agent should use this)
 
-The briefing doesn't just hand over findings — it teaches the agent the verification method from the
+The briefing does more than hand over findings. It teaches the agent the verification method from the
 AITPG/TRACE research, because **verification is the false-positive killer**:
 
 - **Verify each finding with a 4-role debate** — *Advocate* (argue it's real, cite the chain +
@@ -369,32 +369,32 @@ AITPG/TRACE research, because **verification is the false-positive killer**:
 
 ## Why your agent might pause — and how to phrase the request
 
-This tool is **defensive**: it reviews *your own* code, is read-only by default, and never touches a
+This tool is **defensive**. It reviews *your own* code and is read-only by default. It never touches a
 live system unless you supply a TEST target and approve each probe. But a capable coding agent is
-*trained* to slow down around security tooling — its own guidelines say dual-use security tools
+*trained* to slow down around security tooling. Its own guidelines say dual-use security tools
 "require clear authorization context." So if you open a repo and say **"pentest this,"** a careful
-agent may stop and ask whether you're authorized. That's not a bug; it's the agent doing its job
-without enough context. You remove the friction by *supplying* that context. Three levers, in order
+agent may stop and ask whether you are authorized. That is not a bug. The agent is doing its job
+without enough context. You remove the friction by *supplying* that context. There are three levers, in order
 of leverage:
 
-1. **How you ask.** Frame it as a *defensive review of your own code*, not an *attack*. A line like —
+1. **How you ask.** Frame the request as a *defensive review of your own code*, not an *attack*. A line like
    *"Do a defensive security self-review of my own codebase with websec-validator. It's local and
-   read-only — read the repo and follow its briefing. I own this code and authorize the review."* —
-   carries ownership + intent + scope + authorization in one breath, and is usually all it takes.
+   read-only — read the repo and follow its briefing. I own this code and authorize the review."*
+   carries ownership, intent, scope and authorization at once. It is usually all it takes.
 2. **What the tool tells the agent.** The skill description, the top of `SKILL.md`, and the
-   `AGENT-BRIEFING.md` header all lead with the same scope-and-authorization statement, so an agent
-   that reads them is *handed* its authorization instead of reconstructing it. Each staged probe
+   `AGENT-BRIEFING.md` header all open with the same scope-and-authorization statement. An agent that
+   reads them is *handed* its authorization and does not need to reconstruct it. Each staged probe
    carries a one-line `DEFENSIVE CHECK — run only against a system you own` header for the same reason.
-3. **Where the tool comes from.** `pipx install websec-validator` from PyPI reads very differently
-   from running code straight off a URL — provenance is its own trust signal.
+3. **Where the tool comes from.** `pipx install websec-validator` from PyPI looks very different
+   from running code straight off a URL. Provenance is its own trust signal.
 
-What **doesn't** help: GitHub badges, stars, or extra README prose. An agent doesn't fetch those
-before deciding — it reads your request, the skill text, and the briefing. Those are the surfaces
-this tool front-loads, and the ones worth getting right.
+What does **not** help: GitHub badges, stars, or extra README prose. An agent does not fetch those
+before it decides. It reads your request, the skill text and the briefing. The tool puts its scope
+statement on those surfaces first, and those are the ones worth getting right.
 
-One pause is worth **keeping**: before any probe fires at a *running* host, the agent should confirm
-the target and scope with you. That checkpoint is a feature, not friction — the goal is to remove the
-hesitation around *statically reading your own repo*, not the one before *live-firing at a server*.
+Keep one pause: before any probe fires at a *running* host, the agent should confirm
+the target and scope with you. That checkpoint is a feature, not friction. The goal is to remove the
+hesitation about *statically reading your own repo*, not the hesitation before *live-firing at a server*.
 
 ---
 
@@ -455,24 +455,24 @@ map into a full ASVS index lookup.)
 ## Proof & honesty
 
 - **`websec proof`** clones the vuln-app corpus and scores whether recon **surfaces** each app's
-  documented attack surface — a deterministic, regression-trackable proxy for engine quality. It is
-  honest about what it *doesn't* measure: the full kill-criterion (does the briefing make an agent
+  documented attack surface. This is a deterministic, regression-trackable proxy for engine quality.
+  It is honest about what it does *not* measure. The full kill-criterion (does the briefing make an agent
   find planted bugs better than a generic prompt?) is the manual A/B in
   [`corpus/PROOF-PROTOCOL.md`](../corpus/PROOF-PROTOCOL.md).
 - **`websec attest`** projects a completed run into an audit-evidence table, gaps first. It renders
-  **no verdict, score, percentage or badge**, and the word "compliant" does not appear in its output
-  — a test enforces that. It states what is *not* evidenced as plainly as what is, including that it
-  cannot attest the gate was un-bypassed (a client-side hook is bypassable by construction) and
-  cannot evidence approver independence. An evidence inventory is not a compliance determination.
-- **`websec feedback`** records an operator verdict that a detector is wrong — `false-positive` or
-  `severity-wrong` — against a finding's fingerprint, and prints a prefilled issue link without
-  sending anything. Records are metadata-only by default: a finding can point at a secret, so
-  titles, routes, paths and evidence prose are withheld unless `--include-snippet` is passed
-  explicitly. It never suppresses; `.websec-ignore` remains the way to silence a finding locally.
-  The two answer different questions — "this detector is wrong" versus "stop showing me this here".
+  **no verdict, score, percentage or badge**. The word "compliant" does not appear in its output, and
+  a test enforces that. It states what is *not* evidenced as plainly as what is. For example, it
+  cannot attest that nobody bypassed the gate (a client-side hook is bypassable by construction), and
+  it cannot evidence approver independence. An evidence inventory is not a compliance determination.
+- **`websec feedback`** records an operator verdict that a detector is wrong (`false-positive` or
+  `severity-wrong`) against a finding's fingerprint. It prints a prefilled issue link and sends
+  nothing. Records are metadata-only by default. A finding can point at a secret, so the record
+  withholds titles, routes, paths and evidence prose unless you pass `--include-snippet` explicitly.
+  It never suppresses. `.websec-ignore` remains the way to silence a finding locally.
+  The two answer different questions: "this detector is wrong" versus "stop showing me this here".
 - **What this tool is not:** an autonomous scanner, a SaaS, or a replacement for a human reviewer.
-  It is the precise front-half that makes the agent + human dramatically more effective — and it
-  tells you, with a calibrated and clearly-caveated number, how much to trust each lead.
+  It is the precise front half that makes the agent and the human much more effective. It also tells
+  you how much to trust each lead, with a calibrated and clearly-caveated number.
 
 ## Coverage and Repair Evidence Contracts
 
@@ -480,52 +480,52 @@ map into a full ASVS index lookup.)
 unsupported inputs and optional unavailable tools. Read failures, file/report caps, parse errors,
 timeouts and missing explicitly selected tools cannot silently produce a clean completed gate.
 `--require-complete` and `--fail-on` return exit **3** on these execution gaps and preserve partial
-output (exit 2 is reserved for usage/configuration errors, so a CI caller can separate "the code has
-a problem" from "the toolchain has a problem"). A run that is both gate-failing and incomplete exits
+output. Exit 2 is reserved for usage/configuration errors. A CI caller can then separate "the code has
+a problem" from "the toolchain has a problem". A run that is both gate-failing and incomplete exits
 1 and records `gate.failure_kind: findings+incomplete`. A scanner that RAN but whose individual rules
-timed out is recorded as `outcome: partial` with the rule IDs in `rules_incomplete` — "the scanner
-errored" and "these five rules did not run" are different facts and get different words.
-The analyzed-input digest hashes the successfully read source/config content; detector revision hashes
+timed out is recorded as `outcome: partial` with the rule IDs in `rules_incomplete`. "The scanner
+errored" and "these five rules did not run" are different facts, so they get different words.
+The analyzed-input digest hashes the successfully read source/config content. The detector revision hashes
 actual implementation/rule data, so a dirty checkout is distinguishable from the package version.
 
-A baseline records semantic identity across title/line changes and distinguishes new, changed,
+A baseline records semantic identity across title/line changes. It distinguishes new, changed,
 reopened, unchanged and no-longer-observed findings. A disappeared finding remains unverified until
 its original plan is tied to a complete fixed-build rerun and positive/negative evidence.
-`repair-verify` checks hashes, contexts, unchanged detector/scope/policy, and a failing negative test
-from the original build matching the passing fixed-build test. It executes no commands and identifies
-its result as validation of operator-supplied evidence.
+`repair-verify` checks hashes, contexts and unchanged detector/scope/policy. It also checks that a
+failing negative test from the original build matches the passing fixed-build test. It executes no
+commands. It labels its result as validation of operator-supplied evidence.
 
 ## Reusing Specialist Analysis Without Executing the Target
 
 Offline SARIF ingestion brings existing CodeQL and other specialist reports into the same ledger,
 scope accounting and remediation workflow. The import does not run those analyzers, compile the
-application, inspect referenced source or fetch external property files. Its value is preserving
-native rule identity and ordered source-to-sink evidence while exposing exactly what was supplied.
+application, inspect referenced source or fetch external property files. It preserves native rule
+identity and ordered source-to-sink evidence, and it shows exactly what was supplied.
 
-Producer execution success does not establish that the report describes the current source.
+A producer that ran successfully does not establish that its report describes the current source.
 Report SHA provenance is therefore separate from the analyzed-source digest. Unknown invocation
 outcomes, malformed references and exhausted input/expansion budgets are execution gaps. Native
-suppression and absence are observations, not local approval or a verified fix. Colliding producer
-fingerprints become report-bound so result reordering cannot move an acknowledgement to another site.
-Unique producer fingerprints retain continuity across ordinary line and wording edits.
+suppression and absence are observations. They are not local approval or a verified fix. Colliding
+producer fingerprints become report-bound, so reordering the findings cannot move an acknowledgement
+to another site. Unique producer fingerprints retain continuity across ordinary line and wording edits.
 
 The protocol follows the [OASIS SARIF 2.1.0 model](https://docs.oasis-open.org/sarif/sarif/v2.1.0/os/sarif-v2.1.0-os.html).
-Parser tests use authored fixtures and adversarial pairs, including small inputs whose shared traces
+Parser tests use authored fixtures and adversarial pairs. They include small inputs whose shared traces
 would otherwise expand dramatically. This establishes bounded protocol handling, not native analyzer
-accuracy. Imported repair completion is currently unsupported because freshness is unbound.
+accuracy. Imported repair completion is currently unsupported, because freshness is unbound.
 
 ## Scoped Controls and Public-Source Precision
 
-Controls are evidence only when connected to the affected expression or response. Cookie options
-belong to individual setters; unknown spreads and duplicate/conflicting options do not establish
-secure flags. PII masking must affect the actual returned value, and unused or ambiguous helpers
-leave a review lead. Webhook validation, upload sniffing, hashing and extension-message checks use
-the same value/scope discipline with conservative fallback when the syntax is unsupported.
+A control counts as evidence only when it connects to the affected expression or response. Cookie options
+belong to individual setters. Unknown spreads and duplicate or conflicting options do not establish
+secure flags. PII masking must affect the actual returned value. Unused or ambiguous helpers
+leave a review lead. Webhook validation, upload sniffing, hashing and extension-message checks follow
+the same value and scope rule. They fall back conservatively when the syntax is unsupported.
 
-Public-source review yielded three narrow precision corrections: authentication decoder checks need
-an executable decision in the relevant function; nosniff checks require a browser-response sink,
-not merely a file read stream; and GitHub script expressions exempt exact documented numeric IDs
-while retaining arbitrary text and unknown expressions. Paired safe/unsafe regressions support these
+Public-source review produced three narrow precision corrections. First, authentication decoder checks need
+an executable decision in the relevant function. Second, nosniff checks require a browser-response sink,
+not merely a file read stream. Third, GitHub script expressions exempt exact documented numeric IDs,
+and they retain arbitrary text and unknown expressions. Paired safe/unsafe regressions support these
 specific rules. They do not adjudicate every remaining public-project lead or prove those projects safe.
 
 ## Scoped framework and adoption evidence
@@ -537,44 +537,44 @@ separate static hints. Native sibling services must not suppress review of a rea
 
 Django route discovery reads bounded syntax and local bindings without importing application
 modules. Supported root/include composition can resolve literal paths. Unknown roots, dynamic
-prefixes, cycles and parser budgets remain visible gaps or candidates; documented/source route
-uncertainty must survive downstream review.
+prefixes, cycles and parser budgets remain visible gaps or candidates. Route uncertainty, documented
+or in source, must survive downstream review.
 
 Registered Connexion contracts use literal top-level import-bound registration and exact operation
-identifiers; informational YAML docs alone cannot become targets. A strict stdlib literal YAML subset
+identifiers. Informational YAML docs alone cannot become targets. A strict stdlib literal YAML subset
 refuses constructors/aliases/composition/references. Django CSP observations belong to the exact
 returned render response and cannot protect siblings. FastAPI dependencies and mounted tRPC chains
-retain operation ownership; unresolved identity or earlier short-circuit middleware cannot borrow
+retain operation ownership. Unresolved identity or earlier short-circuit middleware cannot borrow
 a later guard. None of these source lanes proves runtime registration, loader or deployment behavior.
 
 Comparative measurement uses captured native reports against explicit reviewed labels, not inferred
 negatives. The offline maintenance importer keeps each tool's denominator separate, marks unknown
 conflicts and leaves partial captures unscored. Distinct corpus, engine/package, detector, rule,
-label and scope bindings remain operator-declared. The harness and synthetic controls are available;
-real competitor and manual agent A/B outcomes remain unrun. See `BENCHMARKS.md` for the contract.
+label and scope bindings remain operator-declared. The harness and synthetic controls are available.
+Real competitor and manual agent A/B outcomes remain unrun. See `BENCHMARKS.md` for the contract.
 
 Secret equality is a LOW review lead at its own operands. Literal presence/type checks differ from
-credential comparisons; a safe helper elsewhere cannot protect the site. This is not a timing
+credential comparisons. A safe helper elsewhere cannot protect the site. This is not a timing
 measurement or a proof that surrounding code is constant-time. Language syntax outside the bounded
 analysis remains a limitation, including ambiguous regular-expression literals.
 
 Agent instructions select the exact current run from the JSON envelope and preserve its exit code.
 They do not substitute older `latest` evidence on failure. Foreign dedicated skills and ambiguous
-shared markers must be preserved; ownership is based on known generated provenance or a complete
-managed region. Runtime/source identity, scan scope, uncertainty and before/after repair evidence
+shared markers must be preserved. Ownership rests on known generated provenance or a complete
+managed region. Runtime/source identity, run scope, uncertainty and before/after repair evidence
 matter more than a version label or HTTP status alone.
 
 At the start of review, current managed guidance offers a release metadata check and respects a
-decline. `websec update-check` is offline; `--online` requires consent. The per-user cache contains
-only version/check-time metadata, with dated/stale advice. Checking never installs a package;
-upgrading is a separate authorized action. This advice is not analysis evidence and cannot change
-findings, completeness or gate exits. Existing installed guidance must be explicitly refreshed
-after an upgrade to acquire the new instructions.
+decline. `websec update-check` is offline. `--online` requires consent. The per-user cache contains
+only version/check-time metadata, with dated/stale advice. Checking never installs a package.
+Upgrading is a separate authorized action. This advice is not analysis evidence and cannot change
+findings, completeness or gate exits. After an upgrade, you must explicitly refresh existing installed
+guidance to get the new instructions.
 
 
 Assigned Python SQL query detection follows supported local request-derived expressions through
 assignment and branch joins to an actual query argument. Constant queries and separate bound
-values do not become tainted merely because a nearby value is untrusted; matched tuple unpacking
-preserves that distinction. Unknown wrappers retain provenance rather than certifying sanitization.
+values do not become tainted only because a nearby value is untrusted. Matched tuple unpacking
+preserves that distinction. Unknown wrappers retain provenance and do not certify sanitization.
 Source/assignment traces and analysis work are bounded. Later loop iterations and unsupported
-interprocedural behavior remain explicit limitations, not complete dataflow coverage.
+interprocedural behavior remain explicit limitations. They are not complete dataflow coverage.

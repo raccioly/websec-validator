@@ -186,7 +186,7 @@
   <section class="rule-top">
     <h2>The problem</h2>
     <p class="lede"><strong>AI agents now write the code. Nobody briefs them on what to attack.</strong>
-    Static scanners answer “which patterns match?” and bury the answer under volume. A pentest answers
+    Static scanners answer “which patterns match?” and report a very large number of matches. A pentest answers
     “what matters, and how would I prove it?” and happens once a year, if at all.</p>
 
     <div class="exhibit">
@@ -195,9 +195,9 @@
 cluster_summary        <span class="kw">distinct issues</span>: <span class="num">13</span>   <span class="cm"># what a reviewer actually has to fix</span></pre>
     </div>
 
-    <p>Same fixture, same run. The <strong>163</strong> is not wrong, and every one is kept for the machine
-    consumers. But a human, or an agent, has to be told they are <strong>13 problems</strong>, where they live,
-    and what would confirm each one. That handoff is the product.</p>
+    <p>Same fixture, same run. The <strong>163</strong> is not wrong. The tool keeps every one for machine
+    consumers. But a human or an agent must learn that these are <strong>13 problems</strong>, where each one lives,
+    and what would confirm it. That handoff is the product.</p>
 
     <figure style="margin-top:11px">
       <svg viewBox="0 0 760 112" role="img" aria-label="A scanner asks which patterns match and reports 163; a pentester asks what to test first and reports 13 distinct issues, each with a probe">
@@ -225,13 +225,13 @@ cluster_summary        <span class="kw">distinct issues</span>: <span class="num
       <div class="verdict good">
         <span class="tag">code in</span>
         <p>Read supported source. Map visible routes, auth decisions, tenant boundaries, sinks, secrets and
-        dependency. Run the installed static scanners, de-duplicate them, and rank what is left by
-        whether it is reachable and exploited in the wild.</p>
+        dependencies. Run the installed static scanners and de-duplicate them. Rank what is left by
+        whether it is reachable and whether attackers exploit it in the wild.</p>
       </div>
       <div class="verdict bad">
         <span class="tag">artifacts out</span>
         <p>A fact file, a findings ledger, a SARIF report, a probe library tailored to what was found,
-        and a briefing for the agent that will do the fixing. Then an exit code that says whether
+        and a briefing for the agent that will do the fixing. The run also returns an exit code that says whether
         the picture is <em>complete</em>.</p>
       </div>
     </div>
@@ -266,7 +266,7 @@ unsupported: []   gaps: []
 <span class="kw">REQUESTED CHECKS COMPLETED</span> — <span class="num">0</span> files read</pre>
     </div>
     <p>A suffix list had been absorbed into another, leaving the “language I cannot read” branch reachable for one language.
-    The fix does not make the tool read Elixir. It makes it <strong>say</strong> it did not: the banner leads with
+    The fix does not make the tool read Elixir. It makes the tool <strong>say</strong> that it did not. The banner starts with
     <code>NO ANALYZABLE SOURCE</code>, and <code>--require-analyzed</code> turns that into exit 3.</p>
     <figure>
       <svg viewBox="0 0 760 126" role="img" aria-label="The four exit codes: 0 clean and complete, 1 findings at or above the threshold, 2 usage error or incompatible scanner, 3 incomplete because a requested check did not finish">
@@ -315,13 +315,13 @@ unsupported: []   gaps: []
     <h2>Nine things the tool will not do, and where that is enforced</h2>
     <table class="dense">
       <tr><th>Refusal</th><th>Why, and where</th></tr>
-      <tr><td>say “compliant”</td><td>The word appears in no output, and a test asserts that, so it cannot come back by accident. <span class="note">tests/test_attest.py</span></td></tr>
+      <tr><td>say “compliant”</td><td>The word appears in no output. A test asserts this, so the word cannot return by accident. <span class="note">tests/test_attest.py</span></td></tr>
       <tr><td>claim complete protection</td><td><code>protection_complete</code> is always false: static analysis cannot see a running system. <span class="note">docs-canonical/SECURITY.md</span></td></tr>
       <tr><td>fill an evidence gap</td><td>The audit projection has 12 control rows; 5 carry an empty evidence list, with the reason. <span class="note">attest.py</span></td></tr>
-      <tr><td>count “unknown” as “false”</td><td>The old rule scored every unmatched finding as a false positive. Relabelling against pinned source left 21 reviewed labels and <strong>35 findings still unknown</strong>, excluded from both sides. <span class="note">calibration.json</span></td></tr>
-      <tr><td>optimize its own score</td><td>Anything fitted from labels uses a strictly proper rule, Brier or log score, never accuracy or F1, which reward confident wrongness. It is printed, never optimized. <span class="note">calibration.SCORING_RULE</span></td></tr>
+      <tr><td>count “unknown” as “false”</td><td>The old rule scored every unmatched finding as a false positive. Relabeling against pinned source left 21 reviewed labels and <strong>35 findings still unknown</strong>, excluded from both sides. <span class="note">calibration.json</span></td></tr>
+      <tr><td>optimize its own score</td><td>A strictly proper rule, Brier or log score, scores anything fitted from labels, never accuracy or F1, which reward confident wrongness. The tool prints the score and never optimizes it. <span class="note">calibration.SCORING_RULE</span></td></tr>
       <tr><td>run a scanner unasked</td><td>TruffleHog verifies secrets against live services, so it runs only when named. <span class="note">scanners.py</span></td></tr>
-      <tr><td>read a cell too thin to trust</td><td>A per-class probability needs at least five samples. One class reaches that today; the rest fall back a tier, and the output names which. <span class="note">calibration.MIN_N</span></td></tr>
+      <tr><td>read a cell too thin to trust</td><td>A per-class probability needs at least five samples. One class reaches that today. The rest fall back a tier, and the output names the tier. <span class="note">calibration.MIN_N</span></td></tr>
       <tr><td>guess reachability</td><td>A vulnerable dependency is tagged <code>imported</code>, <code>no-import-found</code> or <code>n/a</code>. It never rounds <code>n/a</code> to safe. <span class="note">enrichment.py</span></td></tr>
       <tr><td>claim a benchmark it has not run</td><td>An offline captured-report harness preserves reviewed TP/FP/unknown labels and unscored partial captures. No head-to-head or agent-benefit experiment has run. <span class="note">BENCHMARKS.md</span></td></tr>
     </table>
@@ -554,24 +554,24 @@ unsupported: []   gaps: []
     <div class="cols-2">
       <div>
         <h3>Why these twenty-two</h3>
-        <p class="note">Not designed at a whiteboard. Three rows exist because dogfooding on a large LLM-agent monorepo, verified by a
-        15-agent adversarial pass, exposed two classes the route-and-auth model could not see. Four more grew because a real
-        authenticated pen test found its two Criticals and two Highs in files the recon never parsed: AWS-CDK auth config,
-        AppSync GraphQL schema, VTL resolvers. The walker reads those now.</p>
+        <p class="note">The list was not planned in advance. Three rows exist because dogfooding on a large LLM-agent monorepo
+        exposed two classes that the route-and-auth model could not see. A 15-agent adversarial pass verified this. Four more rows exist
+        because a real authenticated pen test found two Criticals and two Highs in files the recon never parsed: AWS-CDK auth config,
+        AppSync GraphQL schema, VTL resolvers. The walker reads those files now.</p>
       </div>
       <div>
         <h3>Mapped to what a reviewer will ask about</h3>
         <p class="note">Every finding carries a CWE, an ASVS 4.0.3 reference and, where they apply, the OWASP API and OWASP LLM
-        Top 10 entries. The methodology publishes the map as a 41-row table; the findings module cites 77 distinct CWEs.
-        Two limits are stated up front: regex over CDK TypeScript is not an AST and can be evaded by aliasing, and
-        man-in-the-browser can never be a confident static catch, so it ships as LOW.</p>
+        Top 10 entries. The methodology publishes the map as a 41-row table. The findings module cites 77 distinct CWEs.
+        The brief states two limits up front. Regex over CDK TypeScript is not an AST, and aliasing can evade it.
+        Man-in-the-browser can never be a confident static catch, so it ships as LOW.</p>
       </div>
     </div>
   </section>
 
   <section class="rule-top tight">
     <h2>The scanners it shells out to, and the version each one must be</h2>
-    <p class="note" style="margin-bottom:5px">Presence on PATH is not compatibility, so each entry carries the lowest version whose CLI matches the invocation the tool builds, and <code>doctor</code> reports it.</p>
+    <p class="note" style="margin-bottom:5px">Presence on PATH is not compatibility. Each entry carries the lowest version whose CLI matches the invocation the tool builds, and <code>doctor</code> reports it.</p>
     <div class="cols-2 compact">
       <table>
         <tr><th>Scanner</th><th>Category · minimum</th></tr>
@@ -605,8 +605,8 @@ unsupported: []   gaps: []
   <section style="margin-top:17px">
     <h2>Six public repositories, 116 leads, zero verified critical issues</h2>
     <p class="lede"><strong>Dated source-only review: 14 September 2026.</strong> A tool that reported a critical in every
-    public project it touched would be a tool that mislabels. The review ran source-only against pinned
-    revisions, executed nothing, sent nothing upstream, and wrote down what it could not conclude.</p>
+    public project it reviewed would be a tool that mislabels. The review ran source-only against pinned
+    revisions. It executed nothing, sent nothing upstream, and recorded what it could not conclude.</p>
 
     <figure>
       <svg viewBox="0 0 760 196" role="img" aria-label="One dot per emitted lead for six public repositories at pinned revisions: Linkding 21, Rustpad 5, Actual 70 marked incomplete, Flask 10, Angular RealWorld 7, Ignite 3">
@@ -668,8 +668,8 @@ unsupported: []   gaps: []
           <li>A local file stream piped to stdout was read as <strong>HTTP file serving</strong> because <code>createReadStream</code> alone counted as serving.</li>
           <li>A numeric GitHub expression in a workflow was read as <strong>script injection</strong>.</li>
         </ul>
-        <p class="note" style="margin-top:6px">Each fix ships with its opposite: the test that makes the tool quieter is paired with one that
-        proves the real case, the JWT decoded without verification, the stream piped to a response, still fires. The review
+        <p class="note" style="margin-top:6px">Each fix ships with its opposite. A test that makes the tool quieter is paired with a test that
+        proves the real case still fires: the JWT decoded without verification, and the stream piped to a response. The review
         also records its own gap: <code>@angular/core</code> was not recognized in the framework inventory.</p>
       </div>
       <div>
@@ -679,12 +679,12 @@ unsupported: []   gaps: []
         Noir present and <strong>8/10</strong> without it, with 7 truth labels left unknown. Both numbers are committed as
         JSON with the detector revision hash. DocGuard binds their validation-record statements to JSON fields;
         this brief uses separate fact tests and a PDF freshness manifest.</p>
-        <p class="note">In September 2026 those 56 corpus findings were relabelled one at a time against the pinned
-        source, each with a note and the revision it was read at. That produced <strong>21 reviewed labels</strong> and a
-        measured probability per severity, replacing a prior that had been guessed. The other <strong>35 stay unknown</strong>
+        <p class="note">In September 2026 the project relabeled those 56 corpus findings one at a time against the pinned
+        source. Each label has a note and the revision it was read at. This produced <strong>21 reviewed labels</strong> and a
+        measured probability per severity. It replaced a prior that had been guessed. The other <strong>35 stay unknown</strong>
         and are counted on neither side.</p>
-        <p class="note">And one real pentest: an authenticated engagement whose two Criticals and two Highs sat in the
-        managed-cloud boundary the recon did not yet parse. Those findings became extractor rows, and two of the retest
+        <p class="note">One real pentest also shaped the tool. It was an authenticated engagement. Its two Criticals and two Highs sat in the
+        managed-cloud boundary that the recon did not yet parse. Those findings became extractor rows. Two of the retest
         lessons corrected the tool's own earlier output.</p>
       </div>
     </div>
@@ -758,7 +758,7 @@ unsupported: []   gaps: []
         <p class="note">Every Monday a workflow proposes a version bump as a pull request and stops. A tag is cut only when a commit
         whose subject starts with <code>release:</code> lands on main, never from a version diff. Publishing to PyPI uses
         Trusted Publishing over OIDC, with no long-lived token, and refuses if the tag does not match the package version.
-        The triage bot that labels and merges bot PRs never checks out the PR's code, and its classifier has its own unit tests
+        The triage bot labels and merges bot PRs. It never checks out the PR's code. Its classifier has its own unit tests
         in the required checks.</p>
       </div>
     </div>
@@ -768,14 +768,14 @@ unsupported: []   gaps: []
     <h2>Every fix cites its bug, and every quieting test has a loud twin</h2>
     <div class="cols-2">
       <div>
-        <p class="note">A field report from 2026-09-18 listed nine problems. They became <strong>50 tests</strong> in one file, and the
-        fixes carry the bug number as a comment at the line that changed, in the CLI, the scanner adapters, the findings
-        module, the coverage contract and the dynamic phase, so a reader can walk from the report to the code and back.</p>
+        <p class="note">A field report from 2026-09-18 listed nine problems. They became <strong>50 tests</strong> in one file. The
+        fixes carry the bug number as a comment at each changed line. This holds in the CLI, the scanner adapters, the findings
+        module, the coverage contract and the dynamic phase, so a reader can go from the report to the code and back.</p>
       </div>
       <div>
         <p class="note">The test file's own docstring states the rule: every “this should be quieter” assertion is paired with a
-        “this must stay loud” one. A precision fix that is not paired with the true-positive it must preserve is not accepted.
-        That is the mechanical form of the no-regression bar this project holds itself to.</p>
+        “this must stay loud” one. The project does not accept a precision fix unless a test also protects the true positive it must preserve.
+        This is the mechanical form of the project's no-regression bar.</p>
       </div>
     </div>
   </section>
@@ -793,8 +793,8 @@ unsupported: []   gaps: []
   <section style="margin-top:17px">
     <h2>What is not new, and who solved which part</h2>
     <p>Static analysis, secret detection, dependency scanning and attack-surface mapping are all solved problems with
-    excellent open-source tools. Anyone claiming otherwise is selling something. This tool <strong>uses</strong> them and adds the
-    a repository-aware planning layer. The benchmark protocol exists; no unrun head-to-head result is claimed.</p>
+    excellent open-source tools. A claim that they are unsolved would not be credible. This tool <strong>uses</strong> them and adds
+    a repository-aware planning layer. The benchmark protocol exists. The brief claims no head-to-head result, because none has run.</p>
     <div class="cols-3">
       <div>
         <h3>The scanners</h3>
@@ -853,7 +853,7 @@ unsupported: []   gaps: []
   <section class="rule-top">
     <h2>What it deliberately is not</h2>
     <ul class="ticks">
-      <li><strong>Not a scanner.</strong> It runs the ones you have installed and would be poorer without them.</li>
+      <li><strong>Not a scanner.</strong> It runs the ones you have installed and needs them.</li>
       <li><strong>Not a SaaS.</strong> No hosted service, account or telemetry; zero runtime dependencies. Optional MCP HTTP is a token-protected loopback server.</li>
       <li><strong>Not a DAST.</strong> Data probes default to GET; explicit TEST login may POST. Write probes need opt-in and a localhost target, including manually executed drafts.</li>
       <li><strong>Not a compliance tool.</strong> No verdict, no score, no badge, and no signed attestation, because a websec-signed attestation would only attest that websec ran.</li>
@@ -875,7 +875,7 @@ unsupported: []   gaps: []
     <h2>One engine, seven surfaces</h2>
     <table>
       <tr><th>Surface</th><th>What it gives you</th></tr>
-      <tr><td>CLI</td><td><code>websec run .</code> is the whole pipeline. <code>gate</code> is the fast scoped pass on the files you just changed; <code>attest</code> projects a run into an audit-evidence table; <code>feedback</code> records that a finding is wrong, metadata-only by default, because a hardcoded-secret finding's snippet <em>is</em> the secret.</td></tr>
+      <tr><td>CLI</td><td><code>websec run .</code> is the whole pipeline. <code>gate</code> is the fast scoped pass on the files you just changed. <code>attest</code> projects a run into an audit-evidence table. <code>feedback</code> records that a finding is wrong. It is metadata-only by default, because a hardcoded-secret finding's snippet <em>is</em> the secret.</td></tr>
       <tr><td>SARIF 2.1.0</td><td>Written on every run and importable back in, so GitHub code scanning, IDEs and other tools read the same ledger.</td></tr>
       <tr><td>GitHub Action</td><td>Composite action with a <code>fail-on</code> threshold, a baseline for legacy repositories, and SARIF upload. Every third-party action it calls is pinned by commit SHA. It installs the engine from its own checkout, never from the target repository.</td></tr>
       <tr><td>Docker</td><td>Core-only or bundled, non-root Python 3.14 images. Noir 1.0.0, Gitleaks 8.30.1 and Trivy 0.74.0 archives are checksum-bound. Native amd64/arm64 checks run; transitive builds and every scanner adapter are not certified.</td></tr>
@@ -925,7 +925,7 @@ unsupported: []   gaps: []
     <h2>Check, do not update</h2>
     <p class="note">Before review, the AI offers a release check and respects a decline. <code>websec update-check</code> is
     offline; <code>--online</code> requires consent. Only version/check-time metadata is cached; stale observations are dated.
-    Checking never installs anything. An upgrade needs separate approval; refresh installed guidance explicitly afterward.</p>
+    Checking never installs anything. An upgrade needs separate approval. Afterward, refresh the installed guidance explicitly.</p>
   </section>
 
   <section class="rule-top">

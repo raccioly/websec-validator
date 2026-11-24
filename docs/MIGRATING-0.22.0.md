@@ -1,15 +1,15 @@
 # Migrating to 0.22.0
 
-0.22.0 closes gaps where the tool reported success it had not earned: a subdirectory `--diff` or
-`gate` run that passed everything, a `security/` directory that was never read, usage errors that
-exited with the "findings" code. No new runtime dependency, no schema-major change, and no finding
-that gated a `websec run` in 0.21.x stops gating it. Several runs that used to pass will now fail or report a gap —
-that is the point of the release. Read the sections that match how you run websec.
+0.22.0 closes gaps where the tool reported success that it had not earned. Three examples: a subdirectory `--diff` or
+`gate` run that passed everything, a `security/` directory that websec never read, and usage errors that
+exited with the "findings" code. The release adds no new runtime dependency and no schema-major change. No finding
+that gated a `websec run` in 0.21.x stops gating it. Several runs that used to pass now fail or report a gap.
+That is the point of the release. Read the sections that match how you run websec.
 
 ## Exit codes now follow the documented contract everywhere
 
 The contract has been `0` clean · `1` findings · `2` usage/configuration error · `3` incomplete since
-0.17.0, but some paths did not follow it.
+0.17.0. Some paths did not follow it.
 
 | Situation | 0.21.x | 0.22.0 |
 |---|---|---|
@@ -24,82 +24,82 @@ The contract has been `0` clean · `1` findings · `2` usage/configuration error
 
 **Action:** a CI step that treated any non-zero exit as "findings" is unaffected. A step that tested
 `1` specifically now sees usage errors as `2`. A `dynamic` job that relied on static CRITICALs to fail
-must gate on `websec run --fail-on critical` instead — which is where that gate belongs.
+must gate on `websec run --fail-on critical` instead. That is where this gate belongs.
 
 ## Subdirectory scans now gate what changed
 
 `websec run <subdir> --diff <base>` and `websec gate <subdir>` compared repository-root paths from Git
-with target-relative finding paths, so every finding read as "untouched" and the gate passed.
-Both now scope correctly from any subdirectory. A monorepo pipeline that scans one service per job
-may start failing on findings it was always supposed to catch.
+with target-relative finding paths. Every finding read as "untouched", and the gate passed.
+Both commands now set the scope correctly from any subdirectory. A monorepo pipeline that checks one service per job
+can start to fail on findings that it was always meant to catch.
 
 ## `security/` directories are scanned
 
 `security/` was on the walker's skip list (a leftover from guarding the tool's own early output
-directory), so auth middleware and policy code under any `security/` directory was never read while
-the run reported complete. It is now analysed; websec's own output directories are recognised by
+directory). The run reported complete, but websec never read the auth middleware and policy code under any `security/` directory.
+websec now analyzes `security/`. It recognizes its own output directories by
 their contents (a run directory or a `runs/` + `latest` store) instead of by name.
 
-`build/`, `dist/`, `out/`, `target/`, `vendor/` and `coverage/` are still skipped, but analysable source
-inside them is counted and reported as a `skipped_directory_code` coverage gap (non-execution) with
-the directory names in `files.skipped_code_dirs`. Nothing fails because of it; it stops being silent.
+websec still skips `build/`, `dist/`, `out/`, `target/`, `vendor/` and `coverage/`. It now counts analyzable source
+inside them and reports it as a `skipped_directory_code` coverage gap (non-execution), with
+the directory names in `files.skipped_code_dirs`. Nothing fails because of this gap. It is no longer silent.
 
-**Action:** expect new findings in repositories with a `security/` directory. Triage them like any
-first run; scope them with `.websec-ignore` only if that code is genuinely not your product.
+**Action:** expect new findings in repositories that have a `security/` directory. Triage them like any
+first run. Use `.websec-ignore` to scope them only if that code is not part of your product.
 
 ## `.websec-ignore` path patterns match on path components
 
-Path-like lines (containing `/`, a glob character or a `.ext`) now match whole path components of the
-finding's path, with any `:line[:col]` suffix stripped. So `*.js` finally matches `src/file.js:13`, and
+Path-like lines (lines that contain `/`, a glob character or a `.ext`) now match whole path components of the
+finding's path, with any `:line[:col]` suffix removed. So `*.js` now matches `src/file.js:13`, and
 `/build/` anchors at the repository root. `category:` lines match the category exactly.
 
-For this release nothing that was suppressed becomes unsuppressed: suppression is the union of the
-new rule and the old substring rule. A finding hidden **only** by the old rule — `tests/` hiding
-`contests/…`, or a bare word such as `test` hiding every title containing "test" — stays hidden, but:
+In this release, nothing that was suppressed becomes unsuppressed. Suppression is the union of the
+new rule and the old substring rule. The old rule alone can hide a finding, as when `tests/` hides
+`contests/…`, or a bare word such as `test` hides every title that contains "test". Such a finding stays hidden, and:
 
-- the run prints one stderr warning per such line, with the exact replacement to use;
+- the run prints one stderr warning for each such line, with the exact replacement to use;
 - the ledger counts it in `suppressed_legacy_substring` and lists it in `suppressed_legacy[]` and
   `suppression_warnings[]`.
 
 **Action:** run once, read the warnings, and replace each flagged line with the suggested pattern or
-`category:` line. The legacy substring rule is a transition aid and may be removed in a future release.
+`category:` line. The legacy substring rule helps the transition. A future release may remove it.
 
-Note that scanner findings are categorised `static-secret`, `static-sca`, `static-sast` and
-`static-iac`; a `category:secret` line matches nothing.
+Scanner findings use the categories `static-secret`, `static-sca`, `static-sast` and
+`static-iac`. A `category:secret` line matches nothing.
 
 ## Fewer false "incomplete" runs
 
-Several field-reported causes of exit `3` on healthy repositories are fixed: Checkov parse errors
+Users reported several causes of exit `3` on healthy repositories. This release fixes them: Checkov parse errors
 from excluded paths, Semgrep partial parses of valid shell scripts, and the JavaScript source-flow
-lane abandoning ordinary modules. Per-file analysis limits are now reported as named gaps
-(`scanner_file_limits`, `source_flow_limit`) rather than as a failed tool. A `source_flow_limit`
-still makes the run incomplete, because that file was not fully analysed. If you had added
-`--exclude` entries or relaxed `--require-complete` to work around these, you can revert that.
+lane that abandoned ordinary modules. websec now reports per-file analysis limits as named gaps
+(`scanner_file_limits`, `source_flow_limit`), not as a failed tool. A `source_flow_limit`
+still makes the run incomplete, because websec did not fully analyze that file. If you added
+`--exclude` entries or relaxed `--require-complete` to work around these causes, you can revert that.
 
-`.websec-ignore` remains a findings filter; it does not change what scanners read. Use `--exclude`
+`.websec-ignore` is still a findings filter. It does not change what scanners read. Use `--exclude`
 to keep a directory away from the scanners.
 
 ## Other visible changes
 
 - `websec emit-context` marks the route count as a floor and the auth scheme as an inference when
-  route discovery is likely incomplete, and no longer reports `jwt (bearer)` without JWT evidence.
-- `websec init` warns on directory globs and, given a prior ledger, proposes expiring
+  route discovery is likely incomplete. It no longer reports `jwt (bearer)` without JWT evidence.
+- `websec init` warns on directory globs. Given a prior ledger, it proposes expiring
   `fingerprint:` acknowledgements for test-fixture secrets.
 
 - `--only` accepts directories (component boundary: `src` does not select `src2/`). An entry that
-  selects nothing becomes a `scope_missed` gap, and a run that analysed nothing in its requested scope
-  prints **REQUESTED SCOPE NOT ANALYZED** instead of "REQUESTED CHECKS COMPLETED".
+  selects nothing becomes a `scope_missed` gap. A run that analyzed nothing in its requested scope
+  prints **REQUESTED SCOPE NOT ANALYZED**, not "REQUESTED CHECKS COMPLETED".
 - An explicit `--graph` path that does not exist is an execution gap (`not found`). Graphs have their
-  own 64 MiB read cap, so multi-megabyte graphify graphs now enrich findings instead of being
-  rejected by the 2 MB source cap.
-- A failing OWASP Noir is no longer reported as an absent one: the run says
-  `OWASP Noir failed: <reason>`, records `routes.noir` and a `route_engine` gap, and `websec doctor`
+  own 64 MiB read cap. Multi-megabyte graphify graphs now enrich findings, and the 2 MB source cap no longer
+  rejects them.
+- websec no longer reports a failing OWASP Noir as an absent one. The run says
+  `OWASP Noir failed: <reason>` and records `routes.noir` and a `route_engine` gap. `websec doctor`
   has a route-engine section.
-- Brakeman is selected only when the scan root has an `app/` directory (Brakeman's own precondition);
-  otherwise `doctor` lists it as not applicable, instead of the run recording a Brakeman error.
+- websec selects Brakeman only when the root of the target has an `app/` directory (Brakeman's own precondition).
+  Otherwise `doctor` lists Brakeman as not applicable, and the run does not record a Brakeman error.
 - The GitHub Action exposes an `exit-code` output.
-- `websec feedback --file-extension` accepts `.ex`, `ex` or a filename, and refuses a value it cannot
-  turn into an extension instead of recording an empty one.
+- `websec feedback --file-extension` accepts `.ex`, `ex` or a filename. It refuses a value that it cannot
+  turn into an extension, and does not record an empty one.
 
 ## See also
 

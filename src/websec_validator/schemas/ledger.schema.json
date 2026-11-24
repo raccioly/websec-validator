@@ -132,9 +132,10 @@
           "kind": {
             "enum": [
               "rule",
-              "incident"
+              "incident",
+              "artifact"
             ],
-            "description": "rule = one detector at N sites; incident = secrets removed from the working tree in the same commit."
+            "description": "rule = one detector at N sites; incident = secrets removed from the working tree in the same commit; artifact = advisories embedded in one compiled binary (one fix: upgrade, rebuild or remove it)."
           },
           "rule": {
             "type": "string"

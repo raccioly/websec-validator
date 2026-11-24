@@ -33,6 +33,8 @@ VERIFY = {
               "secret in git history stays exposed after deletion from the working tree.",
     "cve": "Confirm the vulnerable package is actually reachable from your entry points. An "
            "advisory on an unreachable transitive dependency is real but not urgent.",
+    "deprecated-dependency": "A deprecated version has no known flaw by itself; the risk is that its "
+                             "next advisory will have no fixed release. Check which parent pulls it in.",
 }
 _GENERIC_VERIFY = ("Read the cited file and confirm the dangerous operation is reachable from "
                    "attacker-controlled input. A framework name, a helper's name, a comment or a "

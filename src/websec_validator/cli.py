@@ -601,6 +601,11 @@ def cmd_run(args) -> int:
     only = [key.strip() for key in args.scanners.split(",") if key.strip()] if args.scanners else None
     coverage.add_scanners(facts, det, scan_results, unified, scan=args.scan, only=only,
                           verify_secrets=getattr(args, "verify_secrets", False))
+    if args.scan:
+        # A compiled binary in the tree carries its own dependency list; say when nothing read it.
+        binary_gap = scanners.binary_sca_gap(target, scan_results, args.exclude or ())
+        if binary_gap:
+            coverage.add_gap(facts, "compiled_binary_sca", binary_gap, execution=False)
     imported = []
     if getattr(args, "sarif", None):
         imported = _sarif_imports(args.sarif, target, excludes=args.exclude or (),

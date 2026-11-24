@@ -1,20 +1,20 @@
 # Run websec in other CI systems
 
 This guide covers running websec-validator outside GitHub Actions: GitLab CI, Azure DevOps, Jenkins,
-CircleCI and container-based pipelines. When you finish, your pipeline will gate on findings, fail
-visibly on incomplete runs, and keep the run's SARIF and JSON envelope as artifacts. It also covers
+CircleCI and container-based pipelines. When you finish, your pipeline gates on findings, fails
+visibly on incomplete runs, and keeps the run's SARIF and JSON envelope as artifacts. It also covers
 SBOM output and importing SARIF from other analyzers.
 
 websec is a stdlib-only Python CLI, so every CI system follows the same pattern. Only the GitLab
-example below is spelled out in full. The others are *illustrative*: they show the pattern, but
-this project does not test them, so adapt and verify them in your pipeline.
+example below is complete. The others are *illustrative*. They show the pattern, but this project
+does not test them. Adapt and verify them in your pipeline.
 
 ## The generic pattern
 
 1. **Use a trusted engine.** Install a reviewed version of websec from PyPI, or build the container
-   image from a reviewed source checkout. Never install websec from the repository you are scanning;
-   the target is untrusted input.
-2. **Check out the target as data.** Give websec read access; it does not execute the target's
+   image from a reviewed source checkout. Never install websec from the repository you are
+   analyzing. The target is untrusted input.
+2. **Check out the target as data.** Give websec read access. It does not execute the target's
    code, installers or tests.
 3. **Run with explicit gates:**
 
@@ -24,14 +24,14 @@ this project does not test them, so adapt and verify them in your pipeline.
 
 4. **Keep the artifacts even when the job fails.** Save `websec-out/` (or at least the current run
    directory) with an "always" or "on failure" policy. Reports can contain sensitive source
-   evidence, so restrict access and keep them only as long as needed.
+   evidence. Restrict access and keep them only as long as needed.
 5. **Act on the exit code:**
 
    | Code | Meaning |
    |---|---|
    | `0` | The gate ran and nothing met the threshold. This does not prove protection |
    | `1` | Findings at or above `--fail-on`. If the run was also incomplete, the count is a floor |
-   | `2` | Usage or configuration error; nothing was scanned |
+   | `2` | Usage or configuration error; nothing was analyzed |
    | `3` | Requested checks did not complete; not a pass. Read `coverage.gaps` |
 
    For the full contract, including `gate.failure_kind`, see
@@ -47,20 +47,20 @@ What lands in each run directory (`websec-out/runs/<generated>/`):
 |---|---|
 | `results.sarif` | SARIF 2.1.0, always written. Feed it to any tool that accepts SARIF |
 | `findings.envelope.json` | Versioned JSON envelope for dashboards and scripts |
-| `coverage.json` | What ran, what didn't, and why |
+| `coverage.json` | What ran, what did not, and why |
 | `findings-ledger.json` | The full ledger, including the recorded `gate` verdict |
 | `diff-scope.json` | With `--diff`: changed files and exact added-line ranges |
 | `sbom.cdx.json` / `sbom.spdx.json` | With `--sbom` |
 
 `websec-out/latest` advances only after a **completed** run. A partial attempt keeps its own
 directory and leaves `latest` pointing at the previous completed run. To get the current attempt
-regardless of outcome, add `--format json` and read the `generated` field from stdout. See the
+whatever its outcome, add `--format json` and read the `generated` field from stdout. See the
 [outputs reference](../../reference/outputs.md).
 
 ## GitLab CI
 
 websec writes SARIF and `findings.envelope.json`. It does **not** write GitLab's native security
-report formats, so this job keeps them as plain job artifacts. It does not declare them under
+report formats. So this job keeps the files as plain job artifacts. It does not declare them under
 `artifacts:reports`.
 
 ```yaml
@@ -88,7 +88,7 @@ websec:
 
 Replace `<reviewed-version>` with the release you have reviewed. Python 3.11 or newer is required.
 
-**Merge-request mode** *(illustrative)*: scope the gate to changed files. websec diffs
+**Merge-request mode** *(illustrative)*: this mode scopes the gate to changed files. websec diffs
 `<ref>...HEAD`, so the target branch must exist in the clone:
 
 ```yaml
@@ -103,7 +103,7 @@ websec-mr:
     - websec run . --diff "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --fail-on high --require-complete --out websec-out
 ```
 
-If the ref can't be resolved, websec records a `diff` coverage gap and runs unscoped. Under
+If the ref cannot be resolved, websec records a `diff` coverage gap and runs unscoped. Under
 `--require-complete` that exits `3`.
 
 ## Azure DevOps *(illustrative)*
@@ -126,12 +126,12 @@ steps:
 ```
 
 If you use a SARIF viewer extension for Azure DevOps, point it at the `results.sarif` inside the run
-directory. Check that extension's documentation for the artifact name and layout it expects.
+directory. The extension's documentation gives the artifact name and layout it expects.
 
 ## Jenkins and CircleCI *(illustrative)*
 
-Both follow the generic pattern: a Python 3.11+ image or agent, a pinned install, one `websec run`
-command and an always-archive step.
+Both follow the generic pattern. They use a Python 3.11+ image or agent, a pinned install, one
+`websec run` command and an always-archive step.
 
 Jenkins (declarative):
 
@@ -182,7 +182,7 @@ workflows:
 ## Container-based CI
 
 No image is published. Build it from a reviewed checkout of the engine source, not from the
-repository you are scanning:
+repository you are analyzing:
 
 ```bash
 docker build -t websec-validator .                 # default "bundled" target
@@ -197,19 +197,20 @@ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/scan" \
 ```
 
 - The bundled image carries Noir, Trivy, Gitleaks, Semgrep and Checkov. OSV-Scanner, Prowler,
-  Bandit, gosec and Brakeman are absent, and are reported as missing rather than silently skipped.
-- **Bundling isn't running.** Noir runs on every `run`. The four static scanners run only when you
+  Bandit, gosec and Brakeman are absent. websec reports them as missing and does not skip them
+  silently.
+- **Bundling is not running.** Noir runs on every `run`. The four static scanners run only when you
   add `--scan`.
 - Both targets run as a non-root user. Pass `--user` so output files belong to the CI user.
   `HEALTHCHECK NONE` is deliberate for the one-shot CLI.
-- The digests pinned in the Dockerfile check base and archive bytes. They don't make apt or
+- The digests pinned in the Dockerfile check base and archive bytes. They do not make apt or
   transitive Python dependencies fully reproducible. See the
   [container policy](../../integrations/README.md#container-policy-and-reviewed-downloads).
 
 ## Feed dashboards with `findings.envelope.json`
 
-`findings.envelope.json` is a versioned, self-describing wrapper around the ledger, so a dashboard
-doesn't have to reverse-engineer internal shapes. Top-level fields: `schema_version`, `tool`,
+`findings.envelope.json` is a versioned, self-describing wrapper around the ledger. A dashboard
+does not have to reverse-engineer internal shapes. Top-level fields: `schema_version`, `tool`,
 `tool_version`, `generated`, `target`, `summary` (`total`, `by_severity`, `by_confidence`,
 `suppressed`, `acknowledged`, `dynamic_included`), `calibration`, `verification_context`,
 `attribution`, `coverage` and `findings`. JSON Schemas ship in the package; see the
@@ -229,7 +230,7 @@ PY
 ```
 
 `latest` names the last **completed** run only. To inspect an incomplete attempt, read the envelope
-from that attempt's own directory, or capture `websec run ... --format json` stdout.
+from that attempt's own directory, or capture the `websec run ... --format json` stdout.
 
 ## Emit an SBOM
 
@@ -238,27 +239,27 @@ websec run . --sbom                 # CycloneDX → sbom.cdx.json
 websec run . --sbom spdx            # SPDX JSON → sbom.spdx.json
 ```
 
-- The SBOM is produced by **Trivy**, offline, and doesn't require `--scan`. Trivy must be on `PATH`.
+- **Trivy** produces the SBOM, offline, and it does not require `--scan`. Trivy must be on `PATH`.
 - If Trivy is missing or fails, websec records an `sbom` coverage gap. Under `--fail-on` or
-  `--require-complete`, the run exits `3` instead of passing without the SBOM you asked for.
+  `--require-complete`, the run exits `3`. It does not pass without the SBOM you asked for.
 
 ## Import SARIF from other analyzers
 
-Reuse analysis you already run, such as CodeQL, without websec executing that analyzer:
+Reuse analysis you already run, such as CodeQL. websec does not execute that analyzer:
 
 ```bash
 websec run . --sarif ./codeql.sarif --sarif ./other-analysis.sarif --require-complete
 ```
 
-- Up to 8 `--sarif` reports per run; more is a usage error (exit `2`).
+- Up to 8 `--sarif` reports per run. More is a usage error (exit `2`).
 - Import is **offline**. websec never executes the analyzer and never loads any source path or URL
   referenced inside the report. Only safe relative paths are supported.
-- Native tool and rule identities, traces and report hashes are preserved in `sarif-imports.json`
-  and in the unified ledger.
+- `sarif-imports.json` and the unified ledger keep the native tool and rule identities, traces and
+  report hashes.
 - Unknown analyzer execution, malformed references and size caps become visible incomplete checks.
 - Native suppressions stay as metadata until you acknowledge them locally.
-- **Source freshness is unverified.** A report hash is not a source digest, and a finding absent
-  from an imported report can't verify a repair.
+- **Source freshness is unverified.** A report hash is not a source digest. A finding absent from
+  an imported report cannot verify a repair.
 
 ## See also
 

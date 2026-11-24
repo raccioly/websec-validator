@@ -31,6 +31,7 @@ _VERIFY: dict = {
     "secret": "confirm the credential is ROTATED at the provider, not just removed from the file "
               "(git history still holds it).",
     "cve": "verify the installed and locked package version satisfies the advisory fix, pass compatibility tests, and rerun the applicable scanner with complete coverage.",
+    "deprecated-dependency": "verify the lockfile no longer resolves the deprecated version, pass compatibility tests, and rerun the dependency scan.",
     "missing-csp": "curl -I the deployed route — the header must be present and without unsafe-inline.",
     "clickjacking": "curl -I — X-Frame-Options/frame-ancestors must be set.",
     "cors-misconfig": "send an Origin header from a foreign origin — must not be reflected with credentials.",
@@ -169,6 +170,7 @@ _HUMAN_REASONS: dict = {
     # Out-of-band: the fix is not, or not only, an edit to this repository.
     "secret": "the credential must be ROTATED at the provider; git history still holds it",
     "cve": "an upgrade needs compatibility testing and may require a coordinated release",
+    "deprecated-dependency": "replacing an unmaintained package needs compatibility testing",
     "lockfile-drift": "resolving the drift may change what ships; confirm the intended versions",
     "malicious-install-script": "a compromised package needs incident handling, not a code edit",
     # Taint judgement: whether the input is attacker-controlled cannot be settled from the sink alone.

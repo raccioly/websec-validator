@@ -1,13 +1,13 @@
 # Adopting websec-validator in an existing project
 
-You do not need to clear a security backlog before adopting websec. Start report-only on a branch,
-scope out code that is not your product, record what already exists as a baseline, and only then
-tighten the gate. At the end of this guide you will have a committed `.websec-ignore`, a reviewed
-baseline ledger, a CI job that fails only on new or reopened findings, and (optionally) an agent-loop
-check on every file your coding agent writes.
+You do not need to clear a security backlog before adopting websec. Start report-only on a branch.
+Scope out code that is not your product. Record what already exists as a baseline. Only then tighten
+the gate. At the end of this guide you have a committed `.websec-ignore`, a reviewed baseline
+ledger, a CI job that fails only on new or reopened findings, and (optionally) an agent-loop check
+on every file your coding agent writes.
 
-Each step is written for a human first. The **Tell your agent** block after it is a plain-English
-prompt you can give an AI coding agent to do the same step for you.
+Each step is written for a human first. The **Tell your agent** block after each step is a
+plain-English prompt. Give it to an AI coding agent to do the same step for you.
 
 | Stage | Main command | What it changes in your repository |
 |---|---|---|
@@ -25,14 +25,14 @@ prompt you can give an AI coding agent to do the same step for you.
 - websec-validator installed (`pipx install websec-validator`) on Python 3.11 or newer. See
   [installation](../installation.md).
 - A Git checkout of the project. `--diff`, `websec gate` and `websec hooks` all read Git.
-- Authority to review the code. websec is read-only by default and never touches a running app,
-  but frame agent requests as a *defensive review of your own code* (see
+- Authority to review the code. websec is read-only by default and never touches a running app.
+  Still, describe agent requests as a *defensive review of your own code* (see
   [AI agents](ai-agents.md)).
 
 ## 1. Start from a reviewable baseline
 
-Begin with a clean tree on a dedicated branch, so every file websec or your agent adds shows up in
-one reviewable diff.
+Begin with a clean tree on a dedicated branch. Then every file that websec or your agent adds shows
+up in one reviewable diff.
 
 ```bash
 git status                      # should report a clean tree
@@ -40,8 +40,8 @@ git switch -c chore/adopt-websec
 ```
 
 `websec run` writes its artifacts to `./websec-out/` **in the current working directory** (not in
-the scanned target) unless you pass `--out`. Every attempt gets its own directory under
-`websec-out/runs/`, and the `websec-out/latest` pointer advances only after a run whose requested
+the analyzed target) unless you pass `--out`. Every attempt gets its own directory under
+`websec-out/runs/`. The `websec-out/latest` pointer advances only after a run whose requested
 checks completed. The run ends by printing ``add `websec-out/` to .gitignore`` — it does not edit
 `.gitignore` for you. Do it once:
 
@@ -50,18 +50,19 @@ echo 'websec-out/' >> .gitignore
 git add .gitignore
 ```
 
-The artifacts describe findings, paths and evidence from your code, so treat them as sensitive and
-keep them out of version control. The walker already skips directories named `websec-out`, and any
-directory a run wrote whatever its name (recognised by its `FACTS.json` and `coverage.json`, or its
-`runs/` and `latest`), so a stale output tree is never scanned as source.
+The artifacts describe findings, paths and evidence from your code. Treat them as sensitive and
+keep them out of version control. The walker already skips directories named `websec-out`. It also
+skips any directory a run wrote, whatever its name (it recognizes one by its `FACTS.json` and
+`coverage.json`, or its `runs/` and `latest`). So the walker never reads a stale output tree as
+source.
 
-`websec run` never edits your source. The only commands that write into your repository are the
-ones you invoke for that purpose: `websec init` (`.websec-ignore`), `websec install <host>` (agent
+`websec run` never edits your source. Only the commands you invoke for that purpose write into your
+repository: `websec init` (`.websec-ignore`), `websec install <host>` (agent
 instruction files), `websec hooks install --agent` (`.claude/settings.json`) and `websec hooks
 install` (Git hooks).
 
 > **Tell your agent:** "Create a branch named `chore/adopt-websec` from a clean working tree. Add
-> `websec-out/` to `.gitignore` and stage only that change. Do not run any scan yet."
+> `websec-out/` to `.gitignore` and stage only that change. Do not run websec yet."
 
 ## 2. Check your toolchain and language coverage
 
@@ -72,20 +73,20 @@ websec capabilities      # offline matrix of named profiles, checks and their li
 ```
 
 `doctor` tells you which optional scanners (Trivy, OSV-Scanner, Gitleaks, Semgrep/OpenGrep,
-Checkov, Bandit and others) are present. They only execute when you add `--scan`. A scanner you
-name with `--scanners` but have not installed makes the run incomplete rather than clean.
+Checkov, Bandit and others) are present. They execute only when you add `--scan`. Suppose you name a
+scanner with `--scanners` but have not installed it. Then the run is incomplete, not clean.
 
-Before you trust a clean result, know how deeply websec reads your stack. Coverage falls into
-three tiers. [Language support](../reference/languages.md) is the authoritative list.
+Before you trust a clean result, know how deeply websec reads your stack. Coverage has three
+tiers. [Language support](../reference/languages.md) is the authoritative list.
 
 | Tier | What it means | What you see |
 |---|---|---|
 | Full recon | Framework, route, auth, access-control and sink extractors (the JavaScript/TypeScript and Python web stacks) | normal findings and attack-surface map |
 | Named-check profile | Bounded direct-syntax checks only — for example Java/Spring, .NET, Go, Ruby, PHP, Android, iOS, Rust, C/C++ | listed in `websec capabilities` with each profile's limitations |
-| Unanalysed | Recognised as source but never read or matched — for example Elixir, Scala, Clojure, shell, server-side templates | `coverage.json` → `files.unanalyzed_languages` and a `language_without_analyzer` gap |
+| Unanalyzed | Recognized as source but never read or matched — for example Elixir, Scala, Clojure, shell, server-side templates | `coverage.json` → `files.unanalyzed_languages` and a `language_without_analyzer` gap |
 
-A completed named check that finds nothing is not a statement that the service is secure, and an
-unanalysed language produces no findings at all. That silence is **not** a clean result.
+A completed named check that finds nothing does not mean that the service is secure. An
+unanalyzed language produces no findings at all. That silence is **not** a clean result.
 
 > **Tell your agent:** "Run `websec doctor .` and `websec capabilities`. Tell me which scanners are
 > missing, and which languages in this repository fall into full recon, a named-check profile, or
@@ -95,8 +96,8 @@ unanalysed language produces no findings at all. That silence is **not** a clean
 ## 3. Scope out non-product code first
 
 Most real repositories carry test suites, fixtures, seed data and load-test harnesses, often with
-planted fake credentials. Scope these out *before* the first report, or the first report will be
-mostly noise.
+planted fake credentials. Scope these out *before* the first report. If you do not, the first report
+is mostly noise.
 
 ```bash
 websec run . --scan      # recommended: gives init a findings ledger to read (skim, don't triage yet)
@@ -104,44 +105,43 @@ websec init --dry-run    # print the proposal; write nothing
 websec init              # write .websec-ignore
 ```
 
-`init` walks the repository (to a depth of four directories) and proposes a directory only if
+`init` walks the repository (to a depth of four directories). It proposes a directory only if
 its name is on a fixed list of conventional non-product names (`tests`, `fixtures`, `seed`,
 `examples`, `capacity-test`, `load-test`, `benchmarks`, `third_party` and so on) **and** it
-actually holds files. Every proposed line carries its file count, and the summary says how much of
-the analysed surface the proposal would remove (`covers N of M analyzed file(s)`). If that number
+actually holds files. Every proposed line carries its file count. The summary says how much of
+the analyzed surface the proposal would remove (`covers N of M analyzed file(s)`). If that number
 is most of your repository, the proposal is too aggressive. Edit it.
 
-A directory line hides every future finding in that directory too, including a real credential
-someone pastes into a fixture later. Since 0.22.0 every proposed line says so, and `init` uses the
-scan's ledger (`websec-out/latest/findings-ledger.json`, or `--ledger PATH`) to do better where it
-can. When a directory's only findings are secrets, it proposes a dated
+A directory line also hides every future finding in that directory, including a real credential
+someone pastes into a fixture later. Since 0.22.0 every proposed line says so. `init` also uses the
+run's ledger (`websec-out/latest/findings-ledger.json`, or `--ledger PATH`) to do better where it
+can. Suppose a directory's only findings are secrets. Then `init` proposes a dated
 `fingerprint:<fp> expires:<today+90d>  # REVIEW: …` line for each one and leaves the directory line
-commented out, so a new secret there still gates. The `REVIEW:` reason is a placeholder: confirm
-each value is fake, or rotate it, then rewrite the reason. `latest` only advances after a completed
-run, so if the scan was partial, pass its ledger with `--ledger`. Without any ledger, `init` falls
-back to warned directory globs and says so. Details:
+commented out, so a new secret there still gates. The `REVIEW:` reason is a placeholder. Confirm
+that each value is fake, or rotate it, then rewrite the reason. `latest` advances only after a
+completed run. If the run was partial, pass its ledger with `--ledger`. Without any ledger, `init`
+falls back to warned directory globs and says so. Details:
 [`websec init`](../reference/cli.md#websec-init).
 
-If a `.websec-ignore` already exists, `init` refuses to overwrite it and exits `2`, because that
-file may hold reviewed `fingerprint:` acknowledgements. Pass `--force` only when you mean to replace
-it.
+If a `.websec-ignore` already exists, `init` refuses to overwrite it and exits `2`. That file may
+hold reviewed `fingerprint:` acknowledgements. Pass `--force` only when you mean to replace it.
 
 Things `init` does not propose:
 
 - Directories the walker already skips entirely, such as `node_modules`, `vendor`, `dist`, `build`,
   `out`, `target`, `coverage` and `.next`. If real product code lives in a directory with one of
-  these names, it is **not analysed**. The skip is counted in `coverage.json` under
-  `files.skipped_counts.skip_directory`. Since 0.22.0, analysable files found inside a skipped
-  `build`, `dist`, `out`, `target`, `vendor` or `coverage` directory are also counted and reported
-  as a `skipped_directory_code` gap that names the directory, so this hole is visible. A directory
-  named `security/` is no longer skipped.
+  these names, websec does **not analyze** it. `coverage.json` counts the skip under
+  `files.skipped_counts.skip_directory`. Since 0.22.0, websec also counts analyzable files found
+  inside a skipped `build`, `dist`, `out`, `target`, `vendor` or `coverage` directory. It reports
+  them as a `skipped_directory_code` gap that names the directory, so this hole is visible. A
+  directory named `security/` is no longer skipped.
 
 Pick the right scoping tool for each case:
 
 | Tool | Effect | Use it for |
 |---|---|---|
 | Fixture auto-scoping (default) | Fixture/example routes move to `fixture_endpoints` and are not probed. Under `--scan`, secrets in test files are demoted to LOW and annotated, never dropped. Fixture manifests do not drive framework detection. | nothing to do; `--include-fixtures` turns it off |
-| `--exclude '<glob>'` (repeatable) | Removes a path from recon **and** the static scanners | generated code, dumps or directories you never want read or parsed. The only option that keeps a scanner from parsing a path |
+| `--exclude '<glob>'` (repeatable) | Removes a path from recon **and** the static scanners | generated code, dumps or directories you never want read or parsed. This is the only option that keeps a scanner from parsing a path |
 | `.websec-ignore` path line | Drops matching findings from the ledger after analysis; the count stays in `suppressed`. Scanners still read the path | committed, persistent scoping of findings |
 | `.websec-ignore` `fingerprint:` line | Keeps one finding visible but not gating, with a required reason | a reviewed false positive or accepted risk |
 
@@ -153,20 +153,20 @@ Pick the right scoping tool for each case:
 The full `.websec-ignore` grammar, including how patterns match, is in
 [triage and suppression](triage-and-suppression.md#websec-ignore-reference). When you write a
 `category:` line, copy the category name from the `category` field in `findings-ledger.json`. It
-must match exactly: scanner findings are `static-secret`, `static-sca`, `static-sast` or
+must match exactly. Scanner findings are `static-secret`, `static-sca`, `static-sast` or
 `static-iac`, so `category:secret` matches nothing. Path patterns match whole path components
-(`tests/` does not match `contests/`); during the transition, a line that still hides something
+(`tests/` does not match `contests/`). During the transition, a line that still hides something
 only under the old substring rule prints a warning with its exact replacement.
 
 > **Tell your agent:** "Run `websec run . --scan`, then `websec init --dry-run`, and show me each
 > proposed entry with its file count and the 'covers N of M' total. For each entry, tell me whether
 > the directory contains anything that ships to production. For each proposed `fingerprint:` line,
-> show me the secret's file and line and whether it looks fake; do not mark one fake without
+> show me the secret's file and line and whether it looks fake. Do not mark one fake without
 > evidence. Write the file with `websec init` only after I approve, and never use `--force`."
 
 ## 4. First run: recon only, then with scanners
 
-Run the core pass first. It needs nothing but the code:
+Run the core pass first. It needs only the code:
 
 ```bash
 websec run .
@@ -191,13 +191,13 @@ The console ends with one of these banners. Each means something different:
 
 | Banner | Meaning |
 |---|---|
-| `REQUESTED CHECKS COMPLETED` | Everything you asked for ran. It does **not** mean the code is safe, and some languages may still be unanalysed. |
+| `REQUESTED CHECKS COMPLETED` | Everything you asked for ran. It does **not** mean the code is safe, and some languages may still be unanalyzed. |
 | `PARTIAL SCAN — REQUESTED CHECKS INCOMPLETE` | Something you asked for did not run. The attempt is kept in its own run directory and `latest` is not moved. |
 | `NO ANALYZABLE SOURCE` | Source files exist but websec has no analyzer for any of them. An empty findings list means *not checked*. |
-| `REQUESTED SCOPE NOT ANALYZED` | With `--only`: none of the requested paths selected an analysable file. An empty findings list means *not checked*. |
+| `REQUESTED SCOPE NOT ANALYZED` | With `--only`: none of the requested paths selected an analyzable file. An empty findings list means *not checked*. |
 
 Keep completeness and cleanliness apart. `coverage.json` records `execution_complete` (did the
-requested checks run), and its `limitation` field states that completed execution does not prove the
+requested checks run). Its `limitation` field states that completed execution does not prove the
 absence of vulnerabilities. A quick look:
 
 ```bash
@@ -205,37 +205,38 @@ jq '{execution_complete, gaps: [.gaps[].kind], unanalyzed: .files.unanalyzed_lan
   websec-out/latest/coverage.json
 ```
 
-Two gap kinds name individual files (since 0.22.0), and they are easy to confuse:
+Two gap kinds name individual files (since 0.22.0). They are easy to confuse:
 
 - `scanner_file_limits` is a scope limit. A scanner ran, but Semgrep or Checkov could not parse, or
-  only partly parsed, the files it lists. The run can still be complete; those files' absence of
-  findings is not a clean result.
+  only partly parsed, the files it lists. The run can still be complete. The absence of findings in
+  those files is not a clean result.
 - `source_flow_limit` is an execution gap. websec's own bounded request-to-sink analysis stopped at
-  a budget in the listed files, so the run is incomplete, as it is for an oversized file.
+  a budget in the listed files. So the run is incomplete, as it is for an oversized file.
 
-If either one names files under a directory you never meant to analyse, add `--exclude` for it.
-A `.websec-ignore` line only filters findings and does not stop scanners from parsing a path. See
+Suppose either gap names files under a directory you never meant to analyze. Then add `--exclude`
+for that directory. A `.websec-ignore` line only filters findings. It does not stop scanners from
+parsing a path. See
 [troubleshooting](../troubleshooting.md#coverage-and-results).
 
 See [outputs](../reference/outputs.md) for every artifact and field.
 
 > **Tell your agent:** "Run `websec run .` and then `websec run . --scan`. For each run, report the
 > final coverage banner, every entry in `coverage.json` `gaps`, and any `unanalyzed_languages`.
-> Do not call the repository clean if any language was unanalysed or any requested check did not
+> Do not call the repository clean if any language was unanalyzed or any requested check did not
 > complete."
 
 ## 5. Triage the first report
 
 Work from the clustered view, not the raw count. REPORT.md §1a groups findings by detector rule (and
-history-only secrets by the commit that removed them), so thirteen sites of one pattern read as one
-issue with thirteen places to fix. Clusters are a **view, not a filter**: every site still has its
+history-only secrets by the commit that removed them). So thirteen sites of one pattern read as one
+finding with thirteen places to fix. Clusters are a **view, not a filter**: every site still has its
 own fingerprint and still gates on its own.
 
 For each finding or cluster, decide one of four outcomes:
 
 | Outcome | Action |
 |---|---|
-| Real issue | Fix it, re-run, confirm the finding is no longer observed |
+| Real finding | Fix it, re-run, confirm the finding is no longer observed |
 | Not your product | Add a path line to `.websec-ignore` (step 3) |
 | Reviewed false positive or accepted risk | Add a dated `fingerprint:` acknowledgement with a reason |
 | The detector is wrong | Also record it with `websec feedback` so it can be fixed upstream |
@@ -243,7 +244,8 @@ For each finding or cluster, decide one of four outcomes:
 Useful signals on each finding in `findings-ledger.json`: `severity`, `calibrated` (a measured
 `P(real)` with interval and sample size), `triage.disposition` (`agent-fixable` or
 `human-required`), and `likely_filtered` with `filter_reason` for classes a reviewer usually drops.
-None of these change what gates. To learn what a class means and how to confirm it:
+None of these change what gates. To learn what a class means and how to confirm a finding of that
+class:
 
 ```bash
 websec explain ssrf
@@ -256,7 +258,7 @@ Acknowledge a reviewed finding by its fingerprint, with an expiry and a reason:
 fingerprint:3f080182df0d1a4d expires:2026-12-31  # headers set by the CDN edge config, see infra/cdn.tf
 ```
 
-Report a wrong detector. This is offline and metadata-only by default, and it does **not**
+Report a wrong detector. This command is offline and metadata-only by default. It does **not**
 suppress anything:
 
 ```bash
@@ -287,22 +289,22 @@ websec run . --scan --baseline <baseline-dir>/findings-ledger.json --fail-on hig
 ```
 
 The console reports `N new · N unchanged · N no longer observed`. Identities are semantic (attack
-class, category, location without line number, rule, package, CVE and similar), so moving code
-within a file does not create a "new" finding. A finding that disappears is reported as **no longer
-observed**, which is not proof of a fix. A malformed or unreadable baseline makes the requested
-execution incomplete (exit `3`) rather than silently gating everything or nothing.
+class, category, location without line number, rule, package, CVE and similar). So moving code
+within a file does not create a "new" finding. websec reports a finding that disappears as **no
+longer observed**. That is not proof of a fix. A malformed or unreadable baseline makes the
+requested execution incomplete (exit `3`). It does not silently gate everything or nothing.
 
 Store the baseline where your team keeps review records (a protected path, or an artifact your CI
-can read). The ledger contains finding titles, paths and evidence, so review it before committing
-it anywhere.
+can read). The ledger contains finding titles, paths and evidence. Review it before you commit it
+anywhere.
 
 > **Tell your agent:** "Run `websec run . --scan --require-complete`. If it completes, copy
-> `websec-out/latest/findings-ledger.json` to the baseline location I give you and summarise its
+> `websec-out/latest/findings-ledger.json` to the baseline location I give you and summarize its
 > totals by severity. If it does not complete, stop and show me `coverage.json` gaps instead."
 
 ## 7. Roll out gating in phases
 
-Tighten in three phases. Move to the next only when the current one is quiet and trusted.
+Tighten in three phases. Move to the next phase only when the current one is quiet and trusted.
 
 | Phase | Local | CI | Fails the build on |
 |---|---|---|---|
@@ -310,31 +312,31 @@ Tighten in three phases. Move to the next only when the current one is quiet and
 | **Warn** | `websec hooks install --agent` (agent-loop gate) | `websec run . --require-complete --fail-on high --baseline <ledger>` in a job that is not yet required | nothing blocks merges; failures are visible |
 | **Block** | `websec hooks install --pre-push` | the same command as a **required** status check, or PR mode with `--diff` | new HIGH+ findings, or incomplete execution |
 
-PR mode scopes the gate to files the branch changed (three-dot `base...HEAD`) and writes exact hunk
-ranges to `diff-scope.json`. Make sure the base ref exists in the CI checkout. An unknown ref is
-recorded as a coverage gap and the run continues unscoped.
+PR mode scopes the gate to files the branch changed (three-dot `base...HEAD`). It writes exact hunk
+ranges to `diff-scope.json`. Make sure the base ref exists in the CI checkout. websec records an
+unknown ref as a coverage gap, and the run continues unscoped.
 
 ```bash
 websec run . --diff origin/main --fail-on high --require-complete
 ```
 
-`--diff` also works with a subdirectory target: changed paths are made relative to it, and changes
-outside it are ignored. See [monorepo](monorepo.md#root-run-vs-subdirectory-run).
+`--diff` also works with a subdirectory target. websec makes changed paths relative to the target
+and ignores changes outside it. See [monorepo](monorepo.md#root-run-vs-subdirectory-run).
 
-Exit codes keep "vulnerability" and "broken toolchain" apart:
+Exit codes keep "vulnerability" and "broken toolchain" separate:
 
 | Code | Meaning |
 |---|---|
 | `0` | the gate ran and nothing met the threshold (not proof of protection) |
 | `1` | findings at or above `--fail-on`; if the run was also incomplete, the count is a floor |
-| `2` | usage or configuration error; nothing was scanned |
-| `3` | requested checks did not complete, or `--require-analyzed` found nothing analysable |
+| `2` | usage or configuration error; nothing was analyzed |
+| `3` | requested checks did not complete, or `--require-analyzed` found nothing analyzable |
 
 The agent-loop gate (`websec gate`, installed as a `PostToolUse` hook by `websec hooks install
 --agent`) checks only the files just changed. It defaults to `--fail-on medium`, writes no
 artifacts and never advances a baseline. It fails open, loudly, if it cannot run. Local hooks of any
-kind are developer ergonomics, not controls: settings and hook files are editable. Enforcement
-belongs in a server-side required status check.
+kind are developer ergonomics, not controls, because settings and hook files are editable.
+Enforcement belongs in a server-side required status check.
 
 CI specifics: [GitHub Actions](ci/github-actions.md), [other CI](ci/other-ci.md),
 [pre-commit and Git hooks](ci/pre-commit-and-git-hooks.md).
@@ -346,14 +348,14 @@ CI specifics: [GitHub Actions](ci/github-actions.md), [other CI](ci/other-ci.md)
 
 ## 8. Decide how the policy ages
 
-A suppression policy that never expires drifts into a list of things nobody remembers deciding.
-Agree on these rules up front:
+A suppression policy that never expires becomes a list of things nobody remembers deciding. Agree
+on these rules up front:
 
 - **Date every acknowledgement.** `fingerprint:<fp> expires:YYYY-MM-DD  # reason` stays active
-  through the expiry date. After that it excuses nothing: the finding returns to the gate with a
+  through the expiry date. After that it excuses nothing, and the finding returns to the gate with a
   `reopened_reason`. A line with no reason, or a malformed expiry, never excused anything in the
-  first place. An undated acknowledgement is accepted as a legacy entry that never expires. Avoid
-  it.
+  first place. websec accepts an undated acknowledgement as a legacy entry that never expires. Avoid
+  undated entries.
 - **Review on a cadence.** Every ledger carries `acknowledgement_history` with each entry's state
   (`active`, `expired`, `malformed`, `missing-reason`, `legacy-no-expiry`):
 
@@ -369,9 +371,9 @@ Agree on these rules up front:
   websec init --claimspec websec-acks.json
   ```
 
-- **Refresh threat intelligence deliberately.** EPSS and CISA KEV data are read from a local cache.
-  Refreshing is an explicit network action that sends no project data. Reassessing an existing
-  ledger is offline, and a newly exploited, acknowledged CVE can reopen:
+- **Refresh threat intelligence deliberately.** websec reads EPSS and CISA KEV data from a local
+  cache. Refreshing is an explicit network action that sends no project data. Reassessing an
+  existing ledger is offline, and a newly exploited, acknowledged CVE can reopen:
 
   ```bash
   websec intel status
@@ -379,7 +381,7 @@ Agree on these rules up front:
   websec intel reassess --ledger <baseline-dir>/findings-ledger.json --out reassessment.json
   ```
 
-  Reassessment updates known CVEs only. Finding new dependency CVEs needs a fresh `--scan`.
+  Reassessment updates known CVEs only. To find new dependency CVEs, run again with `--scan`.
 - **Re-baseline on purpose.** Replace the stored baseline after a triage cycle or a websec upgrade,
   never automatically from an advisory or failed run. See [upgrading](../upgrade.md).
 
@@ -392,8 +394,8 @@ Agree on these rules up front:
 
 ### Python/Django monolith
 
-Django URL configurations and Python web frameworks are in the full-recon tier. Bandit is
-auto-selected for Python when installed. A typical first week:
+Django URL configurations and Python web frameworks are in the full-recon tier. websec selects
+Bandit automatically for Python when it is installed. A typical first week:
 
 ```bash
 websec init --dry-run                         # usually proposes tests/, fixtures/, seed data
@@ -401,28 +403,28 @@ websec run . --scan                           # Bandit runs here if installed
 websec run . --scan --scanners bandit --require-complete   # once Bandit is part of the toolchain
 ```
 
-Expect the tenant boundary candidates and unguarded write endpoints in the briefing to need human
-confirmation. These are leads, not verdicts.
+The tenant boundary candidates and unguarded write endpoints in the briefing need human
+confirmation. They are leads, not verdicts.
 
 ### Node/Express or Next.js app
 
-Express route guards, router-mount auth and Next.js configuration are read directly. A Next.js app
-with no `headers()` block in `next.config.*` gets a MEDIUM `nextjs-no-security-headers` finding,
-and response-header findings (CSP, HSTS, clickjacking) are LOW and architectural. A static scan
-cannot see your CDN or edge. If the edge sets those headers, verify them against the live response
-and acknowledge the finding with a dated reason that names where the headers are configured.
+websec reads Express route guards, router-mount auth and Next.js configuration directly. A Next.js
+app with no `headers()` block in `next.config.*` gets a MEDIUM `nextjs-no-security-headers`
+finding. Response-header findings (CSP, HSTS, clickjacking) are LOW and architectural. A static run
+cannot see your CDN or edge. If the edge sets those headers, verify them against the live response.
+Then acknowledge the finding with a dated reason that names where the headers are configured.
 
 ### Monorepo
 
-Run from the root. Services are separated by their nearest manifest, and `websec init` finds nested
-directories such as `backend/capacity-test/`. See
+Run from the root. websec separates services by their nearest manifest, and `websec init` finds
+nested directories such as `backend/capacity-test/`. See
 [monorepo](monorepo.md) for service boundaries, per-service CI and what changes when you point
 websec at a subdirectory.
 
 ### Polyglot repository with an unanalysed language (Elixir)
 
 A repository with a Node API and an Elixir billing service still produces a complete run, because
-nothing websec was asked to do failed. The Elixir files were simply never read. Example output from
+nothing websec was asked to do failed. websec never read the Elixir files. Example output from
 a small synthetic repository:
 
 ```text
@@ -431,9 +433,9 @@ a small synthetic repository:
 > Partially outside coverage: no analyzer for elixir (2). Those files were never read.
 ```
 
-`--require-analyzed` does not trip here. It fires only when *no* source could be analysed, which
-is what an Elixir-only repository gets (exit `3`, `NO ANALYZABLE SOURCE`). For a mixed repository,
-gate on the coverage record yourself, using a fresh `--out` per CI job so `latest` can only point at
+`--require-analyzed` does not trip here. It fires only when *no* source could be analyzed. An
+Elixir-only repository gets that result (exit `3`, `NO ANALYZABLE SOURCE`). For a mixed repository,
+gate on the coverage record yourself. Use a fresh `--out` per CI job, so `latest` can point only at
 this job's completed run:
 
 ```bash
@@ -441,8 +443,8 @@ websec run . --out websec-ci --require-complete --fail-on high
 jq -e '(.files.unanalyzed_languages // {}) | length == 0' websec-ci/latest/coverage.json
 ```
 
-The second command exits non-zero while any language is unanalysed. Either keep it as a reminder
-that those services need another reviewer, or drop it once you have one in place.
+The second command exits non-zero while any language is unanalyzed. Keep it as a reminder that
+those services need another reviewer, or drop it once you have one in place.
 
 ## Next steps
 

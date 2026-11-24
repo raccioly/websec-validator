@@ -1,8 +1,8 @@
 # Triage and suppression
 
-This guide explains how to work through a websec report: how to read clusters and priority
-signals, and how to scope out, acknowledge or report findings without hiding anything a real leak
-would need. It is the reference for the `.websec-ignore` file, `--exclude`, fixture auto-scoping,
+This guide explains how to work through a websec report. It shows how to read clusters and priority
+signals. It also shows how to scope out, acknowledge or report findings without hiding anything a
+real leak would need. It is the reference for the `.websec-ignore` file, `--exclude`, fixture auto-scoping,
 baselines, `websec feedback` and `websec explain`.
 
 One rule runs through all of it: **nothing disappears silently.** Every suppression is either
@@ -14,8 +14,8 @@ For every finding (or cluster of findings), pick one:
 
 | Outcome | Mechanism | Finding afterwards |
 |---|---|---|
-| Real issue: fix it | change the code, re-run | `no-longer-observed` against a baseline (not proof of repair) |
-| Not your product | path or `category:` line in `.websec-ignore`, or `--exclude` | dropped from the ledger and counted in `suppressed`, or never analysed (`--exclude`) |
+| Real finding: fix it | change the code, re-run | `no-longer-observed` against a baseline (not proof of repair) |
+| Not your product | path or `category:` line in `.websec-ignore`, or `--exclude` | dropped from the ledger and counted in `suppressed`, or never analyzed (`--exclude`) |
 | Reviewed false positive or accepted risk | `fingerprint:<fp> expires:<date>  # reason` in `.websec-ignore` | kept, shown as acknowledged, not gating until it expires |
 | The detector is wrong | `websec feedback` (in addition to one of the above) | unchanged. Feedback never suppresses. |
 
@@ -31,7 +31,7 @@ groups findings two ways:
 - **incident**: secrets whose files were removed from the working tree in the same commit. One
   deletion, one remediation (rotate), however many blobs it left behind.
 
-Single-site groups are omitted. Each cluster takes the worst severity and confidence of its
+websec omits single-site groups. Each cluster takes the worst severity and confidence of its
 members, lists every site with its own `fingerprint`, and carries a `gating_note`. The console and
 `cluster_summary` report `distinct_issues` alongside the total.
 
@@ -41,15 +41,15 @@ sites, not clusters.
 
 ### Secrets say where they live
 
-Every Gitleaks finding carries `in_tree`. A finding whose file is gone from the working tree is
-labelled `in-tree: false`, marked `history_only`, and names the commit it was last seen in.
-Deleting a file does not un-leak it, because the blob stays fetchable from the repository. The
-remediation is to **rotate** the credential, and the report says so.
+Every Gitleaks finding carries `in_tree`. Suppose a finding's file is gone from the working tree.
+Then websec labels the finding `in-tree: false`, marks it `history_only`, and names the commit it
+was last seen in. Deleting a file does not un-leak it, because the blob stays fetchable from the
+repository. The remediation is to **rotate** the credential, and the report says so.
 
 ### Priority signals
 
-All of these are additive. They annotate a finding but never change its severity, drop it or add
-one, so they cannot reintroduce a false positive.
+All of these signals are additive. They annotate a finding. They never change its severity, drop
+it or add one, so they cannot reintroduce a false positive.
 
 | Field | What it tells you |
 |---|---|
@@ -60,10 +60,10 @@ one, so they cannot reintroduce a false positive.
 | `reachability` (dependency CVEs, `--scan`) | `imported`: an import of the package was found in first-party source. `no-import-found`: the title says "declared-only"; likely unreachable, verify. `n/a`: ecosystems whose imports are not parsed (Go, Rust and others), so no claim. Name-based, not a call graph. |
 | `epss`, `epss_pct`, `kev` (`--scan`) | FIRST.org EPSS exploit probability and CISA KEV membership, joined from a local cache. Absent when no local snapshot exists; `websec intel refresh` downloads one (public feeds only, no project data sent). |
 
-`--scan` runs both Trivy and OSV-Scanner when installed. The same CVE from both collapses to one
-row with `tools: [osv-scanner, trivy]`.
+`--scan` runs both Trivy and OSV-Scanner when installed. websec collapses the same CVE from both
+into one row with `tools: [osv-scanner, trivy]`.
 
-To learn what a class means and how to confirm or refute it, offline:
+To learn offline what a class means and how to confirm or refute it:
 
 ```bash
 websec explain bola
@@ -75,21 +75,22 @@ websec explain --list          # every attack class this build cites
 
 ### Fixture auto-scoping (on by default)
 
-Test, example and fixture code is split away from your attack surface without being hidden:
+websec splits test, example and fixture code away from your attack surface without hiding it:
 
-- Fixture routes go to `FACTS.json` → `fixture_endpoints`. They are counted in the console and not
-  probed.
-- Under `--scan`, secrets that scanners find in test files are **demoted to LOW and annotated**,
-  never dropped, because a real key pasted into a test is still a committed leak.
+- Fixture routes go to `FACTS.json` → `fixture_endpoints`. The console counts them. websec does not
+  probe them.
+- Under `--scan`, websec **demotes to LOW and annotates** secrets that scanners find in test files.
+  It never drops them, because a real key pasted into a test is still a committed leak.
 - Fixture package manifests do not drive framework detection, so a CLI that vendors an Express demo
   is not read as an Express app.
 
-Recon findings inside test directories (for example a hard-coded fallback signing secret in
-`tests/fixtures/`) are **not** demoted. Scope them explicitly if they are not your product. Pass
-`--include-fixtures` to treat all fixture code as product code.
+websec does **not** demote recon findings inside test directories (for example a hard-coded
+fallback signing secret in `tests/fixtures/`). Scope them explicitly if they are not your product.
+Pass `--include-fixtures` to treat all fixture code as product code.
 
-When most of a run's findings sit in test or example code and no `.websec-ignore` exists, websec
-prints a one-line pointer to the suppression mechanism. It never edits your repository for you.
+Suppose most of a run's findings sit in test or example code and no `.websec-ignore` exists. Then
+websec prints a one-line pointer to the suppression mechanism. It never edits your repository for
+you.
 
 ### `--exclude`
 
@@ -98,18 +99,18 @@ websec run . --exclude 'tests/**' --exclude 'examples/**'
 ```
 
 `--exclude` (repeatable) removes a path from **both** recon and the static scanners. Recon never
-reads excluded files. Trivy, Semgrep and gosec get the patterns as their own exclude flags, and
-since 0.22.0 Checkov gets equivalent `--skip-path` patterns anchored to the target root, so its
-parse errors in excluded trees no longer fail a run. Gitleaks and OSV-Scanner have no path flag;
-their findings in excluded paths are dropped afterwards. Excluded files are counted as `excluded`
-in the coverage record, and the patterns are listed in `coverage.json` under `files.excludes`. A
-pattern matches when it is a substring of the repository-relative path or a glob that matches it.
+reads excluded files. Trivy, Semgrep and gosec get the patterns as their own exclude flags. Since
+0.22.0 Checkov gets equivalent `--skip-path` patterns anchored to the target root, so its parse
+errors in excluded trees no longer fail a run. Gitleaks and OSV-Scanner have no path flag, so
+websec drops their findings in excluded paths afterwards. The coverage record counts excluded files
+as `excluded`, and `coverage.json` lists the patterns under `files.excludes`. A pattern matches when
+it is a substring of the repository-relative path or a glob that matches it.
 
 **`--exclude` is scope; `.websec-ignore` is a findings filter.** Use `--exclude` for content you
-never want read or parsed, such as generated code, dumps and vendored trees: it is the only way to
+never want read or parsed, such as generated code, dumps and vendored trees. It is the only way to
 keep a scanner from parsing a path. Use `.websec-ignore` for committed, reviewable policy about
-findings. A path listed only in `.websec-ignore` is still read by recon and parsed by every
-scanner, so a scanner that fails on a file there still fails.
+findings. Recon still reads a path listed only in `.websec-ignore`, and every scanner still parses
+it. So a scanner that fails on a file there still fails.
 
 ### `websec init`
 
@@ -122,19 +123,19 @@ websec init --force     # replace an existing file (it may hold reviewed acknowl
 
 `init` proposes conventional non-product directories (tests, fixtures, seed data, examples,
 load-test harnesses, `third_party` and similar) that exist in your tree and hold files, each with
-its file count. It also reports how much of the analysed surface the proposal covers. It refuses to
-overwrite an existing `.websec-ignore` without `--force` (exit `2`). Directories the walker already
-skips, such as `vendor` and `node_modules`, are not proposed.
+its file count. It also reports how much of the analyzed surface the proposal covers. It refuses to
+overwrite an existing `.websec-ignore` without `--force` (exit `2`). It does not propose directories
+that the walker already skips, such as `vendor` and `node_modules`.
 
-A directory glob is blunt: it hides every finding under the directory, including ones that do not
-exist yet, such as a real credential pasted into a fixture next month. Since 0.22.0:
+A directory glob is blunt. It hides every finding under the directory, including findings that do
+not exist yet, such as a real credential pasted into a fixture next month. Since 0.22.0:
 
 - Every proposed glob line ends with `also suppresses FUTURE findings here, including real
   secrets; prefer fingerprint: acks`.
-- `init` reads a prior run's findings ledger, never scanning itself: `--ledger PATH`, else
-  `<target>/websec-out/latest/findings-ledger.json`, else the same path under the current
-  directory. A ledger recorded for a different target is ignored, and an explicit `--ledger` that
-  does not match exits `2`.
+- `init` reads a prior run's findings ledger. It never runs an analysis itself. It looks for the
+  ledger in this order: `--ledger PATH`, else `<target>/websec-out/latest/findings-ledger.json`,
+  else the same path under the current directory. `init` ignores a ledger recorded for a different
+  target. An explicit `--ledger` that does not match exits `2`.
 - When the only findings that ledger records under a proposed directory are secrets, `init`
   proposes one acknowledgement per finding and leaves the glob commented out:
 
@@ -143,26 +144,26 @@ exist yet, such as a real credential pasted into a fixture next month. Since 0.2
   fingerprint:9ff8da3937b6b5f4 expires:2027-01-08  # REVIEW: test/fixture credential, confirm it is fake or rotate it (tests/fixtures/users.ts:1)
   ```
 
-  The expiry is 90 days out and the `REVIEW:` reason is a placeholder. Confirm each value is fake,
-  or rotate it, and rewrite the reason before you commit. The acknowledged findings stop gating; a
-  new secret in the directory still gates.
+  The expiry is 90 days out and the `REVIEW:` reason is a placeholder. Confirm that each value is
+  fake, or rotate it. Rewrite the reason before you commit. The acknowledged findings stop gating.
+  A new secret in the directory still gates.
 - A directory that also holds non-secret findings, or whose findings cannot all be tied to a file in
   this working tree, keeps the warned glob.
 
-`latest` only moves after a completed run. If your scan was partial, pass its ledger explicitly with
+`latest` moves only after a completed run. If your run was partial, pass its ledger explicitly with
 `--ledger websec-out/runs/<run-id>/findings-ledger.json`. To add acknowledgements to an existing
-`.websec-ignore`, run `websec init --dry-run` and copy the lines you want; `--force` replaces the
+`.websec-ignore`, run `websec init --dry-run` and copy the lines you want. `--force` replaces the
 whole file, including acknowledgements you already reviewed for paths outside the proposal.
 
 ## `.websec-ignore` reference
 
 ### Location
 
-`.websec-ignore` is read from the **scanned target directory**, not the current working directory.
-`websec run services/api` reads `services/api/.websec-ignore`, not the repository root's file. The
-file is read under the same contained read policy as source, up to 64 KiB. A policy file that cannot
-be fully read makes the requested execution incomplete and is recorded in `coverage.json` →
-`review_policy`.
+websec reads `.websec-ignore` from the **analyzed target directory**, not the current working
+directory. `websec run services/api` reads `services/api/.websec-ignore`, not the repository root's
+file. websec reads the file under the same contained read policy as source, up to 64 KiB. A policy
+file that websec cannot fully read makes the requested execution incomplete. `coverage.json` →
+`review_policy` records this.
 
 ### Line kinds
 
@@ -197,7 +198,7 @@ case-insensitive. A line is a **path pattern** when it contains `/`, a glob char
 names: its file, any `(path)` inside its location (recon findings write `VITE_KEY  (src/app.ts)`),
 and the location itself with `:line[:col]` and a leading `./` removed.
 
-- A leading `/` anchors the pattern at the scanned target's root.
+- A leading `/` anchors the pattern at the analyzed target's root.
 - Without a leading `/`, the pattern matches at any depth, **even when it has a slash in the
   middle**. This is a deliberate difference from `.gitignore`. A leading `**/` means the same.
 - A trailing `/` matches directories only. A matched directory hides everything beneath it.
@@ -206,8 +207,8 @@ and the location itself with `:line[:col]` and a leading `./` removed.
 Any other line is a **bare word**, which keeps the old behaviour: a substring of the finding's
 category, location or title.
 
-The table shows what the new rule matches. Where it is narrower than the old rule, the difference
-is still suppressed in this release, with a warning (see below).
+The table shows what the new rule matches. Where the new rule is narrower than the old rule, this
+release still suppresses the difference, with a warning (see below).
 
 | Pattern | Behaviour |
 |---|---|
@@ -220,10 +221,10 @@ is still suppressed in this release, with a warning (see below).
 | `ssrf` | a bare word: any finding with "ssrf" in its category, location or title. Bare words are dangerous. |
 | `!tests/fixtures/` | no negation. The line does not un-suppress anything. |
 
-**Legacy matching during the transition.** So that upgrading never silently
-un-suppresses a finding, a finding is still hidden when either the new rule or the old one (a
-substring of category, location or title, or an `fnmatch` glob of the raw location) matches. A
-finding hidden **only** by the old rule is surfaced:
+**Legacy matching during the transition.** Upgrading must never silently un-suppress a finding.
+So websec still hides a finding when either the new rule or the old one matches (the old rule is a
+substring of category, location or title, or an `fnmatch` glob of the raw location). websec surfaces
+a finding hidden **only** by the old rule:
 
 - stderr prints one warning per `.websec-ignore` line, with how many findings it hid that way, up to
   three examples, and the exact replacement line, for example:
@@ -241,14 +242,14 @@ jq '.suppression_warnings[] | {pattern, hidden, replacement}' websec-out/latest/
 ```
 
 If the warning names something you did mean to hide, add the replacement line. If not, the warning
-has just shown you a finding your policy was hiding by accident.
+shows you a finding that your policy was hiding by accident.
 
 Path and category suppressions apply to findings, not to recon. Routes and other facts in suppressed
-paths still appear in `FACTS.json`. Use `--exclude` to stop a path being read at all.
+paths still appear in `FACTS.json`. Use `--exclude` to stop websec from reading a path at all.
 
 ### Acknowledgement states
 
-Each `fingerprint:` line is parsed into a state. Only two states excuse a finding:
+websec parses each `fingerprint:` line into a state. Only two states excuse a finding:
 
 | State | When | Excuses the finding? |
 |---|---|---|
@@ -258,8 +259,8 @@ Each `fingerprint:` line is parsed into a state. Only two states excuse a findin
 | `malformed` | anything other than exactly one `expires:YYYY-MM-DD` token after the fingerprint | no |
 | `missing-reason` | nothing after `#` | no |
 
-If the same fingerprint appears twice, the later line wins. Every entry, including the ones that
-excuse nothing, is recorded in the ledger's `acknowledgement_history`:
+If the same fingerprint appears twice, the later line wins. The ledger's `acknowledgement_history`
+records every entry, including the ones that excuse nothing:
 
 ```bash
 jq '.acknowledgement_history[] | {fingerprint, state, expires, reason}' \
@@ -272,8 +273,8 @@ To export reviewed acknowledgements for an auditor as a claimspec v1 `ignore` do
 websec init --claimspec websec-acks.json     # or `-` for stdout
 ```
 
-Path and category lines carry no reason, so they are omitted and counted rather than exported with
-an invented one. The command prints whether the export is the complete policy.
+Path and category lines carry no reason. So websec omits and counts them. It does not export them
+with an invented reason. The command prints whether the export is the complete policy.
 
 ### Where suppressed findings go
 
@@ -281,18 +282,19 @@ an invented one. The command prints whether the export is the complete policy.
   (`suppressed` in the ledger, `N suppressed` in the console) and the policy file's source and
   content digest in `coverage.json` → `review_policy`. Use them for code that is genuinely not your
   product. A path line also hides findings in that path that do not exist yet, including a real
-  secret committed there later. Path lines never change what the scanners read; that is
-  `--exclude`.
+  secret committed there later. Path lines never change what the scanners read. `--exclude` does
+  that.
 - **Fingerprint acknowledgements** keep the full finding, its reason and its expiry. This is the
   right home for "this specific finding is a confirmed false positive".
 
 ## Fingerprints
 
-A fingerprint is a 16-hex-character semantic identity built from the finding's attack class,
-category, location (with any line number removed) and structured identifiers such as rule, package,
-CVE, resource or sink. Title, severity and threat intelligence are excluded, so a fingerprint
-survives line moves and title rewording. Older fingerprints are kept as `fingerprint_aliases`, and an
-alias shared by several current findings is treated as ambiguous rather than allowed to hide them.
+A fingerprint is a 16-hex-character semantic identity. websec builds it from the finding's attack
+class, category, location (with any line number removed) and structured identifiers such as rule,
+package, CVE, resource or sink. The fingerprint excludes title, severity and threat intelligence, so
+it survives line moves and title rewording. websec keeps older fingerprints as
+`fingerprint_aliases`. It treats an alias shared by several current findings as ambiguous. Such an
+alias cannot hide them.
 
 Find fingerprints in the ledger, or in each cluster's `sites` list:
 
@@ -314,16 +316,16 @@ each finding:
 | `unchanged` | same finding as before | no |
 | `no-longer-observed` | in the baseline, absent now | n/a. Absence is not proof of repair. |
 
-Acknowledged findings in the current run still count as observed, so they are never reported as
+Acknowledged findings in the current run still count as observed, so websec never reports them as
 gone. A malformed or unreadable baseline makes the requested execution incomplete (exit `3`).
 
 Local pre-push hooks keep their own accepted baseline under `.git/websec-guardrail/`. Only a
-successful gate advances it. Advisory and failed runs never do.
+successful gate advances it. Advisory and failed runs never advance it.
 
 ## Reporting a wrong detector: `websec feedback`
 
 `.websec-ignore` answers "stop showing me this here". `websec feedback` answers "this detector is
-wrong and upstream should know". The two never write to each other.
+wrong and upstream should know". Neither one writes to the other.
 
 ```bash
 # not a real issue
@@ -340,21 +342,22 @@ websec feedback --verdict false-negative --attack-class ssrf \
 ```
 
 `--file-extension` accepts an extension (`.ex` or `ex`) or a file name such as
-`user_controller.ex`, and keeps only the extension. A value from which no extension can be derived
-is refused with exit `2` rather than recorded empty.
+`user_controller.ex`, and keeps only the extension. websec refuses a value with no derivable
+extension, with exit `2`. It does not record an empty value.
 
 - **Offline.** Nothing is sent. The command appends a record to `feedback.jsonl` in the output
-  directory (`websec-out/` by default, or `--out`) and prints a prefilled GitHub issue URL that you
+  directory (`websec-out/` by default, or `--out`). It prints a prefilled GitHub issue URL that you
   may open yourself.
 - **Metadata-only by default.** The record carries classification and identity (attack class,
   category, rule, severity, confidence, fingerprint, standards, calibration, file extension). It
   carries no path, route, title or evidence. `--include-snippet` adds title, location, file, method
-  and evidence. It shows you the exact record and asks before writing, and needs `--yes` when stdin
+  and evidence. It shows you the exact record and asks before writing. It needs `--yes` when stdin
   is not a terminal.
 - **Reads the latest ledger** (`websec-out/latest/findings-ledger.json`) unless you pass `--ledger`.
 - **False positives become calibration candidates, not labels.** A `false-positive` verdict queues
   a pending candidate in your user-level calibration overlay (under `~/.cache/websec-validator/`
-  unless `WEBSEC_CALIBRATION_HOME` is set). No probability changes until a reviewer promotes it:
+  unless `WEBSEC_CALIBRATION_HOME` is set). No probability changes until a reviewer promotes the
+  candidate:
 
   ```bash
   websec calibrate --review
@@ -366,10 +369,10 @@ is refused with exit `2` rather than recorded empty.
 
 ## In the agent loop
 
-`websec gate` applies `.websec-ignore` exactly as `run` does. Path and category lines drop findings,
-active acknowledgements move findings to `acknowledged`, and expired, malformed or reasonless
-acknowledgements excuse nothing. A finding attributed to a repository file outside the requested
-scope is reported under `outside_scope` and does not block. A finding that names no file still
+`websec gate` applies `.websec-ignore` exactly as `run` does. Path and category lines drop findings.
+Active acknowledgements move findings to `acknowledged`. Expired, malformed or reasonless
+acknowledgements excuse nothing. websec reports a finding attributed to a repository file outside
+the requested scope under `outside_scope`, and it does not block. A finding that names no file still
 blocks. See [AI agents](ai-agents.md).
 
 ## See also

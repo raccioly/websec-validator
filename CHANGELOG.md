@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-11-24
+
+### Added
+
+- Compiled Go binaries in the scan scope are now checked for vulnerable embedded modules. With
+  osv-scanner 2.2.3 or later, the osv adapter adds the `go/binary` plugin. Before that version the
+  plugin flag replaced the lockfile plugins, so the flag is version-gated. All advisories in one
+  binary group into one cluster, because they have one fix: upgrade, rebuild or remove that tool.
+- Deprecated (end-of-life) package versions are now reported. With osv-scanner 2.3.1 or later, the
+  osv adapter adds `--experimental-flag-deprecated-packages`. Each version that its registry marks
+  deprecated becomes a LOW `deprecated-dependency` finding (CWE-1104) with HIGH confidence. A
+  deprecated version gets no more fixes, so its next advisory will have no upgrade path. The
+  remediation names the parent package to upgrade, taken from the lockfile.
+- A `compiled_binary_sca` coverage gap names the in-scope executables when no scanner looked
+  inside them. A tree whose only vulnerable code is a committed or downloaded CLI no longer reads
+  as a clean dependency scan.
+- Each dependency finding now has a specific fix. `fix_target` is the lowest fix on the installed
+  release line, and `fix_major_bump` is true when only a major upgrade fixes it. `dependency_path`
+  is `direct`, `transitive` or `bundled`, and `introduced_by` names the parent package (from
+  `package-lock.json` / `npm-shrinkwrap.json`). `fix_all_target` is the version that clears every
+  advisory on that package version. The remediation text and repair plans use these fields. The
+  generic "upgrade to the fixed version" text is no longer used for scanner findings.
+
+### Changed
+
+- **The pre-push gate now scans dependencies by default.** When `WEBSEC_HOOK_SCAN` is unset, the
+  pre-push gate requires osv-scanner (or trivy if osv-scanner is missing). A known-vulnerable
+  dependency at or above `WEBSEC_HOOK_FAIL_ON` (default `high`) blocks the push. The policy changed,
+  so the first push after you upgrade checks all current findings again. If no dependency scanner is
+  installed, the hook prints a warning and runs recon only. `WEBSEC_HOOK_SCAN=0` turns the scan off.
+  The post-commit hook is unchanged.
+- Semgrep rules for hard-coded credentials (CWE-798, CWE-259, CWE-321) now report at least HIGH.
+  `hardcoded-jwt-secret` is WARNING in the registry and showed MEDIUM, while pipeline scanners rate
+  the same match HIGH and fail their policy on it. In a test file the confidence stays LOW, but the
+  severity does not drop.
+
+### Fixed
+
+- osv-scanner findings had no fixed version (`fixed: ""`). The fix versions now come from each
+  advisory's `affected[].ranges[].events[].fixed`.
+- When two scanners report the same advisory, their fixed-version lists are merged by version.
+  Before, the same two fixes from two tools showed four times.
+- Two advisories on the same package version showed the same title. Titles now name the advisory
+  and the target version, for example `pkg 4.2.1 — CVE-… → 5.6.0 (major upgrade)`.
+- With osv-scanner 2.6.0 or later, osv skips the same directories as the rest of the run.
+
 ## [0.22.3] — 2026-10-11
 
 ## [0.22.2] — 2026-10-11
@@ -1939,7 +1985,8 @@ The initial public line. Highlights across 0.2.1–0.2.9:
 ### Fixed
 - Scanner-contamination and rate-limit fixes (agent-wallet dogfood).
 
-[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.22.3...HEAD
+[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/raccioly/websec-validator/compare/v0.22.3...v0.23.0
 [0.22.3]: https://github.com/raccioly/websec-validator/compare/v0.22.2...v0.22.3
 [0.22.2]: https://github.com/raccioly/websec-validator/compare/v0.22.1...v0.22.2
 [0.22.1]: https://github.com/raccioly/websec-validator/compare/v0.22.0...v0.22.1

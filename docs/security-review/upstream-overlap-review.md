@@ -1,22 +1,22 @@
 # Upstream PR overlap review — 2026-09-14
 
-This is a read-only comparison of 18 selected PR heads with the working implementation. Live main remained `2f75cc607eec972c550584694cc05fc2dca40012`; 53 PRs were open, and 51 overlapped locally modified tracked files. The reviewed working tree includes the 0.14.0 security expansion and concurrent Django/service-inventory work. The [983-test checkpoint](validation.md) describes its immutable wheel, not every subsequent edit.
+This is a read-only comparison of 18 selected PR heads with the working implementation. Live main remained `2f75cc607eec972c550584694cc05fc2dca40012`. There were 53 open PRs. Of these, 51 overlapped locally modified tracked files. The reviewed working tree includes the 0.14.0 security expansion and concurrent Django/service-inventory work. The [983-test checkpoint](validation.md) describes its immutable wheel, not every subsequent edit.
 
-No PR was applied, executed, merged, closed, or commented on. Diff retrieval checked the head before and after retrieval. The crypto family received an independent review with 19 inert current-code reproductions; the other groups received 15 inert reproductions. Fixtures were source text passed to existing extractors, never executed as application code. These are defect/precision observations, not a merge-readiness assessment. PR diffs remain untrusted input.
+Nobody applied, executed, merged, closed or commented on any PR. The diff retrieval checked the head before and after. The crypto family received an independent review with 19 inert current-code reproductions. The other groups received 15 inert reproductions. Fixtures were source text that the review passed to existing extractors. It never executed them as application code. These are defect and precision observations. They are not a merge-readiness assessment. PR diffs remain untrusted input.
 
 ## Follow-up status
 
 At the latest phase-four refresh, main/local HEAD/live origin remained
-`2f75cc607eec972c550584694cc05fc2dca40012`. All 53 open PR heads matched the cached heads; 51
+`2f75cc607eec972c550584694cc05fc2dca40012`. All 53 open PR heads matched the cached heads. 51 of them
 overlap tracked working-tree changes. The 18 selected reviews below retain their original exact heads.
 
-Third-phase comparison and adoption fixes are complete: credential presence/type distinctions,
-reversed operands and unsafe sibling comparisons have paired regressions; agent guidance now selects
+Third-phase comparison and adoption fixes are complete. Credential presence/type distinctions,
+reversed operands and unsafe sibling comparisons have paired regressions. Agent guidance now selects
 the exact current attempt and preserves foreign instructions. Optional pre-commit and PR/weekly
-workflow examples reuse the existing engine/hooks/Action, with no activation by this work. The
+workflow examples reuse the existing engine/hooks/Action. This work activates none of them. The
 remaining upload key/SVG, hash-purpose, PII binding and framework-composition ideas stay backlog.
 Assigned Python SQL-flow work passed independent review and 14 focused tests. The missed Python
-forms below are historical reproductions now covered by bounded assignment analysis. JavaScript
+forms below are historical reproductions. Bounded assignment analysis now covers them. JavaScript
 assignment flow, cross-function provenance and fixed-point loop coverage remain outside that scope.
 
 ## Reviewed heads
@@ -42,11 +42,11 @@ assignment flow, cross-function provenance and fixed-point loop coverage remain 
 | [#50](https://github.com/raccioly/websec-validator/pull/50) | `236ebf8dd7e308d75db5e590042b5c2e2b2f3942` | Independently checked |
 | [#17](https://github.com/raccioly/websec-validator/pull/17) | `71b41eb860f5f6ad5f7ce1326f2e2ec99d4181b0` | Independently checked |
 
-Before any future integration, fetch/recompare the latest target and PR heads, preserve concurrent changes, resolve overlap deliberately, and rerun combined tests. An unchanged main does not make PRs based on older commits compatible with this working tree.
+Before any future integration, fetch and recompare the latest target and PR heads. Preserve concurrent changes, resolve overlap deliberately, and rerun combined tests. An unchanged main does not make PRs based on older commits compatible with this working tree.
 
 ## Upload handling — #44 / #82
 
-**Already covered:** generic `createReadStream`, object reads, local stream destinations, comments and unrelated headers no longer imply browser delivery or a protected browser response. `upload_security.py` now binds supported response operations and headers; `test_public_precision.py` has positive browser-response controls and safe local-read controls. #44's core intent is covered. Its extra hook-test change duplicates the existing global `core.hooksPath` isolation fix.
+**Already covered:** generic `createReadStream`, object reads, local stream destinations, comments and unrelated headers no longer imply browser delivery or a protected browser response. `upload_security.py` now binds supported response operations and headers. `test_public_precision.py` has positive browser-response controls and safe local-read controls. #44's core intent is covered. Its extra hook-test change duplicates the existing global `core.hooksPath` isolation fix.
 
 **Useful remaining evidence from #82:** current code emits `upload-key-from-filename` HIGH for a generated storage key when only a log template mentions the original filename:
 
@@ -58,13 +58,13 @@ function upload(req) {
 }
 ```
 
-Current code also emits `upload-accepts-svg` for an error string saying `image/svg+xml is unsupported`, and for an explicit rejection of that MIME type. An actual filename-derived key still produces the intended lead. Reuse the paired examples, but bind the key to its storage operation and SVG policy to a positive acceptance path. A substring/equality alone cannot distinguish rejection from acceptance. #82's arbitrary `.pipe(w)` receiver also lacks proof that `w` is a browser response.
+Current code also emits `upload-accepts-svg` for an error string saying `image/svg+xml is unsupported`, and for an explicit rejection of that MIME type. An actual filename-derived key still produces the intended lead. Reuse the paired examples, but bind the key to its storage operation. Bind the SVG policy to a positive acceptance path. A substring or equality check alone cannot distinguish rejection from acceptance. #82's arbitrary `.pipe(w)` receiver also lacks proof that `w` is a browser response.
 
 Proposed bounded ownership: `extractors/upload_security.py` and new focused regression cases. Include generated key plus log, actual client-derived key, SVG rejection/allowance, and unsafe sibling handlers.
 
 ## PII response controls — #19 / #68
 
-**Do not adopt the proposed blanket suppressions.** #19 credits names such as `sanitize`, `present`, `toJSON` and any nearby `.select`; #68 credits TypeScript `Omit`/`Pick`/`Exclude` and response variables named `ok`/`exists`. Names and type annotations do not establish what data reaches the response. TypeScript types are erased and do not change JavaScript runtime behavior. [TypeScript documentation](https://www.typescriptlang.org/docs/handbook/2/classes)
+**Do not adopt the proposed blanket suppressions.** #19 credits names such as `sanitize`, `present`, `toJSON` and any nearby `.select`. #68 credits TypeScript `Omit`/`Pick`/`Exclude` and response variables named `ok`/`exists`. Names and type annotations do not establish what data reaches the response. TypeScript types are erased and do not change JavaScript runtime behavior. [TypeScript documentation](https://www.typescriptlang.org/docs/handbook/2/classes)
 
 The current detector correctly retains a lead for `const dto: Omit<User,'email'|'phone'> = user; res.json(dto)`: the assignment still returns the original object. A supported explicit local projection, `const safe={id:user.id}; res.json(safe)`, produces no lead. Current response-bound checks preserve unsafe siblings instead of treating a file-wide helper as a sanitizer.
 
@@ -76,15 +76,15 @@ Proposed ownership: `extractors/pii_exposure.py`, paired tests extending respons
 
 **Already covered:** direct `db.execute(text(f'...{request.args["name"]}...'))` produces one SQL-injection occurrence, as does a direct interpolated query without `text`.
 
-**Historical missed forms, corrected in the fourth phase:** assigning an interpolated Python query to `query` before `db.execute(text(query))`, or assigning `request.args['query']` before that sink, originally produced zero occurrences. Both now retain source/assignment provenance through the bounded Python analysis. Bound-parameter literal queries, unrelated debug interpolation and matched query/parameter tuple unpacking remain safe controls. Unknown later loop iterations are review gaps, not a claim of fixed-point analysis.
+**Historical missed forms, corrected in the fourth phase:** two forms originally produced zero occurrences. One assigned an interpolated Python query to `query` before `db.execute(text(query))`. The other assigned `request.args['query']` before that sink. Both now retain source/assignment provenance through the bounded Python analysis. Bound-parameter literal queries, unrelated debug interpolation and matched query/parameter tuple unpacking remain safe controls. Unknown later loop iterations are review gaps, not a claim of fixed-point analysis.
 
-#95 treats any `text(variable)` as suspicious without tracking its origin. #45 connects SQL-looking interpolation to a later sink within 200 characters without binding the variable or function. Both can flag an unrelated or constant query. Prefer a bounded assignment/use analysis with request taint and explicit scope. `text()` supports bind parameters; it is neither automatically vulnerable nor an escaping operation for already interpolated SQL. [SQLAlchemy text documentation](https://docs.sqlalchemy.org/en/20/core/sqlelement.html#sqlalchemy.sql.expression.text)
+#95 treats any `text(variable)` as suspicious without tracking its origin. #45 connects SQL-looking interpolation to a later sink within 200 characters without binding the variable or function. Both can flag an unrelated or constant query. Prefer a bounded assignment/use analysis with request taint and explicit scope. `text()` supports bind parameters. It is neither automatically vulnerable nor an escaping operation for already interpolated SQL. [SQLAlchemy text documentation](https://docs.sqlalchemy.org/en/20/core/sqlelement.html#sqlalchemy.sql.expression.text)
 
 Proposed ownership: `extractors/surface.py` plus the shared syntax helper only if needed, and dedicated assigned-query tests. Require positive assigned f-string/template and raw-request controls, safe bound parameters, reassignment, sibling functions and unrelated interpolation.
 
 ## Auth composition — #93
 
-The current route report does not recognize `@app.get('/items', dependencies=[Depends(verify_admin)])` as a visible guard. The PR's FastAPI dependency examples are useful, but its test only searches the `GUARD` regex. FastAPI executes declared dependencies before a path operation; whether a dependency actually enforces auth still requires inspection. [FastAPI dependency decorators](https://fastapi.tiangolo.com/tutorial/dependencies/dependencies-in-path-operation-decorators/)
+The current route report does not recognize `@app.get('/items', dependencies=[Depends(verify_admin)])` as a visible guard. The PR's FastAPI dependency examples are useful, but its test only searches the `GUARD` regex. FastAPI executes declared dependencies before a path operation. Whether a dependency actually enforces auth still requires inspection. [FastAPI dependency decorators](https://fastapi.tiangolo.com/tutorial/dependencies/dependencies-in-path-operation-decorators/)
 
 The proposed file-wide `protectedProcedure` / `privateProcedure` token is insufficient: tRPC base procedures are application-defined builders, and the protected behavior comes from attached middleware. [tRPC procedures](https://trpc.io/docs/server/procedures) Recognize an actual procedure/dependency binding and visible enforcement, with unknown external definitions reported as unverified. Imports, comments, names and protected siblings must not guard an unrelated route. This can extend current per-service and Fastify scope checks without weakening them.
 
@@ -94,19 +94,19 @@ Proposed ownership: `extractors/authz.py`, route support only where needed, endp
 
 #30 and the pin-only part of #92 overlap the current composite Action hardening. The current Action uses the existing verified setup-python v6 SHA and a newer verified upload-SARIF v4 SHA. It also handles input arguments without shell interpolation, installs the trusted Action checkout, and publishes only the current attempt's artifacts; old pin-only PRs omit those fixes.
 
-#92 additionally changes Docker scanner versions and repeats an existing hook-test fix. Treat container upgrades as a separate compatibility task; this review did not build containers or validate those scanner versions.
+#92 additionally changes Docker scanner versions and repeats an existing hook-test fix. Treat container upgrades as a separate compatibility task. This review did not build containers or validate those scanner versions.
 
-#53 proposes setup-python v7. Its workflow SHA corresponds to the official v7.0.0 release, but its composite Action uses floating `@v7`, losing the immutable pin. The release changes module packaging and removes an input; test supported runners and all call sites before adopting a consistent pinned upgrade. [Official v7 release](https://github.com/actions/setup-python/releases/tag/v7.0.0) Do not overwrite current Action security changes with a PR based on the old file.
+#53 proposes setup-python v7. Its workflow SHA corresponds to the official v7.0.0 release, but its composite Action uses floating `@v7`, losing the immutable pin. The release changes module packaging and removes an input. Test supported runners and all call sites before you adopt a consistent pinned upgrade. [Official v7 release](https://github.com/actions/setup-python/releases/tag/v7.0.0) Do not overwrite current Action security changes with a PR based on the old file.
 
 ## OpenAPI route inventory — #40 / #34
 
-The route-source implementation in these two PRs is duplicated. Both recursively enumerate with `rglob`, then check skipped directories after traversal and read candidate files directly. That bypasses the new pruning, containment, private-path and read-budget policy. Malformed JSON falls into a simplistic YAML parser; broad exceptions hide failures. #40 also carries the already-fixed hook-test change.
+The route-source implementation in these two PRs is duplicated. Both recursively enumerate with `rglob`, then check skipped directories after traversal and read candidate files directly. That bypasses the new pruning, containment, private-path and read-budget policy. Malformed JSON falls into a simplistic YAML parser, and broad exceptions hide failures. #40 also carries the already-fixed hook-test change.
 
 Current `openapi.py` already performs bounded specification discovery/parsing and compares documented routes against source routes. `routes.py` excludes spec-derived Noir rows from source route evidence. Adding spec paths to the source route inventory would obscure undocumented/stale-route differences and could affect auth attribution. Reuse the bounded reader and keep a separately attributed **documented route candidate** inventory if that product need is confirmed. Add malformed/oversized/private/symlink controls and prove that a spec-only route is never labeled implemented or guarded.
 
 ## Crypto family — #100 / #97 / #76 / #57 / #50 / #17
 
-Independent review grouped #100/#97/#57 around secret-header presence-check false positives. At review time, undefined/null/empty/typeof checks produced LOW leads, reversed comparisons could be missed, and a safe helper in a sibling scope could hide an unsafe comparison. The third-phase per-comparison implementation now handles supported null/empty/type checks, reversed operands and unsafe siblings. JavaScript `undefined` remains deliberately unverified because it can be shadowed; nonempty hardcoded credential comparisons remain leads. Triple f-string interpolation is covered, while ambiguous regex literals remain a stated lexical limitation.
+Independent review grouped #100/#97/#57 around secret-header presence-check false positives. At review time, undefined/null/empty/typeof checks produced LOW leads, reversed comparisons could be missed, and a safe helper in a sibling scope could hide an unsafe comparison. The third-phase per-comparison implementation now handles supported null/empty/type checks, reversed operands and unsafe siblings. JavaScript `undefined` remains deliberately unverified because it can be shadowed. Nonempty hardcoded credential comparisons remain leads. Triple f-string interpolation is covered. Ambiguous regex literals remain a stated lexical limitation.
 
 Do not take #100/#97/#76's blanket quoted-right-hand-side exemption: hardcoded bearer credentials remain security-relevant comparisons. #57's narrower presence-only distinction is a better starting intent, still requiring operand and scope tests.
 
@@ -120,7 +120,7 @@ Remaining current precision cases include hashing password-update metadata, an H
 2. Correct upload key/SVG evidence and crypto comparison scope using the reproduced safe/unsafe pairs.
 3. Improve response-value and framework guard binding incrementally; avoid broad name-based exemptions.
 
-The later adoption slice now supplies current-envelope guidance, partial/provenance limits, preserved foreign instructions and inactive pre-commit/PR/weekly examples. It reuses the existing hooks/Action; nothing was activated automatically. This later implementation is separate from the original read-only PR review.
+The later adoption slice now supplies current-envelope guidance, partial/provenance limits, preserved foreign instructions and inactive pre-commit/PR/weekly examples. It reuses the existing hooks/Action. Nothing was activated automatically. This later implementation is separate from the original read-only PR review.
 
 ## Release consolidation of all 53 PRs
 

@@ -281,6 +281,30 @@ if [ "$_WEBSEC_RC" -ne 0 ]; then exit "$_WEBSEC_RC"; fi
 """
 
 
+def _scan_mode(raw, pre_push: bool) -> str:
+    """WEBSEC_HOOK_SCAN → "all" | "deps" | "off".
+
+    Unset on the PRE-PUSH gate means "deps": vulnerable dependencies are the highest-volume true
+    positive in any repository, and a blocking gate that never looked at them let a known-CVE
+    lockfile reach the pipeline scanner first. The advisory post-commit hook stays recon-only by
+    default (it runs on every commit, where a network SCA pass is too slow). `1` keeps its old
+    meaning (every available scanner); `0`/anything else turns scanning off."""
+    value = (raw or "").strip().lower()
+    if value in ("1", "true", "yes", "all"):
+        return "all"
+    if value == "deps" or (not value and pre_push):
+        return "deps"
+    return "off"
+
+
+def dependency_scanner() -> str:
+    """The SCA scanner the default pre-push gate requires: osv-scanner, else trivy, else ""."""
+    for name in ("osv-scanner", "trivy"):
+        if shutil.which(name):
+            return name
+    return ""
+
+
 def _invoke(root: Path, guard: Path, args: list[str]) -> tuple[int, Path | None, dict]:
     """Capture the exact invocation's output; latest may still name a previous run."""
     import contextlib
@@ -339,11 +363,23 @@ def run_guardrail(*, pre_push: bool = False) -> int:
             raise ValueError("another guardrail is running (or running.lock needs operator cleanup)")
         try:
             threshold = os.environ.get("WEBSEC_HOOK_FAIL_ON", "high")
-            scan = os.environ.get("WEBSEC_HOOK_SCAN") == "1"
+            mode = _scan_mode(os.environ.get("WEBSEC_HOOK_SCAN"), pre_push)
+            scan = mode in ("all", "deps")
             selected = os.environ.get("WEBSEC_HOOK_SCANNERS", "")
             if threshold not in {"critical", "high", "medium", "low"} or (selected and not scan):
                 raise ValueError("invalid gate severity or scanners selected without WEBSEC_HOOK_SCAN=1")
-            policy = {"fail_on": threshold, "scan": scan, "scanners": sorted(filter(None, (s.strip() for s in selected.split(","))))}
+            if mode == "deps" and not selected:
+                selected = dependency_scanner()
+                if not selected:
+                    # Fail OPEN on missing tooling, loudly: blocking every push of a developer who has
+                    # no SCA scanner would teach --no-verify. The policy records the state, so
+                    # installing one later changes the policy and re-gates instead of reusing debt.
+                    mode = "deps-unavailable"
+                    scan = False
+                    print("[websec hook] dependency scan SKIPPED: install osv-scanner (preferred) or "
+                          "trivy so vulnerable dependencies block the push", file=sys.stderr)
+            policy = {"fail_on": threshold, "scan": scan, "scan_mode": mode,
+                      "scanners": sorted(filter(None, (s.strip() for s in selected.split(","))))}
             accepted = guard / "accepted-ledger.json"
             state_path = guard / "accepted-state.json"
             args = ["--require-complete"]

@@ -7,10 +7,10 @@ what it finds, and what it refuses to claim. The long-form reasoning behind ever
 
 ## The two halves
 
-The tool reads supported source, maps the attack surface it can see, de-duplicates the scanners
-you allow, stages probes tailored to what it found, and writes a briefing. It contains no LLM and
-needs no server or running app for that core pass. Your agent and you do the reasoning: confirm the
-model, triage, run probes against a test instance, fix and re-verify.
+The tool reads supported source and maps the attack surface it can see. It de-duplicates the
+scanners you allow, stages probes tailored to what it found, and writes a briefing. It contains no
+LLM and needs no server or running app for that core pass. Your agent and you do the reasoning:
+confirm the model, triage, run probes against a test instance, fix and re-verify.
 
 ```text
 websec (deterministic)                 your agent + you
@@ -21,10 +21,10 @@ websec (deterministic)                 your agent + you
 4. emit AGENT-BRIEFING.md          →   propose fixes, re-run to confirm, report back
 ```
 
-Static recon and the briefing need only the code, and run without `--scan`. *Running* the probes
+Static recon and the briefing need only the code. They run without `--scan`. *Running* the probes
 needs a live test instance and test credentials, which the human supplies. `websec run` itself never
-touches a running app; only the separate, explicitly invoked `websec dynamic` does, and only against
-a target you name. See [Dynamic testing](../guides/dynamic-testing.md).
+touches a running app. Only the separate `websec dynamic` command does, and only when you invoke it
+explicitly against a target you name. See [Dynamic testing](../guides/dynamic-testing.md).
 
 | Actor | Owns |
 |---|---|
@@ -37,8 +37,8 @@ a target you name. See [Dynamic testing](../guides/dynamic-testing.md).
 ## What it extracts
 
 Recon walks the repository once into a shared context and runs 22 deterministic extractors over
-it. Each answers one question a pentester asks first; the answers land in `FACTS.json`. The table
-groups them by the `category` each extractor declares in code.
+it. Each extractor answers one question a pentester asks first. The answers land in `FACTS.json`.
+The table groups the extractors by the `category` each one declares in code.
 
 | Category | Extractor | Dimension | Notable output |
 |---|---|---|---|
@@ -70,9 +70,9 @@ so probes point at the exact endpoints rather than being fired blindly.
 
 Two limits apply to the whole table:
 
-- **It is bounded static analysis.** Regex and bounded AST passes, not a compiler or interpreter.
-  Aliases, wrappers, cross-function flow and deployment behaviour stay unverified, and every
-  finding is a lead with an honest confidence, not a verdict.
+- **It is bounded static analysis.** It uses regex and bounded AST passes, not a compiler or
+  interpreter. Aliases, wrappers, cross-function flow and deployment behavior stay unverified.
+  Every finding is a lead with an honest confidence, not a verdict.
 - **Depth depends on the language.** Python, JavaScript and TypeScript get the full set. Other
   languages get named checks or nothing. [Languages and frameworks](../reference/languages.md) is
   the authoritative matrix.
@@ -82,90 +82,93 @@ Each extractor's reasoning: [METHODOLOGY: Layer 1](../METHODOLOGY.md#layer-1--re
 ## Scanners and de-duplication
 
 With `--scan`, websec executes the installed third-party scanners (Trivy, OSV-Scanner, Gitleaks,
-Semgrep/OpenGrep, Checkov, plus Bandit, gosec or Brakeman when their language is detected) and
+Semgrep/OpenGrep, Checkov, plus Bandit, gosec or Brakeman when their language is detected). It
 merges their native output into one severity-ranked set in `findings.json`. Without `--scan` it only
 reports which scanners are available.
 
-De-duplication is by fingerprint. When two results share one, the rows merge, keep the highest
+De-duplication uses the fingerprint. When two findings share one, the rows merge, keep the highest
 severity and list every tool that reported it. Dependency CVEs use the same `cve|package|id` shape
-for every SCA tool, so that is where cross-tool merging mostly happens: with both SCA engines
-installed, Trivy and OSV-Scanner cross-check each other, the same CVE from both collapses to one row
-tagged `tools: [osv-scanner, trivy]` (agreement means higher confidence), and OSV-Scanner's broader
-lockfile coverage catches CVEs Trivy misses. Secret, SAST and IaC fingerprints include each tool's
-own rule identifier and location, so they merge only on exact repeats.
+for every SCA tool, so most cross-tool merging happens there. With both SCA engines installed,
+Trivy and OSV-Scanner cross-check each other. The same CVE from both collapses to one row tagged
+`tools: [osv-scanner, trivy]` (agreement means higher confidence). OSV-Scanner's broader lockfile
+coverage catches CVEs Trivy misses. Secret, SAST and IaC fingerprints include each tool's own rule
+identifier and location, so they merge only on exact repeats.
 
-Hygiene passes run before the merge: findings inside skipped directories and `--exclude` paths are
-dropped, secrets in gitignored local files and in test/fixture files are downgraded rather than
-dropped, because a real key pasted into a test is still a committed leak.
+Hygiene passes run before the merge. They drop findings inside skipped directories and `--exclude`
+paths. They downgrade, but do not drop, secrets in gitignored local files and in test/fixture files,
+because a real key pasted into a test is still a committed leak.
 
-A missing scanner never fails the run unless you named it with `--scanners`; a named scanner that
-is missing makes the run incomplete rather than clean. See
+A missing scanner never fails the run, unless you named it with `--scanners`. A named scanner that
+is missing makes the run incomplete, not clean. See
 [METHODOLOGY: Layer 2](../METHODOLOGY.md#layer-2--static-scanners).
 
 ## Prioritization
 
-A dependency CVE list is noise until you know which ones matter. With `--scan`, websec enriches every
-dependency vulnerability along two deterministic, offline axes: reachable and exploitable.
+A list of dependency CVEs is noise until you know which ones matter. With `--scan`, websec enriches
+every dependency vulnerability on two deterministic, offline axes: reachable and exploitable.
 
-- **Reachability.** Is the vulnerable package actually **imported** in your first-party source, or
-  only declared in the lockfile? websec searches the real `import`/`require`/`from` sites and tags
-  each CVE `imported` or **`declared-only` (likely unreachable; verify)**. Declared-only
-  vulnerabilities are a major noise class. The check is name-based: a full call graph is out of
-  model, import absence does not prove runtime unreachability (dynamic imports and transitive
-  calls are not seen), and ecosystems whose imports websec does not parse (Go, Rust and others) are
-  tagged `n/a` rather than guessed.
-- **Exploitability.** Each CVE is joined against a **local cache** of
+- **Reachability.** Does your first-party source actually **import** the vulnerable package, or
+  does only the lockfile declare it? websec searches the real `import`/`require`/`from` sites. It
+  tags each CVE `imported` or **`declared-only` (likely unreachable; verify)**. Declared-only
+  vulnerabilities are a major noise class. The check is name-based. A full call graph is out of
+  model. A missing import does not prove the package is unreachable at runtime, because websec does
+  not see dynamic imports or transitive calls. It tags ecosystems whose imports it does not parse
+  (Go, Rust and others) `n/a` and does not guess.
+- **Exploitability.** websec joins each CVE with a **local cache** of
   [FIRST.org EPSS](https://www.first.org/epss/) (exploit probability) and the
   [CISA KEV catalog](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) (known
   exploitation reports). These are prioritization inputs alongside application context.
-  `websec intel refresh` explicitly downloads the public feeds without sending project data.
-  Snapshots record source hashes, dates and freshness; consumers stay offline. Legacy flat caches
+  `websec intel refresh` explicitly downloads the public feeds. It sends no project data.
+  Snapshots record source hashes, dates and freshness. Consumers stay offline. Legacy flat caches
   are marked unverified. With no cache, this step is skipped.
 
-Both are **strictly additive**: they annotate and re-rank, but never change a finding's severity,
-drop one, or add one. They can sharpen triage; they cannot introduce a false positive.
+Both are **strictly additive**. They annotate and re-rank findings. They never change a finding's
+severity, drop a finding or add one. They can sharpen triage, but they cannot introduce a false positive.
 
 An optional third input, blast radius, comes from a [graphify](https://github.com/Graphify-Labs/graphify)
 knowledge graph if one is present (`graphify-out/graph.json` or `--graph`). It tags each mapped
-finding with how much of the app transitively depends on the vulnerable code. It is read as plain
-JSON under its own 64 MiB cap, separate from the per-source-file cap, and is also additive. An
-explicit `--graph` that is missing or unusable makes the run incomplete; an auto-detected one only
-records a visible gap. See [configuration](../reference/configuration.md#graphify-graph-input).
+finding with how much of the app transitively depends on the vulnerable code. websec reads the graph
+as plain JSON under its own 64 MiB cap, separate from the per-source-file cap. This input is also
+additive. An explicit `--graph` that is missing or unusable makes the run incomplete. An
+auto-detected graph that is missing or unusable only records a visible gap. See
+[configuration](../reference/configuration.md#graphify-graph-input).
 
 ## Aim the pentest instead of competing with it
 
-Dynamic scanners re-discover at runtime, expensively, much of what is already visible in the
-source. websec knows it statically, so it aims them. Both sections below are in
+Dynamic scanners spend time to re-discover at runtime much of what the source already shows.
+websec knows it statically, so it aims them. Both sections below are in
 `AGENT-BRIEFING.md`.
 
-- **§4b: what a DAST *will* report, before you run one.** Each static finding is mapped to the
+- **§4b: what a DAST *will* report, before you run one.** Each static finding maps to the
   concrete scanner signature it produces (`missing-csp` → ZAP 10038/10055, SQL injection → ZAP 40018
-  or sqlmap, SSRF → Nuclei/ZAP out-of-band), with the source location that causes it. Fix those and
-  the scan comes back clean on them; the run becomes confirmation, not discovery.
-- **§4b also lists the blind spots.** BOLA, missing auth, mass assignment, RLS gaps, JWT algorithm
-  confusion, committed secrets, supply chain, each with *why* no scanner finds it. A clean scan is
-  not "safe", and saying so is the point.
-- **§5b: a phased, pre-aimed runbook.** Phase 1 safe recon, Phase 2 authorization (two identities,
-  the scanner-blind class), Phase 3 injection, fired only at sink-backed endpoints and gated behind
-  an explicit authorization warning. Every item names a real target and a confirm/disconfirm oracle.
-- **Close the loop.** Feed a real ZAP JSON report back to confirm predictions (an alert confirms
-  only at the exact context; refuting needs an explicit `checks[]` row, never scanner silence), so
-  `P(real)` personalizes to your app over time. Nuclei reports are not parsed:
+  or sqlmap, SSRF → Nuclei/ZAP out-of-band), with the source location that causes it. Fix those
+  findings and the DAST scan comes back clean on them. The run then confirms and does not discover.
+- **§4b also lists the blind spots.** They are BOLA, missing auth, mass assignment, RLS gaps, JWT
+  algorithm confusion, committed secrets and supply chain. Each comes with *why* no scanner finds
+  it. A clean scan is not "safe". The briefing says so on purpose.
+- **§5b: a phased, pre-aimed runbook.** Phase 1 is safe recon. Phase 2 is authorization (two
+  identities, the scanner-blind class). Phase 3 is injection. It fires only at sink-backed
+  endpoints and sits behind an explicit authorization warning. Every item names a real target and a
+  confirm/disconfirm oracle.
+- **Close the loop.** Feed a real ZAP JSON report back to confirm predictions. An alert confirms a
+  prediction only at the exact context. Refuting a prediction needs an explicit `checks[]` row,
+  never scanner silence. Over time, `P(real)` personalizes to your app. websec does not parse
+  Nuclei reports:
 
   ```bash
   websec calibrate --ingest-dast zap.json --ledger findings-ledger.json
   ```
 
-  Blind-spot classes are never scored: a scanner's silence there means nothing.
+  websec never scores blind-spot classes. A scanner's silence there means nothing.
 
 ## Calibrated confidence
 
 A label such as "MEDIUM" is only useful if it maps to how often such leads turn out real.
 `websec calibrate` runs the ledger against a labeled corpus of deliberately vulnerable apps
-(VAmPI, NodeGoat, DVGA), measures how often each *(attack class, confidence)* bucket is a **real**
-documented vulnerability, and writes `calibration.json`, which ships with the package and is
-applied at runtime. Each finding then carries `P(real)` with a **95% Wilson confidence interval**
-and the sample size `n`, so "MEDIUM" becomes a measured rate with stated uncertainty.
+(VAmPI, NodeGoat, DVGA). It measures how often each *(attack class, confidence)* bucket is a **real**
+documented vulnerability. It writes `calibration.json`, which ships with the package and applies at
+runtime. Each finding then carries `P(real)` with a **95% Wilson confidence interval** and the
+sample size `n`. So "MEDIUM" becomes a measured rate with stated uncertainty.
 
 How a finding gets its number:
 
@@ -175,35 +178,36 @@ How a finding gets its number:
    which tier was used.
 
 **Honest caveats.** The corpus is *deliberately vulnerable*, so the rates skew **optimistic** for
-clean production code. Small samples mean **wide intervals**: the interval is the headline, not the
-point estimate, and both tighten as the corpus grows. Unmatched findings remain **unknown** unless
+clean production code. Small samples mean **wide intervals**. The interval is the headline, not the
+point estimate. Both tighten as the corpus grows. Unmatched findings remain **unknown** unless
 explicit negative evidence labels them false. Historical measurements that counted
-unmatched-as-false are not a fresh measurement of the current detector revision. The shipped
-table's `meta` block records its review date, how many findings carry reviewed labels and how many
-stayed unknown, and states that it was not rebuilt for later detector changes; read it before
-quoting a rate. No ML and no dependencies: a binomial proportion with a Wilson interval, a structure
-that can upgrade to isotonic regression if a large labeled set ever exists.
+unmatched findings as false are not a fresh measurement of the current detector revision. The
+`meta` block of the shipped table records its review date, how many findings carry reviewed labels
+and how many stayed unknown. It also states that the table was not rebuilt for later detector
+changes. Read it before you quote a rate. There is no ML and there are no dependencies. The table
+uses a binomial proportion with a Wilson interval. That structure can upgrade to isotonic
+regression if a large labeled set ever exists.
 
 **Evidence controls learning.** Dynamic status codes and scanner silence are observations, not
-truth labels. Only evidence-backed labels are admitted to the local calibration overlay; legacy
-unproven samples are quarantined. Unknown-only input reports no successful measurement and leaves
-existing fitted calibration unchanged. A DAST hit may confirm a scoped lead; absence from a report
-cannot refute it. Manual labels should include reviewer and evidence provenance, not only a boolean.
-An operator's `websec feedback --verdict false-positive` queues a *candidate* that a human must
-accept with `websec calibrate --accept`; it is never a label on its own. Authored paired fixtures
-are scored separately (`websec calibrate --synthetic`) and never merged into `P(real)`.
+truth labels. Only evidence-backed labels enter the local calibration overlay. Legacy unproven
+samples are quarantined. Unknown-only input reports no successful measurement and leaves existing
+fitted calibration unchanged. A DAST alert may confirm a scoped lead. The absence of an alert from a
+report cannot refute a lead. Manual labels should include reviewer and evidence provenance, not only
+a boolean. An operator's `websec feedback --verdict false-positive` queues a *candidate*. A human
+must accept it with `websec calibrate --accept`. It is never a label on its own. Authored paired
+fixtures are scored separately (`websec calibrate --synthetic`) and never merged into `P(real)`.
 
 **Shared format.** `websec calibrate --claimspec PATH` (or `-` for stdout) exports the table the
-runtime actually uses, the shipped corpus table plus your local overlay merged, as a
+runtime actually uses: the shipped corpus table plus your local overlay, merged. The export is a
 [claimspec](https://github.com/raccioly/testguard/tree/main/spec) v1 `calibration` document, the
-Guard-family interchange format. Nothing is lost in translation: the caveat, limitation, evidence
-status, `minN` floor, the per-confidence backoff tier and the labelled uncalibrated prior all
-travel with the numbers (`measures: finding-real`, `bucketBy: attackClass|confidence`). Each cell
-carries raw `n` and `positives`, so a consumer can recompute `p` and the Wilson interval and merge
-two tables by summing counts, the only merge the spec allows. `source.kind` says where the labels
-came from: `human-label` for the shipped table, `tool-oracle` for an overlay-only table, `mixed` once
-your samples are folded in. The writer refuses to export a cell whose stored numbers do not
-reproduce from its counts, rather than emit a document the spec validator would reject. The internal
+Guard-family interchange format. Nothing is lost in translation. The caveat, limitation, evidence
+status, `minN` floor, per-confidence backoff tier and labelled uncalibrated prior all travel with
+the numbers (`measures: finding-real`, `bucketBy: attackClass|confidence`). Each cell carries raw
+`n` and `positives`. A consumer can recompute `p` and the Wilson interval. It can merge two tables
+by summing counts, the only merge the spec allows. `source.kind` says where the labels came from:
+`human-label` for the shipped table, `tool-oracle` for an overlay-only table, and `mixed` once your
+samples are folded in. The writer refuses to export a cell whose stored numbers do not reproduce
+from its counts. This avoids emitting a document that the spec validator would reject. The internal
 `calibration.json` shape and the local overlay are unchanged.
 
 Full detail, including the strictly-proper-scoring-rule objective:
@@ -214,10 +218,10 @@ Full detail, including the strictly-proper-scoring-rule objective:
 `websec proof` clones a vuln-app corpus (VAmPI, NodeGoat, DVGA) and scores whether recon surfaces
 each app's documented attack surface. It is a deterministic, CI-trackable proxy for engine quality
 (historically **10/10**, not rerun for the current detector revision). It does not measure the real
-kill criterion: does the briefing lift an agent's bug-finding compared with a generic prompt? That
-is the manual A/B in [corpus/PROOF-PROTOCOL.md](../../corpus/PROOF-PROTOCOL.md), and like the
-competitor comparison it has not been run. Methodology, calibrated precision numbers and the
-competitor-comparison protocol are in [BENCHMARKS.md](../../BENCHMARKS.md).
+kill criterion: does the briefing help an agent find more bugs than a generic prompt does? That
+test is the manual A/B in [corpus/PROOF-PROTOCOL.md](../../corpus/PROOF-PROTOCOL.md). Like the
+competitor comparison, it has not been run. [BENCHMARKS.md](../../BENCHMARKS.md) holds the
+methodology, the calibrated precision numbers and the competitor-comparison protocol.
 
 `proof` and `calibrate` are development commands; both fetch the public corpus apps from GitHub.
 
@@ -235,9 +239,9 @@ Every finding in `findings-ledger.json` carries what you need to check it rather
 - **A stable fingerprint**, so acknowledgements, baselines, SARIF and feedback all address the
   same finding across runs.
 
-Around the findings, `coverage.json` records what ran, what was skipped and why, and hashes the
-detector code and the bytes read. `manifest.json` hashes the emitted artifacts so later edits are
-detectable. See [Outputs](../reference/outputs.md).
+`coverage.json` records what ran, what was skipped and why. It also hashes the detector code and the
+bytes read. `manifest.json` hashes the emitted artifacts, so later edits are detectable. See
+[Outputs](../reference/outputs.md).
 
 ## What it refuses to claim
 

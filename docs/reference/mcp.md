@@ -1,13 +1,13 @@
 # MCP server reference
 
-`websec mcp` exposes websec's deterministic recon as typed Model Context Protocol tools, so an MCP
-client can call it directly instead of shelling out and parsing stdout. It runs over stdio by
-default, or over authenticated loopback HTTP. It is implemented in
-[`mcp_server.py`](../../src/websec_validator/mcp_server.py) with the standard library only.
+`websec mcp` offers websec's deterministic recon as typed Model Context Protocol tools. An MCP
+client can call the tools directly. It does not need to run a command and parse stdout. The server
+runs over stdio by default, or over authenticated loopback HTTP. It is in
+[`mcp_server.py`](../../src/websec_validator/mcp_server.py) and uses only the standard library.
 
 ## Quick start
 
-Register the stdio server with your client using the common `mcpServers` shape:
+Register the stdio server with your client. Use the common `mcpServers` shape:
 
 ```json
 {
@@ -33,8 +33,8 @@ no arguments.
 
 - Framing: newline-delimited JSON-RPC 2.0 on stdin and stdout. Blank lines and malformed frames are
   skipped; one bad request never stops the loop.
-- Trust: the server runs with the launching user's permissions and can analyze any directory that
-  user can read. There is no root restriction in stdio mode; the client process is the trust
+- Trust: the server runs with the permissions of the user who starts it. It can analyze any
+  directory that user can read. Stdio mode has no root restriction. The client process is the trust
   boundary.
 - Exit: returns `0` when stdin closes.
 
@@ -45,8 +45,9 @@ export WEBSEC_MCP_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsa
 websec mcp --http --allow-root /absolute/path/to/project
 ```
 
-A stateless, JSON-only subset of the Streamable HTTP transport: no SSE streams, no sessions, no
-OAuth. Startup requirements, each refused with exit `2` if unmet:
+This is a stateless, JSON-only subset of the Streamable HTTP transport. It has no SSE streams, no
+sessions and no OAuth. The server has these startup requirements. It refuses to start with exit `2`
+if one is not met:
 
 | Requirement | Rule |
 |---|---|
@@ -81,14 +82,14 @@ On startup it prints `websec-mcp HTTP on loopback port <port>` to stderr.
 | Body size | At most 1 MiB. | `413` |
 | Body | Valid UTF-8 JSON. | `400` (JSON-RPC `-32700`) |
 
-**Limits.** At most 4 requests are handled at once; further connections get `503` without
-authentication or a worker. Each socket has a 5-second inactivity timeout, and receiving the whole
-request (headers and body) has an absolute 10-second deadline, so a client cannot drip bytes
+**Limits.** The server handles at most 4 requests at once. Further connections get `503` without
+authentication or a worker. Each socket has a 5-second inactivity timeout. Receiving the whole
+request (headers and body) has an absolute 10-second deadline, so a client cannot send bytes slowly
 forever. Tool execution itself has no deadline. Every response closes the connection and sends
-`Cache-Control: no-store`. Request logging is disabled, so paths and headers are not written to
-logs.
+`Cache-Control: no-store`. Request logging is off, so the server does not write paths and headers
+to logs.
 
-**Allowed roots.** Roots are granted by the operator at startup, never by the client's MCP roots.
+**Allowed roots.** The operator grants roots at startup. The client's MCP roots never grant them.
 For every repository tool call:
 
 - `path` must be an absolute path to an existing directory inside one of the `--allow-root`
@@ -109,14 +110,14 @@ curl -s http://127.0.0.1:8733/mcp \
 ```
 
 > [!WARNING]
-> The HTTP transport is a single-user local integration. Do not publish it beyond the machine
-> through a port forward or a reverse proxy: a proxy that rewrites `Host` to the loopback value
-> would leave the token as the only barrier. For container use, see
+> The HTTP transport is a single-user local integration. Do not expose it beyond the machine
+> through a port forward or a reverse proxy. A proxy that rewrites `Host` to the loopback value
+> leaves the token as the only barrier. For container use, see
 > [integrations/README.md](../integrations/README.md).
 
 ## Protocol
 
-| Method | Behaviour |
+| Method | Behavior |
 |---|---|
 | `initialize` | Returns `protocolVersion`, `capabilities: {"tools": {"listChanged": false}}` and `serverInfo` (`name: "websec-validator"` and the version). The requested version is echoed if supported, otherwise the newest is returned. stdio supports `2025-11-25`, `2025-06-18`, `2025-03-26` and `2024-11-05`; HTTP supports all but `2024-11-05`. |
 | `ping` | Returns `{}`. |
@@ -127,16 +128,17 @@ curl -s http://127.0.0.1:8733/mcp \
 | Unknown method | Error `-32601`. |
 
 A malformed request (not JSON-RPC 2.0, missing `method`, or a non-string, non-integer `id`) gets
-error `-32600`; non-object `params` gets `-32602`. A tool failure is not a protocol error: it
+error `-32600`. Non-object `params` gets `-32602`. A tool failure is not a protocol error. It
 returns a normal result with `isError: true` and text such as `error: ValueError: not a directory:
 ...`, so the model can read it.
 
 ## Tools
 
-All repository tools run **recon only**: no static scans, no network access, nothing written to
-the repository or to `websec-out/`. (`websec_briefing` does run each installed scanner's version
-probe so the briefing can list which tools are available.) Each call re-analyzes the repository;
-nothing is cached between calls. For scanner results, baselines or gates, use [`websec run`](cli.md#websec-run).
+All repository tools run **recon only**. They do no static scans and no network access. They write
+nothing to the repository or to `websec-out/`. (`websec_briefing` does run each installed scanner's
+version probe, so the briefing can list which tools are available.) Each call analyzes the
+repository again. The server caches nothing between calls. For scanner results, baselines or gates,
+use [`websec run`](cli.md#websec-run).
 
 | Tool | Arguments | Returns | `.websec-ignore` | Graph enrichment |
 |---|---|---|---|---|
@@ -148,14 +150,14 @@ nothing is cached between calls. For scanner results, baselines or gates, use [`
 
 Notes:
 
-- `path` is described in the schema as an absolute path. Over HTTP it must be absolute. Over stdio
-  a relative path is resolved against the server's working directory; prefer absolute paths.
-- `websec_sarif` deliberately builds the ledger without suppressions or acknowledgements, so it can
+- The schema describes `path` as an absolute path. Over HTTP it must be absolute. Over stdio, the
+  server resolves a relative path against its working directory. Use absolute paths.
+- `websec_sarif` builds the ledger without suppressions or acknowledgements on purpose. It can
   contain findings that `websec_findings` and `websec run`'s `results.sarif` leave out or mark as
   suppressed.
-- Graph enrichment reads `<path>/graphify-out/graph.json` if present; an unreadable graph never
-  fails the call. See [configuration.md](configuration.md#graphify-graph-input).
-- `websec_check_updates` accepts no other argument; an unknown key or a non-boolean `online` is an
+- Graph enrichment reads `<path>/graphify-out/graph.json` if it is present. An unreadable graph
+  never fails the call. See [configuration.md](configuration.md#graphify-graph-input).
+- `websec_check_updates` accepts no other argument. An unknown key or a non-boolean `online` is an
   error. With `online: true` it contacts PyPI (see the next section).
 
 ## Registering with clients
@@ -172,20 +174,20 @@ claude mcp add websec -- websec mcp
 **Cursor.** Put the common shape in `.cursor/mcp.json` in the project, or `~/.cursor/mcp.json` for
 all projects.
 
-**Cline and Windsurf.** Both read the common `mcpServers` shape; consult your client's MCP docs for
-where its settings file lives.
+**Cline and Windsurf.** Both read the common `mcpServers` shape. Read your client's MCP docs to find
+its settings file.
 
-**Zed.** Zed configures MCP servers under its own settings key rather than `mcpServers`. Consult
-Zed's MCP documentation and use `websec` with the argument `mcp` as the command.
+**Zed.** Zed configures MCP servers under its own settings key, not `mcpServers`. Read Zed's MCP
+documentation. Use `websec` with the argument `mcp` as the command.
 
 **If `websec` is not found.** Desktop applications often start with a shorter `PATH` than your
-shell. Use the absolute path of the executable (for example from `command -v websec`) as
-`command`, or the `websec-mcp` console script with no arguments.
+shell. Use the absolute path of the executable as `command` (for example from `command -v websec`).
+Or use the `websec-mcp` console script with no arguments.
 
 **HTTP clients.** If your client supports Streamable HTTP with custom headers, point it at
 `http://127.0.0.1:8733/mcp` and send `Authorization: Bearer <token>`. Header and URL syntax differ
-between clients; consult their MCP docs, and keep the token in your local secret environment rather
-than in a committed config file.
+between clients, so read their MCP docs. Keep the token in your local secret environment, not in a
+committed config file.
 
 Broader agent setup, including `websec install` and the agent-loop hook, is in
 [ai-agents.md](../guides/ai-agents.md).
@@ -205,9 +207,9 @@ What the server does and does not guarantee:
 
 - `online: false` (the default) reads only the local cache and makes no request.
 - `online: true` sends one `GET` to `https://pypi.org/simple/websec-validator/` (no redirects,
-  cookies or proxies), and stores only the observed version and check time. It installs nothing.
-- The server cannot verify that a human approved the call; `online: true` represents consent
-  supplied by the client. The rule above is how an agent should obtain it.
+  cookies or proxies). It stores only the observed version and check time. It installs nothing.
+- The server cannot verify that a human approved the call. `online: true` represents consent that
+  the client supplies. The rule above tells an agent how to obtain it.
 - The result never affects findings, coverage or any gate. A failed check returns
   `status: "unavailable"` and the review continues.
 
