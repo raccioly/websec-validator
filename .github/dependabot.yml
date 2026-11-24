@@ -10,3 +10,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # Hold the base image on Python 3.14. Semgrep (1.178.0 and 1.186.0) has no 3.15 support:
+      # on python:3.15-slim its engine exits with no output, so the bundled image would ship a
+      # scanner that silently never runs. Digest updates for 3.14-slim still arrive. Remove this
+      # once Semgrep publishes cp315/py315 wheels and a bundled-image scan completes on 3.15.
+      - dependency-name: python
+        versions: [">=3.15"]
