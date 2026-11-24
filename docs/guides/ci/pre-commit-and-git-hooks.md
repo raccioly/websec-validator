@@ -145,11 +145,11 @@ Verified in [`hooks.py`](../../../src/websec_validator/hooks.py):
 | Variable | Default | Effect |
 |---|---|---|
 | `WEBSEC_HOOK_FAIL_ON` | `high` | Pre-push threshold: `critical`, `high`, `medium` or `low`. It is part of the policy, so changing it means no accepted baseline matches |
-| `WEBSEC_HOOK_SCAN` | unset (recon only) | `1` runs the available static scanners (`--scan`) |
+| `WEBSEC_HOOK_SCAN` | pre-push: unset = dependency scan; post-commit: recon only | Unset on pre-push requires one dependency scanner: osv-scanner, or trivy if osv-scanner is missing. A known-vulnerable dependency at or above the threshold blocks the push. If neither scanner is installed, the hook prints a warning and runs recon only. `deps` asks for the dependency scan on either hook. `1` runs every available static scanner (`--scan`). `0` turns scanners off |
 | `WEBSEC_HOOK_SCANNERS` | empty | Comma-separated scanners to **require** (`--scanners`). Needs `WEBSEC_HOOK_SCAN=1` |
 | `WEBSEC_SKIP_HOOK` | `0` | `1` skips the native hook for that invocation |
 
-An invalid threshold, or `WEBSEC_HOOK_SCANNERS` without `WEBSEC_HOOK_SCAN=1`, makes execution
+An invalid threshold, or `WEBSEC_HOOK_SCANNERS` while scanning is off, makes execution
 incomplete. That blocks pre-push. Post-commit stays advisory.
 
 ```bash

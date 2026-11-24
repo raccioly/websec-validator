@@ -300,6 +300,21 @@ class NormalizeTests(unittest.TestCase):
         self.assertIn("ONE fix", groups[0]["title"])
 
 
+class HardcodedCredentialSeverityTests(unittest.TestCase):
+    def test_cwe_798_rules_are_at_least_high_even_in_tests(self):
+        doc = {"results": [
+            {"check_id": "x.jwt-hardcode.hardcoded-jwt-secret", "path": "src/__tests__/auth.test.ts",
+             "start": {"line": 9}, "extra": {"severity": "WARNING", "message": "hard-coded credential",
+                                             "metadata": {"cwe": ["CWE-798: Use of Hard-coded Credentials"]}}},
+            {"check_id": "x.other", "path": "src/a.ts", "start": {"line": 3},
+             "extra": {"severity": "WARNING", "message": "m", "metadata": {"cwe": "CWE-79: XSS"}}}]}
+        rows = {r["key"]: r for r in scanners._norm_semgrep(doc)}
+        self.assertEqual(rows["hardcoded-jwt-secret"]["severity"], "HIGH")
+        self.assertEqual(rows["other"]["severity"], "MEDIUM")
+        # Test-file context lowers confidence, never severity.
+        self.assertEqual(scanners._derive_confidence(rows["hardcoded-jwt-secret"])[0], "LOW")
+
+
 class BinaryCoverageTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
