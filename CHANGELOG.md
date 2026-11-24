@@ -28,6 +28,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   advisory on that package version. The remediation text and repair plans use these fields. The
   generic "upgrade to the fixed version" text is no longer used for scanner findings.
 
+### Changed
+
+- **The pre-push gate now scans dependencies by default.** When `WEBSEC_HOOK_SCAN` is unset, the
+  pre-push gate requires osv-scanner (or trivy if osv-scanner is missing). A known-vulnerable
+  dependency at or above `WEBSEC_HOOK_FAIL_ON` (default `high`) blocks the push. The policy changed,
+  so the first push after you upgrade checks all current findings again. If no dependency scanner is
+  installed, the hook prints a warning and runs recon only. `WEBSEC_HOOK_SCAN=0` turns the scan off.
+  The post-commit hook is unchanged.
+- Semgrep rules for hard-coded credentials (CWE-798, CWE-259, CWE-321) now report at least HIGH.
+  `hardcoded-jwt-secret` is WARNING in the registry and showed MEDIUM, while pipeline scanners rate
+  the same match HIGH and fail their policy on it. In a test file the confidence stays LOW, but the
+  severity does not drop.
+
 ### Fixed
 
 - osv-scanner findings had no fixed version (`fixed: ""`). The fix versions now come from each

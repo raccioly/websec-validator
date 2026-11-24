@@ -119,8 +119,8 @@ These are all the variables that the CLI, hooks, MCP server and update check rea
 | `XDG_CACHE_HOME` | `intel`, `run --scan` | When `WEBSEC_ENRICH_DIR` is unset, the cache is `$XDG_CACHE_HOME/websec`, else `~/.cache/websec`. |
 | `WEBSEC_CALIBRATION_HOME` | `run`, `gate`, `dynamic`, `feedback`, `calibrate`, MCP | Directory of the local calibration overlay (`calibration-local.json`, pending feedback candidates, `calibration-synthetic.json`). Default: `~/.cache/websec-validator/`. |
 | `WEBSEC_HOOK_FAIL_ON` | git hooks | Pre-push severity threshold: `critical`, `high`, `medium` or `low`. Default `high`. Any other value makes the hook's execution incomplete. |
-| `WEBSEC_HOOK_SCAN` | git hooks | `1` runs the static scanners (`--scan`). Default: recon only. |
-| `WEBSEC_HOOK_SCANNERS` | git hooks | Comma-separated scanners to require. Needs `WEBSEC_HOOK_SCAN=1`, otherwise the hook's execution is incomplete. |
+| `WEBSEC_HOOK_SCAN` | git hooks | Default on pre-push: a dependency scan (osv-scanner, else trivy) that blocks on vulnerable dependencies. `1` runs every static scanner (`--scan`), `deps` the dependency scan, `0` none. Default on post-commit: recon only. |
+| `WEBSEC_HOOK_SCANNERS` | git hooks | Comma-separated scanners to require. Needs scanning on (`WEBSEC_HOOK_SCAN` unset on pre-push, `deps` or `1`), otherwise the hook's execution is incomplete. |
 | `WEBSEC_SKIP_HOOK` | git hooks | `1` skips the git hook for one invocation. The bypass is appended to `$GIT_DIR/websec-guardrail/bypass.jsonl`. The agent hook ignores it on purpose. |
 | `WEBSEC_GATE_FAIL_ON` | agent hook | Threshold for the PostToolUse gate. Default `medium`; an unrecognised value falls back to `medium`. |
 | `WEBSEC_GATE_MIN_CONFIDENCE` | agent hook | Confidence floor for the PostToolUse gate. Default `low` (no filtering); an unrecognised value means no filtering. |

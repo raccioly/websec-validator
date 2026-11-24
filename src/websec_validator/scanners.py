@@ -1122,6 +1122,15 @@ def _norm_semgrep(data: dict) -> list:
         path = r.get("path", "")
         line = (r.get("start") or {}).get("line", 0)
         sev = sevmap.get((r.get("extra") or {}).get("severity", "INFO"), "MEDIUM")
+        # HARD-CODED CREDENTIALS are HIGH whatever the rule's own level. Semgrep's registry ships
+        # `hardcoded-jwt-secret` as WARNING, so a JWT signing secret written into code rendered MEDIUM
+        # here while pipeline scanners rate the same match HIGH and fail their policy on it. A
+        # forged-token value in a negative test is still a literal signing key in the repository;
+        # the test-file context lowers CONFIDENCE (see _derive_confidence), never the severity.
+        cwes = (r.get("extra") or {}).get("metadata", {}).get("cwe") or []
+        cwes = [cwes] if isinstance(cwes, str) else cwes
+        if any(re.match(r"CWE-(?:798|259|321)\b", str(c)) for c in cwes) and SEV_ORDER.get(sev, 0) < SEV_ORDER["HIGH"]:
+            sev = "HIGH"
         out.append({"tool": "semgrep", "category": "sast", "severity": sev,
                     "rule_id": r.get("check_id", ""),
                     **({"semantic_id": r["match_based_id"]} if isinstance(r.get("match_based_id"), str) and r["match_based_id"] else {}),

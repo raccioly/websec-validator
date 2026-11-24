@@ -294,8 +294,8 @@ reinstalling.
 | Variable | Hook | Default | Invalid value |
 |---|---|---|---|
 | `WEBSEC_HOOK_FAIL_ON` | git pre-push | `high` | Hook execution incomplete; pre-push blocks. |
-| `WEBSEC_HOOK_SCAN` | git hooks | unset (recon only) | Anything but `1` means recon only. |
-| `WEBSEC_HOOK_SCANNERS` | git hooks | unset | Set without `WEBSEC_HOOK_SCAN=1`: hook execution incomplete. |
+| `WEBSEC_HOOK_SCAN` | git hooks | pre-push: dependency scan; post-commit: recon only | `1`/`all`: every scanner. `deps`: osv-scanner (else trivy). Anything else: recon only. |
+| `WEBSEC_HOOK_SCANNERS` | git hooks | unset | Set while scanning is off: hook execution incomplete. |
 | `WEBSEC_SKIP_HOOK` | git hooks | unset | `1` skips one invocation and records it in `bypass.jsonl`. |
 | `WEBSEC_GATE_FAIL_ON` | agent hook | `medium` | Falls back to `medium`. |
 | `WEBSEC_GATE_MIN_CONFIDENCE` | agent hook | `low` | Falls back to no filtering. |
