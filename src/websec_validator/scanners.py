@@ -336,6 +336,12 @@ def _osv(target: Path, out: Path, excludes=()) -> list:
     # let the coverage note say binaries were not scanned.
     if version and version >= OSV_ADDITIVE_PLUGINS:
         cmd += ["--experimental-plugins", "go/binary"]
+    # DEPRECATED / END-OF-LIFE package versions (flagged by their maintainer on the registry). A
+    # maintainer-deprecated version gets no more fixes, so its next advisory has no upgrade path —
+    # pipeline scanners report these as end-of-life components and websec reported nothing. osv marks
+    # them from the registry's own deprecation flag (2.3.1+, osv-scanner#2370).
+    if version and version >= OSV_DEPRECATED_FLAG:
+        cmd += ["--experimental-flag-deprecated-packages"]
     # With the binary plugin on, osv opens every file it walks, including the Go/Rust executables
     # JS toolchains ship under node_modules. normalize_findings drops those findings by SKIP_DIRS, so
     # this is performance, not correctness. Gated on the version whose regex form was verified.
@@ -434,6 +440,8 @@ def binary_sca_gap(target: Path, scan_results: list, excludes=()) -> str:
             f"downloaded tools outside the checkout. Their absence from the findings is NOT a clean result")
 
 
+# osv-scanner 2.3.1 (#2370) marks registry-deprecated package versions in its JSON.
+OSV_DEPRECATED_FLAG = (2, 3, 1)
 # osv-scanner 2.2.3 (#2210) made `--experimental-plugins` additive to the default plugins.
 OSV_ADDITIVE_PLUGINS = (2, 2, 3)
 # `--experimental-exclude r:<regex>` verified on 2.6.0 (an exact dirname matched only the top level).
@@ -790,7 +798,7 @@ def _count_findings(key: str, out_file: Path) -> int:
         return sum(len((b.get("results") or {}).get("failed_checks", []) or [])
                    for b in (data if isinstance(data, list) else [data]) if isinstance(b, dict))
     if key == "osv-scanner":
-        return sum(len(p.get("groups", []) or [])
+        return sum(len(p.get("groups", []) or []) + int((p.get("package") or {}).get("deprecated") is True)
                    for r in (data.get("results") or []) for p in (r.get("packages") or []))
     if key == "gosec":
         return len(data.get("Issues", []) or [])
@@ -996,6 +1004,19 @@ def _norm_osv(data: dict) -> list:
             version = pkgobj.get("version", "")
             eco = _OSV_ECO.get(str(pkgobj.get("ecosystem", "")).lower(), "")
             vulns = {v.get("id"): v for v in (p.get("vulnerabilities") or []) if isinstance(v, dict)}
+            if pkgobj.get("deprecated") is True and name and version:
+                # One row per deprecated package VERSION, independent of any advisory on it. Kept in
+                # the `sca` category so occurrence identity, skip-dir filtering, the lockfile parent
+                # lookup and SBOM-style grouping all apply; `deprecated` routes it to its own class.
+                row = {"tool": "osv-scanner", "category": "sca", "severity": "LOW",
+                       "key": "DEPRECATED", "file": source.get("path", ""), "line": 0,
+                       "pkg": name, "cve": "DEPRECATED", "installed": version, "fixed": "",
+                       "ecosystem": eco, "deprecated": True,
+                       "title": f"{name} {version} is deprecated by its maintainer",
+                       "fingerprint": f"deprecated|{name}|{version}"}
+                if artifact:
+                    row["artifact"] = artifact
+                out.append(row)
             for g in (p.get("groups") or []):
                 ids = g.get("ids", []) or []
                 aliases = g.get("aliases", ids) or ids
@@ -1524,6 +1545,8 @@ def _derive_confidence(f: dict, target=None) -> tuple:
         # identity. Only an unpinned/unresolved occurrence lowers identity confidence.
         if f.get("reachability") == "not-imported":
             return "MEDIUM", "advisory matches the pinned version, but the package is never imported"
+        if f.get("deprecated"):
+            return "HIGH", "the package registry marks this exact version deprecated"
         if f.get("artifact") == "binary":
             return "HIGH", "advisory matched a module version recorded in a compiled binary's build info"
         return "HIGH", "advisory matched an exact pinned version from a lockfile"
@@ -1912,7 +1935,7 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
                                       "service", "symbol", "sink", "semantic_id", "line", "fingerprint",
                                       "installed", "fixed", "ecosystem", "advisory_aliases", "confidence", "cwe",
                                       "fix_target", "fix_major_bump", "fix_all_target", "dependency_path", "introduced_by",
-                                      "artifact", "remediation", "title_previous",
+                                      "artifact", "remediation", "title_previous", "deprecated",
                                       # field report #6: a per-INSTANCE id (`key` is a rule id) + why
                                       # this confidence, so `feedback`/baselining can address one finding.
                                       "instance_id", "confidence_basis", "native_confidence",

@@ -195,9 +195,28 @@ def _relpath(finding: dict) -> str:
     return str(finding.get("file") or "").replace("\\", "/")
 
 
+def _deprecated_remediation(finding: dict, pkg: str, installed: str) -> str:
+    """A deprecated version has no CVE to fix — the fix is getting off it, usually via the parent."""
+    path, parents = finding.get("dependency_path"), finding.get("introduced_by") or []
+    if path == "direct":
+        how = (f"Upgrade {pkg} to a maintained release, or replace it with the successor its "
+               f"deprecation notice names (`npm view {pkg}@{installed} deprecated`).")
+    elif path in ("transitive", "bundled") and parents:
+        via = ", ".join(parents[:4]) + (" and others" if len(parents) > 4 else "")
+        how = (f"It is pulled in by {via}. Upgrade that package to a release that no longer depends "
+               f"on {pkg} {installed}, then regenerate the lockfile.")
+    else:
+        how = (f"Find what pulls it in (`npm ls {pkg}`), upgrade that package to a release that no "
+               f"longer uses it, then regenerate the lockfile.")
+    return (f"{pkg} {installed} is deprecated by its maintainer, so it gets no more fixes: the next "
+            f"advisory against it will have no upgrade path. " + how)
+
+
 def remediation(finding: dict) -> str:
     """The one-paragraph fix for an annotated SCA finding (see annotate)."""
     pkg, installed = finding.get("pkg") or "the package", finding.get("installed") or "?"
+    if finding.get("deprecated"):
+        return _deprecated_remediation(finding, pkg, installed)
     target, cve = finding.get("fix_target") or "", finding.get("cve") or "this advisory"
     where = _relpath(finding)
     if not target:
@@ -255,7 +274,7 @@ def annotate(findings: list, target=None) -> dict:
     # reader upgrades to, so say it on each row (4.2.5 fixes two, 5.6.0 fixes four).
     by_pkg: dict = {}
     for f in rows:
-        if f.get("artifact") != "binary":
+        if f.get("artifact") != "binary" and not f.get("deprecated"):
             by_pkg.setdefault((_relpath(f), f.get("pkg"), f.get("installed")), []).append(f)
     for group in by_pkg.values():
         if len(group) < 2:
@@ -281,6 +300,10 @@ def annotate(findings: list, target=None) -> dict:
         f["remediation"] = remediation(f)
         # Two advisories on one package used to render as two identical "pkg 1.0 → 2.0" rows.
         # Name the advisory and the version to move to; say when it is a major upgrade.
+        if f.get("deprecated"):
+            f["fix_target"], f["fix_major_bump"] = "", False
+            counts["deprecated"] = counts.get("deprecated", 0) + 1
+            continue
         cve = f.get("cve") or f.get("key") or ""
         inside = f" in binary {rel}" if f.get("artifact") == "binary" else ""
         fix = target_version or "no fix published"

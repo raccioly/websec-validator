@@ -55,6 +55,8 @@ STANDARDS = {
                          "CWE-347 Improper Verification of Cryptographic Signature"],
                         "ASVS V13.4", ["API8:2023 Misconfiguration"]),
     "cve": (["CWE-1395 Vulnerable Dependency"], "ASVS V14.2.1", ["API8:2023"]),
+    "deprecated-dependency": (["CWE-1104 Use of Unmaintained Third Party Components"], "ASVS V14.2.1",
+                              ["API8:2023"]),
     "iac": (["CWE-1188 Insecure Default"], "ASVS V14.1", []),
     "client-exposure": (["CWE-200 Information Exposure"], "ASVS V14.3", []),
     "graphql": (["CWE-200 Information Exposure"], "ASVS V13.1", ["API8:2023"]),
@@ -207,6 +209,8 @@ REMEDIATION = {
                     "full-credential request to any upstream route.",
     "secret": "Rotate the credential, remove from code/history, load from a secrets manager.",
     "cve": "Upgrade the dependency to the fixed version.",
+    "deprecated-dependency": "Move off the deprecated package: upgrade the parent that pulls it in, or "
+                             "replace it with the maintained successor its deprecation notice names.",
     "iac": "Apply the hardening (non-root user, pin actions to a SHA, enforce TLS, etc.).",
     "client-exposure": "Move the secret server-side; never reference it from a client component or a NEXT_PUBLIC_/VITE_ var.",
     "graphql": "Disable introspection + the playground in production; add query depth/complexity limits.",
@@ -950,6 +954,8 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
     for t in ((unified or {}).get("all") or (unified or {}).get("top", [])):
         cat = t.get("category", "")
         cls = cat_to_class.get(cat, "sast")
+        if cat == "sca" and t.get("deprecated"):
+            cls = "deprecated-dependency"
         sev = t.get("severity", "MEDIUM")
         # Confidence follows severity for secrets/CVEs: a generic-api-key tiered down to MEDIUM
         # (low-precision rule, bug-072) should NOT be stamped HIGH-confidence — keep P(real) honest.
@@ -1011,7 +1017,7 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                     "installed", "fixed", "ecosystem", "advisory_aliases",
                     # dependency_fix: the version to move to, where to change it, and a binary flag.
                     "fix_target", "fix_major_bump", "fix_all_target", "dependency_path", "introduced_by", "artifact",
-                    "title_previous",
+                    "title_previous", "deprecated",
                     "resource_id", "service", "symbol", "sink", "semantic_id", "epss", "epss_pct", "kev", "reachability", "intel", "intel_status",
                     # field report #3: WHERE the secret lives. `in_tree=False` means the file is gone
                     # from the working tree but the blob is still fetchable — the reader could only
@@ -1023,7 +1029,7 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
             if key in t:
                 scanner_finding[key] = t[key]
         # A specific dependency fix (target version, parent to upgrade) replaces the generic sentence.
-        if cls == "cve" and isinstance(t.get("remediation"), str) and t["remediation"]:
+        if cls in ("cve", "deprecated-dependency") and isinstance(t.get("remediation"), str) and t["remediation"]:
             scanner_finding["remediation"] = t["remediation"]
         if not scanner_finding.get("rule_id") and t.get("key"):
             scanner_finding["rule_id"] = t["key"]
