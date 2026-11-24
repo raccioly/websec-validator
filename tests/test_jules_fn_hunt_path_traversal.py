@@ -99,3 +99,26 @@ app.get('/async-methods-safe', (req, res) => {
         findings = res.get("sink_occurrences", [])
         pt = [f for f in findings if f.get("attack_class") == "path-traversal"]
         self.assertEqual(len(pt), 0, "Expected 0 path traversal findings for safe async methods")
+
+
+class FirstArgumentPathTests(unittest.TestCase):
+    """The user-input marker must be in the PATH argument of a file API, not its content."""
+
+    def _pt(self, body):
+        ctx = repo({"app.js": "const fs = require('fs');\napp.get('/x', (req, res) => {\n" + body + "\n});\n"})
+        return [f for f in SurfaceExtractor().extract(ctx, facts={}).get("sink_occurrences", [])
+                if f.get("attack_class") == "path-traversal"]
+
+    def test_concatenated_content_is_not_a_path(self):
+        self.assertEqual(self._pt("fs.writeFileSync(outPath, '\\uFEFF' + lines.join('\\n'));"), [])
+
+    def test_user_input_in_path_still_fires(self):
+        self.assertEqual(len(self._pt("fs.writeFileSync('./uploads/' + req.params.name, data);")), 1)
+
+    def test_path_builder_keeps_any_argument(self):
+        self.assertEqual(len(self._pt("const p = path.join(dir, req.params.file);")), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
