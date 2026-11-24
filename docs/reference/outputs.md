@@ -203,7 +203,10 @@ can carry:
   `fix_major_bump` (`true` when only a major upgrade fixes it), `fix_all_target` (the version that
   clears every advisory on that package version), `dependency_path` (`direct`, `transitive` or
   `bundled`, from an npm lockfile) with `introduced_by` (the parent packages), and `artifact: binary`
-  when the module is embedded in a compiled executable. The `remediation` text uses these fields.
+  when the module is embedded in a compiled executable. The `remediation` text uses these fields;
+- `attack_class: deprecated-dependency` (with `deprecated: true`) for a package version its registry
+  marks deprecated (osv-scanner 2.3.1 or later). It is LOW severity: there is no known flaw yet, but
+  there will be no fixed release for the next one. `introduced_by` names the parent to upgrade.
 
 Top-level blocks: `total`, `by_severity`, `by_confidence`, `suppressed`, `acknowledged`,
 `calibration`, `coverage`, `verification_context`, `attribution`, `clusters` and `cluster_summary`

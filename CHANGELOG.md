@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   osv-scanner 2.2.3 or later, the osv adapter adds the `go/binary` plugin. Before that version the
   plugin flag replaced the lockfile plugins, so the flag is version-gated. All advisories in one
   binary group into one cluster, because they have one fix: upgrade, rebuild or remove that tool.
+- Deprecated (end-of-life) package versions are now reported. With osv-scanner 2.3.1 or later, the
+  osv adapter adds `--experimental-flag-deprecated-packages`. Each version that its registry marks
+  deprecated becomes a LOW `deprecated-dependency` finding (CWE-1104) with HIGH confidence. A
+  deprecated version gets no more fixes, so its next advisory will have no upgrade path. The
+  remediation names the parent package to upgrade, taken from the lockfile.
 - A `compiled_binary_sca` coverage gap names the in-scope executables when no scanner looked
   inside them. A tree whose only vulnerable code is a committed or downloaded CLI no longer reads
   as a clean dependency scan.

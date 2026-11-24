@@ -115,6 +115,10 @@ class OsvArgvTests(unittest.TestCase):
             self.assertEqual(cmd[cmd.index("--experimental-plugins") + 1], "go/binary")
             self.assertIn("--recursive", cmd)
 
+    def test_deprecated_flag_only_where_supported(self):
+        self.assertNotIn("--experimental-flag-deprecated-packages", self.argv("2.3.0"))
+        self.assertIn("--experimental-flag-deprecated-packages", self.argv("2.3.1"))
+
     def test_skip_dirs_regex_only_on_verified_version(self):
         self.assertNotIn("--experimental-exclude", self.argv("2.5.1"))
         cmd = self.argv("2.6.0")
@@ -251,6 +255,40 @@ class NormalizeTests(unittest.TestCase):
         unified = self.normalize({"osv-scanner": osv, "trivy": trivy})
         self.assertEqual(unified["total"], 0)
         self.assertGreaterEqual(unified["contamination_dropped"], 3)
+
+    def test_deprecated_package_is_its_own_class_with_parent_named(self):
+        lock = {"lockfileVersion": 3, "packages": {
+            "": {"devDependencies": {"cleaner": "3.0.2"}},
+            "node_modules/cleaner": {"version": "3.0.2", "dependencies": {"walker": "^7"}},
+            "node_modules/walker": {"version": "7.2.3", "dependencies": {"once-ish": "^1"}},
+            "node_modules/once-ish": {"version": "1.0.6"}}}
+        (self.repo / "package-lock.json").write_text(json.dumps(lock))
+        doc = {"results": [{"source": {"path": "package-lock.json", "type": "lockfile"}, "packages": [
+            {"package": {"name": "once-ish", "version": "1.0.6", "ecosystem": "npm", "deprecated": True}},
+            {"package": {"name": "cleaner", "version": "3.0.2", "ecosystem": "npm", "deprecated": True}},
+            {"package": {"name": "walker", "version": "7.2.3", "ecosystem": "npm"}}]}]}
+        unified = self.normalize({"osv-scanner": doc})
+        rows = {r["pkg"]: r for r in unified["all"]}
+        self.assertEqual(set(rows), {"once-ish", "cleaner"})      # a non-deprecated package: no row
+        self.assertEqual(rows["once-ish"]["severity"], "LOW")
+        self.assertIn("pulled in by walker", rows["once-ish"]["remediation"])
+        self.assertIn("Upgrade cleaner to a maintained release", rows["cleaner"]["remediation"])
+        self.assertIn("registry marks", rows["cleaner"]["confidence_basis"])
+        ledger = findings.build_ledger({}, unified)
+        led = [f for f in ledger["findings"] if f.get("pkg") == "once-ish"][0]
+        self.assertEqual(led["attack_class"], "deprecated-dependency")
+        self.assertIn("CWE-1104", " ".join(led["standards"]["cwe"]))
+        self.assertIn("walker", led["remediation"])
+
+    def test_deprecated_row_does_not_block_clear_all_for_its_cves(self):
+        trivy = {"Results": [{"Target": "package-lock.json", "Type": "npm", "Vulnerabilities": [
+            {"VulnerabilityID": cve, "PkgName": "router-lib", "InstalledVersion": "4.2.1",
+             "FixedVersion": fix, "Severity": "MEDIUM"} for cve, fix in
+            (("CVE-2026-0021", "4.2.5"), ("CVE-2026-0022", "4.2.7"))]}]}
+        osv = {"results": [{"source": {"path": "package-lock.json", "type": "lockfile"}, "packages": [
+            {"package": {"name": "router-lib", "version": "4.2.1", "ecosystem": "npm", "deprecated": True}}]}]}
+        rows = [r for r in self.normalize({"trivy": trivy, "osv-scanner": osv})["all"] if not r.get("deprecated")]
+        self.assertTrue(all(r.get("fix_all_target") == "4.2.7" for r in rows), rows)
 
     def test_one_binary_is_one_cluster(self):
         doc = _osv_doc([("toolcli", "artifact", f"example.com/mod{i}", "1.0.0", "Go", f"GO-{i}",

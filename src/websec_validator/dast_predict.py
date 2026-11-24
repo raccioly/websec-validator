@@ -93,6 +93,7 @@ _BLIND_SPOTS: dict = {
     "webhook-forgery": "needs a crafted unsigned callback delivered to your endpoint.",
     "secret": "committed credentials live in the repo/git history — a black-box scan cannot see them.",
     "cve": "dependency CVEs are inventory-derived; a scanner only sees them if a version banner leaks.",
+    "deprecated-dependency": "an unmaintained dependency is inventory-derived, never visible in a response.",
     "malicious-install-script": "build/install-time RCE never appears in a request.",
     "lockfile-drift": "supply-chain drift is a build artifact, not a runtime response.",
     "excessive-agency": "AI-agent tool permissions are config, not an HTTP surface.",
