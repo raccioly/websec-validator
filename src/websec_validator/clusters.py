@@ -53,6 +53,11 @@ def _group_key(f: dict) -> tuple:
     commit = f.get("commit") or f.get("commit_short")
     if f.get("history_only") and isinstance(commit, str) and commit:
         return ("incident", f"deleted-in:{commit[:12]}")
+    # Every CVE in ONE compiled binary has ONE fix: upgrade, rebuild or remove that file. A Go CLI
+    # can carry 70+ advisories (most in the Go standard library), so without this the report reads
+    # as 70 problems instead of one stale tool.
+    if f.get("artifact") == "binary" and _location_of(f):
+        return ("artifact", f"binary:{_location_of(f)}")
     return ("rule", f"{f.get('category') or ''}:{_rule_of(f)}")
 
 
@@ -68,6 +73,11 @@ def _title(kind: str, disc: str, members: list) -> str:
         return (f"{n} secret(s) removed from the working tree in commit {commit} — the files are "
                 f"gone but every blob is still fetchable from the repo. ONE incident: rotating the "
                 f"{n} credential(s) is the fix; deleting the files was not.")
+    if kind == "artifact":
+        path = disc.split(":", 1)[1]
+        modules = len({m.get("pkg") for m in members if m.get("pkg")})
+        return (f"compiled binary {path} embeds {n} known-vulnerable advisories across {modules} "
+                f"module(s) — ONE fix: upgrade or rebuild this tool, or keep it out of the checkout.")
     # Reuse the longest shared prefix of the member titles so the cluster reads like the findings.
     base = min((str(m.get("title") or "") for m in members), key=len, default="")
     base = base.split(" — ")[0][:110] or _rule_of(members[0])

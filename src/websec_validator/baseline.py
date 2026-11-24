@@ -55,6 +55,9 @@ def annotate(ledger: dict) -> dict:
     for f in (ledger.get("findings", []) or []) + (ledger.get("acknowledged", []) or []):
         aliases = set(f.get("fingerprint_aliases", []))
         aliases.add(legacy_fingerprint(f))
+        if f.get("title_previous") and f["title_previous"] != f.get("title"):
+            # A reworded title (dependency rows, see dependency_fix) must not orphan a v1 baseline entry.
+            aliases.add(legacy_fingerprint({**f, "title": f["title_previous"]}))
         if f.get("fingerprint") and f.get("fingerprint_version") != FINGERPRINT_VERSION:
             aliases.add(f["fingerprint"])
         f["fingerprint"] = fingerprint(f)

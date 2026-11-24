@@ -1009,6 +1009,9 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
             scanner_finding["standards"]["cwe"] = sorted(set(scanner_finding["standards"]["cwe"] + cwes))
         for key in ("rule_id", "rule", "check_id", "package", "pkg", "cve", "vulnerability_id", "resource",
                     "installed", "fixed", "ecosystem", "advisory_aliases",
+                    # dependency_fix: the version to move to, where to change it, and a binary flag.
+                    "fix_target", "fix_major_bump", "fix_all_target", "dependency_path", "introduced_by", "artifact",
+                    "title_previous",
                     "resource_id", "service", "symbol", "sink", "semantic_id", "epss", "epss_pct", "kev", "reachability", "intel", "intel_status",
                     # field report #3: WHERE the secret lives. `in_tree=False` means the file is gone
                     # from the working tree but the blob is still fetchable — the reader could only
@@ -1019,6 +1022,9 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
                     "instance_id", "confidence_basis"):
             if key in t:
                 scanner_finding[key] = t[key]
+        # A specific dependency fix (target version, parent to upgrade) replaces the generic sentence.
+        if cls == "cve" and isinstance(t.get("remediation"), str) and t["remediation"]:
+            scanner_finding["remediation"] = t["remediation"]
         if not scanner_finding.get("rule_id") and t.get("key"):
             scanner_finding["rule_id"] = t["key"]
         # Brakeman publishes a semantic warning fingerprint; our adapters' fallback pipe-delimited

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Compiled Go binaries in the scan scope are now checked for vulnerable embedded modules. With
+  osv-scanner 2.2.3 or later, the osv adapter adds the `go/binary` plugin. Before that version the
+  plugin flag replaced the lockfile plugins, so the flag is version-gated. All advisories in one
+  binary group into one cluster, because they have one fix: upgrade, rebuild or remove that tool.
+- A `compiled_binary_sca` coverage gap names the in-scope executables when no scanner looked
+  inside them. A tree whose only vulnerable code is a committed or downloaded CLI no longer reads
+  as a clean dependency scan.
+- Each dependency finding now has a specific fix. `fix_target` is the lowest fix on the installed
+  release line, and `fix_major_bump` is true when only a major upgrade fixes it. `dependency_path`
+  is `direct`, `transitive` or `bundled`, and `introduced_by` names the parent package (from
+  `package-lock.json` / `npm-shrinkwrap.json`). `fix_all_target` is the version that clears every
+  advisory on that package version. The remediation text and repair plans use these fields. The
+  generic "upgrade to the fixed version" text is no longer used for scanner findings.
+
+### Fixed
+
+- osv-scanner findings had no fixed version (`fixed: ""`). The fix versions now come from each
+  advisory's `affected[].ranges[].events[].fixed`.
+- When two scanners report the same advisory, their fixed-version lists are merged by version.
+  Before, the same two fixes from two tools showed four times.
+- Two advisories on the same package version showed the same title. Titles now name the advisory
+  and the target version, for example `pkg 4.2.1 — CVE-… → 5.6.0 (major upgrade)`.
+- With osv-scanner 2.6.0 or later, osv skips the same directories as the rest of the run.
+
 ## [0.22.3] — 2026-10-11
 
 ## [0.22.2] — 2026-10-11
