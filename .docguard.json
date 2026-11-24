@@ -3,6 +3,7 @@
   "projectName": "websec-validator",
   "version": "0.5",
   "profile": "cli",
+  "enforcement": "standard",
   "projectType": "library",
   "projectTypeConfig": {
     "needsEnvVars": false,

@@ -1,13 +1,13 @@
 # Outputs
 
-Every `websec run` writes a set of artifacts into its own run directory. This page lists each one:
-when it is written, its format and schema, the fields that matter, and who consumes it. Names and
-conditions are taken from the code that writes them (`cli.py`, `scanners.py`, `probes.py`) and
-checked against real runs.
+Every `websec run` writes a set of artifacts into its own run directory. This page lists each
+artifact: when websec writes it, its format and schema, the fields that matter, and who uses it. The
+names and conditions come from the code that writes the artifacts (`cli.py`, `scanners.py`,
+`probes.py`). We checked them against real runs.
 
 > [!WARNING]
 > Artifacts can quote source evidence, file paths, routes and secret locations. Add `websec-out/` to
-> the target repository's `.gitignore`, and treat uploaded artifacts with the same care as the source.
+> the target repository's `.gitignore`. Handle uploaded artifacts with the same care as the source.
 
 ## Where artifacts land
 
@@ -23,32 +23,32 @@ websec-out/
 ```
 
 - **Base directory.** `./websec-out` in the *current working directory*, not in the target. Choose
-  another with `--out DIR`. An implicit `websec-out` that is a symlink is refused; pass `--out`
+  another with `--out DIR`. websec refuses an implicit `websec-out` that is a symlink. Pass `--out`
   deliberately if you need that.
 - **One directory per attempt.** Each run reserves `websec-out/runs/<YYYYMMDD-HHMMSS>-<random>/`.
-  Nothing from an earlier run is overwritten.
-- **The `latest` pointer.** `latest` is a relative symlink to one run directory. It is replaced
-  atomically, and only after a run whose execution completed (`coverage.execution_complete` is
-  `true`) has written all of its artifacts. A partial attempt keeps its own directory and leaves
-  `latest` on the previous completed run. Completed execution describes the requested checks, not
-  complete protection against vulnerabilities.
+  websec does not overwrite anything from an earlier run.
+- **The `latest` pointer.** `latest` is a relative symlink to one run directory. websec replaces it
+  atomically. It does this only after a run whose execution completed (`coverage.execution_complete`
+  is `true`) has written all of its artifacts. A partial attempt keeps its own directory and leaves
+  `latest` on the previous completed run. Completed execution describes the requested checks. It
+  does not mean complete protection against vulnerabilities.
 - **Do not assume `latest` is the run you just started.** If your run was incomplete, `latest` still
   points at an older one. Scripts and agents should take the run directory from the console output
-  or, in CI, from the GitHub Action's `run-directory` output. The instructions `websec install`
-  writes for agents select the run from the current JSON output and reject stale `latest` or
+  or, in CI, from the GitHub Action's `run-directory` output. The instructions that `websec install`
+  writes for agents select the run from the current JSON output. They reject stale `latest` or
   symlink aliases.
-- **`websec dynamic`** reserves its own run directory under the same `runs/` and also advances
+- **`websec dynamic`** reserves its own run directory under the same `runs/`. It also advances
   `latest` when it completes. That directory holds the dynamic results, a rebuilt ledger, report and
-  constitution, but no `AGENT-BRIEFING.md` or `results.sarif`. After a dynamic run, `latest` no
+  constitution. It has no `AGENT-BRIEFING.md` or `results.sarif`. After a dynamic run, `latest` no
   longer points at a directory with a briefing.
 
-Commands that write elsewhere or nothing:
+These commands write elsewhere, or write nothing:
 
 | Command | Writes |
 |---|---|
 | `websec recon` (development) | `FACTS.json` directly into the output base directory, not into a run directory |
-| `websec gate` | Nothing. No artifacts, no run directory, never advances `latest` or an accepted baseline |
-| `websec demo` | A temporary directory only; never touches the current project |
+| `websec gate` | Nothing. No artifacts, no run directory. It never advances `latest` or an accepted baseline |
+| `websec demo` | A temporary directory only. It never touches the current project |
 | `websec emit-context`, `websec capabilities`, `websec explain` | Standard output only |
 
 ## Artifact index
@@ -80,13 +80,13 @@ installed version.
 
 ### `AGENT-BRIEFING.md`
 
-The product: marching orders for your agent. Sections include what the app is (1), the tenant
+The main product: instructions for your agent. Sections include what the app is (1), the tenant
 boundary to confirm first (2), attack surface and targeting (3), the ranked attack-surface inventory
 (3a), access control (3b), config/CI/client-side risks (3c), API-contract shadow endpoints (3e),
 static findings (4), predicted DAST alerts and scanner blind spots (4b), pre-triage tags (4c), the
 three axes of severity, likelihood and who acts (4d), staged probes (5), the phased pentest
-runbook (5b), fix prompts (5c), how to verify and fix (6) and what to hand back (7). Point your
-agent at it:
+runbook (5b), fix prompts (5c), how to verify and fix (6) and what to hand back (7). Tell your
+agent to use it:
 
 > Read `websec-out/runs/<run-id>/AGENT-BRIEFING.md` and follow it.
 
@@ -95,25 +95,26 @@ See [How it works](../concepts/how-it-works.md#aim-the-pentest-instead-of-compet
 
 ### `REPORT.md`
 
-The full human-readable record of the run: executive summary, the findings ledger with evidence
+The full record of the run, written for people: executive summary, the findings ledger with evidence
 chain, standards and confidence (§1), the clustered view (§1a), acknowledged findings shown but not
 gating (§1b), access control, attack surface, config/CI/client-side risks, staged probes and the
-endpoint inventory. It leads with the coverage status: **REQUESTED CHECKS COMPLETED**, **PARTIAL
+endpoint inventory. It starts with the coverage status: **REQUESTED CHECKS COMPLETED**, **PARTIAL
 SCAN — REQUESTED CHECKS INCOMPLETE**, **NO ANALYZABLE SOURCE**, or **REQUESTED SCOPE NOT
 ANALYZED** when `--only` was given and none of its paths selected an analysable file.
 
 ### `CONSTITUTION.md`
 
-The app's security invariants as Given/When/Then statements derived from the recon (for example
-tenant isolation and secret hygiene). Each starts unchecked; the agent confirms or refutes it with a
-probe. A confirmed dynamic missing-auth finding marks the authentication invariant violated. See
+The app's security invariants as Given/When/Then statements. websec derives them from the recon
+(for example tenant isolation and secret hygiene). Each starts unchecked. The agent confirms or
+refutes it with a probe. A confirmed dynamic missing-auth finding marks the authentication
+invariant as violated. See
 [METHODOLOGY: the security constitution](../METHODOLOGY.md#layer-3c--the-security-constitution).
 
 ## Structured recon
 
 ### `FACTS.json`
 
-The full recon: one top-level key per extractor (`stack`, `routes`, `auth`, `authz`, `tenant`,
+The full recon output. It has one top-level key per extractor (`stack`, `routes`, `auth`, `authz`, `tenant`,
 `password_policy`, `surface`, `upload_security`, `schemas`, `iac_ci`, `client_exposure`,
 `client_integrity`, `transport_security`, `pii_exposure`, `graphql`, `integrations`,
 `llm_security`, `crypto_usage`, `authz_dataflow`, `webext`, `agent_config`, `dependencies`), plus
@@ -128,11 +129,12 @@ Fields worth knowing:
   open-redirect, upload and auth-endpoint candidates).
 - `routes.noir`: `{state, reason}`, where `state` is `ok`, `absent` or `failed`. `failed` means an
   installed OWASP Noir crashed, timed out or wrote unusable output, and the routes came from the
-  regex fallback; `reason` says why.
+  regex fallback. `reason` says why.
 - `analysis_scope` (with `--only`): `requested` entries, `matched` files and `missed` entries. A
-  missed entry selected no analysable file and was never analysed.
-- `routes.fixture_endpoints`: test/example/fixture routes split out of the attack surface, kept
-  visible rather than dropped. `--include-fixtures` treats them as product code.
+  missed entry selected no analysable file, and websec never analyzed it.
+- `routes.fixture_endpoints`: test/example/fixture routes that websec splits out of the attack
+  surface. It keeps them visible and does not drop them. `--include-fixtures` treats them as
+  product code.
 - `auth.scheme` (the primary scheme), `auth.schemes_detected` and, since 0.22.0,
   `auth.scheme_confidence` (`high`, `medium` or `low`) with `auth.scheme_basis`, the evidence in
   words. A `jwt (bearer)` reading needs a JWT library imported or called in the same file as a JWT
@@ -155,14 +157,14 @@ Fields worth knowing:
 
 ### `coverage.json`
 
-The execution and scope manifest. It is also embedded in `FACTS.json`, the ledger and the envelope.
+The execution and scope manifest. `FACTS.json`, the ledger and the envelope also embed it.
 
 | Field | Meaning |
 |---|---|
 | `execution_complete` | `true` when every requested check ran. Drives `latest` and exit code `3` |
 | `protection_complete` | Always `false`. Completed execution is not protection |
 | `limitation` | The statement above, in words |
-| `gaps[]` | `{kind, detail, execution}`. `execution: true` means a requested check did not complete; `false` is a scope limit (`language_without_analyzer`, `thin_language_coverage`, `walker_policy`, `excluded_scope`, `profile_scope`, `skipped_directory_code`, `scope_missed`, `route_engine` and others). `skipped_directory_code`: a skipped `build`, `dist`, `out`, `target`, `vendor` or `coverage` directory, or a websec output directory under another name, holds files with an analysable suffix. `scope_missed`: a `--only` path selected nothing. `route_engine`: an installed Noir failed and routes came from the regex fallback. `scanner_file_limits` (since 0.22.0): a scanner completed but could not parse, or only partly parsed, the named in-scope files; every other file was analysed, and those files' absence of findings is not a clean result. Execution gaps include `scanner` (a scanner did not complete), `scanner_rules` (named rules did not complete), `extractor`, and `source_flow_limit` (since 0.22.0): the files, lane and reason where bounded source-flow analysis stopped at a budget. Like an oversized file, that leaves the file not fully analysed, so the run is incomplete. A `graph` gap is an execution gap only for an explicit `--graph` |
+| `gaps[]` | `{kind, detail, execution}`. `execution: true` means a requested check did not complete; `false` is a scope limit (`language_without_analyzer`, `thin_language_coverage`, `walker_policy`, `excluded_scope`, `profile_scope`, `skipped_directory_code`, `scope_missed`, `route_engine` and others). `skipped_directory_code`: a skipped `build`, `dist`, `out`, `target`, `vendor` or `coverage` directory, or a websec output directory under another name, holds files with an analysable suffix. `scope_missed`: a `--only` path selected nothing. `compiled_binary_sca`: compiled executables are in scope, but no scanner read their embedded modules (osv-scanner 2.2.3 or later scans Go binaries). `route_engine`: an installed Noir failed and routes came from the regex fallback. `scanner_file_limits` (since 0.22.0): a scanner completed but could not parse, or only partly parsed, the named in-scope files; every other file was analysed, and those files' absence of findings is not a clean result. Execution gaps include `scanner` (a scanner did not complete), `scanner_rules` (named rules did not complete), `extractor`, and `source_flow_limit` (since 0.22.0): the files, lane and reason where bounded source-flow analysis stopped at a budget. Like an oversized file, that leaves the file not fully analysed, so the run is incomplete. A `graph` gap is an execution gap only for an explicit `--graph` |
 | `extractors` | Outcome per extractor |
 | `scanners` | Per scanner: `installed`, `runnable`, `selected`, `ran`, `outcome`, `reported_version`, `version_verified`, `report_details` (the native diagnostics websec parsed) and, when present, `rules_incomplete` and `file_limitations`. A `file_limitations` row is `{path, reason, native_type, framework?, message}`: `reason` is `parse_failed` (the file was not analysed) or `partial_parse` (it was partly analysed). `report_details.file_limitations_excluded` counts diagnostics for files under `--exclude` or a skipped directory, which are otherwise ignored |
 | `files` | `seen`, `scanned`, `read`, `unsupported`, `unanalyzed_languages`, `no_analyzable_source`, `skipped_counts` (reasons include `skip_directory` and `websec_output`, a directory this tool wrote), caps and read losses. `skipped_code_files` (total analysable-suffix files under skipped build, dependency and output directories) and `skipped_code_dirs[]` (`path`, `code_files`, `count_truncated`; at most 50 listed). With `--only`, `analysis_scope`: `requested` and `matched` counts and the `missed` entries |
@@ -171,11 +173,11 @@ The execution and scope manifest. It is also embedded in `FACTS.json`, the ledge
 | `detector_revision`, `analyzed_input_digest`, `scope_digest` | Hashes that bind the run to the detector code, the bytes read and the scope |
 | `imports` | SARIF import outcomes, when `--sarif` is used |
 
-How to use it to judge a clean run: [Languages: what a clean run means](languages.md#what-a-clean-run-means-for-your-stack).
+To judge a clean run with it, see [Languages: what a clean run means](languages.md#what-a-clean-run-means-for-your-stack).
 
 ### `attack-surface.json`
 
-The ranked per-endpoint planning table behind briefing §3a. `endpoints[]` rows carry `method`,
+The ranked planning table, one row per endpoint, behind briefing §3a. `endpoints[]` rows carry `method`,
 `path`, `handler`, `service_id`, `technology`, `auth`, `params`, `sinks`, `risk`, `why` and
 `is_write`. `summary` counts endpoints, unguarded endpoints and writes, high-risk sinks and IDOR
 candidates.
@@ -184,7 +186,7 @@ candidates.
 
 ### `findings-ledger.json`
 
-The traceable ledger: recon findings, scanner findings and imported SARIF, correlated into one
+The traceable ledger. It correlates recon findings, scanner findings and imported SARIF into one
 ranked set. Each finding (required: `title`, `attack_class`, `severity`, `confidence`, `location`)
 can carry:
 
@@ -196,11 +198,21 @@ can carry:
 - `triage`: the disposition (`agent-fixable` or `human-required`) with its reason;
 - `baseline_state` with `--baseline`; `graph` with a knowledge graph (`--graph` or
   `graphify-out/graph.json`); `in_tree` and commit fields on secrets; `reachability` and EPSS/KEV
-  data on dependency CVEs.
+  data on dependency CVEs;
+- on dependency CVEs, the fix to make: `fix_target` (the lowest fix on the installed release line),
+  `fix_major_bump` (`true` when only a major upgrade fixes it), `fix_all_target` (the version that
+  clears every advisory on that package version), `dependency_path` (`direct`, `transitive` or
+  `bundled`, from an npm lockfile) with `introduced_by` (the parent packages), and `artifact: binary`
+  when the module is embedded in a compiled executable. The `remediation` text uses these fields;
+- `attack_class: deprecated-dependency` (with `deprecated: true`) for a package version its registry
+  marks deprecated (osv-scanner 2.3.1 or later). It is LOW severity: there is no known flaw yet, but
+  there will be no fixed release for the next one. `introduced_by` names the parent to upgrade.
 
 Top-level blocks: `total`, `by_severity`, `by_confidence`, `suppressed`, `acknowledged`,
 `calibration`, `coverage`, `verification_context`, `attribution`, `clusters` and `cluster_summary`
 (a presentation view; `total`, gate counts and per-site fingerprints are unchanged), and `gate`.
+A cluster `kind` is `rule` (one detector at many sites), `incident` (secrets deleted in one commit)
+or `artifact` (all advisories in one compiled binary, which have one fix).
 
 Suppression transparency (since 0.22.0, see
 [how path patterns match](../guides/triage-and-suppression.md#how-path-patterns-match)):
@@ -228,43 +240,43 @@ exit code (`websec run` gates those).
 
 ### `findings.envelope.json`
 
-A versioned, self-describing wrapper around the ledger for consumers that should not depend on its
-internal shape: `schema_version`, `tool`, `tool_version`, `generated` (the run id), `target`,
+A versioned wrapper around the ledger that describes itself. Use it when a consumer should not
+depend on the ledger's internal shape. It has these fields: `schema_version`, `tool`, `tool_version`, `generated` (the run id), `target`,
 `summary` (totals by severity and confidence, suppressed, acknowledged), `calibration`,
 `verification_context`, `attribution`, `coverage` and `findings`. `websec run --format json` prints
 the same envelope to standard output.
 
 ### `results.sarif`
 
-SARIF 2.1.0, written on every run. Upload it to GitHub Code Scanning and each finding appears inline
-on the pull-request diff and in the Security tab.
+SARIF 2.1.0, written on every run. Upload it to GitHub Code Scanning. Each finding then appears
+inline on the pull-request diff and in the Security tab.
 
 - `runs[0].invocations[0].executionSuccessful` mirrors `coverage.execution_complete`, so a partial
   run is visible to the consumer.
 - Each result has `partialFingerprints.websecFingerprintV2`, so Code Scanning tracks it across runs.
-- `properties.security-severity` is a numeric band GitHub uses to rank and colour alerts; CWE,
-  ASVS and OWASP citations and the remediation travel with the rule.
-- Acknowledged findings stay in the log with a `suppressions` entry, so they remain visible and
+- `properties.security-severity` is a numeric band. GitHub uses it to rank and color alerts. The
+  CWE, ASVS and OWASP citations and the remediation travel with the rule.
+- Acknowledged findings stay in the log with a `suppressions` entry. They stay visible and
   attributable.
-- Baseline lifecycle states use SARIF's `baselineState` values; richer lifecycle detail stays in
+- Baseline lifecycle states use SARIF's `baselineState` values. Richer lifecycle detail stays in
   `properties`.
 
 `websec run --format sarif` also prints the log to standard output for piping.
 
 ### `findings.json`
 
-Scanner results after normalization (`--scan`): each scanner's native JSON is parsed,
-de-duplicated across tools by fingerprint (`cve|package|id`, `secret|file|rule|line`,
-`iac|file|check`), ranked by severity and enriched with reachability and EPSS/KEV. A merged row
-lists every tool that reported it in `tools`. With `--sarif` and no `--scan`, the file holds the
-imported findings instead.
+Scanner results after normalization (`--scan`). websec parses each scanner's native JSON,
+de-duplicates it across tools by fingerprint (`cve|package|id`, `secret|file|rule|line`,
+`iac|file|check`), ranks it by severity and enriches it with reachability and EPSS/KEV. A merged
+row lists every tool that reported it in `tools`. With `--sarif` and no `--scan`, the file holds
+the imported findings instead.
 
 ### `sarif-imports.json`
 
 With `--sarif REPORT` (repeatable): one entry per imported report with its `report` provenance
 (hashes, native tool and rule identities, limits, outcome), the mapped `findings` and
-`observations`. Imported reports are never executed and referenced source is never loaded. Source
-freshness stays unverified, and imported absence cannot verify a repair.
+`observations`. websec never executes imported reports and never loads the source they reference.
+Source freshness stays unverified, and imported absence cannot verify a repair.
 
 ## Remediation and planning
 
@@ -274,7 +286,7 @@ One plan per finding, binding the remediation to the original application, sourc
 and detector scope: `plan_id`, `finding_id`, `original`, `original_scope_digest`, `attack_class`,
 `affected`, `prerequisites`, `suggested_remediation`, `triage`, `verification` (the positive and
 negative evidence required) and `prompt`. `websec repair-verify` validates operator-supplied
-evidence against a plan; it never executes commands. See the
+evidence against a plan. It never executes commands. See the
 [validated evidence examples](../security-review/examples/README.md).
 
 ### `diff-scope.json`
@@ -282,25 +294,25 @@ evidence against a plan; it never executes commands. See the
 With `--diff REF`: `base`, `error`, `repo_prefix` (where the target sits in the repository, for
 example `services/api/`, or empty at the root), `files` (changed files, relative to the target,
 mapped to added or modified line ranges) and `counts` (findings in changed files and hunks versus
-pre-existing ones). If the diff cannot be
-computed, `error` is set and the run continues unscoped over the whole repository. That records a
-`diff` execution gap, so the run is incomplete and `latest` does not advance.
+pre-existing ones). If websec cannot compute the diff, it sets `error` and the run continues
+unscoped over the whole repository. That records a `diff` execution gap, so the run is incomplete
+and `latest` does not advance.
 
 ### `probes/`
 
-The probe drafts selected for this app, plus their context:
+The probe drafts that websec selected for this app, plus their context:
 
 - `probe-context.json`: the app's real routes, auth location, sensitive fields, tenant keys and a
   `target_base_url` placeholder.
-- Probe scripts (`.sh`, `.py`). `unauth-baseline` and `rate-limit-burst` are always staged; the
-  rest (BOLA, mass assignment, JWT, SSRF, upload, webhook forgery and others) only when the recon
-  supports them.
+- Probe scripts (`.sh`, `.py`). websec always stages `unauth-baseline` and `rate-limit-burst`. It
+  stages the rest (BOLA, mass assignment, JWT, SSRF, upload, webhook forgery and others) only when
+  the recon supports them.
 - `_lib.py` and `_lib.bash`: the shared transport. It refuses to send a mutating request to any
   host other than localhost.
 
-Probes are drafts. The agent finalizes them against `probe-context.json`; you supply a TEST
-instance and test credentials and approve each run. `websec run` stages them and never executes
-them. See
+Probes are drafts. The agent finalizes them against `probe-context.json`. You supply a TEST
+instance and test credentials, and you approve each run. `websec run` stages the probes and never
+executes them. See
 [Dynamic testing](../guides/dynamic-testing.md).
 
 ## Supply chain and integrity
@@ -308,7 +320,7 @@ them. See
 ### `sbom.cdx.json` and `sbom.spdx.json`
 
 `--sbom` (CycloneDX, the default) or `--sbom spdx` asks Trivy for an SBOM of the target. If Trivy is
-not installed or the SBOM is invalid, the run records an `sbom` gap that counts as an execution gap:
+not installed or the SBOM is invalid, the run records an `sbom` gap. This is an execution gap, so
 the run is incomplete and `latest` does not advance.
 
 ### `manifest.json`
@@ -318,9 +330,9 @@ precondition failed and the `route_engine` status) and scan results, SBOM status
 summary, staged probes, the run timestamp, and `artifact_digests`: SHA-256 of `FACTS.json`,
 `coverage.json`, the ledger, envelope, SARIF, `findings.json`, `repair-plans.json`,
 `attack-surface.json`, `REPORT.md`, `AGENT-BRIEFING.md`, `diff-scope.json` and
-`sarif-imports.json` when present. The digests detect later edits; they do not prove authorship,
-and the manifest does not hash itself. They are meaningful alongside an external copy such as a CI
-artifact.
+`sarif-imports.json` when present. The digests detect later edits. They do not prove authorship,
+and the manifest does not hash itself. They are useful only when you also keep an external copy,
+such as a CI artifact.
 
 ## Versioned contract
 
@@ -329,8 +341,8 @@ JSON Schemas ship in the package: `schemas/facts.schema.json`, `schemas/ledger.s
 `schemas/coverage.schema.json`. Coverage is embedded in facts, ledger and envelope, and SARIF's
 execution status reflects partial checks. Fingerprint V2 preserves V1 migration aliases. SARIF
 lifecycle states use its legal enum and keep richer lifecycle metadata in properties.
-`.websec-ignore` is read from the selected target by default, through the same contained read
-policy; an unrelated working directory does not contribute implicit suppressions. The
+websec reads `.websec-ignore` from the selected target by default, through the same contained read
+policy. An unrelated working directory does not add implicit suppressions. The
 [0.14.0 migration guide](../MIGRATING-0.14.0.md) explains the move to schema 2.0.
 
 ## See also

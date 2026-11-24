@@ -61,6 +61,35 @@ class HookContracts(unittest.TestCase):
         self.assertEqual(self.run_hook(WEBSEC_HOOK_FAIL_ON="low"), 1)
         self.assertEqual(self.run_hook(WEBSEC_HOOK_FAIL_ON="high", WEBSEC_HOOK_SCAN="1", WEBSEC_HOOK_SCANNERS="semgrep"), 3)
 
+    def test_pre_push_scans_dependencies_by_default(self):
+        self.assertEqual(hooks._scan_mode(None, True), "deps")
+        self.assertEqual(hooks._scan_mode("", True), "deps")
+        self.assertEqual(hooks._scan_mode(None, False), "off")      # advisory post-commit stays fast
+        self.assertEqual(hooks._scan_mode("0", True), "off")
+        self.assertEqual(hooks._scan_mode("1", True), "all")
+        captured = []
+        def fake_invoke(root, guard, args):
+            captured.append(args)
+            return 2, None, {}
+        env = dict(self.env); env.pop("WEBSEC_HOOK_SCAN")
+        with patch.dict(os.environ, env, clear=False), patch.object(hooks, "_invoke", fake_invoke), \
+             patch.object(hooks.shutil, "which", lambda name: "/bin/" + name if name == "osv-scanner" else None), \
+             contextlib.redirect_stderr(io.StringIO()):
+            os.environ.pop("WEBSEC_HOOK_SCAN", None)
+            hooks.run_guardrail(pre_push=True)
+        self.assertIn("--scan", captured[-1])
+        self.assertEqual(captured[-1][captured[-1].index("--scanners") + 1], "osv-scanner")
+
+    def test_missing_sca_tool_is_loud_and_never_reuses_a_scanned_baseline(self):
+        env = dict(self.env); env.pop("WEBSEC_HOOK_SCAN")
+        err = io.StringIO()
+        with patch.dict(os.environ, env), patch("shutil.which", return_value=None), contextlib.redirect_stderr(err):
+            os.environ.pop("WEBSEC_HOOK_SCAN", None)
+            self.assertEqual(hooks.run_guardrail(pre_push=True), 0)
+        self.assertIn("dependency scan SKIPPED", err.getvalue())
+        state = json.loads((self.guard / "accepted-state.json").read_text())
+        self.assertEqual(state["policy"]["scan_mode"], "deps-unavailable")
+
     def test_lock_and_invalid_policy_fail_gate_but_advisory_is_nonblocking(self):
         self.guard.mkdir(); (self.guard / "running.lock").mkdir()
         self.assertEqual(self.run_hook(), 2)

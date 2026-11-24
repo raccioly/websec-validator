@@ -2,19 +2,19 @@
 
 Review date: September 11, 2026 (America/New_York)
 Reviewed revision: 2f75cc607eec972c550584694cc05fc2dca40012, main, v0.13.0
-Status: the user approved all six roadmap batches. This document preserves the initial assessment;
-the completed implementation and final validation appear in [validation.md](validation.md). The initial baseline statements below
+Status: the user approved all six roadmap batches. This document preserves the initial assessment.
+The completed implementation and final validation appear in [validation.md](validation.md). The initial baseline statements below
 describe the pre-change checkout, not current implementation status.
 
 ## Assessment
 
-The strongest direction is an evidence-driven security workbench: discover each project's trust boundaries, combine specialist scanners, explain coverage gaps, propose verifiable repairs, and revisit findings when code, policy, or threat intelligence changes.
+The strongest direction is an evidence-driven security workbench. It would discover each project's trust boundaries, combine specialist scanners, explain coverage gaps, propose verifiable repairs, and revisit findings when code, policy or threat intelligence changes.
 
 The existing product already supports much of that workflow. Its main limitation is the reliability of its conclusions. Several reproducible paths turn incomplete evidence into reassuring output or incorrect calibration labels. Expanding detector counts before fixing those paths would amplify that weakness.
 
 No scanner can promise protection against all threats or all project types. The useful promise is explicit coverage, reproducible findings, and tested improvements. A new language appearing in a stack list is not equivalent to security analysis of that language.
 
-This was a broad architecture, detection, trust-boundary, testing, and research review, with targeted source inspection and synthetic reproductions. It is not an exhaustive line-by-line audit or a live penetration test of deployed projects. No other private projects were scanned; no upstream code was copied; no project source, commits, or deployments were changed.
+This was a broad architecture, detection, trust-boundary, testing, and research review, with targeted source inspection and synthetic reproductions. It is not an exhaustive line-by-line audit or a live penetration test of deployed projects. It examined no other private projects. It copied no upstream code. It changed no project source, commits or deployments.
 
 ## Verified baseline
 
@@ -42,7 +42,7 @@ Strengths worth preserving: offline core, external-tool adapters, separate sever
 | Prioritization | Import-based hints, graph blast radius, EPSS/KEV cache | Freshness and provenance; do not call import absence unreachability |
 | Learning | Corpus calibration, local overlay, dynamic/DAST ingestion | Stop deriving ground truth from unrelated alerts and ambiguous statuses |
 
-Bandit and Prowler are detect-only registry entries: they have no execution adapter. Installed/available/runnable/actually-ran must be different capability states.
+Bandit and Prowler are detect-only registry entries. They have no execution adapter. Installed, available, runnable and actually-ran must be different capability states.
 
 ## Findings requiring implementation
 
@@ -56,17 +56,17 @@ A localhost reproduction sent an unauthenticated tools/call request with foreign
 
 The reproduction establishes accepted requests and arbitrary-directory recon. It does not establish a complete browser DNS-rebinding exploit or arbitrary raw-file disclosure.
 
-Fix: retain stdio; constrain HTTP to loopback initially, validate Host/Origin, authenticate HTTP clients, restrict requested paths to explicitly configured roots, reject malformed/oversized requests, and bound concurrent work. Reject unsafe exposure at startup. Update HTTP compatibility claims against the selected protocol version.
+Fix: retain stdio. Constrain HTTP to loopback initially. Validate Host/Origin, authenticate HTTP clients, restrict requested paths to explicitly configured roots, reject malformed/oversized requests, and bound concurrent work. Reject unsafe exposure at startup. Update HTTP compatibility claims against the selected protocol version.
 
-Acceptance: bad/missing credentials, foreign origins, unexpected Host, sibling roots, symlink escape, invalid body length, and oversized requests are rejected; an authorized in-root scan succeeds. The [MCP transport specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) requires Origin validation and recommends authentication.
+Acceptance: bad/missing credentials, foreign origins, unexpected Host, sibling roots, symlink escape, invalid body length, and oversized requests are rejected. An authorized in-root scan succeeds. The [MCP transport specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) requires Origin validation and recommends authentication.
 
 ### F2 — P1: A file symlink escapes the scan root; exclusions are inconsistent
 
 Evidence: [base.py reader](https://github.com/raccioly/websec-validator/blob/2f75cc607eec972c550584694cc05fc2dca40012/src/websec_validator/extractors/base.py#L149) and [glob](https://github.com/raccioly/websec-validator/blob/2f75cc607eec972c550584694cc05fc2dca40012/src/websec_validator/extractors/base.py#L177).
 
-A synthetic repo containing linked.py pointing to a synthetic sibling file outside the repo returned that file's marker through iter_code(). Separately, excluding an omit directory did not stop the dependency extractor from reading omit/package.json and emitting an install-script finding: glob does not apply the same exclusions as the code walk.
+A synthetic repo containing linked.py pointing to a synthetic sibling file outside the repo returned that file's marker through iter_code(). Separately, excluding an omit directory did not stop the dependency extractor from reading omit/package.json and emitting an install-script finding. The glob does not apply the same exclusions as the code walk.
 
-Fix: one root-relative file-access policy for code, manifests, globbed specs, agent configs, and auxiliary artifacts. Refuse paths escaping the resolved scan root; skip non-regular files; apply exclusions consistently. Keep explicitly requested external artifacts a separate, visible input.
+Fix: one root-relative file-access policy for code, manifests, globbed specs, agent configs, and auxiliary artifacts. Refuse paths that escape the resolved scan root. Skip non-regular files. Apply exclusions consistently. Keep explicitly requested external artifacts a separate, visible input.
 
 Acceptance: no out-of-root reads, no FIFO/device hangs, identical exclusions across extractors, explicit accounting of skipped paths, and continued support for repositories located under ancestors named vendor or .cache. Do not scan private .local directories.
 
@@ -74,11 +74,11 @@ Acceptance: no out-of-root reads, no FIFO/device hangs, identical exclusions acr
 
 Evidence: [CLI gate](https://github.com/raccioly/websec-validator/blob/2f75cc607eec972c550584694cc05fc2dca40012/src/websec_validator/cli.py#L335), [extractor driver](https://github.com/raccioly/websec-validator/blob/2f75cc607eec972c550584694cc05fc2dca40012/src/websec_validator/extractors/__init__.py#L66), and [scanner normalization](https://github.com/raccioly/websec-validator/blob/2f75cc607eec972c550584694cc05fc2dca40012/src/websec_validator/scanners.py#L720).
 
-Injected a Semgrep timeout into a CLI run with --scan --scanners semgrep --fail-on high. Exit code was 0. Existing normalization already tracks scanner_errors and parse_failed; the gate does not consume them. This is a missing end-to-end contract, not a need to invent error collection from scratch.
+Injected a Semgrep timeout into a CLI run with --scan --scanners semgrep --fail-on high. Exit code was 0. Existing normalization already tracks scanner_errors and parse_failed, but the gate does not consume them. This is a missing end-to-end contract, not a need to invent error collection from scratch.
 
 A 2,000,001-byte Python file produced files_scanned=1 and files_truncated=false. RepoContext records oversized internally, but the facts output has no oversized disclosure. The file contributes no analyzed contents.
 
-Fix: expose a coverage record with per-extractor and per-scanner outcomes, unsupported formats, unreadable/oversized files, and caps. Add a distinct incomplete exit status under an explicit completeness policy; require explicitly selected scanners to run successfully. Preserve useful partial artifacts.
+Fix: expose a coverage record with per-extractor and per-scanner outcomes, unsupported formats, unreadable/oversized files, and caps. Add a distinct incomplete exit status under an explicit completeness policy. Require explicitly selected scanners to run successfully. Preserve useful partial artifacts.
 
 Acceptance: timeout, malformed report, missing requested tool, extractor exception, unreadable file, and truncated walk cannot be reported as complete. Report-only runs can still finish, but show incompleteness prominently.
 
@@ -90,7 +90,7 @@ Synthetic input document.write(location.search) produced one XSS lead. Adding a 
 
 Fix: associate a sanitizer with the actual expression reaching each sink. Retain uncertainty when that relationship cannot be established. Apply the same audit to authorization, redirect, transaction, and LLM guard co-occurrence rules.
 
-Acceptance: vulnerable plus unrelated-safe code remains detected; comments/imports cannot suppress findings; directly sanitized output remains quiet; aliases, reassignment, branches, and multiple sinks have paired vulnerable/safe cases.
+Acceptance: vulnerable plus unrelated-safe code remains detected. Comments and imports cannot suppress findings. Directly sanitized output remains quiet. Aliases, reassignment, branches and multiple sinks have paired vulnerable/safe cases.
 
 ### F5 — P1: DAST feedback creates incorrect permanent learning labels
 
@@ -100,17 +100,17 @@ A report containing one reflected-XSS alert at /public confirmed an XSS finding 
 
 Fix: correlate by application, endpoint, method, parameter, identity, rule, build, and scan coverage. A class-level alert is supporting evidence, not confirmation of every finding in that class. Silence is inconclusive unless the exact check and relevant surface were exercised successfully.
 
-Acceptance: an alert on route A never confirms/refutes route B; a passive scan never refutes an active finding; incomplete authentication or crawling yields unknown. Preserve sample provenance and deduplicate repeat observations. Existing overlays may contain weak labels; quarantine/review them rather than silently deleting user history.
+Acceptance: an alert on route A never confirms or refutes route B. A passive scan never refutes an active finding. Incomplete authentication or crawling yields unknown. Preserve sample provenance and deduplicate repeat observations. Existing overlays may contain weak labels. Quarantine and review them, and do not silently delete user history.
 
 ### F6 — P1: Dynamic verdicts overstate both safety and confirmation
 
 Evidence: [BOLA summary](https://github.com/raccioly/websec-validator/blob/2f75cc607eec972c550584694cc05fc2dca40012/src/websec_validator/dynamic.py#L255), [write verdicts](https://github.com/raccioly/websec-validator/blob/2f75cc607eec972c550584694cc05fc2dca40012/src/websec_validator/dynamic.py#L395), and [calibration labels](https://github.com/raccioly/websec-validator/blob/2f75cc607eec972c550584694cc05fc2dca40012/src/websec_validator/calibration.py#L213).
 
-Both synthetic cross-tenant requests returned 500; summary still said “0/2 cross-tenant GET reads blocked — all isolated.” A synthetic 400 validation response was converted into is_real=true for missing-auth. Validation can precede authentication; the status alone does not prove bypass. Likewise, a nonempty 200 needs ownership evidence before it proves cross-tenant leakage.
+Both synthetic cross-tenant requests returned 500, yet the summary still said “0/2 cross-tenant GET reads blocked — all isolated.” A synthetic 400 validation response was converted into is_real=true for missing-auth. Validation can precede authentication, so the status alone does not prove bypass. Likewise, a nonempty 200 needs ownership evidence before it proves cross-tenant leakage.
 
 Fix: explicit confirmed-vulnerable / blocked / inconclusive / not-tested states, positive controls for the legitimate user, victim-owned resource markers, expected route policy, and repeatable comparisons. Only evidence-backed confirmations enter calibration.
 
-Acceptance: all-error and zero-test runs never claim isolation; validation errors cannot become confirmed vulnerabilities alone; tests distinguish public responses, soft denials, real victim data, and transport failure.
+Acceptance: all-error and zero-test runs never claim isolation. Validation errors cannot become confirmed vulnerabilities alone. Tests distinguish public responses, soft denials, real victim data and transport failure.
 
 ### F7 — P2: “Immutable” runs collide within the same second
 
@@ -118,7 +118,7 @@ Evidence: [_new_run_dir](https://github.com/raccioly/websec-validator/blob/2f75c
 
 Two calls with a fixed same-second timestamp returned the same directory because mkdir uses exist_ok=True. Later artifact writes can overwrite the earlier run.
 
-Fix: exclusive unique directory creation; publish latest atomically after the run finishes. Acceptance: simultaneous runs are distinct and failed runs never replace the last complete latest pointer.
+Fix: exclusive unique directory creation. Publish latest atomically after the run finishes. Acceptance: simultaneous runs are distinct and failed runs never replace the last complete latest pointer.
 
 ### F8 — P2: Threat-intelligence changes destabilize finding identity
 
@@ -126,17 +126,17 @@ Evidence: [baseline fingerprint](https://github.com/raccioly/websec-validator/bl
 
 Fingerprints include the human-readable title. Adding an EPSS annotation changes identity for the same synthetic CVE/location. Line-number changes can also churn identities when included in location. Findings that disappear are counted as fixed without proving comparable coverage.
 
-Fix: stable detector/rule identity, normalized resource identity and semantic sink anchor; keep presentation, confidence, and threat evidence outside identity. Track newly exploited, severity-changed, no-longer-observed, and verified-fixed separately.
+Fix: stable detector/rule identity, normalized resource identity and semantic sink anchor. Keep presentation, confidence and threat evidence outside identity. Track newly exploited, severity-changed, no-longer-observed and verified-fixed separately.
 
-Acceptance: wording/EPSS updates preserve identity; a newly added sink gets a new identity; scanner loss never marks an issue fixed. Define a migration for existing baselines and acknowledgements.
+Acceptance: wording and EPSS updates preserve identity. A newly added sink gets a new identity. Scanner loss never marks a finding fixed. Define a migration for existing baselines and acknowledgements.
 
 ### F9 — P2: Language/framework coverage is substantially narrower than the broad product ambition
 
 Evidence: [CODE_EXT](https://github.com/raccioly/websec-validator/blob/2f75cc607eec972c550584694cc05fc2dca40012/src/websec_validator/extractors/base.py#L24).
 
-Isolated files with .vue, .svelte, .mts, .cts, .html, .cs, .rs, .kt, and .swift extensions each yielded zero built-in code files. A v-html signature exists, but native .vue files do not enter that source loop. Optional tools may see additional formats; this finding concerns built-in coverage.
+Isolated files with .vue, .svelte, .mts, .cts, .html, .cs, .rs, .kt, and .swift extensions each yielded zero built-in code files. A v-html signature exists, but native .vue files do not enter that source loop. Optional tools may see additional formats. This finding concerns built-in coverage.
 
-Fix: inventory formats independently from detector support; expose a capability matrix; add template and module variants with tested semantics. Route larger language additions through specialist analyzer outputs.
+Fix: inventory formats independently from detector support. Expose a capability matrix. Add template and module variants with tested semantics. Route larger language additions through specialist analyzer outputs.
 
 Acceptance: every recognized file family is either analyzed by named checks or explicitly unsupported. “Framework detected” must not imply “authorization verified.”
 
@@ -160,13 +160,13 @@ For monorepos, identify service boundaries before merging framework and control 
 
 ### 2. Evidence that follows a finding
 
-Extend the existing ledger with source-to-sink evidence, guard scope, analyzer/rule version, input revision, and coverage references. Reuse external flow traces where available; Python's stdlib AST can support narrowly scoped Python checks. Do not attempt a universal regex dataflow engine.
+Extend the existing ledger with source-to-sink evidence, guard scope, analyzer/rule version, input revision, and coverage references. Reuse external flow traces where available. Python's stdlib AST can support narrowly scoped Python checks. Do not attempt a universal regex dataflow engine.
 
-A high-value innovation is a counterexample test for each control: remove the guard and prove the bad case fails; restore it and prove legitimate behavior remains. Adding unrelated safe code must never erase a dangerous path.
+A high-value idea is a counterexample test for each control. Remove the guard and prove the bad case fails. Restore it and prove legitimate behavior remains. Adding unrelated safe code must never erase a dangerous path.
 
 ### 3. Continuous protection triggered by three kinds of change
 
-- Code change: existing hooks/CI rerun relevant checks, with periodic full scans to cover shared-control changes.
+- Code change: existing hooks/CI rerun relevant checks, with periodic full runs to cover shared-control changes.
 - Threat change: a new advisory, exploitation status, or detector revision re-evaluates affected dependencies/surfaces even when source is unchanged.
 - Assurance change: expired suppression, failed scanner, stale feed, new unsupported format, or missing verification reopens review.
 
@@ -241,7 +241,7 @@ Start with the shared read boundary (F2), which protects CLI and MCP scans alike
 
 - Docs reviewed: all four canonical documents, README, AGENTS, BENCHMARKS, proof protocol, and the relevant OpenWolf protocol.
 - Existing pattern: “Walk the tree once; cache file text; serve cheap queries to every extractor.” RepoContext is the common policy point; glob and manifest currently bypass parts of its policy.
-- Proposed approach: centralize allowed-file checks in RepoContext; require resolved paths to remain within the scan root; skip non-regular files and .local; apply exclusions equally to code, text, manifests, and glob. Preserve existing skip-directory behavior relative to the root. External scanner traversal requires a separate follow-up contract.
+- Proposed approach: centralize allowed-file checks in RepoContext. Require resolved paths to remain within the scan root. Skip non-regular files and .local. Apply exclusions equally to code, text, manifests, and glob. Preserve existing skip-directory behavior relative to the root. External scanner traversal requires a separate follow-up contract.
 - Files to change: src/websec_validator/extractors/base.py; tests/test_hardening.py; docs-canonical/SECURITY.md; docs-canonical/TEST-SPEC.md; CHANGELOG.md; .github/workflows/ci.yml. Six files, no new dependency.
 - Risk: HIGH because this changes a security boundary and scan inclusion semantics.
 - Acceptance tests: escaping file symlink; in-root normal file; excluded nested package manifest; direct manifest exclusion; non-regular file; private .local; skip-named ancestor; existing fixture and source scans.

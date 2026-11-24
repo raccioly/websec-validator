@@ -1,11 +1,11 @@
 # CLI reference
 
-Every `websec` command, option, default and exit code, written from the argparse tree in
-[`src/websec_validator/cli.py`](../../src/websec_validator/cli.py) (`build_parser()`). A test binds
-this page to that parser: a new subcommand or long option fails CI until it is documented here.
+This page lists every `websec` command, option, default and exit code. It comes from the argparse
+tree in [`src/websec_validator/cli.py`](../../src/websec_validator/cli.py) (`build_parser()`). A test
+binds this page to that parser. If a subcommand or long option is not documented here, CI fails.
 
-Options that send data off the machine are marked **[network]**. Everything else reads local files
-and writes local artifacts only.
+Options that send data off the machine are marked **[network]**. All other options read local files
+and write local artifacts only.
 
 ## Contents
 
@@ -31,23 +31,23 @@ websec [-h] [--version] <command> ...
 websec <path> [run options]
 ```
 
-`python -m websec_validator …` is the same CLI with the same options and exit codes, for
-environments where the `websec` console script is not on `PATH` (since 0.22.2).
+`python -m websec_validator …` is the same CLI with the same options and exit codes. Use it when the
+`websec` console script is not on `PATH` (since 0.22.2).
 
 | Option | Description |
 |---|---|
-| `--version` | Print `websec-validator <version>` and exit 0. The version comes from the installed package metadata; a source tree that is not installed reports `0.0.0+source`. |
+| `--version` | Print `websec-validator <version>` and exit 0. The version comes from the installed package metadata. A source tree that is not installed reports `0.0.0+source`. |
 | `-h`, `--help` | Print help for `websec` or for any subcommand. |
 
 Dispatch rules (from `main()`):
 
 - `websec` with no arguments prints the help and exits 0.
-- `websec <path>` with no subcommand is rewritten to `websec run <path>`, but **only if the path
-  exists**. An unknown word that is not an existing path is an error (exit 2) with a "did you mean"
-  suggestion, so a typo such as `websec atest .` never silently becomes a scan of `.`.
+- `websec <path>` with no subcommand becomes `websec run <path>`, but **only if the path exists**.
+  An unknown word that is not an existing path is an error (exit 2) with a "did you mean"
+  suggestion. A typo such as `websec atest .` therefore never silently becomes a run on `.`.
 - The usage line lists every user-facing command, including `emit-context`, `gate` and `attest`.
-  `recon`, `proof` and `calibrate` are left out of the help on purpose (see
-  [Development commands](#development-commands)) and work when invoked by name.
+  The help leaves out `recon`, `proof` and `calibrate` on purpose (see
+  [Development commands](#development-commands)). They work when you invoke them by name.
 
 ```bash
 websec --version
@@ -57,7 +57,7 @@ websec run --help
 
 ## Exit codes
 
-`websec run` and `websec gate` follow a four-code contract so CI can tell a vulnerability from a
+`websec run` and `websec gate` follow a four-code contract. CI can then tell a vulnerability from a
 broken toolchain. The constants are `EXIT_OK`, `EXIT_FINDINGS`, `EXIT_USAGE` and `EXIT_INCOMPLETE`
 in `cli.py`.
 
@@ -69,11 +69,11 @@ in `cli.py`.
 | `3` | Requested checks did not complete (`--require-complete`, or `--fail-on` with an execution gap), or `--require-analyzed` found no analyzable source. | The result is **not** a pass. Read `coverage.gaps` in `coverage.json`. |
 
 **Both failing and incomplete.** A run with findings at or above `--fail-on` **and** an execution
-gap exits `1`, and prints both facts on stderr: the finding is definite, and the count is a floor,
-not a total. The ledger records the exact combination so nothing is lost by the collapse.
+gap exits `1`. It prints both facts on stderr. The finding is definite, and the count is a floor,
+not a total. The ledger records the exact combination, so the single exit code loses nothing.
 
-**The verdict is evidence, not only an exit code.** `findings-ledger.json` carries a `gate` object
-written before any artifact, so the artifact and the exit code cannot disagree:
+**The verdict is evidence, not only an exit code.** `findings-ledger.json` carries a `gate` object.
+websec writes it before any artifact, so the artifact and the exit code cannot disagree:
 
 | `gate.verdict` | `gate.failure_kind` | Exit |
 |---|---|---|
@@ -106,8 +106,8 @@ an invalid argument combination) exits `2` with the message on stderr.
 
 ## Environment variables
 
-Every variable the CLI, hooks, MCP server and update check read. None is required for a plain
-`websec run`.
+These are all the variables that the CLI, hooks, MCP server and update check read. A plain
+`websec run` needs none of them.
 
 | Variable | Read by | Meaning |
 |---|---|---|
@@ -119,8 +119,8 @@ Every variable the CLI, hooks, MCP server and update check read. None is require
 | `XDG_CACHE_HOME` | `intel`, `run --scan` | When `WEBSEC_ENRICH_DIR` is unset, the cache is `$XDG_CACHE_HOME/websec`, else `~/.cache/websec`. |
 | `WEBSEC_CALIBRATION_HOME` | `run`, `gate`, `dynamic`, `feedback`, `calibrate`, MCP | Directory of the local calibration overlay (`calibration-local.json`, pending feedback candidates, `calibration-synthetic.json`). Default: `~/.cache/websec-validator/`. |
 | `WEBSEC_HOOK_FAIL_ON` | git hooks | Pre-push severity threshold: `critical`, `high`, `medium` or `low`. Default `high`. Any other value makes the hook's execution incomplete. |
-| `WEBSEC_HOOK_SCAN` | git hooks | `1` runs the static scanners (`--scan`). Default: recon only. |
-| `WEBSEC_HOOK_SCANNERS` | git hooks | Comma-separated scanners to require. Needs `WEBSEC_HOOK_SCAN=1`, otherwise the hook's execution is incomplete. |
+| `WEBSEC_HOOK_SCAN` | git hooks | Default on pre-push: a dependency scan (osv-scanner, else trivy) that blocks on vulnerable dependencies. `1` runs every static scanner (`--scan`), `deps` the dependency scan, `0` none. Default on post-commit: recon only. |
+| `WEBSEC_HOOK_SCANNERS` | git hooks | Comma-separated scanners to require. Needs scanning on (`WEBSEC_HOOK_SCAN` unset on pre-push, `deps` or `1`), otherwise the hook's execution is incomplete. |
 | `WEBSEC_SKIP_HOOK` | git hooks | `1` skips the git hook for one invocation. The bypass is appended to `$GIT_DIR/websec-guardrail/bypass.jsonl`. The agent hook ignores it on purpose. |
 | `WEBSEC_GATE_FAIL_ON` | agent hook | Threshold for the PostToolUse gate. Default `medium`; an unrecognised value falls back to `medium`. |
 | `WEBSEC_GATE_MIN_CONFIDENCE` | agent hook | Confidence floor for the PostToolUse gate. Default `low` (no filtering); an unrecognised value means no filtering. |
@@ -129,16 +129,16 @@ Every variable the CLI, hooks, MCP server and update check read. None is require
 
 Also relevant:
 
-- websec removes every `GIT_*` variable from the environment of its own `git` subprocesses, so a
-  stray `GIT_DIR` cannot redirect what it reads.
+- websec removes every `GIT_*` variable from the environment of its own `git` subprocesses. A
+  stray `GIT_DIR` therefore cannot redirect what websec reads.
 - Staged probe scripts under `probes/` read their own variables (`TARGET`, `TOKEN_A`, `TOKEN_B`,
-  `COOKIE_A`, `APIKEY`, `OBJ_A`, and others). The CLI never reads them; see
+  `COOKIE_A`, `APIKEY`, `OBJ_A`, and others). The CLI never reads them. See
   `probes/_lib.py` in a run directory.
 - `WEBSEC_INPUT_*` and `WEBSEC_ACTION_PATH` are internal to [`action.yml`](../../action.yml). Set
   the action's inputs instead.
 
-Configuration that lives in files rather than variables is described in
-[configuration.md](configuration.md).
+[configuration.md](configuration.md) describes the configuration that lives in files, not in
+variables.
 
 ## `websec run`
 
@@ -198,20 +198,19 @@ websec run <target> [--scan] [--scanners A,B] [--sarif REPORT ...] [--out DIR]
 | `--application-id ID` | target path | Stable application identity recorded in `verification_context`, used by `repair-verify`. |
 | `--build-id ID` | analyzed input digest | Reviewed build identity recorded in `verification_context`. |
 
-**Network:** none by default. `--scan` runs third-party tools as subprocesses; websec itself sends
-nothing, but those tools follow their own network behaviour. websec invokes `semgrep scan --config
-auto`, `osv-scanner scan` and `trivy fs` without offline flags, so check each tool's documentation
-for what it fetches or transmits. Only `--verify-secrets` and `--network` make websec send data.
+**Network:** none by default. `--scan` runs third-party tools as subprocesses. websec itself sends
+nothing, but those tools follow their own network behavior. websec invokes `semgrep scan --config
+auto`, `osv-scanner scan` and `trivy fs` without offline flags. Check each tool's documentation for
+what it fetches or transmits. Only `--verify-secrets` and `--network` make websec send data.
 
-**Files written:** a new directory `DIR/runs/<timestamp>-<random>/` containing `FACTS.json`,
+**Files written:** a new directory `DIR/runs/<timestamp>-<random>/` that contains `FACTS.json`,
 `coverage.json`, `findings-ledger.json`, `findings.envelope.json`, `results.sarif`,
 `repair-plans.json`, `attack-surface.json`, `CONSTITUTION.md`, `AGENT-BRIEFING.md`, `REPORT.md`,
 `manifest.json` (with sha256 digests of the artifacts) and `probes/`; plus `findings.json` with
 `--scan` or `--sarif`, `sarif-imports.json` with `--sarif`, `diff-scope.json` with `--diff`, the SBOM
-with `--sbom`, and each scanner's native output. `DIR/latest` is replaced atomically **only when
-execution completed**; a partial attempt keeps its own directory and leaves `latest` on the previous
-completed run. Nothing is ever overwritten. Field-by-field descriptions are in
-[outputs.md](outputs.md).
+with `--sbom`, and each scanner's native output. websec replaces `DIR/latest` atomically **only when
+execution completed**. A partial attempt keeps its own directory and leaves `latest` on the previous
+completed run. websec never overwrites anything. [outputs.md](outputs.md) describes each field.
 
 **Exit codes:** see [Exit codes](#exit-codes). Argument conflicts (`--scanners` without `--scan`,
 `--verify-secrets` without `--scan`, more than 8 `--sarif`) exit 2.
@@ -224,8 +223,8 @@ websec run . --network-dry-run
 
 ## `websec init`
 
-Scaffold a `.websec-ignore` for this repository from the test, fixture, seed and vendor
-directories that actually exist in it, or export its reviewed acknowledgements.
+Create a starting `.websec-ignore` for this repository from the test, fixture, seed and vendor
+directories that exist in it. Or export its reviewed acknowledgements.
 
 ```text
 websec init [target] [--dry-run] [--force] [--ledger findings-ledger.json] [--claimspec PATH]
@@ -240,11 +239,11 @@ websec init [target] [--dry-run] [--force] [--ledger findings-ledger.json] [--cl
 | `--ledger PATH` | `<target>/websec-out/latest/findings-ledger.json`, then `./websec-out/latest/findings-ledger.json` | A prior run's findings ledger for this target, read only. Secret findings in a proposed directory become fingerprint acknowledgements instead of a glob (see below). A default-location ledger recorded for a different target is ignored; an explicit `--ledger` that is unreadable, not a ledger, or for a different target exits `2`. |
 | `--claimspec PATH` | none | Instead of scaffolding, export the reviewed `fingerprint:` acknowledgements already in `.websec-ignore` as a claimspec v1 `ignore` document. `-` writes to stdout. Path and category patterns and acknowledgements without a usable reason or expiry are omitted and reported on stderr, so the export is never mistaken for the whole policy. |
 
-Every proposal is printed with its file count before anything is written. Since 0.22.0:
+`init` prints every proposal with its file count before it writes anything. Since 0.22.0:
 
 - Every proposed directory glob carries the comment `also suppresses FUTURE findings here,
-  including real secrets; prefer fingerprint: acks`. A glob hides findings that do not exist yet,
-  including a real credential committed to that directory later.
+  including real secrets; prefer fingerprint: acks`. A glob hides findings that do not exist yet.
+  That includes a real credential that someone commits to that directory later.
 - When a prior ledger is available and the **only** findings it records under a proposed directory
   are secrets, `init` does not apply the glob. It writes one
   `fingerprint:<fp> expires:<today+90d>  # REVIEW: test/fixture credential, confirm it is fake or rotate it (<file>:<line>)`
@@ -252,10 +251,10 @@ Every proposal is printed with its file count before anything is written. Since 
   gates. The `REVIEW:` reason is a placeholder: confirm each value is fake, or rotate it, and
   rewrite the reason before committing. A directory that also holds non-secret findings, or whose
   findings cannot all be tied to a file in this working tree, keeps the (warned) glob.
-- Without a ledger, `init` says so and suggests running `websec run . --scan` first. `latest` only
-  advances on a completed run; after a partial one, pass that run's ledger with `--ledger`.
+- Without a ledger, `init` says so and suggests that you run `websec run . --scan` first. `latest`
+  advances only on a completed run. After a partial run, pass that run's ledger with `--ledger`.
 
-`init` never scans. The file grammar is in [configuration.md](configuration.md#websec-ignore).
+`init` never runs scanners. The file grammar is in [configuration.md](configuration.md#websec-ignore).
 
 **Network:** none. **Files written:** `<target>/.websec-ignore`, or the `--claimspec` file.
 **Exit codes:** `0` written, dry run, or exported; `2` when the file exists without `--force`,
@@ -271,7 +270,7 @@ websec init --claimspec -
 ## `websec doctor`
 
 Show which scanners are installed, their versions, and whether each is compatible with the
-invocation websec builds.
+command line that websec builds.
 
 ```text
 websec doctor [target]
@@ -281,8 +280,8 @@ websec doctor [target]
 languages.
 
 `doctor` also prints the engine's provenance (which installation is running) and the offline
-release-check advisory. A scanner marked `✗` is too old for websec's argv; one marked `?` has an
-unknown version.
+release-check advisory. A scanner marked `✗` is too old for websec's argv. A scanner marked `?` has
+an unknown version.
 
 Two more sections (since 0.22.0):
 
@@ -295,8 +294,8 @@ Two more sections (since 0.22.0):
   does not change the exit code.
 
 **Network:** none (the release check reads the local cache only). **Files written:** none.
-**Exit codes:** `0`; `2` when an installed scanner is incompatible, so a CI preflight can stop
-before trusting a scan that would silently produce nothing.
+**Exit codes:** `0`; `2` when an installed scanner is incompatible. A CI preflight can then stop
+before it trusts a run that would silently produce nothing.
 
 ```bash
 websec doctor
@@ -316,10 +315,10 @@ websec update-check [--online] [--format {text,json}]
 | `--online` | off | **[network]** Fetch `https://pypi.org/simple/websec-validator/` metadata to find the newest stable, non-yanked release. Installs nothing. Ask the human before using it. |
 | `--format` | `text` | `text` or `json`. |
 
-Without `--online` it reads the cached result of the last online check and labels it `cached`
-(under 24 hours old) or `stale`. The cache holds only `latest_version` and `checked_at`. The
-approval rule it prints is the one AI agents must follow: ask before checking, and treat an upgrade
-as a separate decision. See [mcp.md](mcp.md#update-check-approval-rule).
+Without `--online`, it reads the cached result of the last online check. It labels the result
+`cached` (under 24 hours old) or `stale`. The cache holds only `latest_version` and `checked_at`.
+The command prints an approval rule. AI agents must follow it: ask before checking, and treat an
+upgrade as a separate decision. See [mcp.md](mcp.md#update-check-approval-rule).
 
 **Files written:** `release.json` in `$WEBSEC_UPDATE_HOME` or `~/.cache/websec-validator/`, after an
 online check only. **Exit codes:** always `0`; release advice is never a gate.
@@ -331,16 +330,16 @@ websec update-check --online --format json
 
 ## `websec demo`
 
-Run a real pass against a bundled sample application so you can see the output before pointing
-the tool at your own code.
+Run websec against a bundled sample application. You can see the output before you use the tool on
+your own code.
 
 ```text
 websec demo
 ```
 
-No options. The sample is materialized in a temporary directory that is deleted afterwards; the
-current project is not touched. **Network:** none. **Exit codes:** `0`; `1` if the sample
-produced no findings, which indicates a detector regression rather than a clean result.
+No options. websec writes the sample to a temporary directory and deletes it afterwards. It does
+not touch the current project. **Network:** none. **Exit codes:** `0`; `1` if the sample produced
+no findings. That indicates a detector regression, not a clean result.
 
 ```bash
 websec demo
@@ -387,7 +386,7 @@ websec capabilities
 
 ## `websec gate`
 
-A fast, scoped pass/fail on the files you just changed, for use inside an agent loop. Writes no
+A fast pass/fail result for the files you just changed. Use it inside an agent loop. It writes no
 artifacts and never advances a baseline or the `latest` pointer.
 
 ```text
@@ -408,19 +407,20 @@ websec gate [target] [--only PATH ...] [--fail-on {critical,high,medium,low}]
 | `--format` | `text` | `text` is what a harness feeds back to the model; `json` for tooling. |
 
 **Default scope** is the working tree: tracked modifications plus untracked files with an
-analyzable suffix, deletions excluded, at most 200 files (more is recorded as an execution gap).
-It is not `base...HEAD`, which would miss uncommitted agent edits. When the target is a
-subdirectory of the repository, the changed paths are translated to be relative to it and changes
-outside it are ignored. `.websec-ignore` applies exactly as in `run`. A finding attributed to a
-*different* existing repository file is reported under `outside_scope` and does not block; one that
-names no file still blocks.
+analyzable suffix, deletions excluded, at most 200 files (websec records more files as an execution
+gap). The scope is not `base...HEAD`, which would miss uncommitted agent edits. When the target is a
+subdirectory of the repository, websec makes the changed paths relative to it and ignores changes
+outside it. `.websec-ignore` applies exactly as in `run`. A finding attributed to a *different*
+existing repository file is reported under `outside_scope` and does not block. A finding that names
+no file still blocks.
 
 > [!NOTE]
 > Outside a git repository, with no `--only`, there is no changed-file set. Since 0.22.0 `gate`
 > exits `3` with `error: no VCS to derive changed files from; pass paths explicitly with --only`
 > instead of reporting a pass. Pass `--only` explicitly there.
 
-A scoped pass is a fast retry signal, not a review. **Network:** none. **Files written:** none.
+A scoped pass is a fast signal to retry. It is not a review. **Network:** none. **Files written:**
+none.
 
 **Exit codes:** `0` pass (or nothing changed); `1` blocking findings, or missed paths with
 `--fail-on-missed`; `2` target is not a directory; `3` the changed-file set could not be determined
@@ -448,25 +448,26 @@ websec hooks {install,uninstall,status} [--pre-push] [--agent] [--path DIR]
 | `--agent` | off | Act on the agent-loop hook instead of a git hook: a `PostToolUse` entry (matcher `Write\|Edit\|MultiEdit`, command `websec-agent-hook`, 30 s timeout) in `.claude/settings.json`. `--pre-push` is ignored with `--agent`. |
 | `--path DIR` | current directory | Repository directory. |
 
-**Git hooks.** The hook directory is resolved through `git rev-parse --git-path hooks`, so worktrees,
-`core.hooksPath` and Husky's durable `.husky/<hook>` script are respected. Existing shell hooks are
-preserved (websec inserts a marked section); non-shell hooks are refused. The hook launches the
-installed package with an isolated interpreter. Both hooks run with `--require-complete`; the
-pre-push hook adds `--fail-on` (`WEBSEC_HOOK_FAIL_ON`, default `high`) and a baseline accepted by the
-previous successful gate under the same policy. Advisory runs and failed gates never advance that
-accepted baseline. Artifacts live in `$GIT_DIR/websec-guardrail/` (the five most recent runs are
-kept). The hooks inspect the working tree, not the pushed objects. See the git-hook variables in
-[Environment variables](#environment-variables).
+**Git hooks.** websec finds the hook directory with `git rev-parse --git-path hooks`. Worktrees,
+`core.hooksPath` and Husky's durable `.husky/<hook>` script therefore work. websec keeps existing
+shell hooks and inserts a marked section. It refuses non-shell hooks. The hook launches the
+installed package with an isolated interpreter. Both hooks run with `--require-complete`. The
+pre-push hook adds `--fail-on` (`WEBSEC_HOOK_FAIL_ON`, default `high`) and a baseline that the
+previous successful gate accepted under the same policy. Advisory runs and failed gates never
+advance that accepted baseline. Artifacts live in `$GIT_DIR/websec-guardrail/` (websec keeps the
+five most recent runs). The hooks inspect the working tree, not the pushed objects. See the
+git-hook variables in [Environment variables](#environment-variables).
 
-**Agent hook.** Runs the same evaluation as `websec gate` in-process on each file the agent writes,
-with an analyzable suffix, and blocks the loop (hook exit 2, finding text on stderr) on a finding at
-or above `WEBSEC_GATE_FAIL_ON` (default `medium`). If the gate cannot run it **fails open, loudly**:
-exit 0 with a stderr warning that the edit was not checked. It does not honour `WEBSEC_SKIP_HOOK`,
-because the agent can set environment variables. Installing is an idempotent JSON merge that leaves
-your other hooks alone; an unparseable `settings.json` is refused rather than overwritten.
+**Agent hook.** It runs the same evaluation as `websec gate` in-process on each file that the agent
+writes with an analyzable suffix. It blocks the loop (hook exit 2, finding text on stderr) on a
+finding at or above `WEBSEC_GATE_FAIL_ON` (default `medium`). If the gate cannot run, the hook
+**fails open, loudly**: it exits 0 with a stderr warning that the edit was not checked. It does not
+honor `WEBSEC_SKIP_HOOK`, because the agent can set environment variables. Installing is an
+idempotent JSON merge that leaves your other hooks alone. websec refuses an unparseable
+`settings.json` and does not overwrite it.
 
 > [!WARNING]
-> Both kinds of hook are developer ergonomics, not a control. They can be skipped with
+> Both kinds of hook help developers. They are not a control. You can skip them with
 > `git push --no-verify`, an uninstalled hook, or an edited settings file, and websec cannot
 > observe those bypasses. For enforcement, run `websec run --fail-on ...` as a required CI status
 > check.
@@ -483,8 +484,8 @@ websec hooks status --agent
 
 ## `websec install`
 
-Teach an AI coding agent to use websec by writing a marked instruction block or a dedicated skill
-file where that host reads its standing instructions.
+Teach an AI coding agent to use websec. The command writes a marked instruction block or a
+dedicated skill file where that host reads its standing instructions.
 
 ```text
 websec install {claude,cursor,codex,gemini,aider,generic,status} [--user] [--project-dir DIR] [--uninstall]
@@ -507,10 +508,10 @@ websec install {claude,cursor,codex,gemini,aider,generic,status} [--user] [--pro
 | `aider` | marked block | `CONVENTIONS.md` | `.config/aider/CONVENTIONS.md` |
 | `generic` | marked block | `AGENTS.md` | `AGENTS.md` |
 
-A skill file is owned by websec and deleted on uninstall. A block is the region between
-`<!-- websec-validator:start -->` and `<!-- websec-validator:end -->` in a file you also edit; only
-that region is replaced or removed; a file with duplicated or broken markers is refused rather than
-guessed at. Destinations must resolve inside the project or home directory. **Exit codes:** `0`;
+websec owns a skill file and deletes it on uninstall. A block is the region between
+`<!-- websec-validator:start -->` and `<!-- websec-validator:end -->` in a file you also edit. websec
+replaces or removes only that region. It refuses a file with duplicated or broken markers and does
+not guess. Destinations must resolve inside the project or home directory. **Exit codes:** `0`;
 `2` on an invalid host, an unsafe destination, or ambiguous markers.
 
 ```bash
@@ -521,8 +522,9 @@ websec install status
 
 ## `websec emit-context`
 
-Print recon as a Claude Code `SessionStart` `additionalContext` JSON envelope, so an agent session
-starts with the attack-surface map already in context. Recon only; no scanners.
+Print recon as a Claude Code `SessionStart` `additionalContext` JSON envelope. An agent session then
+starts with the attack-surface map already in context. This command runs recon only, with no
+scanners.
 
 ```text
 websec emit-context <target> [--markdown]
@@ -534,8 +536,8 @@ websec emit-context <target> [--markdown]
 |---|---|---|
 | `--markdown` | off | Print the raw `## SECURITY CONTEXT` block instead of the JSON envelope, for other harnesses. |
 
-The block states its own uncertainty inline (since 0.22.0), on the `Attack surface` line, without
-adding lines:
+Since 0.22.0, the block states its own uncertainty inline, on the `Attack surface` line. It adds no
+lines:
 
 - The route count is marked as a floor, for example `1 route(s) [⚠ route discovery likely
   INCOMPLETE (~13 handler-ish functions; hand-rolled/dynamic router) — count is a floor]`, when
@@ -546,8 +548,8 @@ adding lines:
   discovery incomplete)` when `routes.coverage_warning` is set. A failed Noir or a regex-fallback
   engine on its own caveats the count, not the scheme. Evidence with no caveat is stated plainly.
 
-**Network:** none. **Files written:** none. **Exit codes:** `0`. Wiring it into a session hook is
-covered in [ai-agents.md](../guides/ai-agents.md).
+**Network:** none. **Files written:** none. **Exit codes:** `0`. [ai-agents.md](../guides/ai-agents.md)
+shows how to wire it into a session hook.
 
 ```bash
 websec emit-context .
@@ -570,9 +572,9 @@ websec mcp [--http] [--host HOST] [--port PORT] [--allow-root PATH ...]
 | `--port PORT` | `8733` | HTTP port. |
 | `--allow-root PATH` | none | A directory the HTTP tools may scan (repeatable). **At least one is required with `--http`**; the server refuses to start without it. |
 
-Tools, limits, and client registration are in [mcp.md](mcp.md). **Network:** the
-server listens on loopback only; the `websec_check_updates` tool contacts PyPI only when called
-with `online: true`.
+[mcp.md](mcp.md) describes the tools, limits, and client registration. **Network:** the server
+listens on loopback only. The `websec_check_updates` tool contacts PyPI only when called with
+`online: true`.
 
 **Exit codes:** stdio returns `0` when stdin closes; `--http` exits `2` on a refused startup
 (missing token, non-loopback host, missing or invalid root, port in use).
@@ -584,7 +586,7 @@ websec mcp --http --allow-root /absolute/path/to/project
 
 ## `websec attest`
 
-Project an existing run into an audit-evidence table, gaps first. It computes nothing and renders
+Show an existing run as an audit-evidence table, with gaps first. It computes nothing and renders
 no verdict, score or badge.
 
 ```text
@@ -599,10 +601,10 @@ websec attest [--run DIR] [--out DIR] [--repo DIR] [--format {text,json,in-toto}
 | `--format` | `text` | `text`, `json`, or `in-toto` (an **unsigned** in-toto Statement for you to sign with your own key; a websec-signed one would attest only that websec ran). |
 
 Without `--run`, `attest` projects `<out>/latest` — the newest **completed** run. It never picks a
-partial attempt silently: if attempts exist under `<out>/runs/` but none was published as `latest`,
+partial attempt silently. If attempts exist under `<out>/runs/` but none was published as `latest`,
 it exits `3` and asks for `--run`.
 
-The bypass record cannot see `--no-verify`, an uninstalled hook or a deleted hook; an empty list is
+The bypass record cannot see `--no-verify`, an uninstalled hook or a deleted hook. An empty list is
 not evidence that no bypass occurred. **Network:** none. **Exit codes:** `0` whenever a run is
 found (it reports, it does not judge); `3` when only unpublished (incomplete) attempts exist;
 `2` when no run directory or no `findings-ledger.json` is found.
@@ -614,7 +616,7 @@ websec attest --run websec-out/latest --format in-toto > statement.json
 
 ## `websec feedback`
 
-Record, offline, that a detector is wrong. Metadata-only by default; nothing is sent.
+Record, offline, that a detector is wrong. By default it records metadata only. It sends nothing.
 
 ```text
 websec feedback --verdict {false-positive,severity-wrong,false-negative} --reason TEXT
@@ -637,10 +639,10 @@ websec feedback --verdict {false-positive,severity-wrong,false-negative} --reaso
 | `--out DIR` | `websec-out` | Output directory for `feedback.jsonl`. |
 | `--format` | `text` | `text` or `json`. |
 
-A `false-positive` verdict also queues a pending calibration candidate that changes no probability
-until a human runs `websec calibrate --accept`. Feedback never suppresses a finding; use a
-`fingerprint:` line in `.websec-ignore` for that. The command prints a prefilled issue link; opening
-it is your choice. **Files written:** `<out>/feedback.jsonl`, and the candidate in the local
+A `false-positive` verdict also queues a pending calibration candidate. It changes no probability
+until a human runs `websec calibrate --accept`. Feedback never suppresses a finding. To suppress one,
+use a `fingerprint:` line in `.websec-ignore`. The command prints a prefilled issue link. Opening
+the link is your choice. **Files written:** `<out>/feedback.jsonl`, and the candidate in the local
 calibration overlay. **Exit codes:** `0`; `2` on invalid input, missing ledger or a declined prompt.
 
 ```bash
@@ -650,8 +652,8 @@ websec feedback --verdict false-negative --attack-class ssrf --file-extension .p
 
 ## `websec repair-verify`
 
-Validate operator-supplied repair evidence offline. It never executes tests or any command from
-the artifacts.
+Validate repair evidence that the operator supplies, offline. It never executes tests or any
+command from the artifacts.
 
 ```text
 websec repair-verify --plan PLAN --record RECORD --rerun LEDGER --evidence-root DIR
@@ -667,8 +669,8 @@ websec repair-verify --plan PLAN --record RECORD --rerun LEDGER --evidence-root 
 | `--evidence-root` | required | Directory containing the test reports the record references. |
 | `--out RESULT.json` | none | Also persist the result. Refuses to overwrite an existing file. |
 
-The result always carries `tests_executed_by_websec: false`. Field requirements are in the
-[evidence examples](../security-review/examples/README.md). **Exit codes:** `0` accepted; `2`
+The result always carries `tests_executed_by_websec: false`. The
+[evidence examples](../security-review/examples/README.md) list the field requirements. **Exit codes:** `0` accepted; `2`
 rejected, invalid input, or `--out` already exists.
 
 ```bash
@@ -677,7 +679,7 @@ websec repair-verify --plan websec-out/latest/repair-plans.json --plan-id <plan-
 
 ## `websec intel`
 
-Explicit public threat-feed refresh (EPSS and CISA KEV) and offline reassessment of known CVEs.
+Refresh the public threat feeds (EPSS and CISA KEV) when you ask, and reassess known CVEs offline.
 
 ```text
 websec intel {refresh,status,reassess} [--cache-dir DIR] [--out FILE]
@@ -693,8 +695,9 @@ Shared options for all three actions:
 ### `websec intel refresh`
 
 **[network]** Download the EPSS scores and the CISA KEV catalog, validate them, and publish a new
-local snapshot atomically. A feed older than the current snapshot is rejected, and a failed refresh
-keeps the last valid snapshot. Only the public feeds are fetched; no project data is uploaded.
+local snapshot atomically. websec rejects a feed that is older than the current snapshot. A failed
+refresh keeps the last valid snapshot. websec fetches only the public feeds and uploads no project
+data.
 **Exit codes:** `0` on success, `2` otherwise.
 
 ```bash
@@ -719,10 +722,10 @@ ledger is never overwritten.
 |---|---|---|
 | `--ledger` | required | The `findings-ledger.json` to reassess. |
 
-Finding identities and source evidence are preserved. An acknowledged CVE that becomes
-known-exploited or crosses EPSS 0.5 is reopened for review. A detector change since the ledger was
-written is reported as `detector-changed-rescan-required`. This does **not** discover new CVEs;
-that needs a fresh `run --scan`. **Exit codes:** `0` when the snapshot is fresh and no finding was
+Finding identities and source evidence stay the same. An acknowledged CVE that becomes
+known-exploited or crosses EPSS 0.5 reopens for review. If the detector changed since the ledger was
+written, websec reports `detector-changed-rescan-required`. This does **not** discover new CVEs.
+For that, you need a fresh `run --scan`. **Exit codes:** `0` when the snapshot is fresh and no finding was
 blocked; `2` when intelligence is stale or unavailable, a finding's provenance blocks the update, or
 the input is invalid.
 
@@ -732,8 +735,8 @@ websec intel reassess --ledger websec-out/latest/findings-ledger.json --out reas
 
 ## `websec research`
 
-Evaluate data-only detector proposals against an allowlist of shipped detectors, offline. Source
-snippets become disposable text fixtures and are never executed.
+Evaluate data-only detector proposals against an allowlist of shipped detectors, offline. websec
+turns source snippets into disposable text fixtures and never executes them.
 
 ```text
 websec research {example,catalog,evaluate} [--out FILE]
@@ -766,8 +769,8 @@ websec research catalog
 | `--suite NAME` | | Evaluate every proposal in a shipped suite. Current choice: `control-scope`. |
 | `--cases FILE` | none | Separate synthetic cases when the proposal is not bundled. Not allowed with `--suite`. |
 
-Passing means **eligible for human review**, not automatic promotion; the authored holdout is
-regression evidence, not an independent benchmark. **Exit codes:** `0` when promotion-eligible,
+A pass means the proposal is **eligible for human review**. It does not mean automatic promotion.
+The authored holdout is regression evidence, not an independent benchmark. **Exit codes:** `0` when promotion-eligible,
 `2` otherwise or on invalid input.
 
 ```bash
@@ -777,7 +780,7 @@ websec research evaluate --proposal proposal.json --out evaluation.json
 
 ## `websec dynamic`
 
-Live probes against a **running test instance you own**. Never point it at production.
+Run live probes against a **running test instance you own**. Never point it at production.
 
 ```text
 websec dynamic --unauth --target URL [--probe-writes] [--facts FACTS.json] [--out DIR]
@@ -793,9 +796,10 @@ websec dynamic --config CONFIG.json [--facts FACTS.json] [--out DIR]
 | `--facts FACTS.json` | `<out>/latest/FACTS.json` | Recon from a prior `websec run`. |
 | `--out DIR` | `./websec-out` | Output root. |
 
-If both `--unauth` and `--config` are given, `--unauth` runs. Status codes are observations, not
-proof: candidate results are labelled `inconclusive` unless the configured controls confirm them,
-and a run where nothing enforced auth is flagged as a suspected fail-open test environment.
+If you give both `--unauth` and `--config`, `--unauth` runs. Status codes are observations, not
+proof. websec labels candidate results `inconclusive` unless the configured controls confirm them.
+If nothing enforced auth in a run, websec flags the test instance as a suspected fail-open
+environment.
 
 **Files written:** a new run directory with `dynamic-unauth-findings.json` or
 `dynamic-findings.json`, plus `findings-ledger.json`, `CONSTITUTION.md`, `REPORT.md`, `FACTS.json`
@@ -819,12 +823,12 @@ websec dynamic --config dynamic-config.json
 
 ## Development commands
 
-`recon`, `proof` and `calibrate` are for working on websec itself or for narrow uses. They are
-hidden from `websec --help` but work when invoked by name.
+`recon`, `proof` and `calibrate` are for work on websec itself or for narrow uses. `websec --help`
+does not list them, but they work when you invoke them by name.
 
 ## `websec recon`
 
-Recon only: write `FACTS.json`, with no ledger, briefing or probes. A subset of `run`.
+Recon only: write `FACTS.json`, with no ledger, briefing or probes. This is a subset of `run`.
 
 ```text
 websec recon <target> [--out DIR]
@@ -843,7 +847,8 @@ websec recon ./my-app --out recon-out
 ## `websec proof`
 
 **[network]** Clone the vulnerable-app corpus and score whether recon surfaces each app's
-documented attack surface. A proxy, not vulnerability precision or agent-lift evidence.
+documented attack surface. This is an indirect measure. It is not vulnerability precision or
+agent-lift evidence.
 
 ```text
 websec proof [--corpus FILE] [--workdir DIR]
@@ -863,7 +868,7 @@ websec proof
 
 ## `websec calibrate`
 
-Fit, inspect and export the confidence calibration that gives each finding its `P(real)`.
+Fit, inspect and export the confidence calibration. The calibration gives each finding its `P(real)`.
 
 ```text
 websec calibrate [--corpus FILE] [--workdir DIR] [--out FILE]
@@ -891,8 +896,8 @@ websec calibrate --claimspec PATH
 | `--claimspec PATH` | none | Export the calibration the runtime uses (shipped table plus local overlay) as a claimspec v1 `calibration` document. `-` writes to stdout. |
 | `--format` | `text` | Output format for `--review`, `--accept`, `--reject` and `--synthetic`. |
 
-Only one mode runs per invocation, checked in this order: review/accept/reject, `--synthetic`,
-`--claimspec`, `--ingest-dast`, `--ingest`, then a corpus fit. The overlay lives in
+Only one mode runs per invocation. websec checks the modes in this order: review/accept/reject,
+`--synthetic`, `--claimspec`, `--ingest-dast`, `--ingest`, then a corpus fit. The overlay lives in
 `$WEBSEC_CALIBRATION_HOME`. **Exit codes:** `0`; `2` for usage errors (a missing or malformed
 `--ingest`, `--ingest-dast` or `--ledger` file, `--ingest-dast` without `--ledger`, an unwritable
 overlay) and when nothing could be matched, exported or reviewed; `3` when a corpus fit produced

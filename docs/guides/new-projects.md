@@ -1,7 +1,7 @@
 # Setting up websec-validator in a new project
 
 On a new repository, every finding is new, so you can gate from the first pull request with no
-baseline to manage. This page wires websec in on day one: agent instructions, a pre-scoped session
+baseline to manage. This page sets up websec on day one: agent instructions, a pre-scoped session
 context, the agent-loop gate, a committed scope policy and a CI gate. Each step is short and links
 to the guide that covers it in depth.
 
@@ -14,14 +14,14 @@ to the guide that covers it in depth.
 ## 1. Keep run artifacts out of Git
 
 `websec run` writes to `./websec-out/` in the current directory by default. It reminds you to ignore
-that directory but does not edit `.gitignore` itself:
+that directory. It does not edit `.gitignore` itself:
 
 ```bash
 echo 'websec-out/' >> .gitignore
 ```
 
 If you later use the [dynamic phase](dynamic-testing.md), keep its credentials file
-(`dynamic-config.json`) out of Git too.
+(`dynamic-config.json`) out of Git as well.
 
 ## 2. Teach your agent to use websec
 
@@ -30,11 +30,11 @@ websec install claude      # or: codex · cursor · gemini · aider · generic
 websec install status
 ```
 
-This writes the standing instruction your agent reads: a skill file for Claude Code
+This command writes the standing instruction your agent reads: a skill file for Claude Code
 (`.claude/skills/security-pass/SKILL.md`) or Cursor (`.cursor/rules/websec-validator.mdc`), or a
 marked block in `AGENTS.md` (Codex, generic), `GEMINI.md` or `CONVENTIONS.md` (Aider). Add `--user`
-to install it for every repository, and `--uninstall` to remove it. Commit the project-level files
-so the whole team's agents get the same instruction. Details: [AI agents](ai-agents.md).
+to install it for every repository, and `--uninstall` to remove it. Commit the project-level files.
+Then the agents of your whole team get the same instruction. Details: [AI agents](ai-agents.md).
 
 ## 3. Prime every session with the security context (Claude Code)
 
@@ -52,9 +52,9 @@ tenant candidates, unguarded writes, sinks, top findings, coverage) inside Claud
 }
 ```
 
-For other harnesses, `websec emit-context . --markdown` prints the raw block. When the evidence is
-thin, which is common early in a project, the block marks the route count as a floor and the auth
-scheme as an unverified guess rather than stating them as fact.
+For other harnesses, `websec emit-context . --markdown` prints the raw block. Early in a project the
+evidence is often thin. Then the block marks the route count as a floor and the auth scheme as an
+unverified guess. It does not state them as fact.
 
 ## 4. Gate the agent loop
 
@@ -63,10 +63,10 @@ websec hooks install --agent     # PostToolUse on Write|Edit|MultiEdit in .claud
 websec hooks status --agent
 ```
 
-Each file the agent writes is checked by `websec gate` (default threshold `medium`), and a finding
-blocks the loop so the agent fixes it on the next turn. The gate writes no artifacts. It fails open,
-loudly, if it cannot run. It is developer ergonomics, not a control: the settings file is editable,
-so enforcement belongs in CI (step 6).
+`websec gate` (default threshold `medium`) checks each file the agent writes. A finding blocks the
+loop, so the agent fixes it on the next turn. The gate writes no artifacts. It fails open, loudly,
+if it cannot run. It is developer ergonomics, not a control. The settings file is editable, so
+enforcement belongs in CI (step 6).
 
 ## 5. Commit a scope policy early
 
@@ -77,18 +77,18 @@ git add .websec-ignore
 ```
 
 On a fresh repository `init` usually finds nothing to scope and writes a commented template. Commit
-it anyway. Once the file exists, `init` refuses to overwrite it without `--force`, and every later
-`fingerprint:` acknowledgement arrives as a reviewable diff with its reason and `expires:` date. Add
-paths as test and fixture directories appear, knowing that a directory line also hides future
-findings there, including a real secret committed later. When a test directory starts holding
-fixture credentials, prefer acknowledging them: run `websec run . --scan`, then
-`websec init --dry-run`, which proposes dated `fingerprint:` lines for a directory whose only
-findings are secrets, and copy the lines you accept into the file. Grammar and matching rules:
+it anyway. Once the file exists, `init` refuses to overwrite it without `--force`. Every later
+`fingerprint:` acknowledgement then arrives as a reviewable diff with its reason and `expires:`
+date. Add paths as test and fixture directories appear. A directory line also hides future findings
+there, including a real secret committed later. Suppose a test directory starts to hold fixture
+credentials. Then acknowledge them. Run `websec run . --scan`, then `websec init --dry-run`. That
+command proposes dated `fingerprint:` lines for a directory whose only findings are secrets. Copy
+the lines you accept into the file. Grammar and matching rules:
 [triage and suppression](triage-and-suppression.md#websec-ignore-reference).
 
 ## 6. Gate CI from the first pull request
 
-With no backlog, gate the whole repository on every pull request and make the job a **required**
+With no backlog, gate the whole repository on every pull request. Make the job a **required**
 status check:
 
 ```bash
@@ -98,15 +98,15 @@ websec run . --require-complete --require-analyzed --fail-on high
 - `--fail-on high` fails on HIGH or CRITICAL findings (exit `1`).
 - `--require-complete` fails if a requested check did not run (exit `3`). This is a toolchain
   problem, not a finding.
-- `--require-analyzed` fails if source is present but none of it can be analysed (exit `3`), so an
+- `--require-analyzed` fails if source is present but none of it can be analyzed (exit `3`). So an
   unsupported stack cannot look clean. It does not trip on an empty repository.
 
-Add `--scan` once your CI image has the scanners you want, and name them with `--scanners` so a
-missing one fails visibly instead of silently. When the repository grows, consider PR mode
+Add `--scan` once your CI image has the scanners you want. Name them with `--scanners`, so a
+missing one fails visibly and not silently. When the repository grows, consider PR mode
 (`--diff origin/main`) or a baseline. See [existing projects, step 7](existing-projects.md#7-roll-out-gating-in-phases).
 Workflow syntax: [GitHub Actions](ci/github-actions.md), [other CI](ci/other-ci.md).
 
-Optionally, add a local pre-push gate as well:
+Optionally, add a local pre-push gate too:
 
 ```bash
 websec hooks install --pre-push

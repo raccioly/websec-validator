@@ -1,11 +1,11 @@
 # Installation
 
-This page covers every supported way to install `websec-validator`, the optional external tools it
-can drive, and how to verify, upgrade and remove it. It is for anyone setting the tool up on a
-workstation, a CI runner or an air-gapped machine. When you finish, `websec --version` and
-`websec doctor` will confirm a working engine, and you will know which optional analyzers it found.
+This page covers every supported way to install `websec-validator`. It also covers the optional
+external tools it can drive, and how to verify, upgrade and remove it. It is for anyone who sets up the
+tool on a workstation, a CI runner or an air-gapped machine. When you finish, `websec --version` and
+`websec doctor` confirm a working engine, and you know which optional analyzers it found.
 
-If you only want the fastest path to a first result, see the [Quickstart](quickstart.md).
+For the fastest path to a first result, see the [Quickstart](quickstart.md).
 
 ## Requirements
 
@@ -14,11 +14,11 @@ If you only want the fastest path to a first result, see the [Quickstart](quicks
 | Python | **3.11 or newer** (`requires-python = ">=3.11"` in [`pyproject.toml`](../pyproject.toml)). CI runs the suite on 3.11, 3.12 and 3.13. |
 | Runtime Python dependencies | None. The package is stdlib-only; external tools are run as subprocesses when present, never imported. |
 | Git | Optional for a plain `websec run`. Used by `--diff`, `websec gate`, `websec hooks`, the Gitleaks history pass and installs from a Git URL. |
-| OS | CI runs on Linux (Ubuntu). macOS is a common development platform (the README and install hints assume Homebrew). See [Windows](#windows) for what is and is not known. |
+| OS | CI runs on Linux (Ubuntu). macOS is a common development platform (the README and install hints assume Homebrew). See [Windows](#windows) for what is known and what is not. |
 
 > [!WARNING]
-> On stock macOS, `/usr/bin/python3` is often Python 3.9, which is too old. Installing into it fails
-> because no release of `websec-validator` supports that interpreter. Use pipx or uv backed by a
+> On stock macOS, `/usr/bin/python3` is often Python 3.9, which is too old. An install into it fails,
+> because no release of `websec-validator` supports that interpreter. Use pipx or uv with a
 > newer Python (Homebrew, pyenv or python.org), as described below.
 
 ## Choose an install channel
@@ -32,7 +32,7 @@ If you only want the fastest path to a first result, see the [Quickstart](quicks
 | [Docker](#docker) | No local Python, bundled scanners | Container | Built locally from a clone; no published image. |
 | [Claude Code plugin](#claude-code-plugin) | Claude Code users | n/a | Delivers agent instructions and a hook; you still need the CLI. |
 
-Every channel installs the same three console scripts:
+Every channel installs the same three console scripts.
 
 | Command | Purpose |
 |---|---|
@@ -42,7 +42,7 @@ Every channel installs the same three console scripts:
 
 ### pipx (recommended)
 
-pipx installs the CLI into its own virtualenv and links the commands onto your `PATH`.
+pipx installs the CLI into its own virtualenv. It links the commands onto your `PATH`.
 
 1. Install pipx if you do not have it (see the [pipx installation docs](https://pipx.pypa.io/stable/installation/)).
    On macOS with Homebrew:
@@ -64,10 +64,10 @@ pipx installs the CLI into its own virtualenv and links the commands onto your `
    pipx install --python python3.12 websec-validator   # any 3.11+ interpreter on PATH
    ```
 
-pipx uses the interpreter it was installed with unless you pass `--python`. A pipx installed with
-Homebrew normally uses Homebrew's current Python, which satisfies the requirement.
+pipx uses the interpreter it was installed with, unless you pass `--python`. A pipx installed with
+Homebrew normally uses Homebrew's current Python, which meets the requirement.
 
-To pin a release (for example to match a reviewed CI configuration), use a normal version specifier:
+To pin a release (for example, to match a reviewed CI configuration), use a normal version specifier:
 `pipx install "websec-validator==<version>"`.
 
 ### pip in a Python 3.11+ virtualenv
@@ -79,8 +79,8 @@ python -m pip install websec-validator
 websec --version
 ```
 
-Keep this virtualenv separate from the environment of the application you scan. The integration
-examples make the same point: the engine you run should be a trusted install, not the target's own
+Keep this virtualenv separate from the environment of the application you check. The integration
+examples make the same point. The engine you run must be a trusted install, not the target's own
 Python environment.
 
 ### uv (alternative)
@@ -92,12 +92,12 @@ uv tool install websec-validator
 websec --version
 ```
 
-uv honours the package's `requires-python` (3.11+). This repository's CI does not test uv installs,
-so treat it as a convenience equivalent to pipx rather than a verified channel.
+uv follows the package's `requires-python` (3.11+). This repository's CI does not test uv installs.
+Treat it as a convenient equivalent to pipx, not a verified channel.
 
 ### From source (bleeding edge)
 
-Use this for unreleased changes on the default branch, or when contributing.
+Use this channel for unreleased changes on the default branch, or when you contribute.
 
 ```bash
 # Latest default-branch code, isolated by pipx
@@ -116,12 +116,12 @@ Contributors can also use `python3 -m pip install -e .` in a 3.11+ virtualenv; s
 > A version string does not identify a source install. A dirty editable checkout, a wheel installed
 > from a local file and a clean PyPI install can all print the same `websec --version`.
 > `websec doctor` prints where the running engine came from (package index, editable checkout,
-> local file) and warns when the imported code is outside the installed distribution. Check it
-> before citing a version in a review.
+> local file). It warns when the imported code is outside the installed distribution. Check it
+> before you cite a version in a review.
 
 ### Docker
 
-There is no published image. Build it from a clone of the repository; the
+There is no published image. Build it from a clone of the repository. The
 [`Dockerfile`](../Dockerfile) has two targets.
 
 | Target | Build command | Contains |
@@ -129,15 +129,15 @@ There is no published image. Build it from a clone of the repository; the
 | bundled (default, last stage) | `docker build -t websec-validator .` | The engine plus OWASP Noir, Trivy, Gitleaks, Semgrep and Checkov |
 | core | `docker build --target core -t websec-core .` | The stdlib engine only, no external tools |
 
-Both images run as a non-root `websec` user (UID 1001), use `websec` as the entrypoint, and disable
-recurring health checks because the CLI is one-shot. Scanner versions are pinned by `ARG` lines in
-the Dockerfile, and the bundled archives for Noir, Trivy and Gitleaks are checked against reviewed
+Both images run as a non-root `websec` user (UID 1001) and use `websec` as the entrypoint. They disable
+recurring health checks, because the CLI is one-shot. `ARG` lines in the Dockerfile pin the scanner versions.
+The bundled archives for Noir, Trivy and Gitleaks are checked against reviewed
 SHA-256 digests before installation
 ([`scripts/install-container-scanners.sh`](../scripts/install-container-scanners.sh)). Those digest
-checks do not make apt packages or transitive dependencies reproducible, and they do not certify
+checks do not make apt packages or transitive dependencies reproducible. They do not certify
 every scanner adapter.
 
-Run it with your repository mounted at `/scan`:
+Run the image with your repository mounted at `/scan`:
 
 ```bash
 # Core pass: recon + briefing. Noir (bundled) runs; the static scanners do not.
@@ -156,13 +156,13 @@ What the bundled image does and does not include:
 |---|---|
 | OWASP Noir, Trivy, Gitleaks, Semgrep, Checkov | OSV-Scanner, Bandit, gosec, Brakeman, TruffleHog, Prowler |
 
-Bundling is not the same as running. Noir runs on every `run`. Trivy, Gitleaks, Semgrep and Checkov
-run only under `--scan`; a plain `run` lists them and prints `(add --scan to execute them)`, exactly
+A bundled tool does not always run. Noir runs on every `run`. Trivy, Gitleaks, Semgrep and Checkov
+run only under `--scan`. A plain `run` lists them and prints `(add --scan to execute them)`, exactly
 as it does outside Docker.
 
 Pass `--user "$(id -u):$(id -g)"` so the container runs with your UID. Without it, the container's
-UID 1001 usually cannot write to a bind-mounted directory owned by you on a Linux host, and anything
-it does write is owned by UID 1001. The `$(id -u)` syntax needs a POSIX shell; on Windows run these
+UID 1001 usually cannot write to a bind-mounted directory that you own on a Linux host. Anything
+it does write is owned by UID 1001. The `$(id -u)` syntax needs a POSIX shell. On Windows, run these
 commands from WSL.
 
 The repository's container CI builds both targets natively on amd64 and arm64, runs an offline
@@ -171,38 +171,38 @@ source-only fixture with `--network none`, and executes each bundled tool's vers
 ### Claude Code plugin
 
 The repository is also a Claude Code plugin. The plugin delivers the `security-pass` skill and a
-`PostToolUse` hook that calls `websec-agent-hook`. It does **not** install the Python CLI, so install
-the CLI with one of the channels above first. Install steps, the `websec-validator@websec-plugins`
-install id, and the settings-file alternative for environments without `/plugin` are in the
-[AI agents guide](guides/ai-agents.md).
+`PostToolUse` hook that calls `websec-agent-hook`. It does **not** install the Python CLI. Install
+the CLI with one of the channels above first. The [AI agents guide](guides/ai-agents.md) has the install steps,
+the `websec-validator@websec-plugins` install id, and the settings-file alternative for environments
+without `/plugin`.
 
 ## Optional external tools
 
 `websec run` needs nothing but the code. External tools add coverage when they are on your `PATH`.
-websec never installs them and never imports them; it detects them, runs the relevant ones as
-subprocesses, and de-duplicates their output into one ledger. The source of truth for this list is
+websec never installs them and never imports them. It detects them and runs the relevant ones as
+subprocesses. It de-duplicates their output into one ledger. The source of truth for this list is
 `REGISTRY` in [`src/websec_validator/scanners.py`](../src/websec_validator/scanners.py).
 
 ### When each tool runs
 
 - **OWASP Noir** runs on every `run` when installed, because it is the route engine, not a scanner.
-  Without it, or when it fails, websec uses its built-in route heuristics and a regex fallback.
+  If Noir is absent or fails, websec uses its built-in route heuristics and a regex fallback.
 - **Static scanners** run only when you pass `--scan`. Without `--scan`, websec lists the ones it
-  found and prints `(add --scan to execute them)`.
-- **Language-specific SAST** (Bandit, gosec, Brakeman) is selected automatically, and only when the
-  stack detector finds that language in the target. Brakeman additionally needs an `app/` directory
-  at the scan root, its own Rails precondition; otherwise `websec doctor` lists it under "not
+  found. It prints `(add --scan to execute them)`.
+- **Language-specific SAST** (Bandit, gosec, Brakeman) is selected automatically. It runs only when the
+  stack detector finds that language in the target. Brakeman also needs an `app/` directory
+  at the root of the target, its own Rails precondition. Without it, `websec doctor` lists Brakeman under "not
   applicable to this target".
 - **TruffleHog** never runs implicitly. It needs `--scan --verify-secrets`, because it sends each
   candidate credential to the provider's API.
 - **`--scanners a,b`** turns selection into a requirement. A selected tool that is not installed is
-  recorded as `unavailable` and makes the run incomplete (exit `3` under `--fail-on` or
-  `--require-complete`). Unselected missing tools are reported as limitations only.
+  recorded as `unavailable`. The run is then incomplete (exit `3` under `--fail-on` or
+  `--require-complete`). Missing tools that you did not select appear as limitations only.
 
 ### Tool reference
 
-The macOS column repeats the install hints websec itself prints (in `websec doctor`, and for Noir
-also in the run output). Where no cross-platform command is listed, use the project's official install
+The macOS column repeats the install hints that websec prints (in `websec doctor`, and for Noir
+also in the run output). Where the table lists no cross-platform command, use the project's official install
 instructions.
 
 | Tool | What it adds | Runs | Minimum version websec checks | macOS (Homebrew) | Linux / WSL | Project |
@@ -222,14 +222,14 @@ instructions.
 Notes:
 
 - **Semgrep / OpenGrep.** websec looks for an executable named `semgrep`. The `doctor` hint mentions
-  [OpenGrep](https://github.com/opengrep/opengrep) as a fully open-source alternative, but websec
-  detects it only if it is reachable as `semgrep`.
-- **Version checks.** A scanner older than its minimum is still run (websec reports rather than
-  refuses), but `websec doctor` marks it incompatible and exits `2`. See
+  [OpenGrep](https://github.com/opengrep/opengrep) as a fully open-source alternative. websec
+  detects OpenGrep only if it is reachable as `semgrep`.
+- **Version checks.** websec still runs a scanner that is older than its minimum, and reports the problem.
+  `websec doctor` marks that scanner incompatible and exits `2`. See
   [Verify the installation](#verify-the-installation).
-- **Noir in `doctor`.** Since 0.22.0, `websec doctor` has a "route engine" section: `✓` with the
-  version when `noir --version` works, `?` when it prints no version, `✗` when it crashes or times
-  out, or the install hint when it is absent. A run also says which engine produced the routes on
+- **Noir in `doctor`.** Since 0.22.0, `websec doctor` has a "route engine" section. It shows `✓` with the
+  version when `noir --version` works, and `?` when Noir prints no version. It shows `✗` when Noir crashes or times
+  out, and the install hint when Noir is absent. A run also names the engine that produced the routes on
   its `routes:` line: `via noir`, or `via regex-fallback` with the reason (not installed, or
   `OWASP Noir failed: …`). See [Troubleshooting](troubleshooting.md#routes-come-from-regex-fallback-even-though-noir-is-installed).
 
@@ -242,30 +242,30 @@ websec doctor ./my-app    # also scopes language-specific scanners to that repo'
 ```
 
 `websec doctor` reports, for each relevant scanner, whether it is on `PATH` and which version it
-found:
+found.
 
-- `✓` the version satisfies websec's invocation, `?` the version could not be read,
-  `✗` the installed version is too old for the command line websec builds.
-- It exits `2` when any installed, relevant scanner is too old. That makes `websec doctor .` usable
-  as a CI preflight before you trust a `--scan` result, because an incompatible scanner can run,
-  fail in its own idiom, and look exactly like a clean scan.
+- `✓` means the version works with the command line that websec builds. `?` means the version could not be read.
+  `✗` means the installed version is too old for that command line.
+- It exits `2` when any installed, relevant scanner is too old. You can use `websec doctor .` as a CI preflight
+  before you trust a `--scan` result. An incompatible scanner can run, fail in its own way,
+  and look exactly like a clean run.
 - Without a target, `doctor` does not know the stack, so it omits Bandit, gosec and Brakeman. Pass
   the repository path to see them. With a target, a relevant scanner whose own precondition fails
-  (Brakeman without an `app/` directory) is listed under "not applicable to this target".
-- The "route engine" section reports OWASP Noir. A broken Noir is marked `✗` but does not change the
-  exit code; every run falls back to regex route discovery until it is fixed.
-- `doctor` makes no network call. Its release line reads only cached metadata; see
-  [Upgrade](upgrade.md) for the consent-gated online check.
+  (Brakeman without an `app/` directory) appears under "not applicable to this target".
+- The "route engine" section reports OWASP Noir. A broken Noir is marked `✗`, but the
+  exit code does not change. Every run falls back to regex route discovery until you fix Noir.
+- `doctor` makes no network call. Its release line reads only cached metadata. See
+  [Upgrade](upgrade.md) for the online check that needs your consent.
 
-To see real output without pointing the tool at your own code, run `websec demo`. It scans a bundled
+To see real output without pointing the tool at your own code, run `websec demo`. It checks a bundled
 sample in a temporary directory and writes nothing to the current directory.
 
 ## Offline and air-gapped use
 
-The core pass (`websec run <path>` with no network flags) needs no network: it reads the repository,
-writes artifacts locally, and makes no network requests of its own. If OWASP Noir is installed it
-runs during the core pass as a local subprocess; like every external tool, its own network behaviour
-is outside websec's control. These are the paths that do contact the network, each opt-in:
+The core pass (`websec run <path>` with no network flags) needs no network. It reads the repository,
+writes artifacts locally, and makes no network requests of its own. If OWASP Noir is installed, it
+runs during the core pass as a local subprocess. Like every external tool, its network behavior
+is outside websec's control. These paths do contact the network, and each one is opt-in:
 
 | What | Network destination | Data sent |
 |---|---|---|
@@ -277,11 +277,11 @@ is outside websec's control. These are the paths that do contact the network, ea
 | `websec dynamic` | The TEST instance you configure | HTTP requests to your own target |
 | `websec proof`, `websec calibrate` (development commands) | GitHub, to clone the vuln-app corpus on first run | None beyond the clone |
 
-`websec mcp --http` listens on loopback only and refuses non-loopback binds; it makes no outbound
+`websec mcp --http` listens on loopback only and refuses non-loopback binds. It makes no outbound
 connections of its own.
 
 To install on a machine without network access, download the wheel elsewhere and copy it across.
-Because there are no runtime dependencies, the wheel is the only file you need:
+The package has no runtime dependencies, so the wheel is the only file you need:
 
 ```bash
 # On a connected machine
@@ -293,7 +293,7 @@ python3 -m pip install --no-index --find-links ./wheels websec-validator
 
 ## Upgrading
 
-See [Upgrade](upgrade.md) for versioning, breaking changes and migration guides. The commands are:
+See [Upgrade](upgrade.md) for versioning, breaking changes and migration guides. Use these commands:
 
 ```bash
 pipx upgrade websec-validator            # pipx
@@ -303,8 +303,8 @@ python -m pip install -U websec-validator  # pip, inside the venv
 
 ## Uninstalling
 
-Remove what websec wrote into your repositories **before** removing the package. The git hooks call
-the installed engine, and a pre-push gate whose runtime is missing blocks the push.
+Remove what websec wrote into your repositories **before** you remove the package. The git hooks call
+the installed engine. A pre-push gate with a missing runtime blocks the push.
 
 1. Remove git guardrail hooks from each repository where you installed them:
 
@@ -314,9 +314,9 @@ the installed engine, and a pre-push gate whose runtime is missing blocks the pu
    websec hooks uninstall --agent      # removes the PostToolUse gate from .claude/settings.json
    ```
 
-   Uninstall removes only websec's managed blocks; your own hook content is preserved.
+   The uninstall command removes only the blocks that websec manages. Your own hook content stays.
 
-2. Remove agent instructions written by `websec install`:
+2. Remove the agent instructions that `websec install` wrote:
 
    ```bash
    websec install status                 # lists what is installed in this project, per host
@@ -347,13 +347,13 @@ the installed engine, and a pre-push gate whose runtime is missing blocks the pu
 What is known:
 
 - CI runs only on Linux. Native Windows is not tested.
-- The code has some Windows-aware paths (for example a Windows file lock for intelligence refresh and
-  Windows drive handling in SARIF paths), but that is not evidence of end-to-end support.
-- The git guardrail hooks are shell scripts, and the Docker examples use POSIX shell syntax.
+- The code has some Windows-aware paths (for example, a Windows file lock for intelligence refresh and
+  Windows drive handling in SARIF paths). That is not evidence of end-to-end support.
+- The git guardrail hooks are shell scripts. The Docker examples use POSIX shell syntax.
 
-The recommended path on Windows is **WSL** (Windows Subsystem for Linux): install Python 3.11+ and
-pipx inside your WSL distribution and follow the Linux instructions. If you try native Windows and
-hit a problem, please [file a bug report](troubleshooting.md#reporting-a-bug-or-a-false-positive)
+The recommended path on Windows is **WSL** (Windows Subsystem for Linux). Install Python 3.11+ and
+pipx inside your WSL distribution, and follow the Linux instructions. If you try native Windows and
+have a problem, please [file a bug report](troubleshooting.md#reporting-a-bug-or-a-false-positive)
 with your environment.
 
 ## Next steps
