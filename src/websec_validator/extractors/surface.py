@@ -59,8 +59,13 @@ SINKS = {
     "nosql-injection": ("bola-write-verbs", "nosql", re.compile(
         r"\.(?:find|findOne|update|updateOne|deleteOne|aggregate)\s*\(\s*(?:req\.|request\.)|\$where")),
     "path-traversal": ("bola-write-verbs", None, re.compile(
-        r"(?:fs\.(?:readFile|writeFile|createReadStream|unlink|readdir)|sendFile|os\.path\.join|\bopen|path\.(?:join|resolve))\s*\([^)]*"
-        + _U)),
+        # File APIs take the PATH as their first argument, so the user-input marker must be there:
+        # `fs.writeFileSync(outPath, '﻿' + lines)` concatenates CONTENT, not a path. Path
+        # builders (`path.join(dir, req.params.f)`) take user input in any argument, so they keep
+        # matching the whole call. A nested builder inside a file call is caught by its own branch.
+        r"(?:fs\.(?:readFile(?:Sync)?|writeFile(?:Sync)?|createReadStream|unlink(?:Sync)?|readdir(?:Sync)?"
+        r"|rmdir(?:Sync)?|rm(?:Sync)?)|sendFile|\bopen)\s*\([^,)]*" + _U
+        + r"|(?:os\.path\.join|path\.(?:join|resolve))\s*\([^)]*" + _U)),
     "ssti": ("ssrf-probes", None, re.compile(
         r"(?:render_template_string|renderString|nunjucks\.renderString|ejs\.render|pug\.compile|Handlebars\.compile|new\s+Template|Template\s*\()\s*\([^)]*"
         + _U)),
