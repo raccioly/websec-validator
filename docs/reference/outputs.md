@@ -164,7 +164,7 @@ The execution and scope manifest. `FACTS.json`, the ledger and the envelope also
 | `execution_complete` | `true` when every requested check ran. Drives `latest` and exit code `3` |
 | `protection_complete` | Always `false`. Completed execution is not protection |
 | `limitation` | The statement above, in words |
-| `gaps[]` | `{kind, detail, execution}`. `execution: true` means a requested check did not complete; `false` is a scope limit (`language_without_analyzer`, `thin_language_coverage`, `walker_policy`, `excluded_scope`, `profile_scope`, `skipped_directory_code`, `scope_missed`, `route_engine` and others). `skipped_directory_code`: a skipped `build`, `dist`, `out`, `target`, `vendor` or `coverage` directory, or a websec output directory under another name, holds files with an analysable suffix. `scope_missed`: a `--only` path selected nothing. `route_engine`: an installed Noir failed and routes came from the regex fallback. `scanner_file_limits` (since 0.22.0): a scanner completed but could not parse, or only partly parsed, the named in-scope files; every other file was analysed, and those files' absence of findings is not a clean result. Execution gaps include `scanner` (a scanner did not complete), `scanner_rules` (named rules did not complete), `extractor`, and `source_flow_limit` (since 0.22.0): the files, lane and reason where bounded source-flow analysis stopped at a budget. Like an oversized file, that leaves the file not fully analysed, so the run is incomplete. A `graph` gap is an execution gap only for an explicit `--graph` |
+| `gaps[]` | `{kind, detail, execution}`. `execution: true` means a requested check did not complete; `false` is a scope limit (`language_without_analyzer`, `thin_language_coverage`, `walker_policy`, `excluded_scope`, `profile_scope`, `skipped_directory_code`, `scope_missed`, `route_engine` and others). `skipped_directory_code`: a skipped `build`, `dist`, `out`, `target`, `vendor` or `coverage` directory, or a websec output directory under another name, holds files with an analysable suffix. `scope_missed`: a `--only` path selected nothing. `compiled_binary_sca`: compiled executables are in scope, but no scanner read their embedded modules (osv-scanner 2.2.3 or later scans Go binaries). `route_engine`: an installed Noir failed and routes came from the regex fallback. `scanner_file_limits` (since 0.22.0): a scanner completed but could not parse, or only partly parsed, the named in-scope files; every other file was analysed, and those files' absence of findings is not a clean result. Execution gaps include `scanner` (a scanner did not complete), `scanner_rules` (named rules did not complete), `extractor`, and `source_flow_limit` (since 0.22.0): the files, lane and reason where bounded source-flow analysis stopped at a budget. Like an oversized file, that leaves the file not fully analysed, so the run is incomplete. A `graph` gap is an execution gap only for an explicit `--graph` |
 | `extractors` | Outcome per extractor |
 | `scanners` | Per scanner: `installed`, `runnable`, `selected`, `ran`, `outcome`, `reported_version`, `version_verified`, `report_details` (the native diagnostics websec parsed) and, when present, `rules_incomplete` and `file_limitations`. A `file_limitations` row is `{path, reason, native_type, framework?, message}`: `reason` is `parse_failed` (the file was not analysed) or `partial_parse` (it was partly analysed). `report_details.file_limitations_excluded` counts diagnostics for files under `--exclude` or a skipped directory, which are otherwise ignored |
 | `files` | `seen`, `scanned`, `read`, `unsupported`, `unanalyzed_languages`, `no_analyzable_source`, `skipped_counts` (reasons include `skip_directory` and `websec_output`, a directory this tool wrote), caps and read losses. `skipped_code_files` (total analysable-suffix files under skipped build, dependency and output directories) and `skipped_code_dirs[]` (`path`, `code_files`, `count_truncated`; at most 50 listed). With `--only`, `analysis_scope`: `requested` and `matched` counts and the `missed` entries |
@@ -198,11 +198,18 @@ can carry:
 - `triage`: the disposition (`agent-fixable` or `human-required`) with its reason;
 - `baseline_state` with `--baseline`; `graph` with a knowledge graph (`--graph` or
   `graphify-out/graph.json`); `in_tree` and commit fields on secrets; `reachability` and EPSS/KEV
-  data on dependency CVEs.
+  data on dependency CVEs;
+- on dependency CVEs, the fix to make: `fix_target` (the lowest fix on the installed release line),
+  `fix_major_bump` (`true` when only a major upgrade fixes it), `fix_all_target` (the version that
+  clears every advisory on that package version), `dependency_path` (`direct`, `transitive` or
+  `bundled`, from an npm lockfile) with `introduced_by` (the parent packages), and `artifact: binary`
+  when the module is embedded in a compiled executable. The `remediation` text uses these fields.
 
 Top-level blocks: `total`, `by_severity`, `by_confidence`, `suppressed`, `acknowledged`,
 `calibration`, `coverage`, `verification_context`, `attribution`, `clusters` and `cluster_summary`
 (a presentation view; `total`, gate counts and per-site fingerprints are unchanged), and `gate`.
+A cluster `kind` is `rule` (one detector at many sites), `incident` (secrets deleted in one commit)
+or `artifact` (all advisories in one compiled binary, which have one fix).
 
 Suppression transparency (since 0.22.0, see
 [how path patterns match](../guides/triage-and-suppression.md#how-path-patterns-match)):

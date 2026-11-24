@@ -24,7 +24,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import enrichment
+from . import dependency_fix, enrichment
 from .extractors.base import (SKIP_DIRS, is_doc_or_example, is_example_file, is_placeholder_value,
                              is_test_file, path_in_skip_dir, read_artifact)
 
@@ -324,7 +324,120 @@ def _osv(target: Path, out: Path, excludes=()) -> list:
     # against osv-scanner 2.4.0 with two nested package-lock.json: without -r, 0 packages; with -r,
     # both lockfiles scanned. Dependency CVEs are the highest-frequency true-positive class in any
     # repo, so this silently removed the single most productive scanner in the set (field report #2).
-    return ["osv-scanner", "scan", "--recursive", "--format", "json", "--output", str(out), str(target)]
+    cmd = ["osv-scanner", "scan", "--recursive"]
+    version = _parse_version(probe_version("osv-scanner"))
+    # COMPILED GO BINARIES. A Go executable carries its module list (build info) inside the file, so
+    # a CLI someone committed or a pipeline downloaded into the checkout ships every vulnerable module
+    # it was built with. Neither `trivy fs` nor osv's default plugins open binaries, so websec reported
+    # such a tree clean while an image/binary-aware scanner listed dozens of CVEs in the same file.
+    # The flag is version-gated, not optional polish: before 2.2.3 `--experimental-plugins` REPLACED
+    # the default plugin set instead of adding to it, so passing it there would silently drop every
+    # lockfile from the scan (the field report #2 failure again). Unknown version → leave it off and
+    # let the coverage note say binaries were not scanned.
+    if version and version >= OSV_ADDITIVE_PLUGINS:
+        cmd += ["--experimental-plugins", "go/binary"]
+    # With the binary plugin on, osv opens every file it walks, including the Go/Rust executables
+    # JS toolchains ship under node_modules. normalize_findings drops those findings by SKIP_DIRS, so
+    # this is performance, not correctness. Gated on the version whose regex form was verified.
+    if version and version >= OSV_REGEX_EXCLUDE:
+        cmd += ["--experimental-exclude", "r:" + _osv_skip_regex(target)]
+    return cmd + ["--format", "json", "--output", str(out), str(target)]
+
+
+def _osv_skip_regex(target: Path) -> str:
+    """SKIP_DIRS as an osv exclude regex ANCHORED to the scan root.
+
+    osv matches the pattern against the ABSOLUTE path. An unanchored `(^|/)\\.claude(/|$)` therefore
+    matched the target's own ancestors: a repo checked out under `.claude/worktrees/…` or `build/…`
+    was excluded whole and osv exited "No package sources found" (verified on 2.6.0) — the bug-005/066
+    class `_checkov_skip_paths` already guards against. Anchors cover the path as given, absolute and
+    symlink-resolved (macOS /tmp → /private/tmp). The leading slash is optional because osv-scalibr
+    walks from the filesystem root and reports paths WITHOUT it (`private/tmp/…`); an anchor that
+    required it matched nothing and silently disabled the exclusion."""
+    anchors = sorted({str(p).strip("/") for p in (target, os.path.abspath(target), os.path.realpath(target))})
+    root = "^/?(?:" + "|".join(re.escape(a) for a in anchors) + ")/"
+    names = "|".join(re.escape(d) for d in EXCLUDE_DIRS)
+    return f"{root}(?:.*/)?(?:{names})(?:/|$)"
+
+
+_BINARY_MAGIC = (b"\x7fELF", b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf", b"\xce\xfa\xed\xfe",
+                 b"\xcf\xfa\xed\xfe")
+_BINARY_PROBE_FILES = 50000
+_BINARY_LIST = 20
+
+
+def _is_executable_image(path: Path) -> bool:
+    """ELF, Mach-O (thin or fat) or PE, by magic bytes — never by name or extension."""
+    try:
+        with open(path, "rb") as stream:
+            head = stream.read(64)
+            if head[:4] in _BINARY_MAGIC:
+                return True
+            # 0xCAFEBABE is a fat Mach-O AND a Java class file; a fat header's arch count is small.
+            if head[:4] == b"\xca\xfe\xba\xbe":
+                return len(head) >= 8 and 0 < int.from_bytes(head[4:8], "big") < 20
+            if head[:2] == b"MZ" and len(head) >= 64:
+                offset = int.from_bytes(head[60:64], "little")
+                if 0 < offset < 4096:
+                    stream.seek(offset)
+                    return stream.read(4) == b"PE\0\0"
+    except OSError:
+        return False
+    return False
+
+
+def compiled_binaries(target: Path, excludes=()) -> dict:
+    """In-scope compiled executables: {"paths": [...first N], "count": n, "truncated": bool}.
+
+    Same scope rules as every finding (SKIP_DIRS + --exclude), so the toolchain binaries that live
+    under node_modules/.venv are not counted. Bounded: reads 64 bytes of at most a fixed number of
+    files and never follows symlinks."""
+    root, paths, count, examined = Path(target), [], 0, 0
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIRS]
+        for name in filenames:
+            examined += 1
+            if examined > _BINARY_PROBE_FILES:
+                return {"paths": paths, "count": count, "truncated": True}
+            path = Path(dirpath) / name
+            rel = path.relative_to(root).as_posix()
+            if path.is_symlink() or (excludes and _matches_excludes(rel, excludes, root)):
+                continue
+            if _is_executable_image(path):
+                count += 1
+                if len(paths) < _BINARY_LIST:
+                    paths.append(rel)
+    return {"paths": paths, "count": count, "truncated": False}
+
+
+def binary_sca_gap(target: Path, scan_results: list, excludes=()) -> str:
+    """Coverage text when compiled binaries are in scope but no scanner looked inside them, else "".
+
+    Without this, a tree whose only vulnerable code is a committed or downloaded CLI reads as a
+    clean dependency scan: trivy `fs` never opens binaries, and osv-scanner does so only when its
+    go/binary plugin ran (osv >= 2.2.3 and the run completed)."""
+    rows = scan_results or []
+    # Only a run that asked for dependency scanning has a dependency gap; `--scanners gitleaks` did not.
+    if not any(r.get("key") in ("trivy", "osv-scanner") or r.get("category") == "sca" for r in rows):
+        return ""
+    scanned = any(r.get("key") == "osv-scanner" and r.get("binary_sca") and r.get("exit_code") in (0, 1)
+                  for r in rows)
+    if scanned:
+        return ""
+    found = compiled_binaries(target, excludes)
+    if not found["count"]:
+        return ""
+    shown = ", ".join(found["paths"][:5]) + (f" (+{found['count'] - 5} more)" if found["count"] > 5 else "")
+    return (f"{found['count']}{'+' if found['truncated'] else ''} compiled executable(s) in scope "
+            f"({shown}) were not checked for vulnerable embedded modules. Install osv-scanner "
+            f"{'.'.join(map(str, OSV_ADDITIVE_PLUGINS))} or later to scan Go binaries, and keep "
+            f"downloaded tools outside the checkout. Their absence from the findings is NOT a clean result")
+
+
+# osv-scanner 2.2.3 (#2210) made `--experimental-plugins` additive to the default plugins.
+OSV_ADDITIVE_PLUGINS = (2, 2, 3)
+# `--experimental-exclude r:<regex>` verified on 2.6.0 (an exact dirname matched only the top level).
+OSV_REGEX_EXCLUDE = (2, 6, 0)
 
 
 def _gosec(target: Path, out: Path, excludes=()) -> list:
@@ -586,7 +699,8 @@ def run_available(target: Path, outdir: Path, stack_languages: list | None = Non
             continue
         out_file = scan_dir / f"{s.key}.json"
         try:
-            proc = subprocess.run(s.argv(target, out_file, excludes), capture_output=True,
+            argv = s.argv(target, out_file, excludes)
+            proc = subprocess.run(argv, capture_output=True,
                                   text=True, timeout=timeout, stdin=subprocess.DEVNULL)
             # Checkov ignores the filename and writes `results_json.json` into the dir passed to
             # `--output-file-path` — so the recorded <key>.json never existed and 100% of its findings
@@ -603,6 +717,7 @@ def run_available(target: Path, outdir: Path, stack_languages: list | None = Non
                             "exit_code": proc.returncode, "output": str(out_file),
                             **({"configuration_policy": "built-in defaults; target .bandit/YAML/pyproject ignored",
                                 "suppression_policy": "inline nosec ignored"} if s.key == "bandit" else {}),
+                            **({"binary_sca": "go/binary" in argv} if s.key == "osv-scanner" else {}),
                             "findings": _count_findings(s.key, out_file)})
         except subprocess.TimeoutExpired:
             results.append({"key": s.key, "name": s.name, "status": "timeout"})
@@ -872,24 +987,51 @@ def _norm_osv(data: dict) -> list:
     both engines collapses to one row with tools:[trivy,osv-scanner]; OSV-only lockfile hits survive."""
     out = []
     for r in (data.get("results") or []):
+        source = r.get("source", {}) or {}
+        # "artifact" = osv's go/binary plugin read the module list out of a compiled executable.
+        artifact = "binary" if str(source.get("type", "")).lower() == "artifact" else ""
         for p in (r.get("packages") or []):
             pkgobj = p.get("package", {}) or {}
             name = pkgobj.get("name", "")
             version = pkgobj.get("version", "")
             eco = _OSV_ECO.get(str(pkgobj.get("ecosystem", "")).lower(), "")
-            # map each vuln id → its human summary for a readable title (best-effort)
+            vulns = {v.get("id"): v for v in (p.get("vulnerabilities") or []) if isinstance(v, dict)}
             for g in (p.get("groups") or []):
                 ids = g.get("ids", []) or []
                 aliases = g.get("aliases", ids) or ids
                 cve = next((a for a in aliases if str(a).upper().startswith("CVE-")), None) or (ids[0] if ids else "")
                 sev = _cvss_band(g.get("max_severity"))
-                out.append({"tool": "osv-scanner", "category": "sca", "severity": sev,
-                            "key": cve, "file": r.get("source", {}).get("path", ""), "line": 0,
-                            "pkg": name, "cve": cve, "installed": version, "fixed": "", "ecosystem": eco,
-                            "advisory_aliases": sorted({a for a in aliases if isinstance(a, str) and a}),
-                            "title": f"{name} {version} — {cve} ({', '.join(i for i in ids if i != cve)[:60]})".rstrip(" ()"),
-                            "fingerprint": f"cve|{name}|{cve}"})
+                fixed = _osv_fixed(name, [vulns[i] for i in ids if i in vulns])
+                row = {"tool": "osv-scanner", "category": "sca", "severity": sev,
+                       "key": cve, "file": source.get("path", ""), "line": 0,
+                       "pkg": name, "cve": cve, "installed": version, "fixed": fixed, "ecosystem": eco,
+                       "advisory_aliases": sorted({a for a in aliases if isinstance(a, str) and a}),
+                       "title": f"{name} {version} → {fixed or '(no fix)'}",
+                       "fingerprint": f"cve|{name}|{cve}"}
+                if artifact:
+                    row["artifact"] = artifact
+                out.append(row)
     return out
+
+
+def _osv_fixed(name: str, vulns: list) -> str:
+    """Fixed versions for `name` from the OSV records' `affected[].ranges[].events[].fixed`.
+
+    osv-scanner's JSON carries the fix only inside each advisory, so the adapter used to write
+    `fixed: ""`. That was invisible while trivy supplied the fix for the same lockfile CVE, but every
+    finding only osv can see (compiled binaries, lockfile formats trivy misses) had no fix version at
+    all — the half of the report a reader acts on. Several ranges (one per release line) → all fixes."""
+    fixes = []
+    for v in vulns:
+        for aff in (v.get("affected") or []):
+            if not isinstance(aff, dict) or (aff.get("package") or {}).get("name") != name:
+                continue
+            for rng in (aff.get("ranges") or []):
+                for ev in (rng.get("events") or []) if isinstance(rng, dict) else []:
+                    value = ev.get("fixed") if isinstance(ev, dict) else None
+                    if isinstance(value, str) and value and value not in fixes:
+                        fixes.append(value)
+    return ", ".join(fixes)
 
 
 def _norm_trufflehog(data) -> list:
@@ -1382,6 +1524,8 @@ def _derive_confidence(f: dict, target=None) -> tuple:
         # identity. Only an unpinned/unresolved occurrence lowers identity confidence.
         if f.get("reachability") == "not-imported":
             return "MEDIUM", "advisory matches the pinned version, but the package is never imported"
+        if f.get("artifact") == "binary":
+            return "HIGH", "advisory matched a module version recorded in a compiled binary's build info"
         return "HIGH", "advisory matched an exact pinned version from a lockfile"
     if cat == "iac":
         return "MEDIUM", "config-file policy check — deterministic match, deployment context unknown"
@@ -1715,8 +1859,13 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
                 by_fp[fp]["severity"] = f["severity"]
             # A second tool may supply remediation/aliases missing from the first.
             if f.get("fixed"):
-                fixes = {value for value in (f["fixed"], by_fp[fp].get("fixed", "")) if value}
-                by_fp[fp]["fixed"] = ", ".join(sorted(fixes))
+                # Each side is itself a comma list ("5.3.0, 4.2.5"); merge the VERSIONS, not the
+                # strings, or the same two fixes from two tools render four times.
+                fixes = {v.strip() for value in (f["fixed"], by_fp[fp].get("fixed", ""))
+                         for v in str(value or "").split(",") if v.strip()}
+                by_fp[fp]["fixed"] = ", ".join(sorted(fixes, key=lambda v: (dependency_fix.version_key(v), v)))
+            if f.get("artifact") and not by_fp[fp].get("artifact"):
+                by_fp[fp]["artifact"] = f["artifact"]
             aliases = set(by_fp[fp].get("advisory_aliases", [])) | set(f.get("advisory_aliases", []))
             if aliases:
                 by_fp[fp]["advisory_aliases"] = sorted(aliases)
@@ -1727,6 +1876,8 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
     deduped = sorted(by_fp.values(), key=lambda f: (-SEV_ORDER[f["severity"]], f["fingerprint"]))
     for finding in deduped:
         finding["tools"].sort()
+    # Which version, where to change it, and whether it is a major upgrade (dependency_fix).
+    dependency_fixes = dependency_fix.annotate(deduped, target)
 
     # ADDITIVE enrichment (never changes severity / count): is the vulnerable dependency actually
     # imported (reachability), and is the CVE known-exploited / high-EPSS (exploitability)? Both
@@ -1760,6 +1911,8 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
                   **{k: f[k] for k in ("key", "rule_id", "id", "cve", "package", "pkg", "resource",
                                       "service", "symbol", "sink", "semantic_id", "line", "fingerprint",
                                       "installed", "fixed", "ecosystem", "advisory_aliases", "confidence", "cwe",
+                                      "fix_target", "fix_major_bump", "fix_all_target", "dependency_path", "introduced_by",
+                                      "artifact", "remediation", "title_previous",
                                       # field report #6: a per-INSTANCE id (`key` is a rule id) + why
                                       # this confidence, so `feedback`/baselining can address one finding.
                                       "instance_id", "confidence_basis", "native_confidence",
@@ -1789,6 +1942,7 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
             "placeholder_tiered": placeholder_tiered,
             "reachability": reachability,
             "exploitability": exploitability,
+            "dependency_fixes": dependency_fixes,
             "parse_failed": sorted(set(parse_failed)),
             "parse_attempted": sorted(set(_parse_attempted)),
             "report_versions": report_versions,
