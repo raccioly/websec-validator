@@ -111,7 +111,8 @@ class CsrfNeedsAStateChangingRouteTests(_Repo):
         self.assertTrue(_may_change_state({"method": "ANY", "methods_detected": ["GET", "DELETE"]}))
         self.assertTrue(_may_change_state({"method": "post"}))
         self.assertFalse(_may_change_state({"method": "ANY", "methods_detected": ["GET"]}))
-        self.assertFalse(_may_change_state({"method": "GET"}))
+        # A framework GET handler may still change state; only detected raw dispatch is proof.
+        self.assertTrue(_may_change_state({"method": "GET"}))
 
 
 class SchemeEvidenceTests(_Repo):

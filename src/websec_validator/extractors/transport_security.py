@@ -175,16 +175,17 @@ def _cookie_sites(source: str, rel: str, inventory: list) -> list[dict]:
 
 
 _STATE_CHANGING = {"POST", "PUT", "PATCH", "DELETE"}
-_UNKNOWN_METHOD = {"ANY", "ALL", "USE", "*", ""}
 
 
 def _may_change_state(route: dict) -> bool:
-    """A write verb, or a method the route map could not pin down (never assumed read-only)."""
-    method = str(route.get("method") or "").upper()
-    if method in _STATE_CHANGING:
+    """False only for a raw server whose detected dispatch methods are all read-only (#225).
+
+    A framework `GET` handler can still change state (`GET /logout`, `GET /confirm?…`), so its
+    declared method is not proof; only a hand-rolled listener whose method checks name nothing
+    but read-only verbs is. A route with no detected methods stays a possible write.
+    """
+    if str(route.get("method") or "").upper() in _STATE_CHANGING:
         return True
-    if method not in _UNKNOWN_METHOD:
-        return False
     detected = {str(item).upper() for item in route.get("methods_detected") or []}
     return not detected or bool(detected & _STATE_CHANGING)
 
@@ -472,9 +473,8 @@ class TransportSecurityExtractor(Extractor):
         if cookie_sites and not ck_samesite:
             csrf_plumbing = False
             server_actions = False
-        # CSRF needs a request that CHANGES state (#225): a repository whose only mapped routes are
-        # read-only (a GET-only raw listener) has nothing to forge. A route whose method is unknown
-        # (`ANY` with no detected methods, `ALL`, `USE`) stays a possible write.
+        # CSRF needs a request that CAN change state (#225): a repository whose only mapped routes are
+        # raw listeners that serve read-only methods has nothing to forge. See `_may_change_state`.
         write_routes = [row for row in routes if _may_change_state(row)]
         if (web_surface and has_routes and write_routes and cookie_auth and not csrf_plumbing and not ck_samesite
                 and not nextauth_default and not server_actions):

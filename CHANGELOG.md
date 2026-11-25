@@ -18,8 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   request. A comparison of another URL (`new URL(event.src).pathname === '/x'`) and a comparison
   inside `assert(…)` or `expect(…)` are no longer routes. A negated method check
   (`req.method !== 'GET'`) now names the method that the server handles. (#225)
-- `no-csrf-protection` needs a route that may change state: a write method, or a route whose method
-  is unknown. A cookie app whose only routes are read-only is no longer reported. The finding now
+- `no-csrf-protection` is no longer reported when the only routes are raw HTTP listeners whose
+  method checks name only read-only methods. A framework `GET` handler can still change state, so
+  it still counts. The finding now
   names the routes (`write_routes`) and the files behind the auth scheme (`auth_basis`). (#225)
 - The auth scheme lists the files behind each signal in `auth.scheme_evidence`, and
   `auth.scheme_basis` names them. Test files are no longer evidence for the auth scheme. (#225)
