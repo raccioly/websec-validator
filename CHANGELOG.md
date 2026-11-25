@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `timing-unsafe-compare` no longer reports template placeholder dispatch. In a `.replace` or
+  `.replaceAll` callback, a parameter that holds a capture group of an alternation regex
+  (`/\{(name|stage)\}/`) can only be one of those public words. Comparing it to one of them is not a
+  secret comparison. A real secret comparison in the same file, a rebound parameter, a capture with
+  no alternation and a literal outside the alternation are still reported. (#219)
+- A raw HTTP server's routes now come only from path literals that are compared against the
+  request. A comparison of another URL (`new URL(event.src).pathname === '/x'`) and a comparison
+  inside `assert(…)` or `expect(…)` are no longer routes. A negated method check
+  (`req.method !== 'GET'`) now names the method that the server handles. (#225)
+- `no-csrf-protection` needs a route that may change state: a write method, or a route whose method
+  is unknown. A cookie app whose only routes are read-only is no longer reported. The finding now
+  names the routes (`write_routes`) and the files behind the auth scheme (`auth_basis`). (#225)
+- The auth scheme lists the files behind each signal in `auth.scheme_evidence`, and
+  `auth.scheme_basis` names them. Test files are no longer evidence for the auth scheme. (#225)
+- The copies of the web build that Capacitor's `cap sync` writes (`ios/App/App/public/`,
+  `android/app/src/main/assets/public/`) are skipped when a `capacitor.config.*` file is at the
+  target root. The skip reason is `generated_copy`, and the `skipped_directory_code` gap counts the
+  copies. Before, a bundle in a copy could exhaust the source-flow budget and make the run
+  incomplete. (#227)
+- The WebExtension `manifest.json` probe no longer stops at 40 matches. A repository with many web
+  app manifests no longer gets a `glob_limit` gap, and the probe cannot miss the extension manifest.
+  (#227)
+- A `source_flow_limit` gap now names the `.websec-ignore` line that already hides a stopped file,
+  and suggests `--exclude`. The gap stays an execution gap, because the analysis of that file did
+  not finish. (#227)
+
 ## [0.23.1] — 2026-11-24
 
 ### Fixed

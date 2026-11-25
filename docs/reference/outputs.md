@@ -137,7 +137,9 @@ Fields worth knowing:
   product code.
 - `auth.scheme` (the primary scheme), `auth.schemes_detected` and, since 0.22.0,
   `auth.scheme_confidence` (`high`, `medium` or `low`) with `auth.scheme_basis`, the evidence in
-  words. A `jwt (bearer)` reading needs a JWT library imported or called in the same file as a JWT
+  words. Since 0.23.2, `auth.scheme_evidence` maps each grep-level signal (`hmac`, `cookie`,
+  `session`, `apikey`, `passport`) to the first five files that produced it, `scheme_basis` names
+  those files for the primary scheme, and test files are not evidence. A `jwt (bearer)` reading needs a JWT library imported or called in the same file as a JWT
   mention; a JOSE `alg` value or a JWKS reference can confirm a mention but never creates a reading
   on its own, and a bare `Authorization: Bearer` header is not JWT evidence. A name-only mention (a
   comment, an identifier, a `token_required` error code) is kept as `jwt? (weak evidence: …)`,

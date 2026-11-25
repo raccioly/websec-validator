@@ -478,7 +478,7 @@ route discovery is flagged incomplete, and it marks the route count as a floor. 
 **Fix.** Read the evidence behind the reading:
 
 ```bash
-jq '.auth | {scheme, scheme_confidence, scheme_basis, schemes_detected, signal_counts}' \
+jq '.auth | {scheme, scheme_confidence, scheme_basis, scheme_evidence, schemes_detected, signal_counts}' \
   websec-out/latest/FACTS.json
 ```
 

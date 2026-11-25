@@ -173,6 +173,21 @@ def _cookie_sites(source: str, rel: str, inventory: list) -> list[dict]:
     return sites
 
 
+
+_STATE_CHANGING = {"POST", "PUT", "PATCH", "DELETE"}
+_UNKNOWN_METHOD = {"ANY", "ALL", "USE", "*", ""}
+
+
+def _may_change_state(route: dict) -> bool:
+    """A write verb, or a method the route map could not pin down (never assumed read-only)."""
+    method = str(route.get("method") or "").upper()
+    if method in _STATE_CHANGING:
+        return True
+    if method not in _UNKNOWN_METHOD:
+        return False
+    detected = {str(item).upper() for item in route.get("methods_detected") or []}
+    return not detected or bool(detected & _STATE_CHANGING)
+
 class TransportSecurityExtractor(Extractor):
     name = "transport_security"
     category = "exposure"
@@ -457,14 +472,28 @@ class TransportSecurityExtractor(Extractor):
         if cookie_sites and not ck_samesite:
             csrf_plumbing = False
             server_actions = False
-        if (web_surface and has_routes and cookie_auth and not csrf_plumbing and not ck_samesite
+        # CSRF needs a request that CHANGES state (#225): a repository whose only mapped routes are
+        # read-only (a GET-only raw listener) has nothing to forge. A route whose method is unknown
+        # (`ANY` with no detected methods, `ALL`, `USE`) stays a possible write.
+        write_routes = [row for row in routes if _may_change_state(row)]
+        if (web_surface and has_routes and write_routes and cookie_auth and not csrf_plumbing and not ck_samesite
                 and not nextauth_default and not server_actions):
+            shown = ", ".join(f"{row.get('method', '?')} {row.get('path', '?')} ({row.get('code_path', '?')})"
+                              for row in write_routes[:3])
+            evidence = auth.get("scheme_evidence") or {}
+            files = sorted({path for paths in evidence.values() for path in paths})[:5]
             findings.append({"severity": "LOW", "kind": "no-csrf-protection", "attack_class": "csrf",
+                             "write_routes": [f"{row.get('method', '?')} {row.get('path', '?')}" for row in write_routes[:10]],
+                             "auth_basis": auth.get("scheme_basis", ""),
                              "detail": "This looks like a cookie/session-authenticated app with HTTP routes, but no "
                              "anti-CSRF token library/middleware (csurf/csrf-csrf/@fastify/csrf/Django/Rails) and no "
                              "`SameSite` cookie attribute were found — state-changing routes may be forgeable "
                              "cross-site (CSRF). Add an anti-CSRF token to write routes AND set session cookies "
-                             "`SameSite=Lax`/`Strict`. VERIFY the auth model first: a Bearer-token-only API is exempt."})
+                             "`SameSite=Lax`/`Strict`. VERIFY the auth model first: a Bearer-token-only API is exempt. "
+                             f"Evidence: auth scheme '{auth.get('scheme', 'unknown')}'"
+                             + (f" from {', '.join(files)}" if files else "")
+                             + f"; route(s) that may change state: {shown}"
+                             + (f" (+{len(write_routes) - 3} more)" if len(write_routes) > 3 else "") + "."})
 
         # 0.6.2: report the cookie-hardening PASS (✓ builds trust + is a regression assertion), or flag the gap.
         passes, cookie_security = [], None
