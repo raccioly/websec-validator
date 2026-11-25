@@ -111,5 +111,10 @@ def run_all(root: Path, version: str, excludes: list | None = None,
     facts["coverage"] = coverage.from_context(ctx, outcomes)
     coverage.add_profiles(facts)
     coverage.add_routes(facts)
-    coverage.add_source_flow(facts)
+    try:
+        from ..findings import load_suppressions
+        ignore_patterns = list(load_suppressions(root, context=ctx))
+    except (OSError, ValueError):
+        ignore_patterns = []
+    coverage.add_source_flow(facts, ignore_patterns)
     return facts
