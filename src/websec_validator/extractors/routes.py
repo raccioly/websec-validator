@@ -328,11 +328,53 @@ _RAW_SERVER_SIG = re.compile(
     r"\bBun\.serve\s*\(|"                                 # Bun.serve({...})
     r"\bBaseHTTPRequestHandler\b|"                        # python http.server
     r"\b(?:HTTPServer|ThreadingHTTPServer)\s*\(", re.I)   # python http.server bind
-_RAW_METHOD_JS = re.compile(r"\breq(?:uest)?\.method\s*(?:===?|==)\s*['\"]([A-Za-z]+)['\"]")
+# `!==` counts too: `if (req.method !== 'GET') return 405` names the one method the handler serves.
+_RAW_METHOD_JS = re.compile(r"\breq(?:uest)?\.method\s*(?:!==?|===?)\s*['\"]([A-Za-z]+)['\"]")
 _RAW_METHOD_PY = re.compile(r"\bdef\s+do_([A-Z]+)\s*\(")   # BaseHTTPRequestHandler do_GET/do_POST/...
 _RAW_PATH = re.compile(
     r"(?:req(?:uest)?\.url|pathname|\.path|url)\s*(?:===?|==|\.startsWith\s*\()\s*['\"](/[^'\"]*)['\"]"
     r"|\bcase\s+['\"](/[^'\"]*)['\"]")
+_REQUEST_NAME = re.compile(r"\b(?:req|request)\b")
+_ASSERTION_CALL = re.compile(r"\b(?:assert(?:\s*\.\s*[A-Za-z]+)?|expect)\s*\(")
+
+
+def _raw_path_from_request(text: str, start: int) -> bool:
+    """Is the path literal at `start` compared against the REQUEST, not some other URL (#225)?
+
+    `new URL(event.src).pathname === '/x'` compares a recorded media URL, and a comparison inside
+    `assert(...)`/`expect(...)` is a test oracle, not dispatch. Neither registers a route. Any other
+    receiver stays a route lead: a bare `pathname` or `url.pathname` is usually `new URL(req.url)`.
+    """
+    # The `.path` alternative starts AT the dot; keep it so the receiver test below sees `).`.
+    before = text[max(0, start - 400):start + (1 if text[start:start + 1] == "." else 0)].rstrip()
+    if before.endswith(")."):
+        close = len(before) - 2
+        depth, index = 0, close
+        while index >= 0:
+            if before[index] == ")":
+                depth += 1
+            elif before[index] == "(":
+                depth -= 1
+                if depth == 0:
+                    break
+            index -= 1
+        if index > 0 and re.search(r"\bnew\s+URL\s*$", before[:index]):
+            if not _REQUEST_NAME.search(before[index:close + 1]):
+                return False
+    for call in _ASSERTION_CALL.finditer(text, max(0, start - 2000), start):
+        opening = text.find("(", call.start())
+        depth, index = 0, opening
+        while index < len(text):
+            if text[index] == "(":
+                depth += 1
+            elif text[index] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            index += 1
+        if opening < start < index:
+            return False
+    return True
 # Hand-rolled-handler evidence: the raw node/http response API + request dispatch. Guards against
 # `http.createServer(expressApp)` — a FRAMEWORK app handed to createServer, whose real routes Noir
 # already found; without this we'd stamp a phantom `/*` on top of a mapped Express/Connect app.
@@ -359,8 +401,10 @@ def _raw_server_routes(ctx: RepoContext) -> list:
         tech = ("python-http" if is_py
                 else "bun-serve" if "Bun.serve" in text else "node-http")
         paths = []
-        for a, b in _RAW_PATH.findall(text):
-            pth = _clean_path(a or b)
+        for match in _RAW_PATH.finditer(text):
+            if match.group(1) and not _raw_path_from_request(text, match.start()):
+                continue
+            pth = _clean_path(match.group(1) or match.group(2))
             if pth and not _is_noise(pth) and pth not in paths:
                 paths.append(pth)
         # A hand-rolled dispatcher branches on method AND url together, but a regex can't reliably

@@ -428,10 +428,96 @@ def _interpolated_comparison(literal: str, suffix: str, depth: int, *, python: b
     return None
 
 
+_REPLACE_CALL = re.compile(r"\.\s*replace(?:All)?\s*\(\s*/")
+_CALLBACK_HEAD = re.compile(r"\s*,\s*(?:async\s+)?(?:function\b\s*[\w$]*\s*)?\(([^()]*)\)\s*(?:=>)?\s*")
+_JS_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"}
+
+
+def _regex_literal_end(source: str, slash: int) -> int:
+    """Index just past `/body/flags` starting at `slash`, or -1 when the literal is not closed."""
+    index, in_class = slash + 1, False
+    while index < len(source) and source[index] != "\n":
+        char = source[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == "[":
+            in_class = True
+        elif char == "]":
+            in_class = False
+        elif char == "/" and not in_class:
+            index += 1
+            while index < len(source) and source[index].isalpha():
+                index += 1
+            return index
+        index += 1
+    return -1
+
+
+def _alternation_members(body: str) -> set:
+    """Plain-word alternatives of every capture group in a regex body: `(name|stage)` -> both."""
+    members = set()
+    for group in re.finditer(r"(?<!\\)\((?!\?)((?:\\.|[^()\\])*)\)", body):
+        for item in group[1].split("|"):
+            if re.fullmatch(r"[\w$-]{1,64}", item):
+                members.add(item)
+    return members
+
+
+def _public_capture_sites(source: str) -> list:
+    """(start, end, parameters, members) for each `.replace(/re/, (m, g1, …) => …)` callback.
+
+    A non-first callback parameter holds a capture group of a regex written in the same call, so
+    when the regex enumerates its values with an alternation (`/\\{(name|stage)\\}/`) the parameter
+    can only ever be one of those public words. Comparing it to one of them leaks nothing secret:
+    this is template-placeholder dispatch, not secret-byte equality (#219).
+    """
+    sites = []
+    for call in _REPLACE_CALL.finditer(source):
+        slash = call.end() - 1
+        end_regex = _regex_literal_end(source, slash)
+        if end_regex < 0:
+            continue
+        body = source[slash + 1:source.rfind("/", slash + 1, end_regex)]
+        members = _alternation_members(body)
+        head = _CALLBACK_HEAD.match(source, end_regex)
+        if not members or not head:
+            continue
+        params = [item.strip() for item in head[1].split(",")]
+        if len(params) < 2 or not all(re.fullmatch(r"[A-Za-z_$][\w$]*", item) for item in params):
+            continue
+        opening = source.rfind("(", 0, slash)
+        masked = source[:slash] + " " * (end_regex - slash) + source[end_regex:]
+        end = expression_end(masked, opening, closing=")")
+        if end <= head.end() or masked[end - 1:end] != ")":
+            continue
+        callback = source[head.end():end - 1]
+        stable = {name for name in params[1:]
+                  if not re.search(r"(?<![\w$.])" + re.escape(name) + r"\s*(?:=(?!=)|\+\+|--|[-+*/%&|^]=)"
+                                   r"|\b(?:const|let|var)\s+[^;=]*?(?<![\w$])" + re.escape(name) + r"(?![\w$])",
+                                   callback)}
+        if stable:
+            sites.append((head.end(), end, stable, members))
+    return sites
+
+
+def _public_capture_comparison(left: str, right: str, position: int, sites: list) -> bool:
+    for start, end, params, members in sites:
+        if not start <= position < end:
+            continue
+        for name, other in ((left, right), (right, left)):
+            other = _unparenthesized(other)
+            if (_unparenthesized(name) in params and len(other) >= 2 and other[0] in "\"'"
+                    and other[-1] == other[0] and other[1:-1] in members):
+                return True
+    return False
+
+
 def _timing_comparison(source: str, suffix: str, _depth: int = 0) -> dict | None:
     """Equality-site hints only; a helper elsewhere cannot certify this comparison."""
     if not _CREDENTIAL_NAME.search(source):
         return None
+    capture_sites = None
     for match in _TIMING_ITEMS.finditer(source):
         if match.group("comparison") is None:
             python = suffix == ".py" and bool(re.search(r"(?:^|\W)(?:[rR]?[fF]|[fF][rR])$", source[max(0, match.start()-3):match.start()]))
@@ -448,6 +534,11 @@ def _timing_comparison(source: str, suffix: str, _depth: int = 0) -> dict | None
         if left_complete and right_complete and (_presence_literal(left, suffix) or _presence_literal(right, suffix)
                                                  or _type_comparison(left, right, suffix)):
             continue
+        if left_complete and right_complete and suffix in _JS_SUFFIXES:
+            if capture_sites is None:
+                capture_sites = _public_capture_sites(source)
+            if _public_capture_comparison(left, right, match.start(), capture_sites):
+                continue
         return {"line": source.count("\n", 0, match.start()) + 1,
                 "operator": match.group("comparison"),
                 "control_scope": "bounded equality operands; credential purpose and runtime timing unverified; JavaScript regex literals are unresolved"}

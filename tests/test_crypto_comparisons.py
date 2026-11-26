@@ -172,5 +172,44 @@ class CryptoComparisonTests(unittest.TestCase):
                 self.assertEqual(len(self.timing('if (' + expression + ') grant();')), 1)
 
 
+class PublicPlaceholderDispatchTests(unittest.TestCase):
+    """#219: a regex capture compared to one of that regex's own alternatives is placeholder dispatch."""
+    scan = CryptoComparisonTests.scan
+    timing = CryptoComparisonTests.timing
+    REGEX = r"/\{(name|stage)\}/g"
+
+    def test_issue_reproduction_is_not_a_timing_lead(self):
+        source = ("export const render = (stage, name) => stage.announcement.replace(" + self.REGEX + ",\n"
+                  "  (_match, token) => token === 'name' ? String(name) : stage.name);\n")
+        self.assertEqual(self.timing(source, '.mjs'), [])
+
+    def test_function_callbacks_and_reversed_operands_are_dispatch_too(self):
+        for callback in ("function (_m, token) { return token === 'stage' ? a : b; }",
+                         "(_m, token) => 'name' === token ? a : b",
+                         "(_m, secret) => secret !== 'stage'"):
+            with self.subTest(callback=callback):
+                self.assertEqual(self.timing("s.replace(" + self.REGEX + ", " + callback + ");"), [])
+
+    def test_real_secret_comparison_in_the_same_file_still_flags(self):
+        rows = self.timing("s.replace(" + self.REGEX + ", (_m, token) => token === 'name' ? a : b);\n"
+                           "if (providedToken === storedSecret) grant();")
+        self.assertEqual([row['line'] for row in rows], [2])
+
+    def test_leads_that_are_not_bounded_dispatch_remain(self):
+        for source in (
+                # The literal is not one of the regex's alternatives.
+                "s.replace(" + self.REGEX + ", (_m, token) => token === 'admin');",
+                # A capture with no alternation can be any attacker-supplied bytes.
+                r"h.replace(/Bearer (\S+)/, (_, token) => token === 'hardcoded');",
+                # Rebinding the parameter breaks the link to the capture group.
+                "s.replace(" + self.REGEX + ", (_m, token) => { token = req.query.t; return token === 'name'; });",
+                # The same name outside the callback is a different value.
+                "s.replace(" + self.REGEX + ", (_m, token) => token);\nif (token === 'name') grant();",
+                # The first parameter is the whole match, never a bounded capture.
+                "s.replace(" + self.REGEX + ", (token) => token === 'name');"):
+            with self.subTest(source=source):
+                self.assertEqual(len(self.timing(source)), 1)
+
+
 if __name__ == '__main__':
     unittest.main()

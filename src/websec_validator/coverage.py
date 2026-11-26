@@ -194,7 +194,7 @@ def thin_languages(cov: dict) -> set:
     return seen - with_sinks - FIRST_CLASS
 
 
-def add_source_flow(facts: dict) -> None:
+def add_source_flow(facts: dict, ignore_patterns: list | None = None) -> None:
     """#194: name the files whose bounded source-flow analysis stopped at a budget.
 
     A budget limit means that file was not fully analysed, so — exactly like an oversized file —
@@ -202,16 +202,30 @@ def add_source_flow(facts: dict) -> None:
     gap names the files and the reason instead of a bare "surface", so an operator can act on it.
     """
     surface = facts.get("surface") or {}
-    rows = []
+    from .findings import _path_match, _pattern_kind
+    paths = [pattern for pattern in (ignore_patterns or []) if _pattern_kind(pattern) == "path"]
+    rows, hidden = [], {}
     for lane in ("sql_flow", "assigned_flow"):
         for row in (surface.get(lane) or {}).get("errors") or []:
             if isinstance(row, dict):
                 rows.append(f"{row.get('file', '?')} ({lane}: {row.get('kind', '?')}"
                             + (f": {row['detail']}" if row.get("detail") else "") + ")")
+                pattern = next((item for item in paths if _path_match(item, str(row.get("file") or ""))), None)
+                if pattern:
+                    hidden.setdefault(pattern, []).append(str(row.get("file")))
     if rows:
         more = f" (+{len(rows) - 8} more)" if len(rows) > 8 else ""
+        # #227: a `.websec-ignore` path line hides FINDINGS; it does not take a file out of analysis,
+        # so the file still spent the budget. Still an execution gap (the run is not complete), but
+        # say which stopped files are already ignored and how to take them out of scope instead.
+        note = ""
+        if hidden:
+            named = "; ".join(f"{len(files)} under .websec-ignore line '{pattern}'" for pattern, files in hidden.items())
+            note = (f". Of these, {named}: that line hides findings but does not remove files from "
+                    "analysis. If those files are generated or duplicated, pass the same pattern to "
+                    "--exclude so they are not analysed")
         add_gap(facts, "source_flow_limit",
-                f"{len(rows)} file(s) not fully analysed by source-flow: {'; '.join(rows[:8])}{more}")
+                f"{len(rows)} file(s) not fully analysed by source-flow: {'; '.join(rows[:8])}{more}{note}")
 
 
 def add_routes(facts: dict) -> None:

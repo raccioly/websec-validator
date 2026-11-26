@@ -121,6 +121,10 @@ scanner still reports that failure. To remove a path from analysis, use `--exclu
 scanners) or `--only` (analysis scope). websec already splits out test, example and fixture code
 and demotes it automatically. `--include-fixtures` turns that off.
 
+A file that `.websec-ignore` hides can therefore still stop at an analysis budget and make the run
+incomplete. The `source_flow_limit` gap then names the `.websec-ignore` line that covers the file, so
+you can move that pattern to `--exclude` when the file is generated or duplicated.
+
 **Where it applies.** `run`, `gate`, the agent hook, `emit-context`, the `dynamic` ledger, and the
 MCP tools `websec_findings` and `websec_briefing`. The MCP `websec_sarif` tool builds the raw
 ledger **without** it (see [mcp.md](mcp.md#tools)).

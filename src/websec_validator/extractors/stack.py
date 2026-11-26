@@ -179,11 +179,9 @@ class StackExtractor(Extractor):
             datastores.add("postgres")                  # Supabase is Postgres-backed
 
         # WebExtension / Chrome extension (MV2/MV3): a manifest.json declaring manifest_version.
-        for mf in ctx.glob("**/manifest.json", 40):
-            if '"manifest_version"' in ctx.text(mf):
-                frameworks.add("webextension")
-                langs.add("node")                       # extension code is JS
-                break
+        if ctx.extension_manifests():
+            frameworks.add("webextension")
+            langs.add("node")                           # extension code is JS
 
         # SQL schema / migration files imply a SQL datastore even with no ORM dependency.
         for sf in ctx.glob("**/*.sql", 60):

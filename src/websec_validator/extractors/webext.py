@@ -219,7 +219,7 @@ class WebExtExtractor(Extractor):
     category = "client-trust"
 
     def extract(self, ctx: RepoContext, facts: dict) -> dict:
-        manifests = [mf for mf in ctx.glob("**/manifest.json", 40) if '"manifest_version"' in ctx.text(mf)]
+        manifests = [mf for mf in ctx.extension_manifests() if '"manifest_version"' in ctx.text(mf)]
         findings: list = []
         permissions: list = []
         host_permissions: list = []

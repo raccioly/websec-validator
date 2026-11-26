@@ -134,6 +134,7 @@ def unanalyzed_languages(paths) -> dict:
 #     corpus apps' own code 155; the vendored bundles run to 32,000-89,000.
 # Skipped files are COUNTED and disclosed as a `walker_policy` scope gap, never silently dropped.
 VENDOR_PREFIX_BYTES = 4096
+MANIFEST_SCREEN_BYTES = 256 * 1024   # a WebExtension manifest is a few KB; larger JSON is not one
 MINIFIED_LINE = 1000
 MINIFIED_DENSITY = 0.9   # non-whitespace share of a long line; minified ~0.97, padded source ~0.01
 _VENDORABLE_EXT = {".js", ".mjs", ".cjs", ".jsx", ".css"}
@@ -195,6 +196,26 @@ def is_websec_output_dir(path: Path) -> bool:
     except OSError:
         return False
     return False
+
+
+# Capacitor's `npx cap sync` copies the built web app into each native project. Those copies are
+# generated duplicates of a web build the scan already covers through its source, exactly like
+# `dist/`: they cannot be fixed in place, and analysing them spends the source-flow budget on
+# bundles (#227). Recognised by the fixed paths Capacitor writes AND a Capacitor config at the
+# repository root, so an unrelated `ios/App/App/public/` in another kind of project is analysed.
+CAPACITOR_WEB_COPIES = ("ios/App/App/public", "android/app/src/main/assets/public")
+_CAPACITOR_CONFIGS = ("capacitor.config.json", "capacitor.config.ts", "capacitor.config.js",
+                      "capacitor.config.mjs", "capacitor.config.cjs")
+
+
+def is_capacitor_web_copy(root: Path, rel: str) -> bool:
+    """True for a Capacitor-synced copy of the web build inside a native project directory."""
+    if rel.replace("\\", "/").strip("/") not in CAPACITOR_WEB_COPIES:
+        return False
+    try:
+        return any((root / name).is_file() for name in _CAPACITOR_CONFIGS)
+    except OSError:
+        return False
 
 
 def _glob_matches(relative: Path, pattern: str) -> bool:
@@ -315,6 +336,7 @@ class RepoContext:
         self.unreadable: list[str] = []
         self.unsupported_files: list[str] = []
         self.glob_truncated: list[dict] = []
+        self._extension_manifests: list[Path] | None = None
         self.skipped_files: list[dict] = []
         self.skip_counts: dict[str, int] = {}
         # Analysable-suffix files under directories the walker pruned (see PROBED_SKIP_DIRS).
@@ -468,6 +490,12 @@ class RepoContext:
                     # This tool's own output (FACTS, staged probe scripts): not the application.
                     # Disclosed as a walker-policy skip and counted like any other pruned tree.
                     self._skip(child, "websec_output")
+                    self._probe_skipped_code(child)
+                    continue
+                if is_capacitor_web_copy(self.root, child.relative_to(self.root).as_posix()):
+                    # A generated copy of the web build (`cap sync`), not source: disclosed and
+                    # counted like `dist/`, so a project whose source lives here is still told.
+                    self._skip(child, "generated_copy")
                     self._probe_skipped_code(child)
                     continue
                 kept.append(name)
@@ -753,6 +781,37 @@ class RepoContext:
                 break
             out.append(path)
         return out
+
+    def extension_manifests(self) -> list[Path]:
+        """Every `manifest.json` that declares `manifest_version` (a WebExtension), shallowest first.
+
+        A classification probe, so it must not stop at a count: a capped glob made a repository
+        with many ordinary web-app manifests report `glob_limit` and could miss the extension one
+        (#227). The candidates come from the in-memory inventory; each is screened with one bounded
+        raw read that bypasses the shared source-byte budget, so screening hundreds of small JSON
+        files cannot turn into `byte_budget_exceeded`. Only the matches are read through `text()`.
+        """
+        if self._extension_manifests is not None:
+            return list(self._extension_manifests)
+        candidates = sorted((path for path in self._files if path.name == "manifest.json"),
+                            key=lambda path: (len(self._relative_files.get(path, path).parts), str(path)))
+        found = []
+        for path in candidates:
+            allowed = self._allowed(path, traversal=True)
+            if allowed is None:
+                continue
+            _, resolved, info = allowed
+            if info.st_size > MANIFEST_SCREEN_BYTES:
+                continue
+            try:
+                with os.fdopen(self._open_file(resolved, info), "rb") as stream:
+                    head = stream.read(MANIFEST_SCREEN_BYTES)
+            except OSError:
+                continue
+            if b'"manifest_version"' in head:
+                found.append(path)
+        self._extension_manifests = found
+        return list(found)
 
     def exists(self, *names: str) -> bool:
         return any(self._allowed(self.root / name) is not None for name in names)

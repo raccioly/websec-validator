@@ -262,6 +262,15 @@ def _scheme_confidence(primary: str, *, jwt_strong: int, jwt: int, reliable: boo
     return level, basis
 
 
+
+MAX_EVIDENCE_FILES = 5
+
+
+def _evidence(store: dict, signal: str, rel: str) -> None:
+    files = store.setdefault(signal, [])
+    if rel not in files and len(files) < MAX_EVIDENCE_FILES:
+        files.append(rel)
+
 class AuthExtractor(Extractor):
     name = "auth"
     category = "authn"
@@ -280,6 +289,7 @@ class AuthExtractor(Extractor):
         all_texts: list = []                # every walked file's text, for the startup-assertion sweep
         jwt_sign_verify = False             # does the repo actually sign/verify JWTs?
         cookie_present = False              # any cookie usage (qualifies HMAC as cookie-session)
+        scheme_evidence: dict = {}          # signal -> first files that produced it (explains the scheme)
         broken_auth: list = []              # total auth-bypass backdoors (CRITICAL) — see the regexes above
         for _p, rel, text in ctx.iter_code():
             if not is_test_file(rel) and not _looks_like_example(rel):
@@ -323,20 +333,27 @@ class AuthExtractor(Extractor):
                         "when that secret is unset (a misconfig, a new environment, a rotation gap) the whole "
                         "verification is SKIPPED and the request is accepted UNVERIFIED (fail-open, CWE-636/CWE-325). "
                         "Fail CLOSED: if the secret is required and absent, reject (500/401), never bypass the check."})
-            if JWT_LIBS.search(text):
+            # Scheme evidence comes from the application, not its tests (#225): a test's cookie jar
+            # or HMAC fixture says nothing about how the shipped app authenticates requests.
+            scheme_file = not is_test_file(rel)
+            if scheme_file and JWT_LIBS.search(text):
                 jwt += 1
                 # Promotion to JWT evidence is judged on comment-stripped source (see JWT_CORE).
                 code = without_comments(text, _p.suffix)
                 if JWT_CORE.search(code) or JWT_CORROBORATION.search(code):
                     jwt_strong += 1
-            if PASSPORT.search(text):
+            if scheme_file and PASSPORT.search(text):
                 passport += 1
-            if SESSION.search(text):
+                _evidence(scheme_evidence, "passport", rel)
+            if scheme_file and SESSION.search(text):
                 session += 1
-            if APIKEY.search(text):
+                _evidence(scheme_evidence, "session", rel)
+            if scheme_file and APIKEY.search(text):
                 apikey += 1
-            if HMAC_AUTH.search(text):
+                _evidence(scheme_evidence, "apikey", rel)
+            if scheme_file and HMAC_AUTH.search(text):
                 hmac += 1
+                _evidence(scheme_evidence, "hmac", rel)
             if GUARDS.search(text) and len(guard_files) < 25:
                 guard_files.append(rel)
             if len(cookie_names) < 20:
@@ -346,8 +363,9 @@ class AuthExtractor(Extractor):
                         cookie_names.append(name)
             if JWT_SIGN_VERIFY.search(text):
                 jwt_sign_verify = True
-            if not cookie_present and COOKIE_PRESENT.search(text):
+            if scheme_file and (COOKIE_PRESENT.search(text) or COOKIE_READ.search(text)):
                 cookie_present = True
+                _evidence(scheme_evidence, "cookie", rel)
             if not _looks_like_example(rel):
                 # Keep a window of the SOURCE around each match, not just the match: SECRET_DEFAULT_JS
                 # starts at the variable NAME, so `process.env.` sits to its left and the env var
@@ -415,6 +433,11 @@ class AuthExtractor(Extractor):
         primary = detected[0] if detected else "unknown"
         scheme_confidence, scheme_basis = _scheme_confidence(
             primary, jwt_strong=jwt_strong, jwt=jwt, reliable=route_count > 0 or bool(nextauth))
+        basis_files = {"hmac-signed-cookie": ("hmac", "cookie"), "session-cookie": ("session",),
+                       "api-key": ("apikey",)}.get(primary, ())
+        named = "; ".join(f"{key}: {', '.join(scheme_evidence[key])}" for key in basis_files if scheme_evidence.get(key))
+        if named:
+            scheme_basis += f" [{named}]"
         token_location = ("cookie" if primary.startswith(("nextauth", "session", "hmac"))
                           else "bearer" if primary.startswith("jwt")
                           else "header" if primary.startswith("api-key")
@@ -427,6 +450,8 @@ class AuthExtractor(Extractor):
             "scheme_confidence": scheme_confidence,
             "scheme_basis": scheme_basis,
             "schemes_detected": detected,
+            # Which files produced each grep-level signal, so a reader can check the classification.
+            "scheme_evidence": scheme_evidence,
             "token_location": token_location,
             "login_endpoints": auth_eps,
             "cookie_names": cookie_names[:15],

@@ -282,6 +282,14 @@ with a sanitized description of its shape. Do not treat the gap as noise. websec
 that file. websec still reads a `/` after `)`, `]`, `}` or an identifier as division.
 A regex literal in that position can still trigger the old behavior.
 
+**A file that `.websec-ignore` already hides.** A `.websec-ignore` path line hides the findings of a
+file. It does not remove the file from analysis, so the file can still use up a budget. Since
+0.23.2, the gap names the `.websec-ignore` line that already covers each stopped file. The gap stays
+an execution gap, because websec did not finish the analysis of that file. If the file is generated
+or a copy of other source, pass the same pattern to `--exclude` to take it out of analysis.
+Capacitor web copies (`ios/App/App/public/` and `android/app/src/main/assets/public/`) are skipped
+automatically, as the next section explains.
+
 ### `latest` points at an older run, or there is no `latest`
 
 **Cause.** `latest` moves forward only after a run whose requested checks all completed. A partial
@@ -340,6 +348,12 @@ The walker no longer skips a directory named `security/`. It now skips only the 
 which it recognizes by content, whatever the name: a run directory (`FACTS.json` next to `coverage.json`) or an output
 root (`runs/` with a `latest` link into it), with skip reason `websec_output`. If such a directory is not named
 `websec-out` and holds analyzable files, such as staged probe scripts, websec also counts it in the `skipped_directory_code` gap.
+
+Since 0.23.2, the walker also skips the copies of the web build that Capacitor's `cap sync` writes
+into the native projects: `ios/App/App/public/` and `android/app/src/main/assets/public/`, at the
+target root, when a `capacitor.config.*` file is also at the root. The skip reason is
+`generated_copy`. websec analyzes the web source that these copies come from. The copies are
+counted in the `skipped_directory_code` gap in the same way.
 
 **Fix.** No flag re-includes a skipped directory name. Skip matching is relative to the
 target. Use the affected directory directly as its own target:
@@ -464,7 +478,7 @@ route discovery is flagged incomplete, and it marks the route count as a floor. 
 **Fix.** Read the evidence behind the reading:
 
 ```bash
-jq '.auth | {scheme, scheme_confidence, scheme_basis, schemes_detected, signal_counts}' \
+jq '.auth | {scheme, scheme_confidence, scheme_basis, scheme_evidence, schemes_detected, signal_counts}' \
   websec-out/latest/FACTS.json
 ```
 
