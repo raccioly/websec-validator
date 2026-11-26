@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.23.2] — 2026-11-26
+
 ### Fixed
 
 - `timing-unsafe-compare` no longer reports template placeholder dispatch. In a `.replace` or
@@ -2027,7 +2029,8 @@ The initial public line. Highlights across 0.2.1–0.2.9:
 ### Fixed
 - Scanner-contamination and rate-limit fixes (agent-wallet dogfood).
 
-[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.23.1...HEAD
+[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.23.2...HEAD
+[0.23.2]: https://github.com/raccioly/websec-validator/compare/v0.23.1...v0.23.2
 [0.23.1]: https://github.com/raccioly/websec-validator/compare/v0.23.0...v0.23.1
 [0.23.0]: https://github.com/raccioly/websec-validator/compare/v0.22.3...v0.23.0
 [0.22.3]: https://github.com/raccioly/websec-validator/compare/v0.22.2...v0.22.3
