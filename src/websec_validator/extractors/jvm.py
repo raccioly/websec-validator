@@ -149,12 +149,10 @@ def handlers(text: str) -> list[dict]:
     rows = []
     for mapping in _MAPPING.finditer(masked):
         owner = max((start for start, _ in classes if start < mapping.start()), default=None)
-        if owner is None:
-            continue
-        info = class_info[owner]
-        # the class's own @RequestMapping sits BEFORE `class`; handler mappings sit after its `{`.
-        if mapping.start() < owner:
-            continue
+        following = min((start for start, _ in classes if start > mapping.start()), default=None)
+        if following is not None and not masked[mapping.start():following].count("{"):
+            continue  # a class-level mapping (it annotates the class that follows)
+        info = class_info[owner] if owner is not None else {"name": "", "annotations": "", "prefixes": [""]}
         args, after = _annotation_args(text, masked, mapping.end())
         body_open = masked.find("{", after)
         semi = masked.find(";", after)

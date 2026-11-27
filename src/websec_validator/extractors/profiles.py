@@ -278,7 +278,19 @@ def _literal_routes(text: str, suffix: str, rel: str) -> list:
         if len(prefixes) == 1:
             prefix = prefixes[0][1].replace("[controller]", re.sub(r"Controller$", "", classes[0][1]))
     if suffix == ".java":
-        patterns = [(r'@(Get|Post|Put|Patch|Delete|Request)Mapping\s*\(\s*(?:(?:value|path)\s*=\s*)?["\']([^"\']*)["\']', "spring")]
+        # Spring handlers come from the JVM handler parser: bare `@PostMapping`, a class-level
+        # prefix per class, `value = {"/a", "/b"}` arrays and `@RequestMapping(method = ...)`. The
+        # old literal-argument regex missed every bare mapping, so without Noir a Spring controller
+        # could lose most of its routes (and their guard analysis with them).
+        from . import jvm
+        for handler in jvm.handlers(text):
+            for method in handler["methods"]:
+                for path in handler["paths"]:
+                    rows.append({"method": method, "path": path or "/", "params": [], "technology": "spring",
+                                 "code_path": rel, "source": "profile-literal", "line": handler["line"],
+                                 "limitations": ["Direct annotations only; meta-annotations, interface-inherited "
+                                                 "mappings and programmatic registration are unresolved."]})
+        return rows
     elif suffix == ".cs":
         patterns = [(r'\bMap(Get|Post|Put|Patch|Delete)\s*\(\s*["\']([^"\']*)["\']', "aspnet-core"),
                     (r'\[Http(Get|Post|Put|Patch|Delete)\s*\(\s*["\']([^"\']*)["\']', "aspnet-core")]
