@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.24.0] — 2026-11-27
-
 ### Added
 
 - `mule` profile for MuleSoft flows and DataWeave: listener routes (fed into the route inventory),
@@ -44,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (#253)
 - The gitleaks directory pass reported absolute paths, so a secret found by both passes was listed
   twice. Paths are now root-relative and the two passes merge. (#250)
+
+## [0.24.0] — 2026-11-27
 
 ### Added
 
