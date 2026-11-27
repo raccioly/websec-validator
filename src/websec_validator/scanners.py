@@ -1866,6 +1866,12 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
                 # the hit so history-only annotation and the briefing can tell them apart.
                 if key in ("gitleaks", "gitleaks-dir"):
                     finding["scan_mode"] = "dir" if key == "gitleaks-dir" else "git"
+                    # The directory pass reports ABSOLUTE paths and the history pass relative ones, so
+                    # the same secret had two fingerprints and was listed twice. Root-relative both.
+                    relative = _rel_to(finding.get("file", ""), target)
+                    if relative and relative != finding.get("file"):
+                        finding["file"] = relative
+                        finding["fingerprint"] = f"secret|{relative}|{finding.get('key', '')}|{finding.get('line', 0)}"
             raw += normalized
         except Exception:
             parse_failed.append(key)          # a truncated/OOM-killed scanner must not read as clean

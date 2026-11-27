@@ -78,7 +78,7 @@ def from_context(ctx, outcomes: dict) -> dict:
     # Elixir service was never looked at. Scope limitation, never an execution failure — nothing
     # failed to run; there was nothing here to run.
     from .extractors.base import unanalyzed_languages
-    unanalyzed = unanalyzed_languages(ctx.unsupported_files)
+    unanalyzed = unanalyzed_languages(ctx.unsupported_files, getattr(ctx, "unsupported_dialects", {}))
     if unanalyzed:
         named = ", ".join(f"{lang} ({n} file(s))" for lang, n in unanalyzed.items())
         gaps.append({"kind": "language_without_analyzer",
@@ -392,6 +392,14 @@ def add_scanners(facts: dict, detected: dict, results: list, unified: dict | Non
         if chosen and details.get("skipped_checks"):
             add_gap(facts, "scanner_scope", f"{key}: {details['skipped_checks']} checks suppressed by native scanner policy",
                     execution=False)
+    # #249: built-in analysis has no rules for these languages, but a whole-tree scanner may still
+    # have read the files. Say which layer covered what, so the gap never claims "never seen".
+    ran = sorted(key for key, row in cov["scanners"].items() if row.get("outcome") in ("completed", "partial")
+                 and key in ("semgrep", "gitleaks", "gitleaks-dir", "trivy", "checkov", "trufflehog"))
+    for gap in cov.get("gaps", []):
+        if gap.get("kind") == "language_without_analyzer" and ran and "scanners that ran" not in gap["detail"]:
+            gap["detail"] += (f". Built-in analysis: none; scanners that ran over the whole tree ({', '.join(ran)}) "
+                              "read these files with their own rules")
     cov["scope_digest"] = _digest({"profile": cov.get("profile"),
                                    "excludes": cov.get("files", {}).get("excludes", []),
                                    "include_fixtures": cov.get("files", {}).get("include_fixtures", False),
