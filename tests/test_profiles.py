@@ -248,7 +248,7 @@ app.addHook('onRequest', authenticate); app.post('/same', handler);
     def test_catalog_does_not_imply_whole_language_analysis(self):
         catalog = capabilities()
         self.assertIn("not whole-language", catalog["scope"])
-        self.assertEqual(10, len(catalog["profiles"]))  # salesforce-apex added in 0.24.0 (#246)
+        self.assertEqual(12, len(catalog["profiles"]))  # salesforce-apex (#246), mule (#250), salesforce-metadata (#251)
         self.assertTrue(all(row["limitations"] for row in catalog["profiles"]))
 
     def test_packaged_holdout_cases(self):

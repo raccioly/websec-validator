@@ -128,6 +128,8 @@ def from_context(ctx, outcomes: dict) -> dict:
                   "types": dict(ctx.file_types), "unreadable": list(ctx.unreadable),
                   "oversized": list(ctx.oversized), "unsupported": list(ctx.unsupported_files),
                   "byte_budget_exceeded": list(ctx.byte_budget_exceeded),
+                  # #249: integration/low-code files read by a named profile, not by the code extractors.
+                  "dialects": {name: len(paths) for name, paths in sorted((getattr(ctx, "dialect_files", {}) or {}).items())},
                   "source_bytes": ctx.cached_source_bytes, "data_bytes": getattr(ctx, "data_bytes_read", 0),
                   "read_policy": source_read_policy(ctx),
                   "truncated": bool(ctx.truncated), "inventory_truncated": ctx.walk_truncated,
@@ -452,7 +454,9 @@ def render_md(facts: dict) -> str:
         status = "REQUESTED CHECKS COMPLETED"
     else:
         status = "PARTIAL SCAN — REQUESTED CHECKS INCOMPLETE"
-    lines = [f"\n> **{status}** — {counts.get('read', 0)} files read; {counts.get('scanned', 0)} code files selected.",
+    dialects = counts.get("dialects") or {}
+    profile_files = (f"; {sum(dialects.values())} profile file(s) ({', '.join(sorted(dialects))})" if dialects else "")
+    lines = [f"\n> **{status}** — {counts.get('read', 0)} files read; {counts.get('scanned', 0)} code files selected{profile_files}.",
              "> Completion describes execution, not complete protection. See `coverage.json` for scope and limits."]
     if counts.get("no_analyzable_source"):
         langs = counts.get("unanalyzed_languages") or {}

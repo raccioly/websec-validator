@@ -18,7 +18,7 @@ extractors in `src/websec_validator/extractors/`, the profile catalog in
 | Tier | What websec does | Languages (canonical id) |
 |---|---|---|
 | 1. Deep analysis | All 22 extractors, with rules written for these languages' idioms and frameworks | Python (`python`), JavaScript (`node`), TypeScript (`typescript`) |
-| 2. Named sink checks | A bounded profile of direct-syntax command/query checks (plus literal routes for Java and .NET). The other extractors still read the files, but their rules target tier-1 idioms | Java (`java`), C# (`csharp`), Go (`go`), Ruby (`ruby`), PHP (`php`), Salesforce Apex (`apex`) |
+| 2. Named sink checks | A bounded profile of direct-syntax command/query checks (plus literal routes for Java and .NET). The other extractors still read the files, but their rules target tier-1 idioms | Java (`java`), C# (`csharp`), Go (`go`), Ruby (`ruby`), PHP (`php`), Salesforce Apex (`apex`), Salesforce metadata (`salesforce-metadata`), MuleSoft (`mule`) |
 | 3. Configuration or manual checks only | One explicit configuration check, or a manual-review placeholder. No injection, secret or authorization rules. Reported as a `thin_language_coverage` gap | Kotlin (`kotlin`), Swift (`swift`), Objective-C (`objective-c`), Rust (`rust`), C (`c`), C++ (`cpp`) |
 | 4. Recognized, not analyzed | websec counts and names them in `coverage.json`. It never reads or matches them | See [tier 4](#tier-4-recognised-but-not-analysed) |
 
@@ -45,6 +45,8 @@ Two capabilities sit across the tiers:
 | Go (`go`) | `.go` | 2 | `go` | gosec | `n/a` |
 | Ruby (`ruby`) | `.rb` | 2 | `ruby` | Brakeman | `n/a` |
 | PHP (`php`) | `.php` | 2 | `php` | — | `n/a` |
+| MuleSoft flows and DataWeave (`mule`) | flow XML under `src/main/mule/` or with a Mule core root element, `.dwl` | 2 | `mule` | — | `n/a` |
+| Salesforce metadata (`salesforce-metadata`) | `*.flow-meta.xml`, Visualforce `.page`/`.component`, Aura markup under `aura/`, LWC `.js` | 2 | `salesforce-metadata` | — | `n/a` |
 | Salesforce Apex (`apex`) | `.cls` `.trigger` `.apex`, only in a Salesforce DX project (`sfdx-project.json` above the file, a `force-app/` path or a `-meta.xml` sibling) | 2 | `salesforce-apex` | — | `n/a` |
 | Kotlin (`kotlin`) | `.kt` `.kts` | 3 | `android` | — | `n/a` |
 | Swift (`swift`) | `.swift` | 3 | `ios` | — | `n/a` |
@@ -125,6 +127,8 @@ websec capabilities
 | `ios` | `swift`, `objective-c` | `ios-explicit-ats-exception` | `NSAllowsArbitraryLoads`, `NSAllowsArbitraryLoadsInWebContent` or `NSAllowsArbitraryLoadsForMedia` set to true in `Info.plist` |
 | `rust` | `rust` | `rust-reqwest-invalid-certificates` | `.danger_accept_invalid_certs(true)` or `.tls_danger_accept_invalid_certs(true)` in a service that references `reqwest` |
 | `native` | `c`, `cpp` | `native-memory-review` | Manual check: source inventory only |
+| `mule` | `mule` | `mule-listener-routes`, `mule-dynamic-query`, `mule-dynamic-request-url`, `mule-insecure-tls`, `mule-plaintext-credential`, `mule-listener-no-tls`, `dataweave-readurl` | `<http:listener path>` routes (joined with the listener-config `basePath`, fed into the route inventory with an API-Manager note instead of a missing-guard verdict). `<db:sql>` built as a `#[...]` concatenation, and `<http:request url/path>` built from request attributes (HIGH when request data is used). `insecure="true"` trust stores and TLSv1/TLSv1.1, literal connector credentials (also in `src/main/resources` YAML/properties; `${secure::...}` placeholders exempt), listeners without TLS (LOW), and `readUrl(` with a non-literal location or `java!` calls in DataWeave (since 0.25.0) |
+| `salesforce-metadata` | `salesforce-metadata` | `flow-system-mode`, `flow-screen-input-dml`, `flow-hardcoded-id`, `flow-literal-credential`, `vf-unescaped-output`, `aura-unescaped-html`, `lwc-apex-entry` | Flows in system mode (HIGH with record deletes/updates), screen input used in a record operation with no decision element, literal record IDs and secret-named literals. Visualforce `escape="false"` and merge fields in `<script>` without `JSENCODE`. `<aura:unescapedHtml>` and LWC `lwc:dom="manual"` with `innerHTML =`. Each `@salesforce/apex/Class.method` import is listed in `stack.profiles.lwc_apex_links` and marks the Apex entry point `called_from_lwc` (since 0.25.0) |
 | `salesforce-apex` | `apex` | `apex-soql-injection`, `apex-without-sharing-entrypoint`, `apex-crud-fls`, `apex-entrypoints` | `Database.query`/`countQuery`/`getQueryLocator` and `Search.query` with a concatenated non-constant operand (a `String.escapeSingleQuotes(...)` operand counts as escaped; HIGH when it is a parameter of an exposed method). A `without sharing` class with `@AuraEnabled`, `@RemoteAction`, `@InvocableMethod`, `webservice` or `@RestResource` methods. An exposed method that runs SOQL or DML with no `WITH USER_MODE`, `WITH SECURITY_ENFORCED`, `AccessLevel.USER_MODE`, `Security.stripInaccessible` or describe check in the class. Exposed methods are listed in `stack.profiles.apex_entrypoints` (since 0.24.0) |
 
 Every profile carries this limitation, verbatim from the catalog: *"Direct syntax only; aliases,
@@ -163,6 +167,7 @@ lists them in `coverage.files.unsupported` and counts them per language in
 | BEAM | Elixir (`elixir`) `.ex` `.exs` · Erlang (`erlang`) `.erl` `.hrl` |
 | Scripting and systems | Perl (`perl`) `.pl` `.pm` · Lua (`lua`) `.lua` · R (`r`) `.r` · Julia (`julia`) `.jl` · Dart (`dart`) `.dart` · Zig (`zig`) `.zig` · Nim (`nim`) `.nim` · Crystal (`crystal`) `.cr` · Haskell (`haskell`) `.hs` · OCaml (`ocaml`) `.ml` · F# (`f#`) `.fs` `.fsx` · Tcl (`tcl`) `.tcl` · Visual Basic (`visual-basic`) `.vb` · Pascal (`pascal`) `.pas` · D (`d`) `.d` · Fortran (`fortran`) `.f90` |
 | Shells | Shell (`shell`) `.sh` `.bash` `.zsh` · PowerShell (`powershell`) `.ps1` `.psm1` |
+| Classified by content (since 0.25.0) | Marketing Cloud AMPscript/SSJS (`ampscript`): an `.html`/`.htm` file containing `%%[`, `%%=` or `<script runat="server">`, or an `.amp` file. It is not counted as analyzed HTML |
 | Server-side templates | ERB (`erb-template`) `.erb` · Haml (`haml-template`) `.haml` · Slim (`slim-template`) `.slim` · Twig (`twig-template`) `.twig` · Handlebars (`handlebars-template`) `.hbs` · EJS (`ejs-template`) `.ejs` · Pug (`pug-template`) `.pug` · Mustache (`mustache-template`) `.mustache` · Liquid (`liquid-template`) `.liquid` · Blade (`blade-template`) `.blade` |
 
 Two special cases:
