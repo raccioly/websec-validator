@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from .extractors.base import SKIP_DIRS, is_test_file, read_artifact
+from .extractors.base import SKIP_DIRS, is_test_file, read_artifact, role_parts
 
 MAX_BYTES = 16 * 1024 * 1024
 MAX_RUNS = 32
@@ -148,7 +148,7 @@ def _location(value, run, excludes, include_fixtures):
         return {"file": "", "line": 0}
     physical = _object(physical, "physical location")
     path = _path(physical.get("artifactLocation"), run)
-    if (any(part in SKIP_DIRS for part in path.split("/"))
+    if (any(part in SKIP_DIRS for part in role_parts(path))
             or any(ex and (ex in path or fnmatch.fnmatch(path, ex)) for ex in excludes)
             or (not include_fixtures and is_test_file(path))):
         raise Excluded("location omitted by selected source scope")

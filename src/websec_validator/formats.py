@@ -273,10 +273,11 @@ def _fallback_fp(f: dict) -> str:
     return fingerprint(f)
 
 
-def to_json(ledger: dict, facts: dict | None = None, tool_version: str = "0", ts: str = "") -> dict:
+def to_json(ledger: dict, facts: dict | None = None, tool_version: str = "0", ts: str = "",
+            run: dict | None = None) -> dict:
     """A versioned, self-describing JSON envelope around the ledger (for non-GitHub CI / dashboards)."""
     facts = facts or {}
-    return {
+    envelope = {
         "schema_version": SCHEMA_VERSION,
         "tool": "websec-validator",
         "tool_version": str(tool_version),
@@ -298,3 +299,8 @@ def to_json(ledger: dict, facts: dict | None = None, tool_version: str = "0", ts
         "coverage": ledger.get("coverage", facts.get("coverage")),
         "findings": ledger.get("findings", []),
     }
+    if run:
+        # #245: where THIS run's artifacts are. `latest/` only ever points at a completed run, so a
+        # consumer of a partial run must not read it; `partial/` points at the newest partial one.
+        envelope["run"] = run
+    return envelope

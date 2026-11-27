@@ -25,7 +25,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from .base import SKIP_DIRS, Extractor, RepoContext, is_test_file, path_in_skip_dir
+from .base import SKIP_DIRS, Extractor, RepoContext, is_test_file, path_in_skip_dir, role_path
 from .profiles import service_for
 from .django_urls import analyze as analyze_django_urls
 from .connexion_routes import analyze as analyze_connexion
@@ -83,7 +83,7 @@ def _is_fixture_route(code_path: str, root=None) -> bool:
             p = Path(p).resolve().relative_to(Path(root).resolve()).as_posix()
         except (ValueError, OSError):
             return False       # outside the root → fail open, keep as product route
-    return bool(is_test_file(p) or _FIXTURE_DIR.search(p))
+    return bool(is_test_file(p) or _FIXTURE_DIR.search(role_path(p)))
 EXCLUDE_GLOBS = "*.test.ts,*.test.tsx,*.spec.ts,*.test.js,*.spec.js,*_test.go,*_test.py,test_*.py,*.stories.tsx"
 
 # param-name heuristics → attack class

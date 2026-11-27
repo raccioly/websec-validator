@@ -21,10 +21,11 @@ _LANG = {".java": "java", ".cs": "csharp", ".go": "go", ".rb": "ruby", ".php": "
          ".c": "c", ".h": "c", ".cpp": "cpp", ".hpp": "cpp", ".m": "objective-c",
          ".mm": "objective-c", ".py": "python", ".js": "node", ".ts": "typescript",
          ".tsx": "typescript", ".jsx": "node", ".vue": "node", ".svelte": "node",
-         ".mjs": "node", ".cjs": "node", ".mts": "typescript", ".cts": "typescript"}
+         ".mjs": "node", ".cjs": "node", ".mts": "typescript", ".cts": "typescript",
+         ".cls": "apex", ".trigger": "apex", ".apex": "apex"}
 _MANIFESTS = {"package.json", "pyproject.toml", "requirements.txt", "setup.py", "Pipfile",
               "pom.xml", "build.gradle", "build.gradle.kts", "go.mod", "Gemfile",
-              "composer.json", "Cargo.toml", "Package.swift", "CMakeLists.txt"}
+              "composer.json", "Cargo.toml", "Package.swift", "CMakeLists.txt", "sfdx-project.json"}
 _SPECS = [
     ("java-spring", ["java"], ["java-direct-command", "java-direct-query", "spring-literal-routes"]),
     ("dotnet", ["csharp"], ["dotnet-direct-command", "dotnet-direct-query", "dotnet-literal-routes"]),
@@ -35,6 +36,8 @@ _SPECS = [
     ("ios", ["swift", "objective-c"], ["ios-explicit-ats-exception"]),
     ("rust", ["rust"], ["rust-reqwest-invalid-certificates"]),
     ("native", ["c", "cpp"], ["native-memory-review"]),
+    ("salesforce-apex", ["apex"], ["apex-soql-injection", "apex-without-sharing-entrypoint", "apex-crud-fls",
+                                   "apex-entrypoints"]),
 ]
 _LIMIT = "Direct syntax only; aliases, binding resolution, authorization, build variants and cross-function flows require review."
 MAX_MANIFEST_ERRORS = 200
@@ -114,7 +117,10 @@ def _manifest_metadata(service: dict, text: str, name: str) -> list:
                 "build.gradle.kts": "kotlin", "go.mod": "go", "Gemfile": "ruby",
                 "composer.json": "php", "Cargo.toml": "rust", "Package.swift": "swift",
                 "pyproject.toml": "python", "requirements.txt": "python", "setup.py": "python",
-                "Pipfile": "python", "CMakeLists.txt": "cpp"}.get(name)
+                "Pipfile": "python", "CMakeLists.txt": "cpp", "sfdx-project.json": "apex"}.get(name)
+    if name == "sfdx-project.json":
+        service["frameworks"].add("salesforce")
+        return []
     if name.endswith(".csproj"):
         language = "csharp"
     if name.startswith("requirements") and name.endswith(".txt"):
@@ -342,6 +348,7 @@ def analyze(ctx) -> dict:
     inventory, configs, errors = _inventory(ctx)
     measurements: dict[tuple, dict] = {}
     sinks, routes, findings = [], [], []
+    apex_entrypoints: list = []
 
     def measured(service, profile, check, examined=0, hits=0):
         row = measurements.setdefault((service["id"], profile, check), {"id": check, "examined": 0, "findings": 0})
@@ -371,8 +378,8 @@ def analyze(ctx) -> dict:
                 measured(service, profile, prefix + "-direct-" + kind, 1)
             seen = {}
             for profile, kind, start, expression, unsafe in _sink_candidates(text, suffix):
-                if not unsafe:
-                    continue
+                if not unsafe or (suffix == ".java" and kind == "query"):
+                    continue  # Java SQL text is analyzed by jvm.sql_sinks (surface), with constants resolved
                 cls = "command-injection" if kind == "command" else "sql-injection"
                 ordinal = seen.get(expression, 0)
                 seen[expression] = ordinal + 1
@@ -383,12 +390,58 @@ def analyze(ctx) -> dict:
                             "source": "request read appears directly in the sink argument; aliases unresolved"})
                 sinks.append(row)
                 measured(service, profile, prefix + "-direct-" + kind, hits=1)
+            if suffix == ".java":
+                from . import jvm
+                for row in jvm.sql_sinks(text):
+                    if not row["request_bound"]:
+                        continue
+                    expression = text[row["offset"]:row["end"]]
+                    ordinal = seen.get(expression, 0)
+                    seen[expression] = ordinal + 1
+                    sink = occurrence(text, row["offset"], expression, rel, "sql-injection", ordinal)
+                    sink.update({"service_id": service["id"], "profile_id": profile, "offset": row["offset"],
+                                 "rule_id": "java-direct-query", "request_bound": row["request_bound"],
+                                 "source": "request parameter(s) " + ", ".join(f"`{n}`" for n in row["request_bound"])
+                                 + " concatenated into the SQL text"})
+                    sinks.append(sink)
+                    measured(service, profile, "java-direct-query", hits=1)
             if suffix in (".java", ".cs"):
                 own_routes = _literal_routes(text, suffix, rel)
                 for row in own_routes:
                     row["service_id"] = service["id"]
                 routes.extend(own_routes)
                 measured(service, profile, "spring-literal-routes" if suffix == ".java" else "dotnet-literal-routes", 1, len(own_routes))
+        if suffix in (".cls", ".trigger", ".apex"):
+            from . import apex
+            for check in ("apex-soql-injection", "apex-without-sharing-entrypoint", "apex-crud-fls", "apex-entrypoints"):
+                measured(service, "salesforce-apex", check, 1)
+            if re.search(r"@isTest\b", raw, re.I) and not ctx.include_fixtures:
+                continue  # Apex test classes run in a test context, not as an exposed surface
+            result = apex.analyze(raw, rel)
+            seen_apex = {}
+            for row in result["queries"]:
+                expression = raw[row["offset"]:row["end"]]
+                ordinal = seen_apex.get(expression, 0)
+                seen_apex[expression] = ordinal + 1
+                sink = occurrence(raw, row["offset"], expression, rel, "sql-injection", ordinal)
+                sink.update({"service_id": service["id"], "profile_id": "salesforce-apex", "offset": row["offset"],
+                             "rule_id": "apex-soql-injection", "sink": "dynamic SOQL/SOSL",
+                             "source": ("exposed-method parameter(s) " + ", ".join(f"`{n}`" for n in row["request_bound"])
+                                        if row["request_bound"] else "non-constant operand(s) "
+                                        + ", ".join(f"`{n[:40]}`" for n in row["dynamic"][:3]))
+                                       + " concatenated into dynamic SOQL/SOSL; String.escapeSingleQuotes and bind "
+                                         "variables are the controls",
+                             **({"request_bound": row["request_bound"]} if row["request_bound"] else {})})
+                sinks.append(sink)
+                measured(service, "salesforce-apex", "apex-soql-injection", hits=1)
+            for row in result["findings"]:
+                findings.append({**row, "profile_id": "salesforce-apex", "service_id": service["id"], "file": rel,
+                                 "semantic_id": row["rule_id"] + ":" + rel + ":" + str(row["line"])})
+                measured(service, "salesforce-apex", row["rule_id"], hits=1)
+            for entry in result["entrypoints"]:
+                if len(apex_entrypoints) < 500:
+                    apex_entrypoints.append({**entry, "service_id": service["id"]})
+            measured(service, "salesforce-apex", "apex-entrypoints", hits=len(result["entrypoints"]))
         if suffix == ".rs":
             check = "rust-reqwest-invalid-certificates"
             measured(service, "rust", check, 1)
@@ -438,5 +491,8 @@ def analyze(ctx) -> dict:
             service["input_boundaries"] = ["unknown"]
     return {"service_inventory": inventory, "profiles": profiles, "findings": findings,
             "sink_occurrences": sinks, "routes": routes, "errors": errors,
+            # #246: Apex entry points (@AuraEnabled/@RemoteAction/webservice/@RestResource) — the attack
+            # surface of a Salesforce org. Platform-authenticated, so listed here rather than as routes.
+            **({"apex_entrypoints": apex_entrypoints} if apex_entrypoints else {}),
             "limitations": [_LIMIT, "No-match results are not security proof; manifest boundaries approximate deployment boundaries.",
                             "Dependency labels include development, peer and optional declarations; they do not prove installation, deployment or a native application."]}

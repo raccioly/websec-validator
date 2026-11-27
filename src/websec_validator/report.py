@@ -40,9 +40,11 @@ def render(facts: dict, scanners: dict, scan_results: list, unified: dict | None
     if ledger and ledger.get("findings"):
         _ll = []
         for f in ledger["findings"][:60]:
-            cwe = (f["standards"]["cwe"][:1] or [""])[0]
+            standards = f.get("standards") or {}
+            # Profile findings carry only the CWE their profile states (no invented OWASP mapping).
+            cwe = ((standards.get("cwe") or [])[:1] or [""])[0]
             chain = " → ".join(e["layer"] for e in f["evidence"])
-            api = (" · " + ", ".join(f["standards"]["owasp_api"])) if f["standards"]["owasp_api"] else ""
+            api = (" · " + ", ".join(standards["owasp_api"])) if standards.get("owasp_api") else ""
             cal = f.get("calibrated") or {}
             if not cal:
                 calstr = ""

@@ -200,15 +200,25 @@ def _artifact_digests(run: Path) -> dict:
     return out
 
 
-def _publish_run(run: Path) -> None:
-    """Atomically replace the latest symlink; a failed run leaves its predecessor intact."""
+def _publish_run(run: Path, pointer: str = "latest") -> None:
+    """Atomically replace a pointer symlink; a failed run leaves its predecessor intact.
+
+    `latest` only ever names a COMPLETED run. `partial` (#245) names the newest partial run, so a
+    first partial run is findable and an older `latest` is never mistaken for this one.
+    """
     base = run.parent.parent
-    temporary = base / (".latest-" + uuid.uuid4().hex)
+    temporary = base / (f".{pointer}-" + uuid.uuid4().hex)
     try:
         temporary.symlink_to(Path("runs") / run.name, target_is_directory=True)
-        os.replace(temporary, base / "latest")
+        os.replace(temporary, base / pointer)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _run_record(run: Path, complete: bool) -> dict:
+    return {"directory": str(run), "execution_complete": bool(complete),
+            "published_as": "latest" if complete else "partial",
+            "pointer": str(run.parent.parent / ("latest" if complete else "partial"))}
 
 
 def cmd_update_check(args) -> int:
@@ -857,6 +867,8 @@ def cmd_run(args) -> int:
 
     if facts["coverage"].get("execution_complete"):
         _publish_run(out)
+    else:
+        _publish_run(out, "partial")
     log(coverage.render_md(facts))
     log(f"\n✓ run {ts} saved (immutable — nothing overwritten):\n    {out}")
     log("    REPORT.md          — full historical record")
@@ -867,13 +879,15 @@ def cmd_run(args) -> int:
     if facts["coverage"].get("execution_complete"):
         log(f"  latest → {out.parent.parent / 'latest'}    ·    add `websec-out/` to .gitignore")
     else:
-        log(f"  partial attempt retained at {out}; latest completed scan unchanged")
+        log(f"  partial attempt retained at {out} (→ {out.parent.parent / 'partial'}); "
+            "latest completed scan unchanged")
 
     # emit the requested machine format on STDOUT (for piping); default 'briefing' emits nothing extra
     if fmt == "sarif":
         print(json.dumps(sarif, indent=2))
     elif fmt == "json":
-        print(json.dumps(formats.to_json(ledger, facts, __version__, ts), indent=2))
+        print(json.dumps(formats.to_json(ledger, facts, __version__, ts,
+                                         run=_run_record(out, facts["coverage"].get("execution_complete"))), indent=2))
 
     # 6. CI gate — the verdict was computed and RECORDED above, before artifacts were written. This
     # block only reports it and returns the exit code, so the artifact and the exit code cannot
@@ -1034,6 +1048,8 @@ def cmd_dynamic(args) -> int:
     (out / "coverage.json").write_text(json.dumps(facts_dict.get("coverage", {}), indent=2))
     if (facts_dict.get("coverage") or {}).get("execution_complete"):
         _publish_run(out)
+    else:
+        _publish_run(out, "partial")
     print(f"  ✓ run {ts} saved (immutable): {out}")
     if _gate["static_findings_not_gated"]:
         print(f"  ⓘ {_gate['static_findings_not_gated']} static CRITICAL finding(s) are in the merged "
@@ -1822,6 +1838,13 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--out", help="output dir (default: ./websec-out)")
     r.add_argument("--exclude", action="append", metavar="PATH",
                    help="exclude a path/glob from recon + scanners (repeatable; e.g. --exclude 'docs/**')")
+    r.add_argument("--max-source-bytes", metavar="SIZE", dest="max_source_bytes",
+                   help="raise the run-wide source cache (default 64M; e.g. 256M). Also "
+                        "WEBSEC_MAX_SOURCE_BYTES. Active limits are in coverage.json files.read_policy")
+    r.add_argument("--max-data-bytes", metavar="SIZE", dest="max_data_bytes",
+                   help="run-wide budget for lockfiles and .sql files (default 512M); also WEBSEC_MAX_DATA_BYTES")
+    r.add_argument("--max-sql-files", metavar="N", type=int, dest="max_sql_files",
+                   help="how many **/*.sql files the schema checks read (default 5000); also WEBSEC_MAX_SQL_FILES")
     r.add_argument("--include-fixtures", action="store_true", dest="include_fixtures",
                    help="treat test/example/fixture code as product code: fixture routes count as attack "
                         "surface and fixture secrets keep full severity (default: split out + demoted)")
@@ -2134,6 +2157,20 @@ def main(argv=None) -> int:
                          f"Run `websec --help` for the command list.")
         argv = ["run"] + argv
     args = parser.parse_args(argv)
+    # #245: read limits travel as environment so every RepoContext in this process (recon, scoped
+    # re-reads, MCP) applies the same values. Validated here so a typo fails before any work starts.
+    from .extractors.base import LIMIT_ENV, parse_size
+    for name in ("max_source_bytes", "max_data_bytes", "max_sql_files"):
+        value = getattr(args, name, None)
+        if value is None:
+            continue
+        try:
+            number = int(value) if name == "max_sql_files" else parse_size(value)
+            if number <= 0:
+                raise ValueError("must be positive")
+        except ValueError as error:
+            parser.error(f"--{name.replace('_', '-')}: {error}")
+        os.environ[LIMIT_ENV[name]] = str(number)
     return args.func(args)
 
 
