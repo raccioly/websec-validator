@@ -23,7 +23,7 @@ import uuid
 import sys
 from pathlib import Path
 
-from . import (__version__, baseline, briefing, calibration, clusters, constitution, diffscope, dynamic,
+from . import (__version__, privacy, baseline, briefing, calibration, clusters, constitution, diffscope, dynamic,
                feedback, findings, coverage, formats, fpfilter, inventory, probes, proof, recon, report,
                scanners)
 
@@ -387,8 +387,9 @@ def cmd_recon(args) -> int:
         print(f"cannot select recon output: {exc}", file=sys.stderr)
         return EXIT_USAGE
     facts = recon.build_facts(target, __version__)
+    _safe = privacy.Scrubber(target, out)
     try:
-        recon.write_facts(facts, out / "FACTS.json")
+        recon.write_facts(_safe.obj(facts), out / "FACTS.json")
     except OSError as exc:
         print(f"cannot write recon output: {exc}", file=sys.stderr)
         return EXIT_USAGE
@@ -508,6 +509,7 @@ def cmd_run(args) -> int:
     target = _resolve_target(args.target)
     try:
         out, ts = _new_run_dir(args.out)
+        _safe = privacy.Scrubber(target, out)
     except (OSError, ValueError) as error:
         print(f"error: cannot reserve output run: {error}", file=sys.stderr)
         return EXIT_USAGE
@@ -622,13 +624,13 @@ def cmd_run(args) -> int:
                                  include_fixtures=getattr(args, "include_fixtures", False))
         coverage.add_imports(facts, [bundle["report"] for bundle in imported])
         unified = findings.merge_imports(unified, [row for bundle in imported for row in bundle["findings"]])
-        (out / "sarif-imports.json").write_text(json.dumps(imported, indent=2))
+        (out / "sarif-imports.json").write_text(_safe.json(imported))
         if not args.scan:
-            (out / "findings.json").write_text(json.dumps(unified["all"], indent=2))
+            (out / "findings.json").write_text(_safe.json(unified["all"]))
         log(f"  imported {len(imported)} SARIF report(s): {sum(len(bundle['findings']) for bundle in imported)} findings; source freshness unverified")
     facts["coverage"]["build_id"] = ts
-    recon.write_facts(facts, out / "FACTS.json")
-    (out / "coverage.json").write_text(json.dumps(facts["coverage"], indent=2))
+    recon.write_facts(_safe.obj(facts), out / "FACTS.json")
+    (out / "coverage.json").write_text(_safe.json(facts["coverage"]))
 
     # 2c. SBOM (opt-in) — offline CycloneDX/SPDX via Trivy, alongside the other machine artifacts.
     sbom = None
@@ -643,7 +645,7 @@ def cmd_run(args) -> int:
     # 2d. Attack-surface inventory — the ranked per-endpoint planning table (also rendered in §3a of
     # the briefing, and the substrate for the DAST-prediction + pentest-plan sections).
     inv = inventory.build(facts)
-    (out / "attack-surface.json").write_text(json.dumps(inv, indent=2))
+    (out / "attack-surface.json").write_text(_safe.json(inv))
     _isum = inv.get("summary", {})
     if _isum.get("endpoints"):
         log(f"  attack surface: {_isum['endpoints']} endpoint(s) ranked · "
@@ -716,7 +718,8 @@ def cmd_run(args) -> int:
                 f"{diff_counts['in_changed_file']} finding(s) in changed files "
                 f"({diff_counts['untouched']} pre-existing) → diff-scope.json")
 
-    ledger["verification_context"] = {"application_id": getattr(args, "application_id", None) or str(target),
+    # #255: the default application id is the target's path digest, never the local path itself.
+    ledger["verification_context"] = {"application_id": getattr(args, "application_id", None) or privacy.target_id(target),
                                        "build_id": getattr(args, "build_id", None) or facts["coverage"]["analyzed_input_digest"],
                                        "source_digest": facts["coverage"]["analyzed_input_digest"]}
     # WHICH CHANGE this finding set describes. A SIBLING of verification_context, never merged into
@@ -823,12 +826,12 @@ def cmd_run(args) -> int:
                             "every change.")
     ledger["gate"] = _gate
 
-    recon.write_facts(facts, out / "FACTS.json")
-    (out / "coverage.json").write_text(json.dumps(facts["coverage"], indent=2))
-    (out / "findings-ledger.json").write_text(json.dumps(ledger, indent=2))
+    recon.write_facts(_safe.obj(facts), out / "FACTS.json")
+    (out / "coverage.json").write_text(_safe.json(facts["coverage"]))
+    (out / "findings-ledger.json").write_text(_safe.json(ledger))
     from . import repairs
-    (out / "repair-plans.json").write_text(json.dumps(repairs.build(ledger), indent=2))
-    (out / "CONSTITUTION.md").write_text(constitution.render(constitution.build(facts, ledger)))
+    (out / "repair-plans.json").write_text(_safe.json(repairs.build(ledger)))
+    (out / "CONSTITUTION.md").write_text(_safe.text(constitution.render(constitution.build(facts, ledger))))
     if ledger["total"]:
         log(f"\n  ledger: {ledger['total']} finding(s) · {ledger['by_severity']} · confidence {ledger['by_confidence']}"
             + (f" · {ledger['suppressed']} suppressed" if ledger["suppressed"] else ""))
@@ -839,15 +842,15 @@ def cmd_run(args) -> int:
                 f"Each site still gates on its own.")
 
     # 5. briefing + comprehensive REPORT.md (immutable run record) + machine artifacts
-    (out / "AGENT-BRIEFING.md").write_text(briefing.render(facts, det, scan_results, manifest, unified, ledger))
-    (out / "REPORT.md").write_text(report.render(facts, det, scan_results, unified, manifest, ts, ledger))
+    (out / "AGENT-BRIEFING.md").write_text(_safe.text(briefing.render(facts, det, scan_results, manifest, unified, ledger)))
+    (out / "REPORT.md").write_text(_safe.text(report.render(facts, det, scan_results, unified, manifest, ts, ledger)))
     # SARIF is ALWAYS written — it's the enterprise/CI interchange artifact (GitHub Code Scanning etc.)
     sarif = formats.to_sarif(ledger, facts, __version__)
-    (out / "results.sarif").write_text(json.dumps(sarif, indent=2))
-    (out / "findings.envelope.json").write_text(json.dumps(formats.to_json(ledger, facts, __version__, ts), indent=2))
+    (out / "results.sarif").write_text(_safe.json(sarif))
+    (out / "findings.envelope.json").write_text(_safe.json(formats.to_json(ledger, facts, __version__, ts)))
     # drop the full `all` finding list from the manifest — it's a duplicate of findings.json
     manifest_summary = {k: v for k, v in unified.items() if k != "all"} if unified else None
-    (out / "manifest.json").write_text(json.dumps(
+    (out / "manifest.json").write_text(_safe.json(
         {"facts": "FACTS.json", "coverage": "coverage.json", "scanners": det, "scan_results": scan_results,
          "sarif_imports": "sarif-imports.json" if imported else None,
          "findings_summary": manifest_summary, "ledger": {"total": ledger["total"], "by_severity": ledger["by_severity"]},
@@ -863,7 +866,7 @@ def cmd_run(args) -> int:
          "artifact_digests": _artifact_digests(out),
          "artifact_digests_note": ("sha256 of the artifacts emitted by this run, computed after they "
                                    "were written. Detects later edits; does not prove authorship. "
-                                   "The manifest itself is not self-hashed.")}, indent=2))
+                                   "The manifest itself is not self-hashed.")}))
 
     if facts["coverage"].get("execution_complete"):
         _publish_run(out)
@@ -994,15 +997,34 @@ def cmd_dynamic(args) -> int:
     # merge dynamic evidence into the traceable ledger + write the immutable run report
     facts_dict = json.loads(facts_path.read_text())
     coverage.add_dynamic(facts_dict, dyn)
-    _root = Path(facts_dict.get("target", "."))
+    # #255: artifacts carry a portable target (its directory name) plus `target_id`, so the recorded
+    # target is often not a usable path. The run keeps that recorded identity. It reads a
+    # .websec-ignore only from a checkout it can prove is the target: the recorded absolute path
+    # (older artifacts), or the working directory when its digest matches `target_id`.
+    recorded = str(facts_dict.get("target", "") or "")
+    recorded_id = facts_dict.get("target_id") or (privacy.target_id(recorded) if Path(recorded).is_absolute() else "")
+    _root = None
+    if Path(recorded).is_absolute() and Path(recorded).is_dir():
+        _root = Path(recorded)
+    elif recorded_id and recorded_id == privacy.target_id(Path.cwd()):
+        _root = Path.cwd()
+    else:
+        print(f"  ⚠ the target recorded in FACTS ({Path(recorded).name or '?'}) is not this working directory; "
+              "no .websec-ignore is applied. Run `websec dynamic` from the target checkout to apply it.",
+              file=sys.stderr)
+    _safe = privacy.Scrubber(_root or recorded or ".", out)
+    # The run directory never holds a .websec-ignore, so it stands in for "no ignore file".
+    _ignore_root = _root or out
     ledger = findings.build_ledger(facts_dict, None, dyn,
-                                   findings.load_suppressions(_root),
-                                   findings.load_acknowledgements(_root))
+                                   findings.load_suppressions(_ignore_root),
+                                   findings.load_acknowledgements(_ignore_root))
     ledger["coverage"] = facts_dict["coverage"]
-    ledger["target"] = str(_root)
+    ledger["target"] = str(_root) if _root else (Path(recorded).name or recorded)
+    if recorded_id:
+        ledger["target_id"] = recorded_id
     ledger["build_id"] = ts
     ledger["verification_context"] = {
-        "application_id": str(_root),
+        "application_id": recorded_id or privacy.target_id(_root or "."),
         "build_id": facts_dict["coverage"].get("analyzed_input_digest", ""),
         "source_digest": facts_dict["coverage"].get("analyzed_input_digest", ""),
     }
@@ -1029,8 +1051,8 @@ def cmd_dynamic(args) -> int:
     else:
         _gate.update(verdict="pass", exit_code=EXIT_OK, failure_kind=None)
     ledger["gate"] = _gate
-    (out / "findings-ledger.json").write_text(json.dumps(ledger, indent=2))
-    (out / "CONSTITUTION.md").write_text(constitution.render(constitution.build(facts_dict, ledger)))
+    (out / "findings-ledger.json").write_text(_safe.json(ledger))
+    (out / "CONSTITUTION.md").write_text(_safe.text(constitution.render(constitution.build(facts_dict, ledger))))
     (out / "REPORT.md").write_text(
         report.render(facts_dict, {"available": [], "missing": []}, [], None, [], ts, ledger))
     print(f"\n  ledger: {ledger['total']} finding(s) · {ledger['by_severity']} · confidence {ledger['by_confidence']}")
@@ -1044,8 +1066,8 @@ def cmd_dynamic(args) -> int:
         print(f"  calibration: folded {len(samples)} confirmed sample(s) ({nr} real / {len(samples) - nr} FP) "
               f"into your local overlay → {rec['meta']['samples']} total; confidence now personalizes to your apps")
 
-    recon.write_facts(facts_dict, out / "FACTS.json")
-    (out / "coverage.json").write_text(json.dumps(facts_dict.get("coverage", {}), indent=2))
+    recon.write_facts(_safe.obj(facts_dict), out / "FACTS.json")
+    (out / "coverage.json").write_text(_safe.json(facts_dict.get("coverage", {})))
     if (facts_dict.get("coverage") or {}).get("execution_complete"):
         _publish_run(out)
     else:

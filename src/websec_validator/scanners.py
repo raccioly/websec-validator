@@ -375,6 +375,44 @@ def _osv(target: Path, out: Path, excludes=()) -> list:
     return cmd + ["--format", "json", "--output", str(out), str(target)]
 
 
+_OSV_UNRESOLVED = re.compile(r"version (?:Maven|npm|PyPI|Go|crates\.io|RubyGems|NuGet|Packagist):([^\s\[]+)\[[^\]]*\]: not found")
+_OSV_MANIFEST = re.compile(r"failed resolution for (\S+?):")
+
+
+def _osv_recover(argv: list, proc, out_file: Path, timeout: int, target: Path) -> tuple:
+    """Classify osv-scanner exits that are scope limits, not failures (#253).
+
+    * exit 128 + `No package sources found`: nothing applicable to scan (a POM with no
+      dependencies, a parent POM). Recorded as an empty, completed report.
+    * `failed resolution` (osv resolves Maven transitively against Maven Central; a connector in
+      another repository fails the whole manifest): run again with `--no-resolve` so the DIRECT
+      dependencies are still checked, and record which packages could not be resolved.
+    Returns (proc, metadata). Anything else is left exactly as osv reported it.
+    """
+    text = (proc.stderr or "") + "\n" + (proc.stdout or "")
+    meta: dict = {}
+    unresolved = sorted(set(_OSV_UNRESOLVED.findall(text)))[:20]
+    # osv prints absolute paths without their leading slash (`private/tmp/...`); restore it first.
+    manifests = sorted({_rel_to(m if m.startswith("/") else "/" + m, target) or m
+                        for m in _OSV_MANIFEST.findall(text)})[:20]
+    if proc.returncode == 128 and "No package sources found" in text:
+        out_file.write_text(json.dumps({"results": []}))
+        meta["no_applicable_input"] = True
+        return subprocess.CompletedProcess(argv, 0, proc.stdout, proc.stderr), meta
+    if "failed resolution" in text:
+        meta["dependency_resolution"] = {"unresolved": unresolved, "manifests": manifests,
+                                         "mode": "transitive" if proc.returncode in (0, 1) else "direct-only"}
+        if proc.returncode not in (0, 1) and "--no-resolve" not in argv:
+            retry = list(argv)
+            retry.insert(retry.index("--recursive") + 1 if "--recursive" in retry else 2, "--no-resolve")
+            second = subprocess.run(retry, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+            if second.returncode in (0, 1) and out_file.exists():
+                return second, meta
+            meta["dependency_resolution"]["mode"] = "failed"
+            meta["dependency_resolution"]["retry_exit"] = second.returncode
+    return proc, meta
+
+
 def _osv_skip_regex(target: Path) -> str:
     """SKIP_DIRS as an osv exclude regex ANCHORED to the scan root.
 
@@ -740,6 +778,9 @@ def run_available(target: Path, outdir: Path, stack_languages: list | None = Non
             # were silently dropped. Normalize the produced file to the expected path.
             # trufflehog streams JSON-lines to STDOUT and writes no report file — persist it so the
             # normal parse path works (same shape of special-case as checkov's renamed output).
+            osv_meta = {}
+            if s.key == "osv-scanner":
+                proc, osv_meta = _osv_recover(argv, proc, out_file, timeout, target)
             if s.key == "trufflehog" and not out_file.exists():
                 out_file.write_text(proc.stdout or "")
             if s.key == "checkov" and not out_file.exists():
@@ -751,6 +792,10 @@ def run_available(target: Path, outdir: Path, stack_languages: list | None = Non
                             **({"configuration_policy": "built-in defaults; target .bandit/YAML/pyproject ignored",
                                 "suppression_policy": "inline nosec ignored"} if s.key == "bandit" else {}),
                             **({"binary_sca": "go/binary" in argv} if s.key == "osv-scanner" else {}),
+                            **osv_meta,
+                            # #253: why a scanner failed, so `error` is never an empty box.
+                            **({"stderr_tail": (proc.stderr or proc.stdout or "").strip()[-500:]}
+                               if proc.returncode not in (0, 1) or not out_file.exists() else {}),
                             "findings": _count_findings(s.key, out_file)})
         except subprocess.TimeoutExpired:
             results.append({"key": s.key, "name": s.name, "status": "timeout"})
@@ -1109,6 +1154,50 @@ def _norm_trufflehog(data) -> list:
     return out
 
 
+# #255: secret scanners write the matched value into their report, and the run directory is often
+# uploaded as a CI artifact. After websec has read what it needs (provider tiering uses the value
+# in memory), the stored report keeps only a short digest of each value.
+_SECRET_REPORTS = {"gitleaks", "gitleaks-dir", "trufflehog"}
+_SECRET_FIELDS = {"Secret", "Match", "Raw", "RawV2", "Redacted", "Line"}
+
+
+def _redact_value(value):
+    if not isinstance(value, str) or not value:
+        return value
+    return "REDACTED:sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+
+def _redact(node):
+    if isinstance(node, dict):
+        return {k: (_redact_value(v) if k in _SECRET_FIELDS else _redact(v)) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_redact(item) for item in node]
+    return node
+
+
+def _redact_report(path: Path, doc) -> None:
+    try:
+        if isinstance(doc, list) and path.read_text(encoding="utf-8", errors="ignore").lstrip().startswith("{") \
+                and "\n{" in path.read_text(encoding="utf-8", errors="ignore"):
+            path.write_text("\n".join(json.dumps(_redact(row)) for row in doc) + "\n")   # JSON lines
+        else:
+            path.write_text(json.dumps(_redact(doc), indent=2))
+    except OSError:
+        pass
+
+
+def _scrub_report_paths(path: Path, target, outdir) -> None:
+    """#255: the native report stays as evidence, without the machine's absolute paths."""
+    from .privacy import Scrubber
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        scrubbed = Scrubber(target, Path(outdir).parent if outdir else None).text(text)
+        if scrubbed != text:
+            path.write_text(scrubbed)
+    except OSError:
+        pass
+
+
 def _norm_gitleaks(data) -> list:
     rows = data if isinstance(data, list) else (data.get("findings") or [])
     out = []
@@ -1244,6 +1333,10 @@ def _norm_checkov(data) -> list:
         for c in ((block.get("results") or {}).get("failed_checks") or []):
             cid = c.get("check_id", "")
             f = c.get("file_path", "") or c.get("repo_file_path", "")
+            # #255: checkov reports root-anchored paths (`/src/a.yaml`) that are neither absolute nor
+            # repo-relative. A real absolute path is relativized later; this one is just anchored.
+            if f.startswith("/") and not Path(f).exists():
+                f = f.lstrip("/")
             rng = c.get("file_line_range") or [0]
             out.append({"tool": "checkov", "category": "iac",
                         **({"resource": c["resource"]} if isinstance(c.get("resource"), str) else {}),
@@ -1814,6 +1907,8 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
                 if isinstance(version, (str, int)):
                     report_versions[key] = str(version)
             normalized = parser(doc)
+            if key in _SECRET_REPORTS:
+                _redact_report(output_path, doc)
             for finding in normalized:
                 if finding.get("category") == "sca":
                     _sca_occurrence(finding, target)
@@ -1821,10 +1916,22 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
                 # the hit so history-only annotation and the briefing can tell them apart.
                 if key in ("gitleaks", "gitleaks-dir"):
                     finding["scan_mode"] = "dir" if key == "gitleaks-dir" else "git"
+                    # The directory pass reports ABSOLUTE paths and the history pass relative ones, so
+                    # the same secret had two fingerprints and was listed twice. Root-relative both.
+                    relative = _rel_to(finding.get("file", ""), target)
+                    if relative and relative != finding.get("file"):
+                        finding["file"] = relative
+                        finding["fingerprint"] = f"secret|{relative}|{finding.get('key', '')}|{finding.get('line', 0)}"
             raw += normalized
         except Exception:
             parse_failed.append(key)          # a truncated/OOM-killed scanner must not read as clean
             continue
+
+    # #255: every native report written to the run directory, parsed or not, loses absolute paths.
+    if target is not None:
+        for r in scan_results:
+            if r.get("output") and Path(r["output"]).is_file():
+                _scrub_report_paths(Path(r["output"]), target, outdir)
 
     # bug-218: the same committed-and-still-present secret is found by BOTH gitleaks passes and
     # shares a fingerprint (secret|file|rule|line). Collapse to one finding carrying both modes, so

@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `mule` profile for MuleSoft flows and DataWeave: listener routes (fed into the route inventory),
+  `<db:sql>` built by concatenation, `<http:request>` URLs built from request data, insecure trust
+  stores and deprecated TLS protocols, literal connector credentials (also in `src/main/resources`
+  YAML/properties), listeners without TLS, and `readUrl(`/`java!` in DataWeave. A missing in-code
+  guard on a Mule listener is a low-confidence lead, because API Manager policies are outside the
+  repository. A `mule-application` POM or `mule-artifact.json` makes the service `mule`, not `java`.
+  (#250, #249)
+- `salesforce-metadata` profile: Flows in system mode, screen input used in a record operation,
+  hard-coded record IDs and secret-named literals; Visualforce `escape="false"` and unencoded merge
+  fields in `<script>`; `<aura:unescapedHtml>` and LWC manual DOM with `innerHTML`; and every
+  `@salesforce/apex/Class.method` import, linked to the Apex entry point it calls. (#251)
+
+### Changed
+
+- Integration and low-code files are classified by compound suffix, path or content, not by
+  `Path.suffix` alone. Mule flow XML, DataWeave, Salesforce Flow, Visualforce and Aura markup are
+  read by their profiles and counted in `coverage.json` `files.dialects`. AMPscript/SSJS in an
+  `.html` file is no longer counted as analyzed HTML: it is listed as `ampscript` under
+  `language_without_analyzer`, so `--require-analyzed` fails when it is the only source. When
+  scanners ran, the gap names them. (#249)
+
+### Fixed
+
+- `path-traversal` no longer treats every `X.open(...)` as a file API. `open` is a sink as a bare
+  call or on a file module (`fs`, `fs.promises`, `os`, `io`, `File`, ...), never with an options
+  object first, so `LightningConfirm.open({...})` and dialog APIs are not reported. (#252)
+- osv-scanner on Maven: a `failed resolution` (a dependency outside Maven Central) reruns with
+  `--no-resolve`, checks the direct dependencies, and records a `dependency_resolution` gap naming
+  the unresolved packages; exit 128 "No package sources found" is no applicable input, not an
+  error. A scanner that writes no report keeps the end of its stderr in `report_details.errors`.
+  (#253)
+- The gitleaks directory pass reported absolute paths, so a secret found by both passes was listed
+  twice. Paths are now root-relative and the two passes merge. (#250, #255)
+- Run artifacts no longer contain the scanning machine's absolute paths or raw secret values.
+  Paths under the target are root-relative, paths under the run directory are relative to it, and
+  the target is named by its directory plus `target_id`, a SHA-256 of the resolved root. The
+  default `application_id` is that digest. The stored gitleaks/trufflehog reports keep a short
+  digest instead of each matched value, and checkov's root-anchored paths (`/src/...`) are
+  repo-relative. `websec init` and `websec dynamic` match runs by `target_id`. (#255)
+
 ## [0.24.0] — 2026-11-27
 
 ### Added

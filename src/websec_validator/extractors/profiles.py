@@ -10,6 +10,7 @@ import copy
 import json
 import plistlib
 import re
+from pathlib import Path
 import xml.etree.ElementTree as ET
 from pathlib import PurePosixPath
 
@@ -25,7 +26,8 @@ _LANG = {".java": "java", ".cs": "csharp", ".go": "go", ".rb": "ruby", ".php": "
          ".cls": "apex", ".trigger": "apex", ".apex": "apex"}
 _MANIFESTS = {"package.json", "pyproject.toml", "requirements.txt", "setup.py", "Pipfile",
               "pom.xml", "build.gradle", "build.gradle.kts", "go.mod", "Gemfile",
-              "composer.json", "Cargo.toml", "Package.swift", "CMakeLists.txt", "sfdx-project.json"}
+              "composer.json", "Cargo.toml", "Package.swift", "CMakeLists.txt", "sfdx-project.json",
+              "mule-artifact.json"}
 _SPECS = [
     ("java-spring", ["java"], ["java-direct-command", "java-direct-query", "spring-literal-routes"]),
     ("dotnet", ["csharp"], ["dotnet-direct-command", "dotnet-direct-query", "dotnet-literal-routes"]),
@@ -38,7 +40,16 @@ _SPECS = [
     ("native", ["c", "cpp"], ["native-memory-review"]),
     ("salesforce-apex", ["apex"], ["apex-soql-injection", "apex-without-sharing-entrypoint", "apex-crud-fls",
                                    "apex-entrypoints"]),
+    ("mule", ["mule"], ["mule-listener-routes", "mule-dynamic-query", "mule-dynamic-request-url", "mule-insecure-tls",
+                        "mule-plaintext-credential", "mule-listener-no-tls", "dataweave-readurl"]),
+    ("salesforce-metadata", ["salesforce-metadata"], ["flow-system-mode", "flow-screen-input-dml", "flow-hardcoded-id",
+                                                      "flow-literal-credential", "vf-unescaped-output",
+                                                      "aura-unescaped-html", "lwc-apex-entry"]),
 ]
+_MULE_CHECKS = ["mule-listener-routes", "mule-dynamic-query", "mule-dynamic-request-url", "mule-insecure-tls",
+                "mule-plaintext-credential", "mule-listener-no-tls", "dataweave-readurl"]
+_SF_META_CHECKS = ["flow-system-mode", "flow-screen-input-dml", "flow-hardcoded-id", "flow-literal-credential",
+                   "vf-unescaped-output", "aura-unescaped-html", "lwc-apex-entry"]
 _LIMIT = "Direct syntax only; aliases, binding resolution, authorization, build variants and cross-function flows require review."
 MAX_MANIFEST_ERRORS = 200
 
@@ -117,9 +128,15 @@ def _manifest_metadata(service: dict, text: str, name: str) -> list:
                 "build.gradle.kts": "kotlin", "go.mod": "go", "Gemfile": "ruby",
                 "composer.json": "php", "Cargo.toml": "rust", "Package.swift": "swift",
                 "pyproject.toml": "python", "requirements.txt": "python", "setup.py": "python",
-                "Pipfile": "python", "CMakeLists.txt": "cpp", "sfdx-project.json": "apex"}.get(name)
+                "Pipfile": "python", "CMakeLists.txt": "cpp", "sfdx-project.json": "apex",
+                "mule-artifact.json": "mule"}.get(name)
     if name == "sfdx-project.json":
         service["frameworks"].add("salesforce")
+        return []
+    # #249: a Mule application's pom.xml is a packaging descriptor, not Java source evidence.
+    if name == "mule-artifact.json" or (name == "pom.xml" and re.search(r"<packaging>\s*mule-(?:application|domain|policy)\s*</packaging>", text)):
+        service["languages"].add("mule")
+        service["frameworks"].add("mule")
         return []
     if name.endswith(".csproj"):
         language = "csharp"
@@ -355,12 +372,26 @@ def _configuration(ctx, path, service: dict) -> tuple[str, str, int, list, str |
     return profile, check, 1, rows, None
 
 
+def _link_entrypoints(entrypoints: list, links: list) -> list:
+    """Mark exposed Apex methods that LWC components import (`called_from_lwc`)."""
+    callers: dict = {}
+    for link in links:
+        callers.setdefault((link["apex_class"].lower(), link["method"].lower()), []).append(link["file"])
+    for entry in entrypoints:
+        cls = Path(entry["file"]).stem.lower()
+        files = callers.get((cls, entry["method"].lower()))
+        if files:
+            entry["called_from_lwc"] = sorted(set(files))[:10]
+    return entrypoints
+
+
 def analyze(ctx) -> dict:
     """Reuse RepoContext's bounded inventory/cache; never traverse or read externally."""
     inventory, configs, errors = _inventory(ctx)
     measurements: dict[tuple, dict] = {}
     sinks, routes, findings = [], [], []
     apex_entrypoints: list = []
+    lwc_apex_links: list = []
 
     def measured(service, profile, check, examined=0, hits=0):
         row = measurements.setdefault((service["id"], profile, check), {"id": check, "examined": 0, "findings": 0})
@@ -454,6 +485,21 @@ def analyze(ctx) -> dict:
                 if len(apex_entrypoints) < 500:
                     apex_entrypoints.append({**entry, "service_id": service["id"]})
             measured(service, "salesforce-apex", "apex-entrypoints", hits=len(result["entrypoints"]))
+        if suffix == ".js" and "@salesforce/apex/" in raw or (suffix == ".js" and re.search(r"(?:^|/)lwc/", rel)):
+            from . import salesforce_metadata as sf_meta
+            service["languages"].add("salesforce-metadata")
+            measured(service, "salesforce-metadata", "lwc-apex-entry", 1)
+            measured(service, "salesforce-metadata", "aura-unescaped-html", 1)
+            for link in sf_meta.lwc_apex_links(raw, rel):
+                if len(lwc_apex_links) < 1000:
+                    lwc_apex_links.append({**link, "service_id": service["id"]})
+                measured(service, "salesforce-metadata", "lwc-apex-entry", hits=1)
+            template = path.with_suffix(".html")
+            if re.search(r"(?:^|/)lwc/", rel) and template.is_file():
+                for row in sf_meta.lwc_manual_dom(ctx.text(template), raw, rel):
+                    findings.append({**row, "profile_id": "salesforce-metadata", "service_id": service["id"],
+                                     "file": rel, "semantic_id": row["rule_id"] + ":" + rel + ":" + str(row["line"])})
+                    measured(service, "salesforce-metadata", "aura-unescaped-html", hits=1)
         if suffix == ".rs":
             check = "rust-reqwest-invalid-certificates"
             measured(service, "rust", check, 1)
@@ -473,6 +519,66 @@ def analyze(ctx) -> dict:
                                      "evidence": match[0], "remediation": "Keep certificate validation enabled and configure specific trusted certificates.",
                                      "limitations": ["Method receiver type and compiled feature selection are unresolved."]})
                     measured(service, "rust", check, hits=1)
+    # #250/#251: dialect files are not code files; their profiles read them here.
+    from . import mule as mule_profile, salesforce_metadata as sf_meta
+    dialects = getattr(ctx, "dialect_files", {}) or {}
+    mule_apps: set = set()
+    for dialect, paths in sorted(dialects.items()):
+        for path in paths:
+            rel = ctx.rel(path)
+            if not ctx.include_fixtures and is_test_file(rel):
+                continue
+            service = service_for(inventory, rel)
+            raw = ctx.text(path)
+            if dialect in ("mule-flow-xml", "dataweave"):
+                service["languages"].add("mule")
+                service["frameworks"].add("mule")
+                mule_apps.add(service["id"])
+                for check in _MULE_CHECKS:
+                    measured(service, "mule", check, 1)
+                result = mule_profile.analyze_flow(raw, rel) if dialect == "mule-flow-xml" else \
+                    {"routes": [], "sinks": [], "findings": mule_profile._dataweave(raw)}
+                for row in result["routes"]:
+                    routes.append({**row, "service_id": service["id"]})
+                measured(service, "mule", "mule-listener-routes", hits=len(result["routes"]))
+                seen_mule: dict = {}
+                for sink in result["sinks"]:
+                    ordinal = seen_mule.get(sink["expression"], 0)
+                    seen_mule[sink["expression"]] = ordinal + 1
+                    row = occurrence(raw, sink["offset"], sink["expression"], rel, sink["kind"], ordinal)
+                    check = "mule-dynamic-query" if sink["kind"] == "sql-injection" else "mule-dynamic-request-url"
+                    row.update({"service_id": service["id"], "profile_id": "mule", "offset": sink["offset"],
+                                "rule_id": check, "source": sink["source"], "flow": sink["flow"],
+                                **({"request_bound": sink["request_bound"]} if sink["request_bound"] else {})})
+                    sinks.append(row)
+                    measured(service, "mule", check, hits=1)
+                for row in result["findings"]:
+                    findings.append({**row, "profile_id": "mule", "service_id": service["id"], "file": rel,
+                                     "semantic_id": row["rule_id"] + ":" + rel + ":" + str(row["line"])})
+                    measured(service, "mule", row["rule_id"], hits=1)
+            else:
+                service["languages"].add("salesforce-metadata")
+                for check in _SF_META_CHECKS:
+                    measured(service, "salesforce-metadata", check, 1)
+                rows = (sf_meta.analyze_flow(raw, rel) if dialect == "salesforce-flow" else
+                        sf_meta.analyze_visualforce(raw, rel) if dialect == "visualforce" else sf_meta.analyze_aura(raw, rel))
+                for row in rows:
+                    findings.append({**row, "profile_id": "salesforce-metadata", "service_id": service["id"], "file": rel,
+                                     "semantic_id": row["rule_id"] + ":" + rel + ":" + str(row["line"])})
+                    measured(service, "salesforce-metadata", row["rule_id"], hits=1)
+    # Literal credentials in a Mule app's resource files (YAML/properties are not code files).
+    if mule_apps:
+        for pattern in ("**/src/main/resources/**/*.yaml", "**/src/main/resources/**/*.yml",
+                        "**/src/main/resources/**/*.properties"):
+            for path in ctx.glob(pattern, 500):
+                rel = ctx.rel(path)
+                service = service_for(inventory, rel)
+                if service["id"] not in mule_apps or re.search(r"(?i)(?:^|/)[^/]*secure[^/]*$", rel) or is_test_file(rel):
+                    continue
+                for row in mule_profile.analyze_properties(ctx.text(path), rel):
+                    findings.append({**row, "profile_id": "mule", "service_id": service["id"], "file": rel,
+                                     "semantic_id": row["rule_id"] + ":" + rel + ":" + str(row["line"])})
+                    measured(service, "mule", "mule-plaintext-credential", hits=1)
     for path in configs:
         service = service_for(inventory, ctx.rel(path))
         profile, check, examined, rows, error = _configuration(ctx, path, service)
@@ -505,6 +611,8 @@ def analyze(ctx) -> dict:
             "sink_occurrences": sinks, "routes": routes, "errors": errors,
             # #246: Apex entry points (@AuraEnabled/@RemoteAction/webservice/@RestResource) — the attack
             # surface of a Salesforce org. Platform-authenticated, so listed here rather than as routes.
-            **({"apex_entrypoints": apex_entrypoints} if apex_entrypoints else {}),
+            **({"apex_entrypoints": _link_entrypoints(apex_entrypoints, lwc_apex_links)} if apex_entrypoints else {}),
+            # #251: each `@salesforce/apex/Class.method` import is one server entry point used by LWC.
+            **({"lwc_apex_links": lwc_apex_links} if lwc_apex_links else {}),
             "limitations": [_LIMIT, "No-match results are not security proof; manifest boundaries approximate deployment boundaries.",
                             "Dependency labels include development, peer and optional declarations; they do not prove installation, deployment or a native application."]}

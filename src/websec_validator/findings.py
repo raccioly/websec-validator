@@ -824,8 +824,9 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
             # #241: Spring Security is on the classpath but its effective chain was not resolved (shared
             # library, auto-configuration or Boot's default). A lead to verify, never a HIGH.
             conf, sev = "LOW", ("MEDIUM" if is_write else "LOW")
-            ev.append({"layer": "recon", "detail": "unverified: Spring Security is a dependency of this module but "
-                       "no filter-chain rule covering the route was resolved; verify the central security configuration"})
+            ev.append({"layer": "recon", "detail": "unverified: " + (eg.get("central_auth_note") or (
+                "Spring Security is a dependency of this module but no filter-chain rule covering the route "
+                "was resolved; verify the central security configuration"))})
         # METHOD-EXACT correlation only. `dyn_get` holds unauth_reachability rows, which are GET-ONLY;
         # falling back to it for a POST/PUT/DELETE applied a GET's verdict to a write. Because
         # --probe-writes is localhost-gated, dyn_write is EMPTY on any remote target, so every write
@@ -1082,7 +1083,7 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         sink_class = row.get("sink_class") or row.get("attack_class", "sast")
         attack = _SINK_ATTACK.get(row.get("attack_class", sink_class), row.get("attack_class", sink_class))
         # #243: a request parameter concatenated straight into SQL text is a HIGH lead, not a pattern hit.
-        bound = bool(row.get("request_bound")) and sink_class == "sql-injection"
+        bound = bool(row.get("request_bound")) and sink_class in ("sql-injection", "ssrf")
         finding = _f(f"{sink_class} sink", "attack-surface", attack, "HIGH" if bound else "MEDIUM",
                      "MEDIUM" if bound else "LOW",
                      f"{row.get('file', '?')}:{row.get('line', 0)}",

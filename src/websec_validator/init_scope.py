@@ -154,10 +154,14 @@ def load_prior_ledger(target: Path, explicit: Path | None = None) -> dict | None
         if not isinstance(ledger, dict) or not isinstance(ledger.get("findings"), list):
             continue
         recorded = ledger.get("target") or (ledger.get("verification_context") or {}).get("application_id")
-        try:
-            same = bool(recorded) and Path(str(recorded)).expanduser().resolve() == root
-        except (OSError, ValueError):
-            same = False
+        from .privacy import target_id
+        if ledger.get("target_id"):
+            same = ledger["target_id"] == target_id(root)   # #255: portable artifacts carry a digest
+        else:
+            try:
+                same = bool(recorded) and Path(str(recorded)).expanduser().resolve() == root
+            except (OSError, ValueError):
+                same = False
         if not same:
             continue
         # Already-acknowledged findings count too: re-running `init --force` after a reviewed run must

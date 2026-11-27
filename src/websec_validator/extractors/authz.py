@@ -855,6 +855,10 @@ class AuthzExtractor(Extractor):
                             + (["Fastify hook presence does not establish this route's instance/registration scope"]
                                if fastify_global_auth and not guarded else []),
                         "public_hint": bool(PUBLIC_HINT.search(e.get("path", "")))})
+            if e.get("central_auth_note") and not guarded:
+                # #250: a Mule listener is usually protected by API Manager policies that live outside
+                # the repository, so a missing in-code guard is an unverified lead, never HIGH.
+                egs[-1].update(central_auth_unresolved=True, central_auth_note=e["central_auth_note"])
             if spring_row:
                 row = egs[-1]
                 row["unverified_controls"] += [] if guarded else spring_row["unverified"]

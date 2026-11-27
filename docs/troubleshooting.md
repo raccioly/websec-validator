@@ -303,6 +303,25 @@ gives `directory`, `execution_complete` and `published_as`, and a partial run is
 `websec-out/partial`. Do not trust `latest` for a run you just started. See the
 [outputs reference](reference/outputs.md).
 
+### `osv-scanner: error` on a Maven project
+
+**Cause.** osv-scanner resolves `pom.xml` dependencies transitively against Maven Central. A
+dependency that exists only in another repository (a MuleSoft connector, a company Nexus) fails the
+whole manifest. Since 0.25.0, websec then runs osv-scanner again with `--no-resolve`, checks the
+direct dependencies, and records a `dependency_resolution` gap that names the unresolved packages.
+A POM with no dependencies is recorded as "no package sources found" (`scanner_scope`), not an
+error. If a scanner still errors, `coverage.json` `scanners.<name>.report_details.errors` holds the
+end of its stderr.
+
+### A Mule or Salesforce project reads 0 code files
+
+**Cause.** Mule flows, DataWeave, Salesforce Flow, Visualforce and Aura markup are not code files.
+Since 0.25.0 the `mule` and `salesforce-metadata` profiles read them, `coverage.json`
+`files.dialects` counts them, and the banner names them as profile files. Mule listener routes are
+in the route inventory; a missing in-code guard on them is a low-confidence lead, because API
+Manager policies live outside the repository. AMPscript pages are listed as `ampscript` under
+`language_without_analyzer`.
+
 ### Every Spring route is reported as `Missing authorization`
 
 **Cause.** Before 0.24.0, websec did not read Spring Security. Since 0.24.0, a route is guarded when

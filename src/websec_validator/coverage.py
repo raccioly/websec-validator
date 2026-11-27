@@ -78,7 +78,7 @@ def from_context(ctx, outcomes: dict) -> dict:
     # Elixir service was never looked at. Scope limitation, never an execution failure — nothing
     # failed to run; there was nothing here to run.
     from .extractors.base import unanalyzed_languages
-    unanalyzed = unanalyzed_languages(ctx.unsupported_files)
+    unanalyzed = unanalyzed_languages(ctx.unsupported_files, getattr(ctx, "unsupported_dialects", {}))
     if unanalyzed:
         named = ", ".join(f"{lang} ({n} file(s))" for lang, n in unanalyzed.items())
         gaps.append({"kind": "language_without_analyzer",
@@ -128,6 +128,8 @@ def from_context(ctx, outcomes: dict) -> dict:
                   "types": dict(ctx.file_types), "unreadable": list(ctx.unreadable),
                   "oversized": list(ctx.oversized), "unsupported": list(ctx.unsupported_files),
                   "byte_budget_exceeded": list(ctx.byte_budget_exceeded),
+                  # #249: integration/low-code files read by a named profile, not by the code extractors.
+                  "dialects": {name: len(paths) for name, paths in sorted((getattr(ctx, "dialect_files", {}) or {}).items())},
                   "source_bytes": ctx.cached_source_bytes, "data_bytes": getattr(ctx, "data_bytes_read", 0),
                   "read_policy": source_read_policy(ctx),
                   "truncated": bool(ctx.truncated), "inventory_truncated": ctx.walk_truncated,
@@ -369,9 +371,37 @@ def add_scanners(facts: dict, detected: dict, results: list, unified: dict | Non
         for policy in ("configuration_policy", "suppression_policy"):
             if result and policy in result:
                 cov["scanners"][key][policy] = result[policy]
+        if result and result.get("stderr_tail") and outcome not in ("completed", "partial"):
+            errors_list = list(details.get("errors") or [])
+            cov["scanners"][key]["report_details"] = dict(details, errors=errors_list + [result["stderr_tail"]])
+        if chosen and result and result.get("no_applicable_input"):
+            cov["scanners"][key]["no_applicable_input"] = True
+            add_gap(facts, "scanner_scope", f"{key}: no package sources found; nothing applicable to scan",
+                    execution=False)
+        resolution = (result or {}).get("dependency_resolution") if chosen else None
+        if resolution:
+            cov["scanners"][key]["dependency_resolution"] = resolution
+            names = ", ".join(resolution.get("unresolved") or []) or "unnamed packages"
+            if resolution.get("mode") == "failed":
+                pass  # the scanner outcome is already an error gap
+            else:
+                add_gap(facts, "dependency_resolution",
+                        f"{key}: transitive dependencies not resolved for {len(resolution.get('manifests') or []) or 1} "
+                        f"manifest(s) ({names} not found in the public registry); "
+                        + ("direct dependencies checked" if resolution.get("mode") == "direct-only"
+                           else "packages that did resolve were checked"),
+                        execution=False)
         if chosen and details.get("skipped_checks"):
             add_gap(facts, "scanner_scope", f"{key}: {details['skipped_checks']} checks suppressed by native scanner policy",
                     execution=False)
+    # #249: built-in analysis has no rules for these languages, but a whole-tree scanner may still
+    # have read the files. Say which layer covered what, so the gap never claims "never seen".
+    ran = sorted(key for key, row in cov["scanners"].items() if row.get("outcome") in ("completed", "partial")
+                 and key in ("semgrep", "gitleaks", "gitleaks-dir", "trivy", "checkov", "trufflehog"))
+    for gap in cov.get("gaps", []):
+        if gap.get("kind") == "language_without_analyzer" and ran and "scanners that ran" not in gap["detail"]:
+            gap["detail"] += (f". Built-in analysis: none; scanners that ran over the whole tree ({', '.join(ran)}) "
+                              "read these files with their own rules")
     cov["scope_digest"] = _digest({"profile": cov.get("profile"),
                                    "excludes": cov.get("files", {}).get("excludes", []),
                                    "include_fixtures": cov.get("files", {}).get("include_fixtures", False),
@@ -424,7 +454,9 @@ def render_md(facts: dict) -> str:
         status = "REQUESTED CHECKS COMPLETED"
     else:
         status = "PARTIAL SCAN — REQUESTED CHECKS INCOMPLETE"
-    lines = [f"\n> **{status}** — {counts.get('read', 0)} files read; {counts.get('scanned', 0)} code files selected.",
+    dialects = counts.get("dialects") or {}
+    profile_files = (f"; {sum(dialects.values())} profile file(s) ({', '.join(sorted(dialects))})" if dialects else "")
+    lines = [f"\n> **{status}** — {counts.get('read', 0)} files read; {counts.get('scanned', 0)} code files selected{profile_files}.",
              "> Completion describes execution, not complete protection. See `coverage.json` for scope and limits."]
     if counts.get("no_analyzable_source"):
         langs = counts.get("unanalyzed_languages") or {}

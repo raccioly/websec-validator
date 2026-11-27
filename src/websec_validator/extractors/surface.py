@@ -65,7 +65,13 @@ SINKS = {
         # builders (`path.join(dir, req.params.f)`) take user input in any argument, so they keep
         # matching the whole call. A nested builder inside a file call is caught by its own branch.
         r"(?:fs\.(?:readFile(?:Sync)?|writeFile(?:Sync)?|createReadStream|unlink(?:Sync)?|readdir(?:Sync)?"
-        r"|rmdir(?:Sync)?|rm(?:Sync)?)|sendFile|\bopen)\s*\([^,)]*" + _U
+        r"|rmdir(?:Sync)?|rm(?:Sync)?)|sendFile"
+        # #252: `open` is a file API only as a bare call (Python `open(...)`) or on a file module
+        # (`fs.open`, `fs.promises.open`, `os.open`, `io.open`, `File.open`, ...). `X.open({...})` is a
+        # modal/dialog API (LightningConfirm, MUI/Material dialogs), and no file API takes an options
+        # object first.
+        r"|(?<![\w$.])open|\b(?:fs(?:\.promises)?|fsPromises|os|io|codecs|gzip|bz2|lzma|tarfile|zipfile|File)\.open"
+        r")\s*\((?!\s*\{)[^,)]*" + _U
         + r"|(?:os\.path\.join|path\.(?:join|resolve))\s*\([^)]*" + _U)),
     "ssti": ("ssrf-probes", None, re.compile(
         r"(?:render_template_string|renderString|nunjucks\.renderString|ejs\.render|pug\.compile|Handlebars\.compile|new\s+Template|Template\s*\()\s*\([^)]*"

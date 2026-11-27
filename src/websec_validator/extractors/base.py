@@ -20,6 +20,8 @@ from functools import lru_cache
 from pathlib import Path
 
 from .apex import APEX_SUFFIXES, is_apex_source
+from .dialects import (PROFILE_DIALECTS, UNANALYZED_DIALECTS,
+                       classify as classify_dialect)
 from .jvm import JVM_SOURCE_ROOT
 
 SKIP_DIRS = {".git", "node_modules", "dist", "build", ".next", ".nuxt", "venv",
@@ -150,11 +152,19 @@ UNANALYZED_LANG = {
 }
 
 
-def unanalyzed_languages(paths) -> dict:
-    """{language: file_count} for walked files whose suffix has no analyser. Sorted, bounded."""
+_DIALECT_SUFFIXES = {".dwl", ".xml", ".page", ".component", ".cmp", ".app", ".evt", ".intf", ".design",
+                     ".tokens", ".html", ".htm", ".amp", ".ampscript"}
+
+
+def unanalyzed_languages(paths, dialects: dict | None = None) -> dict:
+    """{language: file_count} for walked files whose suffix has no analyser. Sorted, bounded.
+
+    `dialects` maps a path to a content/path-classified language (#249: AMPscript in `.html`).
+    """
     counts: dict = {}
+    dialects = dialects or {}
     for path in paths or []:
-        lang = UNANALYZED_LANG.get(Path(str(path)).suffix.lower())
+        lang = dialects.get(str(path)) or UNANALYZED_LANG.get(Path(str(path)).suffix.lower())
         if lang:
             counts[lang] = counts.get(lang, 0) + 1
     return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
@@ -422,6 +432,10 @@ class RepoContext:
         self.oversized: list[str] = []
         self.unreadable: list[str] = []
         self.unsupported_files: list[str] = []
+        # #249: dialect files (Mule flow XML, DataWeave, Salesforce metadata) read by named
+        # profiles, and the language of each unsupported file classified by content.
+        self.dialect_files: dict[str, list[Path]] = {}
+        self.unsupported_dialects: dict[str, str] = {}
         self.glob_truncated: list[dict] = []
         self._extension_manifests: list[Path] | None = None
         self.skipped_files: list[dict] = []
@@ -600,6 +614,15 @@ class RepoContext:
                 self._relative_files[path] = path.relative_to(self.root)
                 suffix = path.suffix.lower()
                 self.file_types[suffix or "<none>"] = self.file_types.get(suffix or "<none>", 0) + 1
+                dialect = classify_dialect(path, self.rel(path), allowed[1]) if suffix in _DIALECT_SUFFIXES else None
+                if dialect in PROFILE_DIALECTS:
+                    self.dialect_files.setdefault(dialect, []).append(path)
+                    continue
+                if dialect in UNANALYZED_DIALECTS:
+                    # AMPscript/SSJS is server-side code in an `.html` file: not analysable HTML.
+                    self.unsupported_files.append(self.rel(path))
+                    self.unsupported_dialects[self.rel(path)] = dialect
+                    continue
                 if suffix in CODE_EXT:
                     # A vendored library or minified bundle is not the operator's source and cannot
                     # be fixed by them; analysing it buries the findings that can. Counted as a
