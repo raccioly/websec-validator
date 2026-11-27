@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-11-27
+
 ### Added
 
 - `mule` profile for MuleSoft flows and DataWeave: listener routes (fed into the route inventory),
@@ -2144,7 +2146,8 @@ The initial public line. Highlights across 0.2.1–0.2.9:
 ### Fixed
 - Scanner-contamination and rate-limit fixes (agent-wallet dogfood).
 
-[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/raccioly/websec-validator/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/raccioly/websec-validator/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/raccioly/websec-validator/compare/v0.23.3...v0.24.0
 [0.23.3]: https://github.com/raccioly/websec-validator/compare/v0.23.2...v0.23.3
 [0.23.2]: https://github.com/raccioly/websec-validator/compare/v0.23.1...v0.23.2
