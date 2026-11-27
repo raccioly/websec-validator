@@ -258,6 +258,16 @@ A `websec dynamic` ledger carries its own `gate` with `command: "dynamic"`, `thr
 counts the CRITICAL static findings from `FACTS.json` that are in the ledger but do not set the
 exit code (`websec run` gates those).
 
+### Paths and secrets in artifacts
+
+Since 0.25.0, no artifact in a run directory contains an absolute local path or a raw secret value.
+Paths under the target are root-relative, and paths under the run directory are relative to it.
+`target` is the target's directory name, and `target_id` is `sha256:` plus the first 32 hex digits
+of the SHA-256 of the resolved root path. The default `verification_context.application_id` is the
+same digest. `websec init` and `websec dynamic` match a run to a checkout by `target_id`. The stored
+`scanners/gitleaks*.json` and `scanners/trufflehog.json` reports replace each matched value with
+`REDACTED:sha256:<12 hex>`.
+
 ### `findings.envelope.json`
 
 A versioned wrapper around the ledger that describes itself. Use it when a consumer should not

@@ -1154,6 +1154,50 @@ def _norm_trufflehog(data) -> list:
     return out
 
 
+# #255: secret scanners write the matched value into their report, and the run directory is often
+# uploaded as a CI artifact. After websec has read what it needs (provider tiering uses the value
+# in memory), the stored report keeps only a short digest of each value.
+_SECRET_REPORTS = {"gitleaks", "gitleaks-dir", "trufflehog"}
+_SECRET_FIELDS = {"Secret", "Match", "Raw", "RawV2", "Redacted", "Line"}
+
+
+def _redact_value(value):
+    if not isinstance(value, str) or not value:
+        return value
+    return "REDACTED:sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+
+def _redact(node):
+    if isinstance(node, dict):
+        return {k: (_redact_value(v) if k in _SECRET_FIELDS else _redact(v)) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_redact(item) for item in node]
+    return node
+
+
+def _redact_report(path: Path, doc) -> None:
+    try:
+        if isinstance(doc, list) and path.read_text(encoding="utf-8", errors="ignore").lstrip().startswith("{") \
+                and "\n{" in path.read_text(encoding="utf-8", errors="ignore"):
+            path.write_text("\n".join(json.dumps(_redact(row)) for row in doc) + "\n")   # JSON lines
+        else:
+            path.write_text(json.dumps(_redact(doc), indent=2))
+    except OSError:
+        pass
+
+
+def _scrub_report_paths(path: Path, target, outdir) -> None:
+    """#255: the native report stays as evidence, without the machine's absolute paths."""
+    from .privacy import Scrubber
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        scrubbed = Scrubber(target, Path(outdir).parent if outdir else None).text(text)
+        if scrubbed != text:
+            path.write_text(scrubbed)
+    except OSError:
+        pass
+
+
 def _norm_gitleaks(data) -> list:
     rows = data if isinstance(data, list) else (data.get("findings") or [])
     out = []
@@ -1289,6 +1333,10 @@ def _norm_checkov(data) -> list:
         for c in ((block.get("results") or {}).get("failed_checks") or []):
             cid = c.get("check_id", "")
             f = c.get("file_path", "") or c.get("repo_file_path", "")
+            # #255: checkov reports root-anchored paths (`/src/a.yaml`) that are neither absolute nor
+            # repo-relative. A real absolute path is relativized later; this one is just anchored.
+            if f.startswith("/") and not Path(f).exists():
+                f = f.lstrip("/")
             rng = c.get("file_line_range") or [0]
             out.append({"tool": "checkov", "category": "iac",
                         **({"resource": c["resource"]} if isinstance(c.get("resource"), str) else {}),
@@ -1859,6 +1907,8 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
                 if isinstance(version, (str, int)):
                     report_versions[key] = str(version)
             normalized = parser(doc)
+            if key in _SECRET_REPORTS:
+                _redact_report(output_path, doc)
             for finding in normalized:
                 if finding.get("category") == "sca":
                     _sca_occurrence(finding, target)
@@ -1876,6 +1926,12 @@ def normalize_findings(scan_results: list, outdir: Path, target: Path | None = N
         except Exception:
             parse_failed.append(key)          # a truncated/OOM-killed scanner must not read as clean
             continue
+
+    # #255: every native report written to the run directory, parsed or not, loses absolute paths.
+    if target is not None:
+        for r in scan_results:
+            if r.get("output") and Path(r["output"]).is_file():
+                _scrub_report_paths(Path(r["output"]), target, outdir)
 
     # bug-218: the same committed-and-still-present secret is found by BOTH gitleaks passes and
     # shares a fingerprint (secret|file|rule|line). Collapse to one finding carrying both modes, so

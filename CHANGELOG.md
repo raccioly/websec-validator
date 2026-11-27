@@ -41,7 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   error. A scanner that writes no report keeps the end of its stderr in `report_details.errors`.
   (#253)
 - The gitleaks directory pass reported absolute paths, so a secret found by both passes was listed
-  twice. Paths are now root-relative and the two passes merge. (#250)
+  twice. Paths are now root-relative and the two passes merge. (#250, #255)
+- Run artifacts no longer contain the scanning machine's absolute paths or raw secret values.
+  Paths under the target are root-relative, paths under the run directory are relative to it, and
+  the target is named by its directory plus `target_id`, a SHA-256 of the resolved root. The
+  default `application_id` is that digest. The stored gitleaks/trufflehog reports keep a short
+  digest instead of each matched value, and checkov's root-anchored paths (`/src/...`) are
+  repo-relative. `websec init` and `websec dynamic` match runs by `target_id`. (#255)
 
 ## [0.24.0] — 2026-11-27
 
