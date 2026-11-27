@@ -997,24 +997,34 @@ def cmd_dynamic(args) -> int:
     # merge dynamic evidence into the traceable ledger + write the immutable run report
     facts_dict = json.loads(facts_path.read_text())
     coverage.add_dynamic(facts_dict, dyn)
-    _root = Path(facts_dict.get("target", "."))
-    # #255: artifacts carry a portable target (its directory name) plus `target_id`. When the
-    # recorded target is not a usable path, the working directory is the target only if its digest
-    # matches; otherwise the run continues from it and says so.
-    if not (_root.is_absolute() and _root.is_dir()):
+    # #255: artifacts carry a portable target (its directory name) plus `target_id`, so the recorded
+    # target is often not a usable path. The run keeps that recorded identity. It reads a
+    # .websec-ignore only from a checkout it can prove is the target: the recorded absolute path
+    # (older artifacts), or the working directory when its digest matches `target_id`.
+    recorded = str(facts_dict.get("target", "") or "")
+    recorded_id = facts_dict.get("target_id") or (privacy.target_id(recorded) if Path(recorded).is_absolute() else "")
+    _root = None
+    if Path(recorded).is_absolute() and Path(recorded).is_dir():
+        _root = Path(recorded)
+    elif recorded_id and recorded_id == privacy.target_id(Path.cwd()):
         _root = Path.cwd()
-        if facts_dict.get("target_id") and facts_dict["target_id"] != privacy.target_id(_root):
-            print(f"  ⚠ FACTS target_id does not match {_root.name}; reading .websec-ignore from the working "
-                  "directory", file=sys.stderr)
-    _safe = privacy.Scrubber(_root, out)
+    else:
+        print(f"  ⚠ the target recorded in FACTS ({Path(recorded).name or '?'}) is not this working directory; "
+              "no .websec-ignore is applied. Run `websec dynamic` from the target checkout to apply it.",
+              file=sys.stderr)
+    _safe = privacy.Scrubber(_root or recorded or ".", out)
+    # The run directory never holds a .websec-ignore, so it stands in for "no ignore file".
+    _ignore_root = _root or out
     ledger = findings.build_ledger(facts_dict, None, dyn,
-                                   findings.load_suppressions(_root),
-                                   findings.load_acknowledgements(_root))
+                                   findings.load_suppressions(_ignore_root),
+                                   findings.load_acknowledgements(_ignore_root))
     ledger["coverage"] = facts_dict["coverage"]
-    ledger["target"] = str(_root)
+    ledger["target"] = str(_root) if _root else (Path(recorded).name or recorded)
+    if recorded_id:
+        ledger["target_id"] = recorded_id
     ledger["build_id"] = ts
     ledger["verification_context"] = {
-        "application_id": privacy.target_id(_root),
+        "application_id": recorded_id or privacy.target_id(_root or "."),
         "build_id": facts_dict["coverage"].get("analyzed_input_digest", ""),
         "source_digest": facts_dict["coverage"].get("analyzed_input_digest", ""),
     }

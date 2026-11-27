@@ -348,7 +348,10 @@ class CoverageTests(unittest.TestCase):
         self.assertFalse(self.latest('coverage.json')['execution_complete'])
         ledger = self.latest('findings-ledger.json')
         self.assertEqual(ledger['coverage'], self.latest('coverage.json'))
-        self.assertEqual(ledger['target'], str(self.repo))
+        # #255: artifacts name the target portably and bind it by digest, not by local path.
+        from websec_validator.privacy import target_id
+        self.assertEqual(ledger['target'], self.repo.name)
+        self.assertEqual(ledger['target_id'], target_id(self.repo))
         self.assertEqual(ledger['verification_context']['source_digest'],
                          ledger['coverage']['analyzed_input_digest'])
 
