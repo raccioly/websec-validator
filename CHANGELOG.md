@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `dev-token-backdoor` now needs request credential material compared against a literal or prefix
+  (`token.startsWith("dev-")`, `token === "dev-token"`, `"dev-token".equals(token)`, or a literal list
+  checked with `.includes(token)`). A `dev-user` literal passed as an argument, such as
+  `requireNonNullElse(jwt.getSubject(), "dev-user")`, is not a comparison. No caller can send it, so it
+  is no longer reported as a CRITICAL backdoor. (#238)
+
+### Added
+
+- `anonymous-fallback-principal` (LOW): a shared `dev-` identity is used when no principal exists
+  (`?? 'dev-user'`, `requireNonNullElse(..., "dev-user")`, `.orElse("dev-user")`). The finding gives
+  the line and asks you to confirm that the authentication layer refuses the request first. A file
+  with a real backdoor reports only the backdoor. (#238)
+
 ## [0.23.2] — 2026-11-26
 
 ### Fixed

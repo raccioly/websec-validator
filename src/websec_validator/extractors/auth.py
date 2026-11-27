@@ -122,10 +122,26 @@ JWT_SIGN_VERIFY = re.compile(r"jwt\.(?:sign|verify)|jsonwebtoken|\bjose\b|jwtVer
 # Surfaced by the FP/FN audit: a real Fastify API accepts unsigned `dev-*` bearer tokens as dev-admin; the
 # coach authorize() accepts any 8-char password; the pocket Stripe verify fails OPEN if the secret is unset).
 # (1) a dev/hardcoded token accepted as a valid PRINCIPAL — `token.startsWith('dev-')` deriving a role/user.
+# Every alternative needs a COMPARISON of credential material against the literal (#238): a `dev-user`
+# literal passed as an argument (`requireNonNullElse(jwt.getSubject(), "dev-user")`) names a fallback
+# principal, which no caller can send, so it is not a backdoor (see ANON_FALLBACK_PRINCIPAL below).
+_DEV_CRED = r"(?:token|authHeader|auth|bearer|apiKey|header|credential|jwt|authorization|cookie|key)\w*"
+_DEV_LIT = r"['\"]dev-(?:admin|user|token|superadmin|master)['\"]"
 DEV_TOKEN_BACKDOOR = re.compile(
-    r"\b(?:token|authHeader|auth|bearer|apiKey|header|credential|jwt)\w*\s*\.\s*startsWith\s*\(\s*['\"](?:dev-|dev_|debug|test-|local|bypass|admin-|master-)"
-    r"|\b(?:token|authHeader|bearer|role|user|principal|apiKey)\w*\s*===?\s*['\"](?:dev|dev-admin|debug|bypass|localdev|master|backdoor)['\"]"
-    r"|['\"]dev-(?:admin|user|token|superadmin|master)['\"]\s*(?:===|==|\)|,|\.startsWith)", re.I)
+    r"\b" + _DEV_CRED + r"\s*\.\s*startsWith\s*\(\s*['\"](?:dev-|dev_|debug|test-|local|bypass|admin-|master-)"
+    r"|\b(?:token|authHeader|bearer|role|user|principal|apiKey)\w*\s*(?:===?\s*|\.\s*equals(?:IgnoreCase)?\s*\(\s*)"
+    r"['\"](?:dev|dev-admin|debug|bypass|localdev|master|backdoor)['\"]"
+    r"|\b" + _DEV_CRED + r"\s*(?:===?\s*|\.\s*equals(?:IgnoreCase)?\s*\(\s*)" + _DEV_LIT
+    + r"|" + _DEV_LIT + r"\s*(?:===?\s*[\w.]|\.\s*(?:equals(?:IgnoreCase)?|startsWith)\s*\()"
+    r"|\[\s*" + _DEV_LIT + r"[^\]\n]{0,120}\]\s*\.\s*(?:includes|indexOf|contains)\s*\(", re.I)
+# A shared identity used when NO principal exists (`?? 'dev-user'`, `requireNonNullElse(..., "dev-user")`,
+# `principal != null ? ... : "dev-user"`). Not forgeable, but a request that reaches the handler without a
+# principal is attributed to a shared name instead of refused — LOW, and only when no backdoor matched.
+ANON_FALLBACK_PRINCIPAL = re.compile(
+    r"(?:requireNonNullElse(?:Get)?\s*\([^;\n]{0,160}?,|\?\?|\|\||\borElse\s*\(|getOrDefault\s*\([^;\n]{0,80}?,|:)"
+    r"\s*['\"]dev-(?:user|admin|superadmin|principal|owner|anonymous)['\"]", re.I)
+_PRINCIPAL_CONTEXT = re.compile(r"principal|getSubject|subject|jwt|authentication|currentUser|session\.user|req\.user"
+                                r"|getName\s*\(|userId|owner", re.I)
 # a NODE_ENV/production guard in the same file downgrades it (still risky, but not an all-envs backdoor).
 _PROD_GUARD = re.compile(r"NODE_ENV\s*[!=]==?\s*['\"]production|isProd|isProduction|process\.env\.PROD\b|env\s*!==?\s*['\"]prod", re.I)
 # (2) accept-any-credential: an authorize()/login with an explicit accept-any / MVP / mock intent, or a
@@ -305,6 +321,21 @@ class AuthExtractor(Extractor):
                            "unreachable in production and cannot be toggled by a header/env." if prod_gated
                            else "No production guard is visible in this file, so it is reachable in prod. ")
                         + "Remove the dev shortcut or gate it behind a build-time flag that is impossible in production."})
+                else:
+                    fallback = next((m for m in ANON_FALLBACK_PRINCIPAL.finditer(text)
+                                     if _PRINCIPAL_CONTEXT.search(
+                                         text[text.rfind("\n", 0, m.start()) + 1:m.end()])), None)
+                    if fallback:
+                        line = text.count("\n", 0, fallback.start()) + 1
+                        broken_auth.append({
+                            "kind": "anonymous-fallback-principal", "attack_class": "auth-fallback",
+                            "severity": "LOW", "confidence": "MEDIUM", "file": rel, "line": line,
+                            "detail": f"{rel}:{line} uses a shared literal identity when no principal is "
+                            "present (a `dev-` fallback name). No caller can send this value, so it is not a "
+                            "token backdoor, but a request that reaches the handler without a principal is "
+                            "attributed to that shared name instead of refused. Confirm the authentication "
+                            "layer (filter chain / middleware) rejects such requests first, and prefer failing "
+                            "closed (401) over a fallback identity."})
                 if AUTHORIZE_FN.search(text) and ACCEPT_ANY_CRED.search(text):
                     broken_auth.append({
                         "kind": "accept-any-credential", "attack_class": "auth-backdoor",
