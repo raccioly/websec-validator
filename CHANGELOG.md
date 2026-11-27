@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Spring Security is route-guard evidence. A route is guarded when the first `SecurityFilterChain`
+  rule that matches it is `authenticated()`, `hasRole(...)`, `hasAuthority(...)`, `access(...)` or
+  `denyAll()`. It is also guarded when `@PreAuthorize`, `@PostAuthorize`, `@Secured` or
+  `@RolesAllowed` is on the handler or its class, and method security enables that annotation
+  family. A chain applies to its own Maven/Gradle module and to modules that depend on it. A route
+  under a `permitAll()` matcher stays a lead, and its evidence names the matcher. When Spring
+  Security is a dependency but no chain rule was resolved, the lead is MEDIUM/LOW-confidence and says
+  so. (#241)
+- `salesforce-apex` profile. Apex (`.cls`, `.trigger`, `.apex`) is read in a Salesforce DX project
+  (`sfdx-project.json`, `force-app/` or a `-meta.xml` sibling). It is not read elsewhere, because
+  `.cls` is also a LaTeX class. Checks: dynamic SOQL/SOSL built by concatenation (HIGH when an
+  exposed method's parameter is concatenated in), `without sharing` on a class with exposed methods,
+  and exposed SOQL/DML with no CRUD/FLS enforcement. Exposed methods are listed in
+  `stack.profiles.apex_entrypoints`, and `stack.frameworks` reports `salesforce`. (#246)
+- `--max-source-bytes`, `--max-data-bytes` and `--max-sql-files` (and `WEBSEC_MAX_*`) raise the
+  read limits, and `coverage.json` `files.read_policy` records the active values. A partial run is
+  published as `websec-out/partial`, and `--format json` prints the run's directory in the
+  envelope's `run` field. (#245)
+- Routes excluded as test, example or fixture code are a `fixture_excluded_routes` coverage gap,
+  not only a console line. (#244)
+
+### Changed
+
+- Dependency lockfiles and `.sql` files have their own read budget (512 MiB, 32 MiB per file), so
+  lockfiles no longer fill the 64 MiB source cache. The schema checks read up to 5000 `.sql` files
+  instead of 60. Repositories with many migrations or several large lockfiles can now complete.
+  (#245)
+- Java SQL text is analysed as text. String literals, `UPPER_SNAKE` and `static final` constants,
+  numbers and numeric- or UUID-typed parameters are not input. `update`, `batchUpdate`, `queryFor*`,
+  `executeQuery`/`executeUpdate`, `prepareStatement` and `createQuery` are sinks, and a one-hop SQL
+  variable is followed. A `@RequestParam`, `@PathVariable` or `@RequestBody` parameter concatenated
+  into SQL is HIGH. (#243)
+- Angular, Vue and Svelte code is classified as browser code by content (an `@angular/*` import with
+  no server import, or a `.vue`/`.svelte` file), so it gets no server-only rules (`proxy-escape`,
+  `xxe`, `mass-assignment`, SSRF, path traversal) in any folder. (#248)
+
+### Fixed
+
+- `timing-unsafe-compare` no longer reports presence checks (`x == null` in Java, Kotlin, C# and
+  PHP; `x == nil` in Swift and Ruby), enum constants (`Result.DEAD_TOKEN`), status constants
+  (`AUTH_TOKEN_INVALID_ERROR`), `size()`/`length()` checks, char comparisons, or comparisons in
+  browser code. The finding now has its line. A comparison with an environment or configuration
+  secret is still reported. (#242)
+- Directory-name rules (example, build output, script) no longer apply to Java/Kotlin package
+  directories below `src/main/java/` and similar source roots. A `com.example`, `build`, `tool`,
+  `ops` or `migration` package is analysed like any other. A real `svc/build/` directory is still
+  skipped, and Semgrep is not told to exclude those package names. (#244)
+- `webhook-forgery` recognises Java HMAC verification: `Mac.getInstance("Hmac...")`, `HmacUtils`
+  or Guava `Hashing.hmacSha256`, a comparison such as `MessageDigest.isEqual`, the signature
+  header passed in, and a rejecting branch. One hop into an injected verifier class is followed.
+  (#247)
+
 ## [0.23.3] — 2026-11-27
 
 ### Fixed

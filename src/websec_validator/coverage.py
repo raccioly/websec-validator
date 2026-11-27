@@ -42,9 +42,17 @@ def include_reads(cov: dict, ctx, *, input_prefix: str = "", execution: bool = T
 
 
 def source_read_policy(ctx) -> dict:
-    from .extractors.base import MAX_BYTES
+    from .extractors.base import MAX_BYTES, MAX_DATA_FILE_BYTES, LIMIT_ENV
     return {"max_file_bytes": MAX_BYTES, "max_cached_raw_bytes_per_context": ctx.source_bytes_limit,
-            "accounting": "successful cache entries; aliases share payload, separate read caps count separately"}
+            "accounting": "successful cache entries; aliases share payload, separate read caps count separately",
+            # #245: the active limits, so a PARTIAL run says which one to raise and how.
+            "data_inputs": {"max_file_bytes": MAX_DATA_FILE_BYTES,
+                            "max_bytes": getattr(ctx, "data_bytes_limit", None),
+                            "max_sql_files": getattr(ctx, "max_sql_files", None),
+                            "scope": "dependency lockfiles and .sql files; separate from the source cache"},
+            "overrides": {"--max-source-bytes": LIMIT_ENV["max_source_bytes"],
+                          "--max-data-bytes": LIMIT_ENV["max_data_bytes"],
+                          "--max-sql-files": LIMIT_ENV["max_sql_files"]}}
 
 
 def _digest(inputs: dict) -> str:
@@ -120,7 +128,8 @@ def from_context(ctx, outcomes: dict) -> dict:
                   "types": dict(ctx.file_types), "unreadable": list(ctx.unreadable),
                   "oversized": list(ctx.oversized), "unsupported": list(ctx.unsupported_files),
                   "byte_budget_exceeded": list(ctx.byte_budget_exceeded),
-                  "source_bytes": ctx.cached_source_bytes, "read_policy": source_read_policy(ctx),
+                  "source_bytes": ctx.cached_source_bytes, "data_bytes": getattr(ctx, "data_bytes_read", 0),
+                  "read_policy": source_read_policy(ctx),
                   "truncated": bool(ctx.truncated), "inventory_truncated": ctx.walk_truncated,
                   "glob_truncated": list(ctx.glob_truncated), "excludes": list(ctx.excludes),
                   "include_fixtures": ctx.include_fixtures,
@@ -236,7 +245,19 @@ def add_routes(facts: dict) -> None:
     # from the regex fallback, so this is a visible scope limit, not lost execution: Noir is never an
     # explicitly requested check, and failing --require-complete on it would gate shipping on a tool
     # the operator did not ask for.
-    noir = (facts.get("routes") or {}).get("noir") or {}
+    # #244: routes dropped as test/example/fixture code used to be printed to the console only.
+    # Coverage is what consumers gate and render on, so the count and its sources go there too. A
+    # scope POLICY (re-include with --include-fixtures), not an execution failure.
+    routes = facts.get("routes") or {}
+    if routes.get("fixture_excluded"):
+        sources = sorted({str(row.get("code_path", "")) for row in routes.get("fixture_endpoints", []) or []})
+        facts["coverage"]["fixture_excluded_routes"] = routes["fixture_excluded"]
+        add_gap(facts, "fixture_excluded_routes",
+                f"{routes['fixture_excluded']} route(s) in test/example/fixture code were excluded from "
+                f"analysis: {', '.join(sources[:5])}" + (f" (+{len(sources) - 5} more)" if len(sources) > 5 else "")
+                + ". Re-include them with --include-fixtures if they are application routes",
+                execution=False)
+    noir = routes.get("noir") or {}
     if isinstance(noir, dict) and noir.get("state") == "failed":
         add_gap(facts, "route_engine",
                 f"OWASP Noir failed: {noir.get('reason', 'unknown')} — routes came from the regex fallback",
@@ -421,7 +442,11 @@ def render_md(facts: dict) -> str:
     if cov.get("imports"):
         lines.append(f"> SARIF imports: {len(cov['imports'])}; producer analysis and import outcomes recorded separately from scanners. Source freshness unverified; repair completion unsupported.")
     if counts.get("byte_budget_exceeded"):
-        lines.append("> Source cache budget exhausted. Narrow the target or use explicit exclusions and review each resulting scope; unread inputs are not analyzed.")
+        lines.append("> Source cache budget exhausted. Narrow the target or use explicit exclusions and review each "
+                     "resulting scope, or raise the budget with --max-source-bytes (--max-data-bytes for lockfiles "
+                     "and .sql files); unread inputs are not analyzed.")
+    if counts.get("glob_truncated"):
+        lines.append("> A file-pattern limit was reached (coverage files.glob_truncated). For `**/*.sql`, raise it with --max-sql-files.")
     profiles = cov.get("profiles", [])
     if profiles:
         checked = sum(check.get("status") == "completed" for profile in profiles for check in profile.get("checks", []))

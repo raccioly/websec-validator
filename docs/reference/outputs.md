@@ -14,6 +14,7 @@ names and conditions come from the code that writes the artifacts (`cli.py`, `sc
 ```text
 websec-out/
 ├── latest -> runs/20261010-102331-osixyn8w      # symlink to the last COMPLETED run
+├── partial -> runs/20261010-104512-k3j9x2aa     # symlink to the last PARTIAL run (since 0.24.0)
 └── runs/
     ├── 20261010-102331-osixyn8w/                # one directory per attempt
     │   ├── AGENT-BRIEFING.md
@@ -32,6 +33,9 @@ websec-out/
   is `true`) has written all of its artifacts. A partial attempt keeps its own directory and leaves
   `latest` on the previous completed run. Completed execution describes the requested checks. It
   does not mean complete protection against vulnerabilities.
+- **The `partial` pointer.** Since 0.24.0, a partial attempt is published as `partial`, so a first
+  partial run can be found and is never confused with an older `latest`. `--format json` also
+  prints the run's own directory in the envelope's `run` field.
 - **Do not assume `latest` is the run you just started.** If your run was incomplete, `latest` still
   points at an older one. Scripts and agents should take the run directory from the console output
   or, in CI, from the GitHub Action's `run-directory` output. The instructions that `websec install`
@@ -149,6 +153,15 @@ Fields worth knowing:
   every scheme is `low`, because the repository may not serve HTTP at all. `auth.signal_counts.jwt` is the permissive name-level count that still stages JWT
   probes; `auth.signal_counts.jwt_strong` counts the files whose mention is backed by real
   evidence.
+- `authz.endpoint_guards[]` (since 0.24.0, for Java/Kotlin handlers): `guard_evidence` (the Spring
+  Security rule or method annotation that guards the route), `public_rule` (the `permitAll()` rule
+  that makes it public), `central_auth_unresolved` (Spring Security is a dependency but no chain rule
+  covering the route was resolved) and `unverified_controls`.
+- `surface.sink_occurrences[]`: since 0.24.0, a Java/Kotlin or Apex SQL sink carries
+  `dynamic_operands` and, when a request parameter is concatenated in, `request_bound`; those rank
+  HIGH in the ledger.
+- `stack.profiles.apex_entrypoints[]` (since 0.24.0): exposed Apex methods (`file`, `line`,
+  `method`, `kind`, and `http_method`/`path` for `@RestResource`).
 - `surface.assigned_flow`: the bounded JS/Python assignment-flow lane. `errors[]` (`file`, `kind`,
   `detail`, at most 50) names each file where analysis stopped, usually `LimitReached` at a
   budget; `limits` holds the budgets and `work` what was spent. Since 0.22.0 the per-file scope
@@ -166,10 +179,10 @@ The execution and scope manifest. `FACTS.json`, the ledger and the envelope also
 | `execution_complete` | `true` when every requested check ran. Drives `latest` and exit code `3` |
 | `protection_complete` | Always `false`. Completed execution is not protection |
 | `limitation` | The statement above, in words |
-| `gaps[]` | `{kind, detail, execution}`. `execution: true` means a requested check did not complete; `false` is a scope limit (`language_without_analyzer`, `thin_language_coverage`, `walker_policy`, `excluded_scope`, `profile_scope`, `skipped_directory_code`, `scope_missed`, `route_engine` and others). `skipped_directory_code`: a skipped `build`, `dist`, `out`, `target`, `vendor` or `coverage` directory, or a websec output directory under another name, holds files with an analysable suffix. `scope_missed`: a `--only` path selected nothing. `compiled_binary_sca`: compiled executables are in scope, but no scanner read their embedded modules (osv-scanner 2.2.3 or later scans Go binaries). `route_engine`: an installed Noir failed and routes came from the regex fallback. `scanner_file_limits` (since 0.22.0): a scanner completed but could not parse, or only partly parsed, the named in-scope files; every other file was analysed, and those files' absence of findings is not a clean result. Execution gaps include `scanner` (a scanner did not complete), `scanner_rules` (named rules did not complete), `extractor`, and `source_flow_limit` (since 0.22.0): the files, lane and reason where bounded source-flow analysis stopped at a budget. Like an oversized file, that leaves the file not fully analysed, so the run is incomplete. A `graph` gap is an execution gap only for an explicit `--graph` |
+| `gaps[]` | `{kind, detail, execution}`. `execution: true` means a requested check did not complete; `false` is a scope limit (`language_without_analyzer`, `thin_language_coverage`, `walker_policy`, `excluded_scope`, `profile_scope`, `skipped_directory_code`, `scope_missed`, `route_engine` and others). `skipped_directory_code`: a skipped `build`, `dist`, `out`, `target`, `vendor` or `coverage` directory, or a websec output directory under another name, holds files with an analysable suffix. `scope_missed`: a `--only` path selected nothing. `fixture_excluded_routes` (since 0.24.0): routes in test, example or fixture code were excluded; the count is also in the top-level `fixture_excluded_routes` field. `compiled_binary_sca`: compiled executables are in scope, but no scanner read their embedded modules (osv-scanner 2.2.3 or later scans Go binaries). `route_engine`: an installed Noir failed and routes came from the regex fallback. `scanner_file_limits` (since 0.22.0): a scanner completed but could not parse, or only partly parsed, the named in-scope files; every other file was analysed, and those files' absence of findings is not a clean result. Execution gaps include `scanner` (a scanner did not complete), `scanner_rules` (named rules did not complete), `extractor`, and `source_flow_limit` (since 0.22.0): the files, lane and reason where bounded source-flow analysis stopped at a budget. Like an oversized file, that leaves the file not fully analysed, so the run is incomplete. A `graph` gap is an execution gap only for an explicit `--graph` |
 | `extractors` | Outcome per extractor |
 | `scanners` | Per scanner: `installed`, `runnable`, `selected`, `ran`, `outcome`, `reported_version`, `version_verified`, `report_details` (the native diagnostics websec parsed) and, when present, `rules_incomplete` and `file_limitations`. A `file_limitations` row is `{path, reason, native_type, framework?, message}`: `reason` is `parse_failed` (the file was not analysed) or `partial_parse` (it was partly analysed). `report_details.file_limitations_excluded` counts diagnostics for files under `--exclude` or a skipped directory, which are otherwise ignored |
-| `files` | `seen`, `scanned`, `read`, `unsupported`, `unanalyzed_languages`, `no_analyzable_source`, `skipped_counts` (reasons include `skip_directory`, `websec_output`, a directory this tool wrote, and `generated_copy`, a Capacitor `cap sync` copy of the web build), caps and read losses. `skipped_code_files` (total analysable-suffix files under skipped build, dependency and output directories) and `skipped_code_dirs[]` (`path`, `code_files`, `count_truncated`; at most 50 listed). With `--only`, `analysis_scope`: `requested` and `matched` counts and the `missed` entries |
+| `files` | `seen`, `scanned`, `read`, `unsupported`, `unanalyzed_languages`, `no_analyzable_source`, `skipped_counts` (reasons include `skip_directory`, `websec_output`, a directory this tool wrote, and `generated_copy`, a Capacitor `cap sync` copy of the web build), caps and read losses. `source_bytes` and `data_bytes` (since 0.24.0) are the bytes read into the source cache and the separate lockfile/`.sql` budget; `read_policy` gives the active limits (`max_cached_raw_bytes_per_context`, `data_inputs.max_bytes`, `data_inputs.max_sql_files`) and the options that raise them. `skipped_code_files` (total analysable-suffix files under skipped build, dependency and output directories) and `skipped_code_dirs[]` (`path`, `code_files`, `count_truncated`; at most 50 listed). With `--only`, `analysis_scope`: `requested` and `matched` counts and the `missed` entries |
 | `profiles`, `service_inventory` | Named-check status per service |
 | `route_discovery` | Django, Connexion and tRPC route-parser candidates and gaps |
 | `detector_revision`, `analyzed_input_digest`, `scope_digest` | Hashes that bind the run to the detector code, the bytes read and the scope |
@@ -246,7 +259,8 @@ A versioned wrapper around the ledger that describes itself. Use it when a consu
 depend on the ledger's internal shape. It has these fields: `schema_version`, `tool`, `tool_version`, `generated` (the run id), `target`,
 `summary` (totals by severity and confidence, suppressed, acknowledged), `calibration`,
 `verification_context`, `attribution`, `coverage` and `findings`. `websec run --format json` prints
-the same envelope to standard output.
+the same envelope to standard output. On standard output it also has `run` (since 0.24.0):
+`directory`, `execution_complete`, `published_as` (`latest` or `partial`) and `pointer`.
 
 ### `results.sarif`
 

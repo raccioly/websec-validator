@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import re
 
-from .base import Extractor, RepoContext, is_test_file
+from .base import Extractor, RepoContext, is_client_file, is_test_file
 from .syntax import (call_expression, expression_end, in_literal, js_functions,
-                     object_properties, split_arguments, without_comments)
+                     object_properties, split_arguments, without_comments, server_file)
 
 # Exact metadata suffixes are not password bytes. Hashes/tokens in general remain
 # credential-shaped; a broad suffix exemption would hide double-hashed passwords.
@@ -331,12 +331,21 @@ def _nonce_argument(argument: str, scope: dict) -> bool:
 
 
 _METADATA_SUFFIXES = {"name", "type", "id", "method", "algorithm", "class", "url", "uri",
-                      "path", "count", "salt", "format", "state", "required", "status", "date", "time"}
+                      "path", "count", "salt", "format", "state", "required", "status", "date", "time",
+                      # #242: status/kind words that name a constant or a flag, never secret bytes
+                      "error", "errors", "code", "kind", "mode", "event", "action", "reason", "message",
+                      "label", "field", "header", "prefix", "scheme", "policy", "strategy", "provider",
+                      "enabled", "flow", "step", "screen", "page", "route", "view"}
+# A size/emptiness call (`token.length()`, `tokens.size()`, `apiKey.isBlank()`) is metadata.
+_METADATA_CALLS = {"length", "size", "isEmpty", "isBlank", "count", "hashCode", "getClass"}
 
 
 def _metadata_operand(value: str) -> bool:
     """Name heuristic for a simple metadata value, never a compound secret expression."""
     value = _unparenthesized(value)
+    call = re.fullmatch(r"([A-Za-z_$][\w$]*(?:\s*[?!]?\.\s*[A-Za-z_$][\w$]*)*)\s*\.\s*(\w+)\s*\(\s*\)", value)
+    if call and call[2] in _METADATA_CALLS:
+        return True
     if not re.fullmatch(r"[A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*", value):
         return False
     leaf = value.rsplit(".", 1)[-1].strip()
@@ -362,15 +371,48 @@ def _credential_operand(value: str) -> bool:
     return False
 
 
+# Languages whose `null`/`nil` is a keyword, so `token == null` can only be a presence check (#242).
+_NULL_KEYWORD = {".java", ".kt", ".kts", ".cs", ".groovy", ".scala", ".php", ".dart",
+                 ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"}
+_NIL_KEYWORD = {".swift", ".rb", ".go", ".lua"}
+
+
 def _presence_literal(value: str, suffix: str) -> bool:
     value = _unparenthesized(value)
     if value in {"''", '""', '0', '"0"', "'0'"}:
         return True
     if suffix == ".py":
         return value in {"None", "True", "False"}
-    if suffix not in {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"}:
+    if suffix in _NIL_KEYWORD:
+        # Swift/Ruby/Go conditions have no parentheses: `token == nil { return }` reads the block too.
+        return bool(re.fullmatch(r"(?:nil|true|false)(?:\s*\{[\s\S]*)?", value))
+    if suffix in _NULL_KEYWORD:
+        return value in {"null", "true", "false"}
+    return False
+
+
+def _constant_operand(value: str) -> bool:
+    """`Result.DEAD_TOKEN` / `TokenStatus.EXPIRED`: an enum member or a status constant on a type.
+
+    Only used when the OTHER operand is not credential-shaped. A holder of configuration or secrets
+    (`process.env.API_KEY`, `Config.API_SECRET`, `settings.TOKEN`) is never a constant here, and a
+    bare UPPER_SNAKE name is left to the metadata-suffix rule (`AUTH_TOKEN_INVALID_ERROR`), since
+    `const API_SECRET = ...` is exactly what a real comparison uses.
+    """
+    value = _unparenthesized(value)
+    match = re.fullmatch(r"((?:[A-Za-z_$][\w$]*\s*\.\s*)*[A-Z][A-Za-z0-9]*)\s*\.\s*[A-Z][A-Z0-9_]*", value)
+    if not match:
         return False
-    return value in {"null", "true", "false"}
+    return not re.search(r"env|config|setting|secret|propert|credential|keys?\b|vault|options", match[1], re.I)
+
+
+def _char_comparison(left: str, right: str) -> bool:
+    """`token.charAt(0) == 'B'`: one character against a char literal."""
+    for one, other in ((left, right), (right, left)):
+        if (re.search(r"\.\s*charAt\s*\([^()]*\)$", _unparenthesized(one))
+                and re.fullmatch(r"'(?:\\.|[^'\\])'", _unparenthesized(other))):
+            return True
+    return False
 
 
 def _typeof_operand(value: str, suffix: str) -> bool:
@@ -529,10 +571,16 @@ def _timing_comparison(source: str, suffix: str, _depth: int = 0) -> dict | None
             continue
         left, left_complete = _comparison_operand(source, match.start() - 1, -1)
         right, right_complete = _comparison_operand(source, match.end(), 1)
-        if not (_credential_operand(left) or _credential_operand(right)):
+        left_credential, right_credential = _credential_operand(left), _credential_operand(right)
+        if not (left_credential or right_credential):
             continue
         if left_complete and right_complete and (_presence_literal(left, suffix) or _presence_literal(right, suffix)
-                                                 or _type_comparison(left, right, suffix)):
+                                                 or _type_comparison(left, right, suffix)
+                                                 or _char_comparison(left, right)):
+            continue
+        if left_complete and right_complete and (
+                (left_credential and not right_credential and _constant_operand(left))
+                or (right_credential and not left_credential and _constant_operand(right))):
             continue
         if left_complete and right_complete and suffix in _JS_SUFFIXES:
             if capture_sites is None:
@@ -630,7 +678,10 @@ class CryptoUsageExtractor(Extractor):
                     "symmetric (the library constrains it to HMAC) — but it silently re-opens alg-confusion / "
                     "alg:none the moment the verifier is migrated to an asymmetric/JWKS key (CWE-347). Pass an "
                     "explicit `algorithms: ['HS256']` (and issuer/audience) so the guarantee is in the code.")
-            timing = _timing_comparison(source, _p.suffix.lower())
+            # #242: browser code holds no server secret — `password === confirmPassword` in a form or a
+            # client-side token-state check has no timing side channel an attacker could measure.
+            browser = not server_file(rel, source, is_client_file(rel, source))
+            timing = None if browser else _timing_comparison(source, _p.suffix.lower())
             if timing:
                 add("LOW", "timing-unsafe-compare", "timing-unsafe-compare", rel,
                     "A credential-shaped value is compared with raw equality/inequality. Review whether "

@@ -18,7 +18,7 @@ extractors in `src/websec_validator/extractors/`, the profile catalog in
 | Tier | What websec does | Languages (canonical id) |
 |---|---|---|
 | 1. Deep analysis | All 22 extractors, with rules written for these languages' idioms and frameworks | Python (`python`), JavaScript (`node`), TypeScript (`typescript`) |
-| 2. Named sink checks | A bounded profile of direct-syntax command/query checks (plus literal routes for Java and .NET). The other extractors still read the files, but their rules target tier-1 idioms | Java (`java`), C# (`csharp`), Go (`go`), Ruby (`ruby`), PHP (`php`) |
+| 2. Named sink checks | A bounded profile of direct-syntax command/query checks (plus literal routes for Java and .NET). The other extractors still read the files, but their rules target tier-1 idioms | Java (`java`), C# (`csharp`), Go (`go`), Ruby (`ruby`), PHP (`php`), Salesforce Apex (`apex`) |
 | 3. Configuration or manual checks only | One explicit configuration check, or a manual-review placeholder. No injection, secret or authorization rules. Reported as a `thin_language_coverage` gap | Kotlin (`kotlin`), Swift (`swift`), Objective-C (`objective-c`), Rust (`rust`), C (`c`), C++ (`cpp`) |
 | 4. Recognized, not analyzed | websec counts and names them in `coverage.json`. It never reads or matches them | See [tier 4](#tier-4-recognised-but-not-analysed) |
 
@@ -45,6 +45,7 @@ Two capabilities sit across the tiers:
 | Go (`go`) | `.go` | 2 | `go` | gosec | `n/a` |
 | Ruby (`ruby`) | `.rb` | 2 | `ruby` | Brakeman | `n/a` |
 | PHP (`php`) | `.php` | 2 | `php` | — | `n/a` |
+| Salesforce Apex (`apex`) | `.cls` `.trigger` `.apex`, only in a Salesforce DX project (`sfdx-project.json` above the file, a `force-app/` path or a `-meta.xml` sibling) | 2 | `salesforce-apex` | — | `n/a` |
 | Kotlin (`kotlin`) | `.kt` `.kts` | 3 | `android` | — | `n/a` |
 | Swift (`swift`) | `.swift` | 3 | `ios` | — | `n/a` |
 | Objective-C (`objective-c`) | `.m` `.mm` | 3 | `ios` | — | `n/a` |
@@ -115,7 +116,7 @@ websec capabilities
 
 | Profile id | Languages | Check ids | What the check matches |
 |---|---|---|---|
-| `java-spring` | `java` | `java-direct-command`, `java-direct-query`, `spring-literal-routes` | `Runtime.getRuntime().exec` / `new ProcessBuilder`, and `executeQuery`/`executeUpdate`/`execute`/`createQuery`/`createNativeQuery`, where a request read (`request.getParameter`/`getHeader`/`getQueryString`) appears directly in the argument. Literal `@GetMapping`-style routes |
+| `java-spring` | `java` | `java-direct-command`, `java-direct-query`, `spring-literal-routes` | `Runtime.getRuntime().exec` / `new ProcessBuilder`, and `executeQuery`/`executeUpdate`/`execute`/`createQuery`/`createNativeQuery`, where a request read (`request.getParameter`/`getHeader`/`getQueryString`) appears directly in the argument. Since 0.24.0, SQL text built by concatenation is analysed for `query`/`queryFor*`/`update`/`batchUpdate`/`execute*`/`prepareStatement`/`createQuery`: string literals, `UPPER_SNAKE`/`static final` constants, numbers and numeric- or UUID-typed parameters are not input, a one-hop SQL variable is followed, and a `@RequestParam`/`@PathVariable`/`@RequestBody` parameter in the text is a request source (HIGH). Literal `@GetMapping`-style routes |
 | `dotnet` | `csharp` | `dotnet-direct-command`, `dotnet-direct-query`, `dotnet-literal-routes` | `Process.Start` / `new ProcessStartInfo`, and `new SqlCommand` / `FromSqlRaw` / `ExecuteSqlRaw` / `ExecuteSqlCommand`, fed directly by `Request.Query`/`Form`/`Headers[...]`. Literal `MapGet(...)` and `[HttpGet("...")]` routes |
 | `go` | `go` | `go-direct-command`, `go-direct-query` | `exec.Command(Context)` and `.Query`/`QueryRow`/`Exec(Context)` fed directly by `r.FormValue(...)` or `r.URL.Query().Get(...)` |
 | `ruby` | `ruby` | `ruby-direct-command`, `ruby-direct-query` | `system`/`exec`/`IO.popen` and `.execute`/`find_by_sql`/`where` fed directly by `params[...]`; literal-key hash `where` conditions count as parameterized |
@@ -124,6 +125,7 @@ websec capabilities
 | `ios` | `swift`, `objective-c` | `ios-explicit-ats-exception` | `NSAllowsArbitraryLoads`, `NSAllowsArbitraryLoadsInWebContent` or `NSAllowsArbitraryLoadsForMedia` set to true in `Info.plist` |
 | `rust` | `rust` | `rust-reqwest-invalid-certificates` | `.danger_accept_invalid_certs(true)` or `.tls_danger_accept_invalid_certs(true)` in a service that references `reqwest` |
 | `native` | `c`, `cpp` | `native-memory-review` | Manual check: source inventory only |
+| `salesforce-apex` | `apex` | `apex-soql-injection`, `apex-without-sharing-entrypoint`, `apex-crud-fls`, `apex-entrypoints` | `Database.query`/`countQuery`/`getQueryLocator` and `Search.query` with a concatenated non-constant operand (a `String.escapeSingleQuotes(...)` operand counts as escaped; HIGH when it is a parameter of an exposed method). A `without sharing` class with `@AuraEnabled`, `@RemoteAction`, `@InvocableMethod`, `webservice` or `@RestResource` methods. An exposed method that runs SOQL or DML with no `WITH USER_MODE`, `WITH SECURITY_ENFORCED`, `AccessLevel.USER_MODE`, `Security.stripInaccessible` or describe check in the class. Exposed methods are listed in `stack.profiles.apex_entrypoints` (since 0.24.0) |
 
 Every profile carries this limitation, verbatim from the catalog: *"Direct syntax only; aliases,
 binding resolution, authorization, build variants and cross-function flows require review."* The
@@ -134,7 +136,7 @@ How profiles are selected and reported:
 - websec applies profiles per **service**. A service is the nearest directory that holds a manifest
   (`package.json`, `pyproject.toml`, `requirements*.txt`, `setup.py`, `Pipfile`, `pom.xml`,
   `build.gradle`, `build.gradle.kts`, `go.mod`, `Gemfile`, `composer.json`, `Cargo.toml`,
-  `Package.swift`, `CMakeLists.txt` or a `.csproj`). Manifest boundaries approximate deployment
+  `Package.swift`, `CMakeLists.txt`, `sfdx-project.json` or a `.csproj`). Manifest boundaries approximate deployment
   boundaries. They do not prove them.
 - websec selects a profile when one of its languages appears in the service. It selects `android`
   and `ios` only when it finds an `AndroidManifest.xml` or `Info.plist`.

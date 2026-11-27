@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from .base import Extractor, RepoContext, is_test_file
+from .base import Extractor, RepoContext, is_test_file, role_path
 from .syntax import direct_call, guarded_body, in_literal, js_functions, split_arguments, without_comments
 
 JWT_LIBS = re.compile(r"jsonwebtoken|\bjose\b|\bPyJWT\b|import\s+jwt\b|get_jwt_identity|"
@@ -160,7 +160,7 @@ FAILOPEN_VERIFY = re.compile(
 
 def _looks_like_example(rel: str) -> bool:
     """Example/doc files are MEANT to hold placeholder secrets — don't cry forgeable-JWT on them."""
-    r = rel.lower()
+    r = role_path(rel).lower()  # #244: `com/example/` below src/main/java is a package, not an example
     return (".example" in r or ".sample" in r or ".dist" in r or ".template" in r
             or "/docs/" in r or "/doc/" in r or "/examples/" in r or r.endswith((".md", ".mdx")))
 

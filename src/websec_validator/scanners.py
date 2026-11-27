@@ -227,12 +227,37 @@ def _bundled_rules_dir():
         return None
 
 
+_JVM_PROBE_DIRS = 20000
+
+
+def _jvm_package_collisions(target: Path) -> set:
+    """SKIP_DIRS names that are also JVM PACKAGE directories in this repo (#244).
+
+    Semgrep's `--exclude build` drops every path component named `build`, including the
+    `com.acme.build` package. Those names are not passed to it; real build output it then reads is
+    dropped afterwards by the role-aware `_in_skip_dir` post-filter. Bounded walk, names only.
+    """
+    root, found, seen = Path(target), set(), 0
+    for dirpath, dirnames, _files in os.walk(root, followlinks=False):
+        rel = Path(dirpath).relative_to(root).as_posix()
+        inside = bool(re.search(r"(?:^|/)src/(?:main|test|testFixtures|integrationTest|it)/(?:java|kotlin|scala|groovy)(?:/|$)", rel))
+        if inside:
+            found.update(d for d in dirnames if d in EXCLUDE_DIRS and not d.startswith("."))
+        else:
+            dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIRS]
+        seen += 1
+        if seen > _JVM_PROBE_DIRS:
+            break
+    return found
+
+
 def _semgrep(target: Path, out: Path, excludes=()) -> list:
     cmd = ["semgrep", "scan", "--config", "auto", "--json", "--output", str(out)]
     rules = _bundled_rules_dir()
     if rules:
         cmd += ["--config", rules]      # bundled rules run ALONGSIDE auto — the repo-wide multiplier
-    for d in list(EXCLUDE_DIRS) + list(excludes):
+    packages = _jvm_package_collisions(target)
+    for d in [d for d in EXCLUDE_DIRS if d not in packages] + list(excludes):
         cmd += ["--exclude", d]
     return cmd + [str(target)]
 

@@ -16,6 +16,7 @@ from .base import Extractor, RepoContext, is_client_file, is_script_file, is_tes
 from .syntax import (without_comments, expression_end, call_expression, direct_call,
                      occurrence, python_shell_safe, server_file, split_arguments, direct_options, in_literal)
 from .profiles import service_for, java_fixed_argv
+from . import jvm
 from . import sql_flow, assigned_flow
 
 # user-controlled markers (kept loose on purpose)
@@ -270,7 +271,10 @@ _SERVER_REQUEST_CLASSES = {"ssrf", "ssrf-outbound-http", "command-injection", "p
                            "eval-injection", "xxe", "redos", "error-disclosure",
                            # log-injection: a server handler logging request data — client/CLI/no-web-surface
                            # files (which don't take an HTTP request) must not fire (bug-135/140 lesson).
-                           "log-injection"}
+                           "log-injection",
+                           # #248: overwriting fields of a browser-side object changes no server record;
+                           # the server that persists it is where mass assignment applies.
+                           "mass-assignment"}
 # a Python module that is an operator CLI (has an __main__ entrypoint / argparse / click) and imports NO
 # web framework — its input is argv/stdin, not an HTTP request, so server-only sinks don't apply.
 _PY_CLI = re.compile(r"if\s+__name__\s*==\s*['\"]__main__['\"]|\bargparse\.|click\.command|\btyper\.|sys\.argv", re.I)
@@ -406,7 +410,13 @@ class SurfaceExtractor(Extractor):
                     continue
                 if cls in _SERVER_REQUEST_CLASSES and (nonserver or no_request_surface):
                     continue
-                if cls == "xss":
+                jvm_sql = {}
+                if cls == "sql-injection" and _p.suffix.lower() in jvm.JVM_SUFFIXES:
+                    # #243: JVM SQL text — literals and named constants are not input; JdbcTemplate
+                    # update/queryFor*/Statement.execute* are sinks; one-hop SQL variables resolve.
+                    jvm_sql = {row["offset"]: row for row in jvm.sql_sinks(text)}
+                    candidates = [(offset, text[offset:row["end"]], "") for offset, row in jvm_sql.items()]
+                elif cls == "xss":
                     candidates = _xss_candidates(text)
                 elif cls == "command-injection":
                     candidates = [(m.start(), call_expression(text, m.start()), "")
@@ -449,6 +459,16 @@ class SurfaceExtractor(Extractor):
                     seen[expression] = ordinal + 1
                     evidence = occurrence(text, start, expression, rel, cls, ordinal, control=control)
                     evidence["offset"] = start
+                    if start in jvm_sql:
+                        row = jvm_sql[start]
+                        evidence["dynamic_operands"] = row["dynamic"]
+                        if row["request_bound"]:
+                            evidence.update(request_bound=row["request_bound"], rule_id="java-direct-query",
+                                            source="request parameter(s) " + ", ".join(f"`{name}`" for name in row["request_bound"])
+                                            + " concatenated into the SQL text")
+                        else:
+                            evidence["source"] = ("non-constant operand(s) " + ", ".join(f"`{op[:40]}`" for op in row["dynamic"][:3])
+                                                  + " concatenated into the SQL text; provenance requires review")
                     if service:
                         evidence["service_id"] = service["id"]
                     occurrences.append(evidence)

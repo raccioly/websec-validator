@@ -244,6 +244,58 @@ def _webhook_verified(scope: dict, source: str) -> bool:
     return False
 
 
+# JVM webhook verification (#247): an HMAC over the body (`Mac.getInstance("HmacSHA256")` +
+# `doFinal`, commons-codec `HmacUtils`, Guava `Hashing.hmacSha256`) plus a comparison, reached from
+# the handler with the signature header, and a rejecting branch. One hop into an injected
+# verifier/service class is followed; anything further stays a lead.
+_JVM_HMAC = re.compile(r"Mac\s*\.\s*getInstance\s*\(\s*\"Hmac(?:SHA(?:1|224|256|384|512)|MD5)\"|\bHmacUtils\b"
+                       r"|Hashing\s*\.\s*hmacSha(?:1|256|512)\s*\(|\bHmacAlgorithms\.")
+_JVM_COMPARE = re.compile(r"MessageDigest\s*\.\s*isEqual\s*\(|\bconstantTimeEquals\s*\(|Arrays\s*\.\s*equals\s*\(|\.equals\s*\(")
+_JVM_REJECT = re.compile(r"\b(?:status\s*\(\s*(?:40[013])|HttpStatus\s*\.\s*(?:UNAUTHORIZED|FORBIDDEN|BAD_REQUEST)"
+                         r"|throw\s+new\s+\w+|ResponseEntity\s*\.\s*(?:badRequest|status)\s*\(|sendError\s*\(\s*40[013])")
+_SIGNATURE_HEADER = re.compile(r"@RequestHeader\s*\(\s*(?:(?:value|name)\s*=\s*)?\"([^\"]*(?:signature|sig|hmac|token)[^\"]*)\"[^)]*\)"
+                               r"\s*(?:final\s+)?[\w<>\[\]]+\s+(\w+)", re.I)
+
+
+def _jvm_webhook_verified(ctx, rel: str, source: str, endpoint: dict) -> str | None:
+    from . import jvm
+    rows = jvm.handler_for(jvm.handlers(source), endpoint.get("method", ""), endpoint.get("path", ""))
+    if len(rows) != 1:
+        return None
+    row = rows[0]
+    header = _SIGNATURE_HEADER.search(row["signature"])
+    names = [header[2]] if header else re.findall(
+        r"(\w+)\s*=\s*\w+\s*\.\s*getHeader\s*\(\s*\"[^\"]*signature[^\"]*\"", row["body"], re.I)
+    if not names:
+        return None
+    body = row["body"]
+    if not _JVM_REJECT.search(body):
+        return None
+    masked_body = jvm.mask_literals(body)
+    for name in names:
+        # Every call whose own argument list holds the signature value (calls may nest: `if (!v.verify(b, s))`).
+        for call in re.finditer(r"(?:\b(\w+)\s*\.\s*)?\b(\w+)\s*\(", masked_body):
+            close = jvm.balanced_end(masked_body, call.end() - 1)
+            if not re.search(r"\b" + re.escape(name) + r"\b", masked_body[call.end():close - 1]):
+                continue
+            receiver, method = call[1], call[2]
+            if method in ("if", "while", "return", "for", "switch", "catch"):
+                continue
+            if receiver in (None, "this"):
+                if _JVM_HMAC.search(source) and _JVM_COMPARE.search(source):
+                    return f"{rel}: HMAC computed and compared in {method}()"
+                continue
+            field = re.search(r"\b([A-Z]\w*)(?:<[^>]*>)?\s+" + re.escape(receiver) + r"\s*[;=),]", source)
+            if not field:
+                continue
+            for path in ctx.code_files:
+                if path.stem == field[1] and path.suffix.lower() in jvm.JVM_SUFFIXES:
+                    other = without_comments(ctx.text(path), path.suffix.lower())
+                    if _JVM_HMAC.search(other) and _JVM_COMPARE.search(other):
+                        return f"{ctx.rel(path)}: {field[1]}.{method}() computes and compares the HMAC"
+    return None
+
+
 class IntegrationsExtractor(Extractor):
     name = "integrations"
     category = "surface"
@@ -268,6 +320,8 @@ class IntegrationsExtractor(Extractor):
             if not WEBHOOK_STRONG.search(e.get("path", "")) and not WEBHOOK_RECEIVER.search(handler):
                 continue                                     # WEAK webhook path + no receiver evidence → not a webhook
             if scope and _webhook_verified(scope, source):
+                continue
+            if Path(cp).suffix.lower() in (".java", ".kt") and _jvm_webhook_verified(ctx, ctx.rel(Path(cp)), source, e):
                 continue
             unverified.append(f"{e['method']} {e['path']}  ({ctx.rel(Path(cp)) if cp else '?'})")
 

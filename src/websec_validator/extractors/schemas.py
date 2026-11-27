@@ -235,7 +235,7 @@ class SchemasExtractor(Extractor):
         owner_scoped: list = []
         rls_policy_count = 0
         rls_enabled_count = 0
-        for sf in ctx.glob("**/*.sql", 60):
+        for sf in ctx.glob("**/*.sql", getattr(ctx, "max_sql_files", 5000)):
             stext = _strip_sql_comments(ctx.text(sf))   # comments must not count as tables or RLS tokens
             srel = ctx.rel(sf)
             rls_policy_count += len(RLS_POLICY.findall(stext))

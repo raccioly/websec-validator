@@ -191,7 +191,8 @@ entries:
 |---|---|---|
 | `scanner`: `<name>: unavailable` | You selected it with `--scanners` but it is not installed | Install it, or drop it from `--scanners` |
 | Scanner timeout, error, invalid report, or `scanner_rules` partial | The tool ran but did not produce a usable result | Run the tool by hand; check `websec doctor` for version problems. For Checkov or Semgrep parse errors, see [Checkov](#checkov-error-from-files-you-excluded) and [Semgrep](#semgrep-error-on-valid-shell-scripts) below |
-| Read loss, oversized files, byte budget | Some source could not be read within limits | Narrow the target or exclude generated files |
+| Read loss, oversized files, byte budget | Some source could not be read within limits | Narrow the target or exclude generated files. Since 0.24.0, dependency lockfiles and `.sql` files have their own budget, so they no longer fill the source cache. Raise a limit with `--max-source-bytes`, `--max-data-bytes` or `--max-sql-files`; `coverage.json` `files.read_policy` lists the active values |
+| `glob_limit` on `**/*.sql` | More `.sql` files than `--max-sql-files` (default 5000) | Raise `--max-sql-files` |
 | `extractor`: `surface` with `source_flow_limit` | Bounded source-flow analysis stopped at a budget in the named files | See [below](#source_flow_limit-on-an-ordinary-js-module) |
 | `graph`, `baseline`, SARIF import | An explicitly supplied `--graph`, `--baseline` or `--sarif` input was missing, malformed, unreadable or over a cap. A graph's own cap is 64 MiB, and the gap names the reason (`not found`, `oversized`, `excluded or out of scope`, `invalid`) | Fix or remove the input |
 | `dependency-existence` | `--network` could not resolve some names | Retry; UNKNOWN is never treated as clean |
@@ -297,8 +298,33 @@ attempt keeps its own directory under `websec-out/runs/` and prints `partial att
 latest completed scan unchanged`. If your first run was partial, there is no `latest` yet.
 
 **Fix.** Use the run directory that the console printed, fix the gap above, and run again. For automation,
-select the current attempt from the JSON envelope (`--format json`, field `generated`). Do not
-trust `latest`. See the [outputs reference](reference/outputs.md).
+select the current attempt from the JSON envelope (`--format json`): since 0.24.0 its `run` field
+gives `directory`, `execution_complete` and `published_as`, and a partial run is also published as
+`websec-out/partial`. Do not trust `latest` for a run you just started. See the
+[outputs reference](reference/outputs.md).
+
+### Every Spring route is reported as `Missing authorization`
+
+**Cause.** Before 0.24.0, websec did not read Spring Security. Since 0.24.0, a route is guarded when
+the first `SecurityFilterChain` rule that matches it is `authenticated()`, `hasRole(...)`,
+`hasAuthority(...)`, `access(...)` or `denyAll()`, or when `@PreAuthorize`, `@PostAuthorize`,
+`@Secured` or `@RolesAllowed` is on the handler or its class and `@EnableMethodSecurity` (or
+`@EnableGlobalMethodSecurity`) turns that annotation family on. A chain applies to its own
+Maven/Gradle module and to modules whose build file depends on that module.
+
+**What you still see.** A route under a `permitAll()` matcher stays a lead, and its evidence names
+the matcher. A module that depends on Spring Security, but whose chain websec could not resolve
+(auto-configuration, a chain more than one module away, Spring Boot's default), gets a LOW-confidence
+lead that says so. Check `authz.endpoint_guards[]` in `FACTS.json`: `guard_evidence`, `public_rule`,
+`central_auth_unresolved` and `unverified_controls` explain each decision.
+
+### Java code in a `com/example`, `build`, `tool` or `migration` package was not analyzed
+
+**Cause.** Before 0.24.0, directory-name rules (example, build output, script) also matched Java
+package directories. Since 0.24.0, the segments below a source root such as `src/main/java/` are
+package names, and those rules read only the path above the root. A real `svc/build/` directory is
+still skipped. Routes that websec excludes as test, example or fixture code are now listed in
+`coverage.json` as a `fixture_excluded_routes` gap. Re-include them with `--include-fixtures`.
 
 ### "REQUESTED CHECKS COMPLETED", but part of the code was not analyzed
 

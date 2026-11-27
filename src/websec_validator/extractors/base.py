@@ -19,6 +19,9 @@ import subprocess
 from functools import lru_cache
 from pathlib import Path
 
+from .apex import APEX_SUFFIXES, is_apex_source
+from .jvm import JVM_SOURCE_ROOT
+
 SKIP_DIRS = {".git", "node_modules", "dist", "build", ".next", ".nuxt", "venv",
              ".venv", "__pycache__", ".mypy_cache", ".pytest_cache", "coverage",
              ".turbo", "out", "target", ".gradle", "vendor", "site-packages",
@@ -60,6 +63,45 @@ MAX_SKIPPED_CODE_DIRS = 50               # directories listed (the total count i
 MAX_FILES = 12000
 MAX_BYTES = 2_000_000
 MAX_SOURCE_BYTES = 64 * 1024 * 1024
+# #245: DATA inputs — dependency lockfiles and `.sql` schema/migration files — are read by the
+# dependency and schema extractors, not matched by the pattern extractors. They have their own
+# per-file cap and run-wide budget so a monorepo's lockfiles can no longer exhaust the source cache
+# (which made every run PARTIAL), and large ones are hashed but not kept in memory.
+MAX_DATA_FILE_BYTES = 32 * 1024 * 1024
+MAX_DATA_BYTES = 512 * 1024 * 1024
+DATA_CACHE_BYTES = 1024 * 1024           # data files larger than this are read on demand, not cached
+MAX_SQL_FILES = 5000                     # `**/*.sql` matches the schema/stack extractors read
+DATA_FILE_NAMES = {"package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
+                   "bun.lock", "poetry.lock", "Pipfile.lock", "uv.lock", "Cargo.lock", "Gemfile.lock",
+                   "composer.lock", "go.sum", "packages.lock.json", "gradle.lockfile"}
+LIMIT_ENV = {"max_source_bytes": "WEBSEC_MAX_SOURCE_BYTES", "max_data_bytes": "WEBSEC_MAX_DATA_BYTES",
+             "max_sql_files": "WEBSEC_MAX_SQL_FILES"}
+
+
+def parse_size(value) -> int:
+    """`67108864`, `64M`, `64MiB`, `1G` → bytes. Raises ValueError on anything else or <= 0."""
+    match = re.fullmatch(r"\s*(\d+)\s*([kmg]?)(?:i?b)?\s*", str(value), re.I)
+    if not match:
+        raise ValueError(f"not a size: {value!r} (use bytes or a K/M/G suffix)")
+    number = int(match[1]) * {"": 1, "k": 1024, "m": 1024 ** 2, "g": 1024 ** 3}[match[2].lower()]
+    if number <= 0:
+        raise ValueError("size must be positive")
+    return number
+
+
+def _env_limit(name: str, default: int, size: bool = True) -> int:
+    raw = os.environ.get(LIMIT_ENV[name], "").strip()
+    if not raw:
+        return default
+    try:
+        return parse_size(raw) if size else max(1, int(raw))
+    except ValueError:
+        return default
+
+
+def is_data_file(path) -> bool:
+    name = Path(path).name
+    return name in DATA_FILE_NAMES or name.lower().endswith(".sql")
 MAX_WALK_FILES = 120_000
 MAX_SKIP_SAMPLES = 200
 # Report known source types that the built-in code extractors do not inspect.
@@ -235,6 +277,31 @@ def _glob_matches(relative: Path, pattern: str) -> bool:
     return match(0, 0)
 
 
+# Below a JVM language source root (`src/main/java/`, `src/test/kotlin/`, ...) path segments are
+# PACKAGE names, not directory roles (#244): `com/example/`, `com/acme/build/` and `com/acme/tool/`
+# are application packages. Directory-role heuristics read only the part above the root (plus the
+# file name), so `examples/demo/src/main/java/...` is still an example and `svc/build/` is still
+# build output.
+def role_path(rel: str, *, directory: bool = False) -> str:
+    """`rel` with the package directories below a JVM source root removed.
+
+    A file keeps its name; a `directory=True` path below the root keeps nothing past the root.
+    """
+    rel = (rel or "").replace("\\", "/")
+    match = JVM_SOURCE_ROOT.search(rel if not directory else rel.rstrip("/") + "/")
+    if not match:
+        return rel
+    tail = rel[match.end():]
+    if directory or not tail:
+        return rel[:match.end()]
+    return rel[:match.end()] + tail.rsplit("/", 1)[-1]
+
+
+def role_parts(rel: str, *, directory: bool = False) -> list[str]:
+    """Directory-role segments of `rel` (see `role_path`)."""
+    return role_path(rel, directory=directory).split("/")
+
+
 def path_in_skip_dir(path: str, root: "Path | str | None" = None) -> bool:
     """True if `path` lies under a SKIP_DIR segment, measured RELATIVE to the scan root.
 
@@ -257,7 +324,7 @@ def path_in_skip_dir(path: str, root: "Path | str | None" = None) -> bool:
             if Path(p).is_absolute():
                 return False  # absolute but outside the root → don't risk a false drop
             # else: already a root-relative path → check its segments as-is below
-    return any(part in SKIP_DIRS for part in p.split("/"))
+    return any(part in SKIP_DIRS for part in role_parts(p))
 
 
 # --- file-class helpers -------------------------------------------------------------------------
@@ -290,19 +357,35 @@ _CLIENT_FILE = re.compile(r"\.(?:tsx|jsx)$|(?:^|/)(?:components?|hooks?|contexts
 
 
 def is_test_file(rel: str) -> bool:
-    return bool(_TEST_FILE.search((rel or "").replace("\\", "/")))
+    return bool(_TEST_FILE.search(role_path(rel)))
 
 
 def is_script_file(rel: str) -> bool:
-    return bool(_SCRIPT_FILE.search((rel or "").replace("\\", "/")))
+    return bool(_SCRIPT_FILE.search(role_path(rel)))
+
+
+# Browser frameworks recognised by CONTENT, not by directory name (#248): Angular keeps views under
+# pages/, features/, views/ or directly in src/app/, so `components/` alone missed them and the file
+# got server-only rules (proxy-escape, xxe). A module that imports Angular's browser packages is
+# browser code — unless it is the SSR entry (platform-server / @angular/ssr / an HTTP server import).
+_ANGULAR_IMPORT = re.compile(r"""\bfrom\s+['"](?:@angular/(?:core|common|router|forms|platform-browser|material|cdk)"""
+                             r"""|@ionic/angular)(?:/[\w/-]*)?['"]""")
+_SERVER_IMPORT = re.compile(r"""\bfrom\s+['"](?:@angular/ssr|@angular/platform-server|express|fastify|koa|@nestjs/[\w-]+"""
+                            r"""|node:http|http|@hapi/hapi)(?:/[\w/-]*)?['"]|\brequire\s*\(\s*['"](?:express|fastify|koa)['"]""")
+_SFC_SUFFIX = (".vue", ".svelte")
 
 
 def is_client_file(rel: str, text: str = "") -> bool:
     rel = (rel or "").replace("\\", "/")
     if _CLIENT_FILE.search(rel):
         return True
+    if rel.lower().endswith(_SFC_SUFFIX):
+        return True  # a Vue/Svelte single-file component is view code (+page.server.ts is a .ts file)
     head = text[:300]
-    return "'use client'" in head or '"use client"' in head
+    if "'use client'" in head or '"use client"' in head:
+        return True
+    return bool(rel.lower().endswith((".ts", ".mts")) and text and _ANGULAR_IMPORT.search(text)
+                and not _SERVER_IMPORT.search(text))
 
 
 class RepoContext:
@@ -328,8 +411,12 @@ class RepoContext:
         self.include_fixtures = bool(include_fixtures)
         self._text: dict[tuple[Path, int], str] = {}
         self._text_metadata: dict[tuple[Path, int], dict] = {}
-        self.source_bytes_limit = MAX_SOURCE_BYTES
+        self.source_bytes_limit = _env_limit("max_source_bytes", MAX_SOURCE_BYTES)
+        self.data_bytes_limit = _env_limit("max_data_bytes", MAX_DATA_BYTES)
+        self.max_sql_files = _env_limit("max_sql_files", MAX_SQL_FILES, size=False)
         self.cached_source_bytes = 0
+        self.data_bytes_read = 0
+        self._apex_context: dict = {}
         self.byte_budget_exceeded: list[str] = []
         self.input_hashes: dict[str, str] = {}
         self.oversized: list[str] = []
@@ -432,7 +519,7 @@ class RepoContext:
         if self._excluded(relative.as_posix()):
             self._skip(path, "excluded")
             return None
-        if traversal and any(part in SKIP_DIRS for part in relative.parts):
+        if traversal and any(part in SKIP_DIRS for part in role_parts(relative.as_posix(), directory=directory)):
             self._skip(path, "skip_directory")
             return None
         try:
@@ -444,7 +531,7 @@ class RepoContext:
             if self._excluded(target.as_posix()):
                 self._skip(path, "excluded")
                 return None
-            if traversal and any(part in SKIP_DIRS for part in target.parts):
+            if traversal and any(part in SKIP_DIRS for part in role_parts(target.as_posix(), directory=directory)):
                 self._skip(path, "skip_directory")
                 return None
             info = resolved.stat()
@@ -520,6 +607,13 @@ class RepoContext:
                     if is_vendored_asset(path):
                         self._skip(path, "vendored_asset")
                         continue
+                    if len(self.code_files) >= MAX_FILES:
+                        self.truncated = True
+                    else:
+                        self.code_files.append(path)
+                elif suffix in APEX_SUFFIXES and is_apex_source(self.root, self.rel(path), self._apex_context):
+                    # #246: Salesforce Apex is analysed by the salesforce-apex profile. Outside a
+                    # Salesforce DX context `.cls` is a LaTeX class and stays out of the inventory.
                     if len(self.code_files) >= MAX_FILES:
                         self.truncated = True
                     else:
@@ -691,13 +785,15 @@ class RepoContext:
             os.close(fd)
             raise
 
-    def text(self, path: Path, *, max_bytes: int = MAX_BYTES) -> str:
+    def text(self, path: Path, *, max_bytes: int | None = None) -> str:
         allowed = self._allowed(path)
         if allowed is None:
             return ""
         path, resolved, info = allowed
+        if is_data_file(resolved):
+            return self._data_text(path, resolved, info, max_bytes)
         # Custom readers may tighten the shared limit, never relax it.
-        cap = max(0, min(max_bytes, MAX_BYTES))
+        cap = max(0, min(MAX_BYTES if max_bytes is None else max_bytes, MAX_BYTES))
         key = (resolved, cap)
         if key not in self._text:
             reason, content = None, None
@@ -736,6 +832,46 @@ class RepoContext:
                 failures.append(self.rel(path))
             self._skip(path, reason)
         return self._text[key]
+
+    def _data_text(self, path: Path, resolved: Path, info, max_bytes: int | None) -> str:
+        """A lockfile or `.sql` file: own per-file cap and budget; large ones are not cached."""
+        cap = max(0, min(MAX_DATA_FILE_BYTES if max_bytes is None else max_bytes, MAX_DATA_FILE_BYTES))
+        key = (resolved, cap)
+        if key in self._text:
+            content_text = self._text[key]
+        else:
+            reason, content_text, content = None, "", None
+            try:
+                if info.st_size > cap:
+                    reason = "oversized"
+                elif info.st_size > self.data_bytes_limit - self.data_bytes_read:
+                    reason = "byte_budget_exceeded"
+                else:
+                    with os.fdopen(self._open_file(resolved, info), "rb") as stream:
+                        content = stream.read(cap + 1)
+                    if len(content) > cap:
+                        reason = "oversized"
+            except (OSError, ValueError):
+                reason = "unreadable"
+            if reason:
+                self._text[key] = ""
+                self._text_metadata[key] = {"error": reason}
+            else:
+                if key not in self._text_metadata:  # a re-read of an uncached large file is not charged twice
+                    self.data_bytes_read += len(content)
+                content_text = content.decode("utf-8", errors="ignore")
+                self._text_metadata[key] = {"sha256": hashlib.sha256(content).hexdigest(), "bytes": len(content)}
+                if len(content) <= DATA_CACHE_BYTES:
+                    self._text[key] = content_text
+        metadata = self._text_metadata[key]
+        if "sha256" in metadata:
+            self.input_hashes[self.rel(path)] = metadata["sha256"]
+        else:
+            failures = getattr(self, metadata["error"])
+            if self.rel(path) not in failures:
+                failures.append(self.rel(path))
+            self._skip(path, metadata["error"])
+        return content_text
 
     def iter_code(self):
         """Yield (path, relpath, text) for every selected code file (honours the analysis scope)."""
@@ -880,7 +1016,7 @@ def is_example_file(rel: str) -> bool:
 def is_doc_or_example(rel: str) -> bool:
     """True for documentation, examples/ and `*.example`-style template files. Secrets matched here
     are overwhelmingly placeholders (`Bearer <token>` in a README, a value in `.env.example`)."""
-    p = "/" + (rel or "").replace("\\", "/").lower().lstrip("/")
+    p = "/" + role_path(rel).lower().lstrip("/")
     if any(m in p for m in _NEVER_DOC):
         return False
     base = p.rsplit("/", 1)[-1]

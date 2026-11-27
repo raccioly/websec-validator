@@ -817,6 +817,15 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
         is_write = m in WRITE_VERBS
         ev = [{"layer": "recon", "detail": f"no auth guard found in handler {eg.get('code_path','?')}"}]
         conf, sev = "MEDIUM", ("HIGH" if is_write else "MEDIUM")
+        if eg.get("public_rule"):
+            ev.append({"layer": "recon", "detail": "a Spring Security rule makes this route public: "
+                       + eg["public_rule"] + " — confirm it is meant to be reachable without a principal"})
+        elif eg.get("central_auth_unresolved"):
+            # #241: Spring Security is on the classpath but its effective chain was not resolved (shared
+            # library, auto-configuration or Boot's default). A lead to verify, never a HIGH.
+            conf, sev = "LOW", ("MEDIUM" if is_write else "LOW")
+            ev.append({"layer": "recon", "detail": "unverified: Spring Security is a dependency of this module but "
+                       "no filter-chain rule covering the route was resolved; verify the central security configuration"})
         # METHOD-EXACT correlation only. `dyn_get` holds unauth_reachability rows, which are GET-ONLY;
         # falling back to it for a POST/PUT/DELETE applied a GET's verdict to a write. Because
         # --probe-writes is localhost-gated, dyn_write is EMPTY on any remote target, so every write
@@ -1072,11 +1081,15 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
     for row in occurrences:
         sink_class = row.get("sink_class") or row.get("attack_class", "sast")
         attack = _SINK_ATTACK.get(row.get("attack_class", sink_class), row.get("attack_class", sink_class))
-        finding = _f(f"{sink_class} sink", "attack-surface", attack, "MEDIUM", "LOW",
+        # #243: a request parameter concatenated straight into SQL text is a HIGH lead, not a pattern hit.
+        bound = bool(row.get("request_bound")) and sink_class == "sql-injection"
+        finding = _f(f"{sink_class} sink", "attack-surface", attack, "HIGH" if bound else "MEDIUM",
+                     "MEDIUM" if bound else "LOW",
                      f"{row.get('file', '?')}:{row.get('line', 0)}",
                      [{"layer": "recon", "detail": f"{row.get('source', 'untrusted input')} reaches {row.get('sink', sink_class)}",
                        "control_scope": row.get("control_scope")}])
-        finding.update({key: row[key] for key in ("file", "semantic_id", "sink", "symbol", "service_id", "profile_id") if key in row})
+        finding.update({key: row[key] for key in ("file", "semantic_id", "sink", "symbol", "service_id", "profile_id",
+                                                  "request_bound") if key in row})
         finding["rule_id"] = sink_class
         out.append(finding)
     for cls, info in (facts.get("surface", {}).get("sinks", {}) or {}).items():
@@ -1346,10 +1359,15 @@ def build_ledger(facts: dict, unified: dict | None, dynamic: dict | None = None,
     # ---- 13. Crypto-usage — algorithm choice + verify-option correctness (weak password hash,
     # jwtVerify without an algorithms allowlist, predictable principal). ----
     for fnd in (facts.get("crypto_usage", {}) or {}).get("findings", []):
-        out.append(_f(f"{fnd.get('kind')}: {fnd.get('file')}", "crypto",
-                      fnd.get("attack_class", "weak-password-hash"),
-                      fnd.get("severity", "MEDIUM"), "MEDIUM", fnd.get("file", ""),
-                      [{"layer": "recon", "detail": fnd.get("detail", "")}]))
+        line = fnd.get("line")
+        crypto_finding = _f(f"{fnd.get('kind')}: {fnd.get('file')}", "crypto",
+                            fnd.get("attack_class", "weak-password-hash"),
+                            fnd.get("severity", "MEDIUM"), "MEDIUM",
+                            f"{fnd.get('file', '')}:{line}" if line else fnd.get("file", ""),
+                            [{"layer": "recon", "detail": fnd.get("detail", "")}])
+        if line:  # #242: the comparison's own line, so a reviewer need not search the file
+            crypto_finding.update(file=fnd.get("file", ""), line=line)
+        out.append(crypto_finding)
 
     # ---- 14. Authz data-flow — does the guard trust the right thing? (unsigned-cookie authz,
     # claim-keyed authz, transaction-local RLS context). ----

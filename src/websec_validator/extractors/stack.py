@@ -184,7 +184,7 @@ class StackExtractor(Extractor):
             langs.add("node")                           # extension code is JS
 
         # SQL schema / migration files imply a SQL datastore even with no ORM dependency.
-        for sf in ctx.glob("**/*.sql", 60):
+        for sf in ctx.glob("**/*.sql", getattr(ctx, "max_sql_files", 5000)):
             stext = ctx.text(sf)
             if re.search(r"\bCREATE\s+TABLE\b", stext, re.I):
                 datastores.add("postgres" if re.search(

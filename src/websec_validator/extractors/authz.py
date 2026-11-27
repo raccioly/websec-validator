@@ -27,6 +27,8 @@ from .base import Extractor, RepoContext, is_client_file, is_test_file
 from .profiles import service_for
 from .syntax import without_comments, expression_end, in_literal, js_functions
 from .framework_auth import fastapi_guards
+from .jvm import JVM_SUFFIXES
+from .spring_security import SpringSecurity
 
 
 # --- Spec-first routes: find the code that actually implements the operation ------------------
@@ -759,6 +761,18 @@ class AuthzExtractor(Extractor):
         global_auth = (mw_auth or mount_detected or fastify_global_auth
                        or any(GLOBAL_AUTH.search(t) for _p, _r, t in ctx.iter_code()))
         roles: set = set(mw.get("role_checks", []))
+        # Spring Security (#241): built once per repository on the UNSCOPED reader, because a shared
+        # security module's chain applies to the services that depend on it.
+        spring = None
+        if any(Path(str(e.get("code_path", ""))).suffix.lower() in JVM_SUFFIXES for e in endpoints):
+            root_ctx = getattr(ctx, "context", ctx)
+            spring = getattr(root_ctx, "_spring_security", None)
+            if spring is None:
+                spring = SpringSecurity(root_ctx)
+                try:
+                    root_ctx._spring_security = spring
+                except AttributeError:
+                    pass
         protected = no_guard = unknown = 0
         no_guard_writes, egs = [], []
         fastapi_by_file = {}
@@ -814,6 +828,9 @@ class AuthzExtractor(Extractor):
                        or _imported_guard(relcp, text)
                        # Express per-route middleware, scoped to THIS registration.
                        or route_middleware_guarded(text, e.get("method", ""), e.get("path", "")))
+            spring_row = spring.route(relcp, e.get("method", ""), e.get("path", "")) if spring and relcp else None
+            if spring_row and spring_row["guarded"]:
+                guarded = True
             if fastapi is not None:
                 # Dependency names/imports or an enforcing sibling never guard
                 # this endpoint. Unsupported composition remains explicitly unverified.
@@ -838,6 +855,15 @@ class AuthzExtractor(Extractor):
                             + (["Fastify hook presence does not establish this route's instance/registration scope"]
                                if fastify_global_auth and not guarded else []),
                         "public_hint": bool(PUBLIC_HINT.search(e.get("path", "")))})
+            if spring_row:
+                row = egs[-1]
+                row["unverified_controls"] += [] if guarded else spring_row["unverified"]
+                if spring_row["evidence"]:
+                    row["guard_evidence"] = spring_row["evidence"][:3]
+                if spring_row.get("public_rule") and not guarded:
+                    row["public_rule"] = spring_row["public_rule"]
+                if spring_row.get("central_unresolved") and not guarded:
+                    row["central_auth_unresolved"] = True
             if guarded:
                 protected += 1
             elif not text:
