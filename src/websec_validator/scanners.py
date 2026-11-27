@@ -375,6 +375,44 @@ def _osv(target: Path, out: Path, excludes=()) -> list:
     return cmd + ["--format", "json", "--output", str(out), str(target)]
 
 
+_OSV_UNRESOLVED = re.compile(r"version (?:Maven|npm|PyPI|Go|crates\.io|RubyGems|NuGet|Packagist):([^\s\[]+)\[[^\]]*\]: not found")
+_OSV_MANIFEST = re.compile(r"failed resolution for (\S+?):")
+
+
+def _osv_recover(argv: list, proc, out_file: Path, timeout: int, target: Path) -> tuple:
+    """Classify osv-scanner exits that are scope limits, not failures (#253).
+
+    * exit 128 + `No package sources found`: nothing applicable to scan (a POM with no
+      dependencies, a parent POM). Recorded as an empty, completed report.
+    * `failed resolution` (osv resolves Maven transitively against Maven Central; a connector in
+      another repository fails the whole manifest): run again with `--no-resolve` so the DIRECT
+      dependencies are still checked, and record which packages could not be resolved.
+    Returns (proc, metadata). Anything else is left exactly as osv reported it.
+    """
+    text = (proc.stderr or "") + "\n" + (proc.stdout or "")
+    meta: dict = {}
+    unresolved = sorted(set(_OSV_UNRESOLVED.findall(text)))[:20]
+    # osv prints absolute paths without their leading slash (`private/tmp/...`); restore it first.
+    manifests = sorted({_rel_to(m if m.startswith("/") else "/" + m, target) or m
+                        for m in _OSV_MANIFEST.findall(text)})[:20]
+    if proc.returncode == 128 and "No package sources found" in text:
+        out_file.write_text(json.dumps({"results": []}))
+        meta["no_applicable_input"] = True
+        return subprocess.CompletedProcess(argv, 0, proc.stdout, proc.stderr), meta
+    if "failed resolution" in text:
+        meta["dependency_resolution"] = {"unresolved": unresolved, "manifests": manifests,
+                                         "mode": "transitive" if proc.returncode in (0, 1) else "direct-only"}
+        if proc.returncode not in (0, 1) and "--no-resolve" not in argv:
+            retry = list(argv)
+            retry.insert(retry.index("--recursive") + 1 if "--recursive" in retry else 2, "--no-resolve")
+            second = subprocess.run(retry, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+            if second.returncode in (0, 1) and out_file.exists():
+                return second, meta
+            meta["dependency_resolution"]["mode"] = "failed"
+            meta["dependency_resolution"]["retry_exit"] = second.returncode
+    return proc, meta
+
+
 def _osv_skip_regex(target: Path) -> str:
     """SKIP_DIRS as an osv exclude regex ANCHORED to the scan root.
 
@@ -740,6 +778,9 @@ def run_available(target: Path, outdir: Path, stack_languages: list | None = Non
             # were silently dropped. Normalize the produced file to the expected path.
             # trufflehog streams JSON-lines to STDOUT and writes no report file — persist it so the
             # normal parse path works (same shape of special-case as checkov's renamed output).
+            osv_meta = {}
+            if s.key == "osv-scanner":
+                proc, osv_meta = _osv_recover(argv, proc, out_file, timeout, target)
             if s.key == "trufflehog" and not out_file.exists():
                 out_file.write_text(proc.stdout or "")
             if s.key == "checkov" and not out_file.exists():
@@ -751,6 +792,10 @@ def run_available(target: Path, outdir: Path, stack_languages: list | None = Non
                             **({"configuration_policy": "built-in defaults; target .bandit/YAML/pyproject ignored",
                                 "suppression_policy": "inline nosec ignored"} if s.key == "bandit" else {}),
                             **({"binary_sca": "go/binary" in argv} if s.key == "osv-scanner" else {}),
+                            **osv_meta,
+                            # #253: why a scanner failed, so `error` is never an empty box.
+                            **({"stderr_tail": (proc.stderr or proc.stdout or "").strip()[-500:]}
+                               if proc.returncode not in (0, 1) or not out_file.exists() else {}),
                             "findings": _count_findings(s.key, out_file)})
         except subprocess.TimeoutExpired:
             results.append({"key": s.key, "name": s.name, "status": "timeout"})

@@ -369,6 +369,26 @@ def add_scanners(facts: dict, detected: dict, results: list, unified: dict | Non
         for policy in ("configuration_policy", "suppression_policy"):
             if result and policy in result:
                 cov["scanners"][key][policy] = result[policy]
+        if result and result.get("stderr_tail") and outcome not in ("completed", "partial"):
+            errors_list = list(details.get("errors") or [])
+            cov["scanners"][key]["report_details"] = dict(details, errors=errors_list + [result["stderr_tail"]])
+        if chosen and result and result.get("no_applicable_input"):
+            cov["scanners"][key]["no_applicable_input"] = True
+            add_gap(facts, "scanner_scope", f"{key}: no package sources found; nothing applicable to scan",
+                    execution=False)
+        resolution = (result or {}).get("dependency_resolution") if chosen else None
+        if resolution:
+            cov["scanners"][key]["dependency_resolution"] = resolution
+            names = ", ".join(resolution.get("unresolved") or []) or "unnamed packages"
+            if resolution.get("mode") == "failed":
+                pass  # the scanner outcome is already an error gap
+            else:
+                add_gap(facts, "dependency_resolution",
+                        f"{key}: transitive dependencies not resolved for {len(resolution.get('manifests') or []) or 1} "
+                        f"manifest(s) ({names} not found in the public registry); "
+                        + ("direct dependencies checked" if resolution.get("mode") == "direct-only"
+                           else "packages that did resolve were checked"),
+                        execution=False)
         if chosen and details.get("skipped_checks"):
             add_gap(facts, "scanner_scope", f"{key}: {details['skipped_checks']} checks suppressed by native scanner policy",
                     execution=False)
