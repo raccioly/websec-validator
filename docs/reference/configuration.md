@@ -17,6 +17,7 @@ under [Environment variables](cli.md#environment-variables).
 | [Baseline ledger](#baseline-ledger) | `run --baseline` | `run` | Run incomplete. |
 | [Named profiles](#named-profiles) | built in | `run`, `gate`, `capabilities` | Invalid analyzed configuration: execution error. |
 | [Caches and local state](#caches-and-local-state) | per-user cache directories | various | Cache problems are reported. They do not fail a run. |
+| [Read limits](#read-limits) | `run --max-*-bytes`, `--max-sql-files`, `WEBSEC_MAX_*` | `run`, `gate`, MCP | Invalid option: exit 2. Invalid variable: default used. |
 | [Hook variables](#hook-environment-variables) | environment | git hooks, agent hook | Invalid git-hook values: hook execution incomplete. |
 | [MCP token and roots](#mcp-token-and-allowed-roots) | `WEBSEC_MCP_TOKEN`, `mcp --allow-root` | `mcp --http` | Server refuses to start (exit 2). |
 
@@ -289,6 +290,21 @@ Everything websec keeps outside the run directory. None of it is uploaded.
 
 The command's output reports errors from reading these caches. None of them fails a `websec
 run`.
+
+## Read limits
+
+websec reads source into a bounded cache. Dependency lockfiles and `.sql` files have their own
+budget, so a monorepo's lockfiles cannot fill the source cache (since 0.24.0).
+
+| Limit | Default | Option | Environment variable |
+|---|---|---|---|
+| Source cache, whole run | 64 MiB | `--max-source-bytes` | `WEBSEC_MAX_SOURCE_BYTES` |
+| Lockfiles and `.sql` files, whole run | 512 MiB (32 MiB per file; files over 1 MiB are not cached) | `--max-data-bytes` | `WEBSEC_MAX_DATA_BYTES` |
+| `**/*.sql` files read by the schema checks | 5000 | `--max-sql-files` | `WEBSEC_MAX_SQL_FILES` |
+
+Sizes accept bytes or a `K`, `M` or `G` suffix. An invalid option value stops the command with
+exit 2; an invalid environment value falls back to the default. `coverage.json` `files.read_policy`
+records the active values. Reaching a limit makes the run partial and names the gap.
 
 ## Hook environment variables
 
